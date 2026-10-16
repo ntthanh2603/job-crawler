@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from jobcrawler.llm import LLMResult
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import FetchResult, TransportError, decode_body
-from jobcrawler.net.proxy_pool import Proxy
+from jobcrawler.net.kv import RedisKV
+from jobcrawler.net.proxy_pool import Proxy, ProxyPool, load_proxies
 from jobcrawler.prompts import healthcheck
-from jobcrawler.resources import Resources
+from jobcrawler.resources import Resources, make_proxy_pool
 
 log = get_logger(__name__)
 
@@ -43,15 +44,28 @@ def parse_exit_info(body: str) -> tuple[str | None, str | None]:
     return fields.get("ip"), fields.get("loc")
 
 
+def proxies_to_check(res: Resources) -> ProxyPool:
+    """Pool đang dùng; khi PROXY_ENABLED=false thì đọc thẳng PROXIES_FILE để vẫn kiểm tra được."""
+    if res.proxies.enabled or res.settings.proxy_enabled:
+        return res.proxies
+    kv = RedisKV(res.redis, prefix=res.settings.redis_prefix)
+    return make_proxy_pool(res.settings, kv, load_proxies(res.settings.proxies_file))
+
+
 async def check_proxies(
-    res: Resources, *, url: str | None = None, concurrency: int = 20, timeout: float = 15
+    res: Resources,
+    *,
+    pool: ProxyPool | None = None,
+    url: str | None = None,
+    concurrency: int = 20,
+    timeout: float = 15,
 ) -> list[ProxyCheck]:
     """Gọi `url` qua từng proxy; proxy sống được gỡ trạng thái `dead`, proxy lỗi bị loại.
 
     Đi thẳng transport (bỏ qua rate limit/robots) vì mỗi proxy chỉ gọi một lần tới URL kiểm tra.
     """
     url = url or res.settings.proxy_check_url
-    pool = res.proxies
+    pool = pool or res.proxies
     transport = res.http.transport
     sem = asyncio.Semaphore(concurrency)
 

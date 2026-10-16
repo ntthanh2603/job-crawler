@@ -22,6 +22,9 @@ uv run jobcrawler run "Test"
 Postgres và Redis mở ra host ở cổng 15432 và 16379 (đổi bằng `POSTGRES_PORT`, `REDIS_PORT`).
 Worker đọc proxy từ `./config` (mount read-only vào container).
 
+Không dùng proxy: đặt `PROXY_ENABLED=false` trong `.env` (áp dụng cho cả worker), hoặc thêm
+`--no-proxy` cho một lệnh CLI, ví dụ `uv run jobcrawler --no-proxy run "Test"`.
+
 ## Kiểm tra hạ tầng
 
 ```bash

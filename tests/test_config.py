@@ -50,3 +50,9 @@ def test_secret_not_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     s = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
     assert s.serp_enabled
     assert "super-secret" not in repr(s)
+
+
+def test_proxy_toggle(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert Settings(_env_file=None).proxy_enabled  # pyright: ignore[reportCallIssue]
+    monkeypatch.setenv("PROXY_ENABLED", "false")
+    assert not Settings(_env_file=None).proxy_enabled  # pyright: ignore[reportCallIssue]

@@ -39,3 +39,16 @@ def test_unimplemented_commands_exit_nonzero(args: list[str]) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 1
     assert "Chưa cài đặt" in result.output
+
+
+def test_no_proxy_flag_disables_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    from jobcrawler.config import get_settings
+
+    monkeypatch.delenv("PROXY_ENABLED", raising=False)  # để monkeypatch dọn lại sau test
+    get_settings.cache_clear()
+    try:
+        result = runner.invoke(app, ["--no-proxy", "stats"])
+        assert result.exit_code == 1  # stats chưa cài đặt; chỉ cần callback đã chạy
+        assert get_settings().proxy_enabled is False
+    finally:
+        get_settings.cache_clear()

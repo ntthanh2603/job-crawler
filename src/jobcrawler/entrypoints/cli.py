@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import os
 import sys
 from collections.abc import Coroutine
 from typing import Annotated, Any, NoReturn
@@ -32,7 +33,15 @@ app.add_typer(llm_app, name="llm")
 
 
 @app.callback()
-def _setup() -> None:
+def _setup(
+    no_proxy: Annotated[
+        bool,
+        typer.Option("--no-proxy", help="Không dùng proxy, đi thẳng (như PROXY_ENABLED=false)."),
+    ] = False,
+) -> None:
+    if no_proxy:
+        os.environ["PROXY_ENABLED"] = "false"
+        get_settings.cache_clear()
     configure_logging(get_settings())
 
 
@@ -192,16 +201,25 @@ def proxies_check(
 
     async def go() -> list[health.ProxyCheck] | None:
         async with open_resources() as res:
-            if not res.proxies.enabled:
+            pool = health.proxies_to_check(res)
+            if not pool.enabled:
                 return None
             return await health.check_proxies(
-                res, url=url, concurrency=concurrency, timeout=timeout
+                res, pool=pool, url=url, concurrency=concurrency, timeout=timeout
             )
 
+    settings = get_settings()
+    if not settings.proxy_enabled:
+        typer.secho(
+            "PROXY_ENABLED=false: crawl đang đi thẳng; chỉ kiểm tra proxy trong file.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     results = _run(go())
     if results is None:
-        file = get_settings().proxies_file
-        typer.secho(f"Không có proxy nào trong {file}.", fg=typer.colors.YELLOW, err=True)
+        typer.secho(
+            f"Không có proxy nào trong {settings.proxies_file}.", fg=typer.colors.YELLOW, err=True
+        )
         raise typer.Exit(1)
     if json_out:
         typer.echo(

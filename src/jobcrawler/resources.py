@@ -21,8 +21,8 @@ from jobcrawler.db.session import create_engine, create_sessionmaker
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.browser import BrowserManager
 from jobcrawler.net.http import CurlTransport, HttpClient, HttpConfig
-from jobcrawler.net.kv import RedisKV
-from jobcrawler.net.proxy_pool import ProxyPool, load_proxies
+from jobcrawler.net.kv import KeyValueStore, RedisKV
+from jobcrawler.net.proxy_pool import Proxy, ProxyPool, load_proxies
 from jobcrawler.net.ratelimit import RedisRateLimiter
 
 log = jlog.get_logger(__name__)
@@ -52,6 +52,17 @@ class Resources:
 def _redis_location(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.hostname}:{parts.port or 6379}"
+
+
+def make_proxy_pool(settings: Settings, kv: KeyValueStore, proxies: list[Proxy]) -> ProxyPool:
+    return ProxyPool(
+        kv,
+        proxies,
+        sticky_seconds=settings.proxy_sticky_seconds,
+        cooldown_seconds=settings.proxy_cooldown_seconds,
+        max_failures=settings.proxy_max_consecutive_failures,
+        dead_seconds=settings.proxy_dead_seconds,
+    )
 
 
 async def _close_sink(sink: jlog.PgLogSink) -> None:
@@ -108,21 +119,18 @@ async def open_resources(
             log.warning("llm.disabled", reason="thiếu LLM_BASE_URL hoặc LLM_MODEL")
 
         kv = RedisKV(redis, prefix=settings.redis_prefix)
-        proxy_list = load_proxies(settings.proxies_file)
-        if proxy_list:
+        proxy_list: list[Proxy] = []
+        if not settings.proxy_enabled:
+            log.info("proxy.disabled", reason="PROXY_ENABLED=false: đi thẳng, không proxy")
+        elif proxy_list := load_proxies(settings.proxies_file):
             log.info("proxy.loaded", count=len(proxy_list), file=str(settings.proxies_file))
         else:
             log.warning(
-                "proxy.none", file=str(settings.proxies_file), reason="đi thẳng, không proxy"
+                "proxy.none",
+                file=str(settings.proxies_file),
+                reason="không có proxy nên đi thẳng; đặt PROXY_ENABLED=false nếu cố ý",
             )
-        proxies = ProxyPool(
-            kv,
-            proxy_list,
-            sticky_seconds=settings.proxy_sticky_seconds,
-            cooldown_seconds=settings.proxy_cooldown_seconds,
-            max_failures=settings.proxy_max_consecutive_failures,
-            dead_seconds=settings.proxy_dead_seconds,
-        )
+        proxies = make_proxy_pool(settings, kv, proxy_list)
 
         browser = BrowserManager(max_pages=settings.browser_max_pages, use_proxies=proxies.enabled)
         stack.push_async_callback(browser.close)

@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     serp_api_key: SecretStr | None = None
 
     # Crawl và worker.
+    # false = không dùng proxy (đi thẳng), kể cả khi PROXIES_FILE có proxy. CLI: --no-proxy.
+    proxy_enabled: bool = True
     # Nằm trong thư mục config/ để compose mount cả thư mục (file chưa có cũng không lỗi).
     proxies_file: Path = Path("config/proxies.txt")
     worker_concurrency: int = Field(default=10, ge=1)

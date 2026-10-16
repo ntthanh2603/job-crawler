@@ -230,6 +230,57 @@ def test_cli_proxies_check(
     assert sorted(r["ok"] for r in data) == [False, True]
 
 
+def test_cli_proxies_check_still_checks_file_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, site: Site, test_database_url: str
+) -> None:
+    from jobcrawler.entrypoints.cli import app
+
+    with serve_proxy() as live:
+        proxies_file = tmp_path / "proxies.txt"
+        proxies_file.write_text(live.url, encoding="utf-8")
+        monkeypatch.setenv("PROXIES_FILE", str(proxies_file))
+        monkeypatch.setenv("PROXY_CHECK_URL", f"{site.base}/trace")
+        monkeypatch.setenv("DATABASE_URL", test_database_url)
+        monkeypatch.setenv("REDIS_PREFIX", f"jctest:{uuid4().hex[:8]}")
+        monkeypatch.delenv("PROXY_ENABLED", raising=False)
+        get_settings.cache_clear()
+        try:
+            result = CliRunner().invoke(app, ["--no-proxy", "proxies", "check", "--json"])
+        finally:
+            get_settings.cache_clear()
+    assert result.exit_code == 0, result.output
+    assert "PROXY_ENABLED=false" in result.stderr
+    assert [r["ok"] for r in json.loads(result.stdout)] == [True]
+
+
+async def test_open_resources_without_proxy_goes_direct(
+    tmp_path: Path, site: Site, test_database_url: str, redis: tuple[Redis, str]
+) -> None:
+    from jobcrawler.resources import open_resources
+
+    _, prefix = redis
+    with serve_proxy() as live:
+        proxies_file = tmp_path / "proxies.txt"
+        proxies_file.write_text(live.url, encoding="utf-8")
+        common = {
+            "database_url": test_database_url,
+            "redis_url": _redis_url(),
+            "redis_prefix": prefix,
+            "proxies_file": proxies_file,
+        }
+        async with open_resources(Settings(proxy_enabled=False, **common), db_logs=False) as res:
+            assert not res.proxies.enabled
+            direct = await res.http.fetch(f"{site.base}/hello", use_cache=False)
+        async with open_resources(Settings(proxy_enabled=True, **common), db_logs=False) as res:
+            assert res.proxies.enabled
+            proxied = await res.http.fetch(f"{site.base}/hello", use_cache=False)
+    assert direct.ok
+    assert direct.proxy_id is None
+    assert proxied.ok
+    assert proxied.proxy_id is not None
+    assert live.requests == [f"{site.base}/hello"]  # chỉ lượt bật proxy đi qua proxy
+
+
 def test_cli_proxies_check_without_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_database_url: str
 ) -> None:
