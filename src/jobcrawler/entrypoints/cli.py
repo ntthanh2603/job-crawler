@@ -7,6 +7,7 @@ import dataclasses
 import json
 import os
 import sys
+import time
 from collections.abc import Coroutine
 from typing import Annotated, Any, NoReturn
 
@@ -127,6 +128,88 @@ def run(
         )
     if result.status is RunStatus.FAILED:
         raise typer.Exit(1)
+
+
+@app.command()
+def site(
+    website: Annotated[str, typer.Argument(help="Domain hoặc URL, ví dụ base.vn.")],
+    json_out: Annotated[bool, typer.Option("--json", help="In kết quả dạng JSON.")] = False,
+    refresh: Annotated[bool, typer.Option(help="Bỏ qua cache tìm nguồn (7 ngày).")] = False,
+    discover_only: Annotated[
+        bool, typer.Option("--discover-only", help="Chỉ tìm trang careers/ATS.")
+    ] = False,
+    deadline: Annotated[
+        float | None, typer.Option(help="Giây tối đa (mặc định COMPANY_DEADLINE_SECONDS).")
+    ] = None,
+    show: Annotated[int, typer.Option(help="Số job in ra (dạng text).")] = 50,
+    steps: Annotated[bool, typer.Option(help="In các bước tìm nguồn.")] = False,
+) -> None:
+    """Tìm trang careers/ATS của một website và liệt kê job (chưa chuẩn hoá/xác minh)."""
+    from jobcrawler.services import jobs
+    from jobcrawler.sources import ats
+
+    async def go() -> jobs.WebsiteJobs:
+        async with open_resources() as res:
+            limit = deadline or res.settings.company_deadline_seconds
+            return await jobs.jobs_for_website(
+                res,
+                website,
+                deadline=time.monotonic() + limit,
+                refresh=refresh,
+                discover_only=discover_only,
+            )
+
+    found = _run(go())
+    d = found.discovery
+    if json_out:
+        payload = {
+            "website": found.website,
+            "domain": found.domain,
+            "discovery": d.model_dump(mode="json") if d else None,
+            "sources": [dataclasses.asdict(r) for r in found.collected.reports],
+            "incomplete_sources": found.incomplete_sources,
+            "jobs": [j.model_dump(mode="json") for j in found.jobs],
+        }
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if d is None:
+        typer.secho(f"{found.domain}: hết giờ khi tìm nguồn.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    cached = " (cache)" if d.from_cache else ""
+    typer.echo(
+        f"{d.domain} · trang chủ {d.homepage or '-'} · cách tìm: {d.method or '-'}{cached}"
+        + (f" · lỗi: {d.error}" if d.error else "")
+    )
+    for url in d.careers_pages:
+        typer.echo(f"  careers: {url}")
+    for ref in d.ats:
+        typer.echo(f"  ATS: {ref.name} {ref.url}")
+    for ref in d.unsupported_ats:
+        typer.echo(f"  ATS chưa thu thập được: {ref.name} — {ats.unsupported_reason(ref)}")
+    if steps:
+        for step in d.steps:
+            typer.echo(f"  · {step}")
+    if not d.found:
+        typer.secho("Không tìm thấy trang careers hay ATS.", fg=typer.colors.YELLOW)
+    if discover_only:
+        return
+    for r in found.collected.reports:
+        mark = typer.style(
+            f"{r.outcome.value:<8}", fg=typer.colors.GREEN if r.jobs else typer.colors.YELLOW
+        )
+        typer.echo(
+            f"  {mark} {r.name}: {r.jobs} job, {r.duration_ms / 1000:.1f} s"
+            + (f" · {r.error}" if r.error else "")
+        )
+    typer.echo(f"Job ({len(found.jobs)}):")
+    for job in found.jobs[:show]:
+        where = "; ".join(job.locations) or "-"
+        typer.echo(f"  [{job.method.value}] {job.title} — {where} — {job.url}")
+    if len(found.jobs) > show:
+        typer.echo(f"  … và {len(found.jobs) - show} job khác (--show, --json).")
+    if found.incomplete_sources:
+        typer.echo(f"Chưa xong: {', '.join(found.incomplete_sources)}")
 
 
 @app.command()

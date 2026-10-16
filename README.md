@@ -25,6 +25,21 @@ Worker đọc proxy từ `./config` (mount read-only vào container).
 Không dùng proxy: đặt `PROXY_ENABLED=false` trong `.env` (áp dụng cho cả worker), hoặc thêm
 `--no-proxy` cho một lệnh CLI, ví dụ `uv run jobcrawler --no-proxy run "Test"`.
 
+## Job từ website doanh nghiệp
+
+```bash
+uv run jobcrawler site base.vn                 # tìm trang careers/ATS rồi liệt kê job
+uv run jobcrawler site momo.vn --discover-only --steps
+uv run jobcrawler site https://jobs.lever.co/acme --json
+uv run jobcrawler run "Base" --website base.vn # chạy pipeline, ghi company_runs + source_fetches
+```
+
+Tìm nguồn: link trên trang chủ → sitemap.xml → đường dẫn phổ biến → subdomain careers./tuyendung.;
+nhiều ứng viên thì LLM chọn trong danh sách. Kết quả cache 7 ngày trên Redis (`--refresh` bỏ qua).
+ATS có adapter: Greenhouse, Lever, Ashby, Workable, Workday, BambooHR, Recruitee, Teamtailor
+(SmartRecruiters chỉ nhận diện: robots.txt cấm API). Trang careers khác: JSON-LD → parser chung →
+LLM; mở bằng Chromium khi HTML không có danh sách tin.
+
 ## Kiểm tra hạ tầng
 
 ```bash

@@ -1,0 +1,779 @@
+"""Trang careers chung trên website doanh nghiệp: JSON-LD → parser → LLM fallback.
+
+Một `CareersSource` bắt đầu từ một trang danh sách (do `pipeline/discovery.py` tìm ra):
+
+1. Đọc trang danh sách, lấy JobPosting JSON-LD có sẵn, link tới trang chi tiết, link phân
+   trang / "xem tất cả" / mục lục việc làm (có giới hạn). HTML là khung SPA, hoặc HTTP không
+   thấy tin nào, thì mở bằng trình duyệt và chờ mạng yên (danh sách nạp bằng XHR).
+2. Không thấy gì bằng rule → LLM đọc trang (từng đoạn) và chọn vị trí, link trong danh sách
+   link của trang; không được bịa link.
+3. Trang chi tiết: JSON-LD JobPosting; không có thì parser chung (tiêu đề + nội dung chính +
+   các trường có nhãn như "Mức lương:"); trang không rõ là tin tuyển dụng thì hỏi LLM, không
+   có LLM thì bỏ. Trang "chi tiết" hoá ra là danh sách con thì lấy tiếp link tin trên đó.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlsplit
+
+from jobcrawler.logging import get_logger
+from jobcrawler.net.http import FetchResult, WaitUntil
+from jobcrawler.net.urls import host_of, normalize_url, path_segments, same_site
+from jobcrawler.pages import (
+    Link,
+    clean_text,
+    extract_links,
+    html_to_markdown,
+    looks_like_spa_shell,
+    main_node,
+    meta_content,
+    node_text,
+    parse,
+)
+from jobcrawler.prompts import job_detail, job_listing
+from jobcrawler.schemas import ExtractionMethod, RawJob
+from jobcrawler.sources import jsonld
+from jobcrawler.sources.base import Source, SourceSession, gather_all, text_or_none
+from jobcrawler.text import strip_accents
+
+log = get_logger(__name__)
+
+KIND = "careers"
+# Mô tả ngắn hơn mức này coi như JSON-LD của trang danh sách (chỉ có tiêu đề), cần trang chi tiết.
+_MIN_DESCRIPTION = 200
+_MAX_LLM_LINKS = 150
+_MAX_LLM_LISTINGS = 2
+_LLM_LISTING_CHUNK = 6_000  # ký tự markdown mỗi lời gọi
+_LLM_LISTING_CHUNKS = 4
+
+# Đoạn đường dẫn hay gặp của trang việc làm (đã bỏ dấu, viết thường).
+JOB_SEGMENTS = frozenset(
+    {
+        "job",
+        "jobs",
+        "career",
+        "careers",
+        "tuyen-dung",
+        "tuyendung",
+        "viec-lam",
+        "vieclam",
+        "vi-tri",
+        "vi-tri-tuyen-dung",
+        "co-hoi-nghe-nghiep",
+        "co-hoi-viec-lam",
+        "tin-tuyen-dung",
+        "chi-tiet-tuyen-dung",
+        "job-detail",
+        "job-details",
+        "jobdetail",
+        "position",
+        "positions",
+        "opening",
+        "openings",
+        "vacancy",
+        "vacancies",
+        "recruitment",
+        "opportunities",
+        "opportunity",
+        "o",  # Recruitee/Teamtailor: /o/<slug>
+        "jd",
+    }
+)
+# Đoạn đường dẫn của trang không phải tin (danh mục, tin tức, đăng nhập...).
+STOP_SEGMENTS = frozenset(
+    {
+        "page",
+        "category",
+        "categories",
+        "danh-muc",
+        "tag",
+        "tags",
+        "search",
+        "tim-kiem",
+        "department",
+        "departments",
+        "location",
+        "locations",
+        "login",
+        "register",
+        "dang-nhap",
+        "dang-ky",
+        "news",
+        "tin-tuc",
+        "blog",
+        "blogs",
+        "su-kien",
+        "events",
+        "press",
+        "bao-chi",
+        "media",
+        "thu-vien",
+        "gallery",
+        "about",
+        "about-us",
+        "gioi-thieu",
+        "lien-he",
+        "contact",
+        "faq",
+        "privacy",
+        "terms",
+        "policy",
+        "chinh-sach",
+        "feed",
+        "author",
+        "wp-content",
+        "wp-admin",
+        "cdn-cgi",
+    }
+)
+# Trang tìm kiếm / lọc theo từ khoá: /tuyen-dung/tim-kiem-theo-hash-tag?tukhoa=...
+_STOP_PREFIXES = ("tim-kiem", "search", "hash-tag", "hashtag", "filter", "loc-")
+# Trang chính sách, điều khoản (privacy-policy, chinh-sach-bao-mat...).
+_STOP_WORDS = (
+    "privacy",
+    "policy",
+    "cookie",
+    "terms",
+    "dieu-khoan",
+    "chinh-sach",
+    "bao-mat",
+    "saved-jobs",
+    "job-alert",
+    "favorite",
+    "wishlist",
+)
+# Trang mục lục việc làm (/en/jobs/, /careers/tuyen-dung/): đi tiếp như trang danh sách.
+_INDEX_SEGMENTS = frozenset(
+    {
+        "jobs",
+        "job",
+        "careers",
+        "career",
+        "tuyen-dung",
+        "viec-lam",
+        "vi-tri-tuyen-dung",
+        "co-hoi-nghe-nghiep",
+        "co-hoi-viec-lam",
+        "openings",
+        "positions",
+        "vacancies",
+        "opportunities",
+    }
+)
+# Tiền tố ngôn ngữ (/en/, /vi-vn/): trang danh sách /en/ vẫn là trang gốc.
+_LOCALE = re.compile(r"^[a-z]{2}(-[a-z]{2})?$")
+_FILE_EXT = re.compile(r"\.(pdf|docx?|xlsx?|pptx?|jpe?g|png|gif|webp|svg|zip|rar|mp4)$", re.I)
+# Chữ trên link không nói lên tên vị trí.
+_GENERIC_TEXT = re.compile(
+    r"^(xem( them| chi tiet| ngay)?|chi tiet|ung tuyen( ngay)?|nop (ho so|don|cv)|apply( now)?|"
+    r"read more|view( details?| job| more)?|details?|more|learn more|see more|tim hieu them|"
+    r"\W*)$"
+)
+_VIEW_ALL = re.compile(
+    r"(xem|tat ca|toan bo).{0,20}(vi tri|viec lam|cong viec|co hoi|tin tuyen dung)|"
+    r"(all|view|see|browse|explore|search).{0,15}(jobs|positions|openings|opportunities|roles)|"
+    r"open (positions|roles)|current openings|vi tri dang tuyen|co hoi viec lam|"
+    r"tim (cong )?viec"
+)
+# Chữ "xem tất cả" trơn: chỉ tính khi đường dẫn trông như trang việc làm (/alljobs, /careers).
+_VIEW_ALL_SHORT = re.compile(r"^(xem tat ca|tat ca|view all|see all|show all|all)$")
+_PAGE_PARAMS = frozenset({"page", "p", "trang", "paged", "pg", "pagenumber", "page_no"})
+_PAGE_PATH = re.compile(r"/(?:page|trang)[/-](\d+)/?$", re.IGNORECASE)
+_ID_PARAMS = frozenset({"id", "job", "jid", "post", "pid", "slug", "code"})
+# Đoạn cuối của trang danh sách (không phải tin): /careers/all-jobs, /alljobs, /tim-viec.
+LISTING_SEGMENTS = frozenset(
+    {
+        "all-jobs",
+        "alljobs",
+        "all",
+        "job-list",
+        "jobs-list",
+        "job-listing",
+        "search-jobs",
+        "job-search",
+        "tim-viec",
+        "tim-kiem-viec-lam",
+        "danh-sach-viec-lam",
+        "danh-sach-tuyen-dung",
+        # SAP SuccessFactors Career Site: /search/, /viewalljobs/
+        "search",
+        "viewalljobs",
+        "jobsearch",
+    }
+)
+# Trang "chi tiết" có từ ngần này link tin trở lên thì là danh sách con.
+_SUB_LISTING_LINKS = 3
+
+# Nhóm từ khoá của một bản mô tả công việc (đã bỏ dấu). Đếm số nhóm xuất hiện.
+_JD_SIGNALS: tuple[tuple[str, ...], ...] = (
+    ("mo ta cong viec", "job description", "about the role", "the role", "job summary"),
+    ("yeu cau", "requirements", "qualifications", "what you need", "who you are"),
+    ("quyen loi", "phuc loi", "che do dai ngo", "benefits", "what we offer", "perks"),
+    ("trach nhiem", "responsibilities", "what you will do", "what you'll do", "nhiem vu"),
+    ("han nop", "deadline", "ung tuyen", "nop ho so", "apply"),
+    ("muc luong", "thu nhap", "salary", "compensation"),
+    ("dia diem lam viec", "noi lam viec", "location", "work location"),
+    ("kinh nghiem", "experience"),
+)
+_CLEAR_JD = 4  # ≥ số nhóm này: chắc chắn là tin tuyển dụng, không cần hỏi LLM
+
+# Trường có nhãn trong nội dung ("Mức lương: 10 - 15 triệu"). Khoá → nhãn (đã bỏ dấu).
+_LABELS: dict[str, tuple[str, ...]] = {
+    "salary_raw": ("muc luong", "luong", "thu nhap", "salary"),
+    "location": (
+        "dia diem lam viec",
+        "noi lam viec",
+        "dia diem",
+        "khu vuc",
+        "work location",
+        "location",
+    ),
+    "expires_raw": ("han nop ho so", "han nop", "han ung tuyen", "deadline", "closing date"),
+    "experience_raw": ("kinh nghiem", "experience"),
+    "employment_type": (
+        "hinh thuc lam viec",
+        "hinh thuc",
+        "loai hinh",
+        "employment type",
+        "job type",
+    ),
+    "level": ("cap bac", "level", "seniority"),
+}
+_MD_MARKS = re.compile(r"\*\*|__|`")
+_LABEL_LINE = re.compile(r"^[\s>*_\-#|]*(?P<label>[^:\n]{2,40}?)[\s*_]*[:：][\s*_]*(?P<value>.*)$")
+
+
+@dataclass(frozen=True, slots=True)
+class JobLink:
+    url: str
+    title: str | None  # chữ trên link nếu nói lên tên vị trí
+
+
+def _plain(text: str) -> str:
+    return clean_text(strip_accents(text).lower())
+
+
+def _title_like(text: str) -> bool:
+    words = text.split()
+    return 2 <= len(words) <= 25 and not _GENERIC_TEXT.match(_plain(text))
+
+
+def _job_like(segment: str) -> bool:
+    return segment in JOB_SEGMENTS or any(
+        k in segment for k in ("job", "career", "tuyen-dung", "tuyendung", "viec-lam")
+    )
+
+
+def _segments(url: str) -> list[str]:
+    return [
+        strip_accents(s).lower().replace("_", "-").removesuffix(".html").removesuffix(".htm")
+        for s in path_segments(url)
+    ]
+
+
+def _stop(segment: str) -> bool:
+    return (
+        segment in STOP_SEGMENTS
+        or segment.startswith(_STOP_PREFIXES)
+        or any(w in segment for w in _STOP_WORDS)
+    )
+
+
+def _content_segments(segs: list[str]) -> list[str]:
+    """Bỏ tiền tố ngôn ngữ ở đầu đường dẫn."""
+    i = 0
+    while i < len(segs) and _LOCALE.match(segs[i]):
+        i += 1
+    return segs[i:]
+
+
+def _is_index(segs: list[str]) -> bool:
+    """/alljobs, /en/jobs/, /careers/tuyen-dung/: trang danh sách, không phải tin."""
+    content = _content_segments(segs)
+    if not content:
+        return False
+    return content[-1] in LISTING_SEGMENTS or (len(content) <= 2 and content[-1] in _INDEX_SEGMENTS)
+
+
+def _is_id_param(key: str) -> bool:
+    """`id`, `jobId`, `request_id`, `postid`... (không tính `pageId` của banner/tracking)."""
+    if key.startswith(("page", "from", "utm", "ref", "source")):
+        return False
+    return key in _ID_PARAMS or key.endswith(("_id", "jobid", "postid", "requestid"))
+
+
+def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
+    """Link có dạng trang chi tiết tin tuyển dụng, cùng site với trang danh sách."""
+    listing = normalize_url(listing_url) or listing_url
+    listing_segs = _segments(listing)
+    # Trang danh sách là trang gốc (hoặc chỉ có tiền tố ngôn ngữ) thì mọi link đều "con".
+    listing_is_root = not _content_segments(listing_segs)
+    best: dict[str, JobLink] = {}
+    for link in links:
+        url = link.url
+        if url == listing or not same_site(url, listing) or _FILE_EXT.search(urlsplit(url).path):
+            continue
+        segs = _segments(url)
+        if not segs or segs[-1] in LISTING_SEGMENTS or any(_stop(s) for s in segs):
+            continue
+        query = {k.lower() for k, _ in parse_qsl(urlsplit(url).query)}
+        if query & _PAGE_PARAMS:
+            continue
+        by_id = any(_is_id_param(k) for k in query)  # /job-detail.html?id=12
+        # Trang con của trang danh sách (/tuyen-dung → /tuyen-dung/ke-toan). Trang danh sách là
+        # trang gốc thì mọi link đều "con", nên không tính.
+        child = (
+            not listing_is_root
+            and host_of(url) == host_of(listing)
+            and len(segs) > len(listing_segs)
+            and segs[: len(listing_segs)] == listing_segs
+        )
+        parents = segs if by_id else segs[:-1]
+        job_seg = any(s in JOB_SEGMENTS for s in parents) or any(
+            s.startswith(("tuyen-dung-", "viec-lam-", "job-", "career-")) for s in segs
+        )
+        last = segs[-1]
+        slug = by_id or ((bool(re.search(r"\d", last)) or last.count("-") >= 2) and len(last) >= 5)
+        titled = _title_like(link.text)
+        # Tham số khác id (?dept=, ?location=) thường là bộ lọc của trang danh sách.
+        filtered = bool(query) and not by_id
+        score = (2 if child or job_seg else 0) + slug + titled - filtered
+        if score < 3:
+            continue
+        title = link.text if titled else None
+        current = best.get(url)
+        if current is None or (title and len(title) > len(current.title or "")):
+            best[url] = JobLink(url=url, title=title or (current.title if current else None))
+    return list(best.values())
+
+
+def _page_number(url: str) -> int | None:
+    for key, value in parse_qsl(urlsplit(url).query):
+        if key.lower() in _PAGE_PARAMS and value.isdigit():
+            return int(value)
+    if m := _PAGE_PATH.search(urlsplit(url).path):
+        return int(m.group(1))
+    return None
+
+
+def _listing_like(link: Link, segs: list[str]) -> bool:
+    """Trang mục lục việc làm (/tim-kiem-viec-lam, /en/jobs/, /search/) hoặc link "xem tất cả
+    vị trí" (không phải trang chính sách, tin đã lưu...)."""
+    if not urlsplit(link.url).query and _is_index(segs):
+        return True
+    if any(_stop(s) for s in segs):
+        return False
+    text = _plain(link.text)
+    return bool(_VIEW_ALL.search(text)) or bool(
+        _VIEW_ALL_SHORT.match(text) and any(_job_like(s) for s in segs)
+    )
+
+
+def listing_links(links: list[Link], page_url: str) -> list[str]:
+    """Trang danh sách tiếp theo: phân trang của trang hiện tại, link "xem tất cả vị trí"."""
+    current = _page_number(page_url) or 1
+    base_path = _PAGE_PATH.sub("/", urlsplit(page_url).path).rstrip("/")
+    pages: dict[int, str] = {}
+    others: list[str] = []
+    for link in links:
+        if not same_site(link.url, page_url) or link.url == page_url:
+            continue
+        number = _page_number(link.url)
+        path = _PAGE_PATH.sub("/", urlsplit(link.url).path).rstrip("/")
+        if number is not None and number > current and path == base_path:
+            pages.setdefault(number, link.url)
+        elif (segs := _segments(link.url)) and _listing_like(link, segs):
+            others.append(link.url)
+    ordered = [pages[n] for n in sorted(pages)]
+    return list(dict.fromkeys([*ordered, *others]))
+
+
+def jd_signals(markdown: str) -> int:
+    text = _plain(markdown)
+    return sum(any(k in text for k in group) for group in _JD_SIGNALS)
+
+
+def labeled_fields(markdown: str) -> dict[str, str]:
+    """Các trường có nhãn rõ ràng ("Mức lương: ...", "Hạn nộp: ...") trong nội dung. Nhãn đứng
+    riêng một dòng ("MỨC LƯƠNG:" rồi "Thỏa thuận") thì lấy dòng ngay sau."""
+    found: dict[str, str] = {}
+    lines = [line for line in markdown.splitlines() if line.strip()]
+    for i, line in enumerate(lines):
+        m = _LABEL_LINE.match(line)
+        if m is None:
+            continue
+        label = _plain(m["label"]).strip(" *_")
+        key = next((k for k, names in _LABELS.items() if label in names), None)
+        if key is None or key in found:
+            continue
+        value = clean_text(_MD_MARKS.sub("", m["value"]).strip(" *|"))
+        if not value and i + 1 < len(lines) and _LABEL_LINE.match(lines[i + 1]) is None:
+            value = clean_text(_MD_MARKS.sub("", lines[i + 1]).strip(" *|#-"))
+        if value and len(value) <= 200:
+            found[key] = value
+    return found
+
+
+@dataclass(frozen=True, slots=True)
+class Page:
+    url: str  # URL cuối (sau redirect), đã chuẩn hoá
+    html: str
+    rendered: bool = False
+
+
+def _render_needed(result: FetchResult, html: str) -> bool:
+    content_type = result.headers.get("content-type", "")
+    return "html" in content_type and looks_like_spa_shell(html)
+
+
+def _page(result: FetchResult, rendered: bool) -> Page:
+    return Page(normalize_url(result.final_url) or result.final_url, result.text, rendered)
+
+
+async def fetch_page(
+    session: SourceSession,
+    url: str,
+    *,
+    required: bool = False,
+    render: bool = False,
+    auto_render: bool = True,
+    wait_until: WaitUntil = "domcontentloaded",
+) -> Page | None:
+    """Một trang HTML. `render=True` thì mở bằng trình duyệt; HTML là khung SPA thì cũng mở
+    bằng trình duyệt (trừ khi `auto_render=False`) và chờ mạng yên vì nội dung nạp bằng XHR.
+
+    `required`: lỗi thì dừng nguồn (`SourceError`) thay vì trả None.
+    """
+    if render:
+        if not session.can_render:
+            return None
+        result = await session.render(url, wait_until=wait_until)
+        return _page(result, True) if result.ok else None
+    result = await (session.fetch_ok(url) if required else session.fetch(url))
+    if not result.ok:
+        return None
+    if auto_render and _render_needed(result, result.text) and session.can_render:
+        rendered = await session.render(url, wait_until="networkidle")
+        if rendered.ok:
+            return _page(rendered, True)
+    return _page(result, False)
+
+
+@dataclass(slots=True)
+class ListingScan:
+    """Những gì đọc được trên một trang danh sách."""
+
+    page: Page
+    links: list[Link]
+    jobs: list[RawJob]  # JobPosting JSON-LD đủ nội dung
+    job_links: list[JobLink]
+    next_pages: list[str]
+
+    @property
+    def empty(self) -> bool:
+        return not self.jobs and not self.job_links
+
+
+def scan_listing(page: Page) -> ListingScan:
+    links = extract_links(parse(page.html), page.url)
+    jobs: list[RawJob] = []
+    found = job_links(links, page.url)
+    known = {j.url for j in found}
+    for job in jsonld.raw_jobs(page.html, page.url):
+        if len(job.description or "") >= _MIN_DESCRIPTION:
+            jobs.append(job)
+        elif job.url != page.url and job.url not in known:
+            # JSON-LD của trang danh sách chỉ có tiêu đề: cần trang chi tiết.
+            found.append(JobLink(url=job.url, title=job.title))
+            known.add(job.url)
+    return ListingScan(page, links, jobs, found, listing_links(links, page.url))
+
+
+async def scan_with_render(
+    session: SourceSession, url: str, *, required: bool, render: bool = True
+) -> ListingScan | None:
+    """Đọc trang danh sách; HTTP không thấy tin nào thì mở lại bằng trình duyệt (danh sách do
+    JavaScript nạp sau). `render=False`: chỉ dùng HTTP."""
+    page = await fetch_page(session, url, required=required, auto_render=render)
+    if page is None:
+        return None
+    scan = scan_listing(page)
+    if render and scan.empty and not page.rendered:
+        # Danh sách nạp bằng XHR sau khi trang tải: chờ mạng yên.
+        rendered = await fetch_page(session, url, render=True, wait_until="networkidle")
+        if rendered is not None:
+            # DOM đã chạy JavaScript chứa ít nhất những gì HTML gốc có.
+            return scan_listing(rendered)
+    return scan
+
+
+def split_markdown(markdown: str, size: int) -> list[str]:
+    """Chia markdown thành các đoạn ≤ `size` ký tự, cắt ở ranh giới dòng."""
+    chunks: list[str] = []
+    current: list[str] = []
+    length = 0
+    for line in markdown.splitlines():
+        if current and length + len(line) + 1 > size:
+            chunks.append("\n".join(current))
+            current, length = [], 0
+        current.append(line[:size])
+        length += min(len(line), size) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def _tokens(text: str) -> set[str]:
+    return set(re.findall(r"\w+", _plain(text)))
+
+
+def pick_title(hint: str | None, headings: list[str], og_title: str | None) -> str | None:
+    """Tên vị trí của trang chi tiết.
+
+    `<h1>` hay là banner chung của site ("TMA tự hào là nơi làm việc..."), nên khi có chữ trên
+    link ở trang danh sách (`hint`) thì chọn tiêu đề trên trang giống nó nhất; không tiêu đề
+    nào giống thì dùng chính `hint`.
+    """
+    if not hint:
+        return (headings[0] if headings else None) or og_title
+    want = _tokens(hint)
+    best, best_score = None, 0.0
+    for candidate in [*headings, og_title or ""]:
+        got = _tokens(candidate)
+        if not got or not want:
+            continue
+        score = len(want & got) / len(want | got)
+        if score > best_score:
+            best, best_score = candidate, score
+    return best if best is not None and best_score >= 0.5 else hint
+
+
+def _llm_listing_candidates(scans: list[ListingScan]) -> list[ListingScan]:
+    """Trang để LLM đọc khi rule không thấy tin: trang có URL kiểu danh sách trước (trang
+    careers gốc thường chỉ giới thiệu), tối đa 2 trang."""
+
+    def listing_like(scan: ListingScan) -> bool:
+        segs = _segments(scan.page.url)
+        return bool(segs) and (segs[-1] in LISTING_SEGMENTS or segs[-1] in JOB_SEGMENTS)
+
+    return sorted(scans, key=lambda s: not listing_like(s))[:_MAX_LLM_LISTINGS]
+
+
+class CareersSource(Source):
+    kind = KIND
+
+    def __init__(self, url: str) -> None:
+        super().__init__(host_of(url), url)
+
+    # --- danh sách bằng LLM ---
+
+    async def _llm_listing(
+        self, session: SourceSession, scan: ListingScan
+    ) -> tuple[list[JobLink], list[RawJob]]:
+        url = scan.page.url
+        candidates = list(
+            {
+                link.url: link
+                for link in scan.links
+                if same_site(link.url, url) and link.url != url
+            }.values()
+        )[:_MAX_LLM_LINKS]
+        node = main_node(parse(scan.page.html))
+        markdown = html_to_markdown(node.html or "") if node is not None else ""
+        if not markdown.strip():
+            return [], []
+        links = "\n".join(f"{i}. {c.text or '-'} — {c.url}" for i, c in enumerate(candidates))
+        # Danh sách dài: mỗi lời gọi chỉ đọc một đoạn để kịp sinh JSON trong giới hạn thời gian.
+        results = await gather_all(
+            session.llm.structured(
+                job_listing.PROMPT, job_listing.JobListing, url=url, page=chunk, links=links
+            )
+            for chunk in split_markdown(markdown, _LLM_LISTING_CHUNK)[:_LLM_LISTING_CHUNKS]
+        )
+        items = [
+            item
+            for r in results
+            if r.value is not None and r.value.is_job_listing
+            for item in r.value.jobs
+        ]
+        found: list[JobLink] = []
+        inline: list[RawJob] = []
+        titles: set[str] = set()
+        for item in items:
+            title = clean_text(item.title)
+            if not title or title in titles:
+                continue
+            titles.add(title)
+            if item.link is not None and 0 <= item.link < len(candidates):
+                found.append(JobLink(url=candidates[item.link].url, title=title))
+                continue
+            # Vị trí không có trang riêng: chỉ có tên (mô tả nằm trên trang danh sách).
+            inline.append(
+                RawJob(
+                    source=KIND,
+                    external_id=jsonld.external_id_for_url(url, title),
+                    url=url,
+                    title=title,
+                    locations=[loc] if (loc := text_or_none(item.location)) else [],
+                    method=ExtractionMethod.LLM,
+                    extra={"inline": True},
+                )
+            )
+        return found, inline
+
+    # --- chi tiết ---
+
+    async def _detail(
+        self, session: SourceSession, link: JobLink
+    ) -> tuple[RawJob | None, list[JobLink]]:
+        """(tin ở trang chi tiết, link tin mới thấy trên trang).
+
+        Trang không rõ là tin mà có nhiều link tin thì có thể là danh sách con (theo phòng ban,
+        địa điểm): lấy cả các link đó. Trang tin thật cũng hay có mục "vị trí khác" nên vẫn bóc
+        tin như thường (LLM quyết định khi không rõ).
+        """
+        page = await fetch_page(session, link.url)
+        if page is None:
+            return None, []
+        if postings := jsonld.raw_jobs(page.html, page.url):
+            job = postings[0]
+            if not same_site(job.url, page.url):
+                job = job.model_copy(update={"url": page.url})
+            return job, []
+        tree = parse(page.html)
+        og_title = meta_content(tree, "og:title")
+        node = main_node(tree)
+        if node is None:
+            return None, []
+        markdown = html_to_markdown(node.html or "")
+        signals = jd_signals(markdown)
+        more: list[JobLink] = []
+        if signals < _CLEAR_JD:
+            sub = scan_listing(page)
+            if len(sub.job_links) >= _SUB_LISTING_LINKS:
+                more = sub.job_links
+        headings = [node_text(h) for h in node.css("h1, h2")]
+        title = pick_title(link.title, [h for h in headings if h], og_title)
+        return await self._parse_detail(session, page, title, markdown, signals), more
+
+    async def _parse_detail(
+        self, session: SourceSession, page: Page, title: str | None, markdown: str, signals: int
+    ) -> RawJob | None:
+        fields = labeled_fields(markdown)
+        method = ExtractionMethod.HEURISTIC
+        detail: job_detail.JobDetail | None = None
+        if signals < _CLEAR_JD:
+            if not session.llm.enabled:
+                return None
+            result = await session.llm.structured(
+                job_detail.PROMPT,
+                job_detail.JobDetail,
+                url=page.url,
+                title=title or "",
+                page=markdown,
+            )
+            if result.value is None or not result.value.is_job_posting:
+                return None
+            detail = result.value
+            method = ExtractionMethod.LLM
+            title = clean_text(detail.title) or title
+        if not title or len(markdown) < 50:
+            return None
+        location = fields.get("location")
+        return RawJob(
+            source=KIND,
+            external_id=jsonld.external_id_for_url(page.url),
+            url=page.url,
+            title=title,
+            company_name=detail.company_name if detail else None,
+            description=markdown,
+            description_format="markdown",
+            locations=(detail.locations if detail and detail.locations else [])
+            or ([location] if location else []),
+            work_mode=detail.work_mode if detail else None,
+            employment_type=(detail.employment_type if detail else None)
+            or fields.get("employment_type"),
+            level=(detail.level if detail else None) or fields.get("level"),
+            salary_raw=(detail.salary if detail else None) or fields.get("salary_raw"),
+            experience_raw=(detail.experience if detail else None) or fields.get("experience_raw"),
+            expires_raw=(detail.deadline if detail else None) or fields.get("expires_raw"),
+            posted_raw=detail.posted if detail else None,
+            apply_url=page.url,
+            method=method,
+            extra={"jd_signals": signals},
+        )
+
+    # --- nguồn ---
+
+    async def jobs(self, session: SourceSession) -> AsyncIterator[RawJob]:
+        limits = session.limits
+        queue = [normalize_url(self.url) or self.url]
+        visited: set[str] = set()
+        pending: dict[str, JobLink] = {}  # trang chi tiết cần mở, theo thứ tự gặp
+        yielded: set[str] = set()  # external_id đã yield
+        done_urls: set[str] = set()  # trang đã có đủ nội dung hoặc đã mở
+        scans: list[ListingScan] = []
+
+        def add_links(links: list[JobLink]) -> None:
+            for link in links:
+                if link.url in done_urls:
+                    continue
+                current = pending.get(link.url)
+                if current is None or (link.title and not current.title):
+                    pending[link.url] = link
+
+        while queue and len(visited) < limits.max_listing_pages:
+            url = queue.pop(0)
+            if url in visited:
+                continue
+            visited.add(url)
+            scan = await scan_with_render(session, url, required=not scans)
+            if scan is None:
+                continue
+            visited.add(scan.page.url)
+            scans.append(scan)
+            if scan.jobs:
+                session.count(url, len(scan.jobs))
+            for job in scan.jobs:
+                if job.external_id not in yielded:
+                    yielded.add(job.external_id)
+                    done_urls.add(job.url)
+                    yield job
+            add_links(scan.job_links)
+            queue.extend(u for u in scan.next_pages if u not in visited)
+            log.debug("careers.listing", url=scan.page.url, jobs=len(scan.jobs), links=len(pending))
+
+        if scans and not pending and not yielded and session.llm.enabled:
+            for scan in _llm_listing_candidates(scans):
+                found, inline = await self._llm_listing(session, scan)
+                add_links(found)
+                for job in inline:
+                    if job.external_id not in yielded:
+                        yielded.add(job.external_id)
+                        yield job
+                if found or inline:
+                    break
+
+        opened = 0
+        while pending and opened < limits.max_detail_pages:
+            batch: list[JobLink] = []
+            size = min(limits.detail_concurrency, limits.max_detail_pages - opened)
+            while pending and len(batch) < size:
+                url = next(iter(pending))
+                link = pending.pop(url)
+                if url not in done_urls:
+                    done_urls.add(url)
+                    batch.append(link)
+            opened += len(batch)
+            for link, (job, more) in zip(
+                batch, await gather_all(self._detail(session, link) for link in batch), strict=True
+            ):
+                add_links(more)
+                if job is not None:
+                    session.count(link.url, 1)
+                if job is not None and job.external_id not in yielded:
+                    yielded.add(job.external_id)
+                    yield job

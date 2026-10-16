@@ -18,6 +18,7 @@ def test_help_lists_commands() -> None:
     assert "proxies" in result.output
     assert "llm" in result.output
     assert "fetch" in result.output
+    assert "site" in result.output
 
 
 def test_infra_subcommands_have_check() -> None:

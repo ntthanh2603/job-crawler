@@ -1,0 +1,359 @@
+{
+ "total": 8,
+ "jobPostings": [
+  {
+   "title": "Logistics Operations Manager for Customs compliance operations",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Logistics-Operations-Manager-for-Customs-compliance-operations_JR0288022-1",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 2 Days Ago",
+   "bulletFields": [
+    "JR0288022"
+   ]
+  },
+  {
+   "title": "Module Equipment Technician (Kỹ Thuật Viên Bảo trì Sửa chữa)",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Manufacturing-Technician-Module-Technician-Level-2--K-Thut-Vin-Sn-Xut-Bc-2-_JR0276795",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 28 Days Ago",
+   "bulletFields": [
+    "JR0276795"
+   ]
+  },
+  {
+   "title": "Foundry Program Manager, Service Operations and Program Management",
+   "externalPath": "/job/PRC-Chengdu/Foundry-Program-Manager--Service-Operations-and-Program-Management_JR0287147-1",
+   "locationsText": "2 Locations",
+   "postedOn": "Posted 30 Days Ago",
+   "bulletFields": [
+    "JR0287147"
+   ]
+  },
+  {
+   "title": "Manufacturing Operator (Nhân viên vận hành máy)",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Manufacturing-Technician-Level-1--K-Thut-Vin-Sn-Xut-Bc-1-_JR0276793",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 30 Days Ago",
+   "bulletFields": [
+    "JR0276793"
+   ]
+  },
+  {
+   "title": "Facilities Engineering Intern",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Facilities-Engineering-Intern_JR0287227",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "JR0287227"
+   ]
+  },
+  {
+   "title": "Capital industrial Engineer",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Capital-industrial-Engineer_JR0286618",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "JR0286618"
+   ]
+  },
+  {
+   "title": "Calibration Lab Engineer",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Calibration-Lab-Engineer_JR0286689",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "JR0286689"
+   ]
+  },
+  {
+   "title": "Financial Analyst",
+   "externalPath": "/job/Vietnam-Ho_Chi_Minh_City/Financial-Analyst_JR0286267",
+   "locationsText": "Vietnam, Ho_Chi_Minh_City",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "JR0286267"
+   ]
+  }
+ ],
+ "facets": [
+  {
+   "facetParameter": "jobFamilyGroup",
+   "descriptor": "Job Category",
+   "values": [
+    {
+     "descriptor": "Manufacturing and Process Development",
+     "id": "dc8bf79476611087d67b5159c64a703c",
+     "count": 3
+    },
+    {
+     "descriptor": "Intern",
+     "id": "dc8bf79476611087d67b36517cf17036",
+     "count": 1
+    },
+    {
+     "descriptor": "Finance",
+     "id": "dc8bf79476611087d67aed516c5e702c",
+     "count": 1
+    },
+    {
+     "descriptor": "Supply Chain",
+     "id": "c37a9eaa90371000c6fd6537fef70000",
+     "count": 1
+    },
+    {
+     "descriptor": "Business Strategy and Enablement",
+     "id": "6fbee4bf2e511000c6fd6a78c26e0000",
+     "count": 1
+    },
+    {
+     "descriptor": "Contract Employee",
+     "id": "dc8bf79476611087d67bc98084127048",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "facetParameter": "workerSubType",
+   "descriptor": "Job Type",
+   "values": [
+    {
+     "descriptor": "Regular",
+     "id": "dc8bf79476611087dfde9c6b065bae76",
+     "count": 6
+    },
+    {
+     "descriptor": "Student / Intern (Fixed Term)",
+     "id": "dc8bf79476611087dfde99931439ae75",
+     "count": 1
+    },
+    {
+     "descriptor": "Intel Contract Employee (Fixed Term)",
+     "id": "dc8bf79476611087dfde8d38b882ae74",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "facetParameter": "timeType",
+   "descriptor": "Time Type",
+   "values": [
+    {
+     "descriptor": "Full time",
+     "id": "dc193d6170de10860883d9bf7c0e01a9",
+     "count": 8
+    }
+   ]
+  },
+  {
+   "facetParameter": "locationMainGroup",
+   "values": [
+    {
+     "facetParameter": "locations",
+     "descriptor": "Locations",
+     "values": [
+      {
+       "descriptor": "US, Oregon, Hillsboro",
+       "id": "1e4a4eb3adf1011246675c76bf81f8ce",
+       "count": 241
+      },
+      {
+       "descriptor": "US, Arizona, Phoenix",
+       "id": "1e4a4eb3adf101b8aec18a77bf810dd0",
+       "count": 179
+      },
+      {
+       "descriptor": "US, California, Santa Clara",
+       "id": "1e4a4eb3adf10118b1dfe877bf8162d0",
+       "count": 119
+      },
+      {
+       "descriptor": "Malaysia, Penang",
+       "id": "1e4a4eb3adf1016620eafb74bf81d9cd",
+       "count": 105
+      },
+      {
+       "descriptor": "US, California, Folsom",
+       "id": "1e4a4eb3adf1018c4bf78f77bf8112d0",
+       "count": 73
+      },
+      {
+       "descriptor": "India, Bangalore",
+       "id": "1e4a4eb3adf101f44070f976bf8184cf",
+       "count": 66
+      },
+      {
+       "descriptor": "US, Texas, Austin",
+       "id": "1e4a4eb3adf1016541777876bf8111cf",
+       "count": 63
+      },
+      {
+       "descriptor": "Malaysia, Kulim",
+       "id": "1e4a4eb3adf101740c9ff674bf81d4cd",
+       "count": 43
+      },
+      {
+       "descriptor": "US, New Mexico, Albuquerque",
+       "id": "1e4a4eb3adf10146fd5c5276bf81eece",
+       "count": 24
+      },
+      {
+       "descriptor": "Ireland, Leixlip",
+       "id": "1e4a4eb3adf101424c5a8574bf8175cd",
+       "count": 23
+      },
+      {
+       "descriptor": "PRC, Shanghai",
+       "id": "1e4a4eb3adf1017ae1675974bf8152cd",
+       "count": 21
+      },
+      {
+       "descriptor": "Poland, Gdansk",
+       "id": "1e4a4eb3adf10124b3604375bf811ace",
+       "count": 16
+      },
+      {
+       "descriptor": "Israel, Haifa",
+       "id": "1e4a4eb3adf1013563ba9174bf817fcd",
+       "count": 15
+      },
+      {
+       "descriptor": "Taiwan, Taipei",
+       "id": "1e4a4eb3adf101a35ab0bc75bf8188ce",
+       "count": 11
+      },
+      {
+       "descriptor": "PRC, Beijing",
+       "id": "1e4a4eb3adf101274b92fb75bf81c2ce",
+       "count": 10
+      },
+      {
+       "descriptor": "Mexico, Guadalajara",
+       "id": "1e4a4eb3adf101717b7c0175bf81decd",
+       "count": 10
+      },
+      {
+       "descriptor": "Vietnam, Ho_Chi_Minh_City",
+       "id": "1e4a4eb3adf101bf12a99b76bf812fcf",
+       "count": 8
+      },
+      {
+       "descriptor": "PRC, Chengdu",
+       "id": "1e4a4eb3adf101b8e4180176bf81c7ce",
+       "count": 8
+      },
+      {
+       "descriptor": "Canada, Toronto",
+       "id": "1e4a4eb3adf1019f4237e975bf81b3ce",
+       "count": 7
+      },
+      {
+       "descriptor": "Japan, Tokyo",
+       "id": "1e4a4eb3adf1017e01a9cd74bf81b1cd",
+       "count": 7
+      },
+      {
+       "descriptor": "Israel, Petah-Tikva",
+       "id": "1e4a4eb3adf101aaeda8a474bf818ecd",
+       "count": 7
+      },
+      {
+       "descriptor": "US, Massachusetts, Beaver Brook",
+       "id": "da6b8032b879100204a63a809f6c0000",
+       "count": 6
+      },
+      {
+       "descriptor": "US, Colorado, Fort Collins",
+       "id": "1e4a4eb3adf101989587fd77bf8176d0",
+       "count": 4
+      },
+      {
+       "descriptor": "Germany, Munich",
+       "id": "1e4a4eb3adf101311d06d076bf815ccf",
+       "count": 4
+      },
+      {
+       "descriptor": "South Korea, Seoul",
+       "id": "1e4a4eb3adf1016cebea8c75bf815bce",
+       "count": 4
+      },
+      {
+       "descriptor": "Israel, Kiryat-Gat",
+       "id": "1e4a4eb3adf101cb242c9e74bf8189cd",
+       "count": 4
+      },
+      {
+       "descriptor": "PRC, Shenzhen",
+       "id": "1e4a4eb3adf1018866765f74bf8157cd",
+       "count": 3
+      },
+      {
+       "descriptor": "US, Ohio, New Albany",
+       "id": "9225dd5a24931001586f2d984f1e0000",
+       "count": 2
+      },
+      {
+       "descriptor": "Virtual US",
+       "id": "1e4a4eb3adf101cc4e292078bf8199d0",
+       "count": 2
+      },
+      {
+       "descriptor": "US, California, San Diego",
+       "id": "1e4a4eb3adf1013ddb7bd877bf8153d0",
+       "count": 2
+      },
+      {
+       "descriptor": "Costa Rica, San Jose",
+       "id": "1e4a4eb3adf101888ff41a77bf81a2cf",
+       "count": 2
+      },
+      {
+       "descriptor": "US, Pennsylvania, Allentown",
+       "id": "1e4a4eb3adf1019877cb6176bf81fdce",
+       "count": 2
+      },
+      {
+       "descriptor": "US, New York, New York",
+       "id": "1e4a4eb3adf1017f0a3f5776bf81f3ce",
+       "count": 2
+      },
+      {
+       "descriptor": "Taiwan, Hsinchu",
+       "id": "1e4a4eb3adf101e2d0f3b175bf817ece",
+       "count": 2
+      },
+      {
+       "descriptor": "Israel, Jerusalem",
+       "id": "1e4a4eb3adf101f41cd29774bf8184cd",
+       "count": 2
+      },
+      {
+       "descriptor": "Virtual India",
+       "id": "fabab36f05f51000ba74e9448dc20000",
+       "count": 1
+      },
+      {
+       "descriptor": "Virtual South Korea",
+       "id": "04a88582f0711000bf71a4efcc680000",
+       "count": 1
+      },
+      {
+       "descriptor": "US, Oregon, Portland",
+       "id": "0741efd9f02e01994a3c9ca2ae078199",
+       "count": 1
+      },
+      {
+       "descriptor": "US, Florida,  Multiple Cities",
+       "id": "1e4a4eb3adf10194b7227578bf81e9d0",
+       "count": 1
+      },
+      {
+       "descriptor": "US, Washington,  Multiple Cities",
+       "id": "1e4a4eb3adf101770f350977bf8193cf",
+       "count": 1
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "userAuthenticated": false
+}

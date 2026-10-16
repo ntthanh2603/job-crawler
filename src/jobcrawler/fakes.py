@@ -108,50 +108,80 @@ class FakeRenderer:
         return reply
 
 
+def fetch_result(
+    url: str,
+    body: str | bytes = b"",
+    *,
+    status: int = 200,
+    content_type: str = "text/html; charset=utf-8",
+    headers: Mapping[str, str] | None = None,
+    outcome: FetchOutcome | None = None,
+    final_url: str | None = None,
+) -> FetchResult:
+    content = body.encode() if isinstance(body, str) else body
+    if outcome is None:
+        outcome = FetchOutcome.OK if status < 400 else FetchOutcome.ERROR
+    return FetchResult(
+        url=url,
+        final_url=final_url or url,
+        status=status,
+        outcome=outcome,
+        headers={
+            "content-type": content_type,
+            **{k.lower(): v for k, v in (headers or {}).items()},
+        },
+        content=content,
+        error=None if outcome is FetchOutcome.OK else f"http_{status}",
+    )
+
+
+def _file_kwargs(path: Path, kwargs: dict[str, Any]) -> dict[str, Any]:
+    if "content_type" not in kwargs and path.suffix == ".json":
+        kwargs["content_type"] = "application/json"
+    if "content_type" not in kwargs and path.suffix in (".rss", ".xml"):
+        kwargs["content_type"] = "application/rss+xml; charset=utf-8"
+    return kwargs
+
+
 @dataclass
 class FakeFetcher:
-    """Cài đặt `Fetcher` trả kết quả dựng sẵn theo URL; ghi lại mọi lời gọi."""
+    """Cài đặt `Fetcher` trả kết quả dựng sẵn theo URL; ghi lại mọi lời gọi.
+
+    `render()` dùng `rendered` nếu URL có ở đó (DOM sau khi chạy JavaScript), không thì như
+    `fetch()`. `add_route()` cho câu trả lời phụ thuộc request (vd. body JSON của POST).
+    """
 
     results: dict[str, FetchResult] = field(default_factory=dict)
+    rendered: dict[str, FetchResult] = field(default_factory=dict)
+    routes: dict[str, Callable[[dict[str, Any]], FetchResult]] = field(default_factory=dict)
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
+    delay: float = 0.0  # giây chờ mỗi lời gọi (thử deadline)
 
-    def add(
-        self,
-        url: str,
-        body: str | bytes = b"",
-        *,
-        status: int = 200,
-        content_type: str = "text/html; charset=utf-8",
-        headers: Mapping[str, str] | None = None,
-        outcome: FetchOutcome | None = None,
-        final_url: str | None = None,
-    ) -> None:
-        content = body.encode() if isinstance(body, str) else body
-        if outcome is None:
-            outcome = FetchOutcome.OK if status < 400 else FetchOutcome.ERROR
-        self.results[url] = FetchResult(
-            url=url,
-            final_url=final_url or url,
-            status=status,
-            outcome=outcome,
-            headers={
-                "content-type": content_type,
-                **{k.lower(): v for k, v in (headers or {}).items()},
-            },
-            content=content,
-            error=None if outcome is FetchOutcome.OK else f"http_{status}",
-        )
+    def add(self, url: str, body: str | bytes = b"", **kwargs: Any) -> None:
+        self.results[url] = fetch_result(url, body, **kwargs)
 
     def add_file(self, url: str, path: str | Path, **kwargs: Any) -> None:
         """Dùng file fixture (tests/fixtures/<source>/...) làm nội dung của URL."""
         path = Path(path)
-        if "content_type" not in kwargs and path.suffix == ".json":
-            kwargs["content_type"] = "application/json"
-        self.add(url, path.read_bytes(), **kwargs)
+        self.add(url, path.read_bytes(), **_file_kwargs(path, kwargs))
+
+    def add_rendered_file(self, url: str, path: str | Path, **kwargs: Any) -> None:
+        path = Path(path)
+        self.rendered[url] = fetch_result(url, path.read_bytes(), **_file_kwargs(path, kwargs))
+
+    def add_route(self, url: str, handler: Callable[[dict[str, Any]], FetchResult]) -> None:
+        """`handler(kwargs của fetch)` → kết quả."""
+        self.routes[url] = handler
 
     def _get(self, url: str, kind: str, kwargs: dict[str, Any]) -> FetchResult:
         self.calls.append((kind, url, kwargs))
-        found = self.results.get(url)
+        found: FetchResult | None = None
+        if kind == "render":
+            found = self.rendered.get(url)
+        if found is None and url in self.routes:
+            found = self.routes[url](kwargs)
+        if found is None:
+            found = self.results.get(url)
         if found is None:
             return FetchResult(
                 url=url,
@@ -174,9 +204,13 @@ class FakeFetcher:
         )
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        if self.delay:
+            await asyncio.sleep(self.delay)
         return self._get(with_params(url, kwargs.get("params")), "fetch", kwargs)
 
     async def render(self, url: str, **kwargs: Any) -> FetchResult:
+        if self.delay:
+            await asyncio.sleep(self.delay)
         return self._get(url, "render", kwargs)
 
 

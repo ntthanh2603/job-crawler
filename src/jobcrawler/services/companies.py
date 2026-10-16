@@ -8,13 +8,15 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun
+from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyIn, CompanyResult, JobOut, RunStatus
+from jobcrawler.services import jobs as website_jobs
+from jobcrawler.sources.base import FetchRecord
 from jobcrawler.text import normalize_company_name
 
 log = get_logger(__name__)
@@ -60,20 +62,56 @@ async def ensure_company(session: AsyncSession, company_in: CompanyIn) -> Compan
     return company
 
 
-async def _run_pipeline(res: Resources, company: Company, deadline: float) -> PipelineOutcome:
-    # M0: khung rỗng. Các bước KYC (M3), tìm nguồn + thu thập (M2, M4),
-    # chuẩn hoá/xác minh/gộp/lưu (M5) sẽ gắn vào đây, dừng ở `deadline` (time.monotonic()).
-    return PipelineOutcome(status=RunStatus.OK)
+async def _run_pipeline(
+    res: Resources,
+    company: Company,
+    company_in: CompanyIn,
+    deadline: float,
+    records: list[FetchRecord],
+) -> PipelineOutcome:
+    # KYC (M3) sẽ điền primary_domain; trước đó dùng website ghi trong input nếu có.
+    # Chuẩn hoá/xác minh/gộp/lưu (M5) gắn sau bước thu thập. Mọi bước dừng ở `deadline`.
+    website = company.primary_domain or company_in.website
+    if not website:
+        log.info("company.no_website", reason="chưa có website (KYC ở M3 sẽ tìm)")
+        return PipelineOutcome(status=RunStatus.OK)
+    found = await website_jobs.jobs_for_website(res, website, deadline=deadline, records=records)
+    return PipelineOutcome(
+        status=RunStatus.PARTIAL if found.incomplete_sources else RunStatus.OK,
+        jobs_found=len(found.jobs),
+        incomplete_sources=found.incomplete_sources,
+    )
 
 
 async def _finish_run(
     res: Resources,
     run_id: UUID,
+    company_id: int,
     outcome: PipelineOutcome,
+    records: list[FetchRecord],
     finished_at: datetime,
     duration_ms: int,
 ) -> None:
     async with res.sessionmaker.begin() as session:
+        if records:
+            await session.execute(
+                insert(SourceFetch),
+                [
+                    {
+                        "run_id": run_id,
+                        "company_id": company_id,
+                        "source": r.source,
+                        "url": r.url,
+                        "http_status": r.http_status,
+                        "proxy_id": r.proxy_id,
+                        "duration_ms": r.duration_ms,
+                        "items": r.items,
+                        "outcome": r.outcome.value,
+                        "error": r.error,
+                    }
+                    for r in records
+                ],
+            )
         await session.execute(
             update(CompanyRun)
             .where(CompanyRun.run_id == run_id)
@@ -112,8 +150,10 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
             log.info("company.start", tax_code=company_in.tax_code, website=company_in.website)
             # Giá trị khi bị huỷ (timeout SAQ, Ctrl+C): CancelledError không phải Exception.
             outcome = PipelineOutcome(status=RunStatus.FAILED, error="cancelled")
+            # Ghi cả khi pipeline lỗi/bị huỷ giữa chừng.
+            records: list[FetchRecord] = []
             try:
-                outcome = await _run_pipeline(res, company, deadline)
+                outcome = await _run_pipeline(res, company, company_in, deadline, records)
             except Exception as exc:
                 outcome = PipelineOutcome(
                     status=RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}"
@@ -122,7 +162,9 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
             finally:
                 finished_at = datetime.now(UTC)
                 duration_ms = int((time.monotonic() - t0) * 1000)
-                await _finish_run(res, run_id, outcome, finished_at, duration_ms)
+                await _finish_run(
+                    res, run_id, company.id, outcome, records, finished_at, duration_ms
+                )
                 done = log.warning if outcome.status is RunStatus.FAILED else log.info
                 done(
                     "company.done",

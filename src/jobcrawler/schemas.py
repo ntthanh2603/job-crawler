@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -75,6 +75,16 @@ class SalaryPeriod(StrEnum):
     HOUR = "hour"
 
 
+class ExtractionMethod(StrEnum):
+    """Cách bóc một tin, theo thứ tự tin cậy giảm dần."""
+
+    ATS_API = "ats_api"  # API JSON công khai của ATS
+    JSONLD = "jsonld"  # schema.org/JobPosting nhúng trong trang
+    PARSER = "parser"  # parser riêng của một site
+    LLM = "llm"  # LLM bóc từ markdown của trang
+    HEURISTIC = "heuristic"  # không có LLM: tiêu đề + nội dung chính của trang
+
+
 def _blank_to_none(value: Any) -> Any:
     if isinstance(value, str):
         value = value.strip()
@@ -120,6 +130,44 @@ class CompanyEntity(BaseModel):
     @property
     def display_name(self) -> str:
         return self.brand_name or self.legal_name or self.input_name
+
+
+class RawJob(BaseModel):
+    """Một tin bóc từ một nguồn, chưa chuẩn hoá (lưu vào `job_postings.raw`).
+
+    Giữ nguyên giá trị nguồn trả về (HTML, chuỗi địa điểm, lương...); chuẩn hoá ở
+    `pipeline/normalize.py`. Ngày chỉ được parse khi nguồn trả định dạng rõ ràng (ISO, epoch);
+    dạng tương đối như "Posted 3 Days Ago" giữ ở `*_raw`.
+    """
+
+    source: str  # loại nguồn: greenhouse, lever, ..., careers
+    external_id: str  # duy nhất trong `source`
+    url: str
+    title: str
+    company_name: str | None = None  # tên nhà tuyển dụng nguồn ghi trên tin
+    description: str | None = None
+    description_format: Literal["html", "markdown", "text"] = "html"
+    requirements: str | None = None  # cùng định dạng với description
+    benefits: str | None = None
+    locations: list[str] = Field(default_factory=list)
+    work_mode: str | None = None  # giá trị thô: remote, hybrid, onsite, TELECOMMUTE...
+    employment_type: str | None = None
+    department: str | None = None
+    level: str | None = None
+    salary_raw: str | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
+    experience_raw: str | None = None
+    skills: list[str] = Field(default_factory=list)
+    posted_at: datetime | None = None
+    posted_raw: str | None = None
+    expires_at: datetime | None = None
+    expires_raw: str | None = None
+    apply_url: str | None = None
+    method: ExtractionMethod
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class Location(BaseModel):

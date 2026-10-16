@@ -8,6 +8,7 @@ font, media; tối đa `BROWSER_MAX_PAGES` trang cùng lúc. User-Agent lấy t�
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 from typing import Any
 
@@ -19,6 +20,9 @@ from jobcrawler.net.http import RawResponse, TransportError, WaitUntil
 from jobcrawler.net.proxy_pool import Proxy
 
 BLOCKED_RESOURCES = frozenset({"image", "font", "media"})
+# `networkidle`: tải trang tới DOMContentLoaded rồi chờ mạng yên tối đa chừng này (giây). Nhiều
+# site không bao giờ yên (analytics, long-polling); hết giờ thì vẫn lấy DOM hiện có.
+NETWORK_IDLE_CAP_SECONDS = 8.0
 _PROXY_ERRORS = ("ERR_PROXY", "ERR_TUNNEL", "ERR_SOCKS")
 
 
@@ -79,8 +83,15 @@ class BrowserManager:
             try:
                 await context.route("**/*", _block_heavy)
                 page = await context.new_page()
+                goto_wait: WaitUntil = (
+                    "domcontentloaded" if wait_until == "networkidle" else wait_until
+                )
                 try:
-                    response = await page.goto(url, wait_until=wait_until, timeout=timeout * 1000)
+                    response = await page.goto(url, wait_until=goto_wait, timeout=timeout * 1000)
+                    if wait_until == "networkidle":
+                        cap = min(NETWORK_IDLE_CAP_SECONDS, timeout) * 1000
+                        with contextlib.suppress(PlaywrightTimeoutError):
+                            await page.wait_for_load_state("networkidle", timeout=cap)
                 except PlaywrightTimeoutError as exc:
                     raise TransportError("timeout", str(exc)) from exc
                 except PlaywrightError as exc:

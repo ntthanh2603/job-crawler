@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     proxy_max_consecutive_failures: int = Field(default=5, ge=1)
     proxy_dead_seconds: int = Field(default=3600, ge=1)
     proxy_check_url: str = "https://www.cloudflare.com/cdn-cgi/trace"
+    # Nguồn từ website doanh nghiệp (trang careers, ATS).
+    discovery_cache_seconds: int = Field(default=7 * 86_400, ge=0)
+    # Không tìm thấy nguồn nào: cache ngắn hơn để lượt sau thử lại sớm.
+    discovery_negative_cache_seconds: int = Field(default=86_400, ge=0)
+    # Thời gian tối đa cho bước tìm nguồn trong một lượt (phần còn lại để thu thập).
+    discovery_timeout_seconds: float = Field(default=60, gt=0)
+    source_max_jobs: int = Field(default=500, ge=1)
+    source_max_detail_pages: int = Field(default=80, ge=0)
+    source_max_listing_pages: int = Field(default=10, ge=1)
+    source_max_rendered_pages: int = Field(default=10, ge=0)
+    # Request/giây tới API công khai của ATS (host dùng chung cho mọi doanh nghiệp).
+    # Ghi đè từng host bằng RATE_LIMITS.
+    ats_rate_per_second: float = Field(default=2.0, gt=0)
+
     # Deadline mềm: tới mốc này thì huỷ các nguồn chưa xong và lưu kết quả `partial`.
     company_deadline_seconds: float = Field(default=165, gt=0)
     # Timeout cứng của job SAQ `process_company`.
