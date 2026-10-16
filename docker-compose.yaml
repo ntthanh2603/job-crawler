@@ -1,0 +1,72 @@
+name: jobcrawler
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jobcrawler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobcrawler}
+      POSTGRES_DB: ${POSTGRES_DB:-jobcrawler}
+    ports:
+      - "${POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Chỉ chạy khi volume còn trống: tạo thêm DB `jobcrawler_test` cho test tích hợp.
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Chạy một lần `jobcrawler db upgrade` để worker không khởi động trên schema cũ.
+  migrate:
+    build: .
+    image: jobcrawler:latest
+    command: ["jobcrawler", "db", "upgrade"]
+    env_file: &env_file
+      - path: .env
+        required: false
+    environment: &app_env
+      # Ghi đè URL trong .env (vốn trỏ localhost cho CLI trên host) bằng hostname nội bộ.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  worker:
+    image: jobcrawler:latest
+    command: ["jobcrawler", "worker"]
+    env_file: *env_file
+    environment: *app_env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: ${WORKER_REPLICAS:-3}
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:

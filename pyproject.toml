@@ -1,0 +1,68 @@
+[project]
+name = "jobcrawler"
+version = "0.1.0"
+description = "Thu thập tin tuyển dụng cho ~10.000 doanh nghiệp từ careers, ATS và các trang tuyển dụng"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "curl-cffi>=0.16",
+    "openai>=3.31.0",
+    # Khớp đúng tag image mcr.microsoft.com/playwright/python trong Dockerfile.
+    "playwright==1.63.0",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16.0",
+    "saq[redis]>=0.26.4",
+    "sqlalchemy[asyncio]>=2.0.40",
+    "structlog>=26.1.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+jobcrawler = "jobcrawler.entrypoints.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "PT", "RUF"]
+# RUF001-003: chuỗi/comment tiếng Việt có ký tự mà ruff coi là "ambiguous unicode".
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Migration sinh bởi Alembic có CHECK constraint dài trên một dòng.
+"src/jobcrawler/db/alembic/versions/*" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jobcrawler"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: cần Postgres + Redis thật (đặt TEST_DATABASE_URL, xem .env.example)",
+]
+# Giống bộ lọc trong jobcrawler.resources (pytest reset bộ lọc đặt lúc import).
+filterwarnings = ['ignore:\s*Proactor event loop:curl_cffi.utils.CurlCffiWarning']
