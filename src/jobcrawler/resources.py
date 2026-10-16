@@ -9,9 +9,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from curl_cffi.requests import AsyncSession as CurlSession
 from curl_cffi.utils import CurlCffiWarning
-from openai import AsyncOpenAI
 from redis.asyncio import Redis
 from saq import Queue
 from sqlalchemy import make_url, text
@@ -20,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from jobcrawler import logging as jlog
 from jobcrawler.config import Settings, get_settings
 from jobcrawler.db.session import create_engine, create_sessionmaker
+from jobcrawler.llm import LLMClient
 from jobcrawler.net.browser import BrowserManager
+from jobcrawler.net.http import CurlTransport, HttpClient, HttpConfig
+from jobcrawler.net.kv import RedisKV
+from jobcrawler.net.proxy_pool import ProxyPool, load_proxies
+from jobcrawler.net.ratelimit import RedisRateLimiter
 
 log = jlog.get_logger(__name__)
 
@@ -40,8 +43,9 @@ class Resources:
     sessionmaker: async_sessionmaker[AsyncSession]
     redis: Redis
     queue: Queue
-    llm: AsyncOpenAI | None  # None khi chưa cấu hình LLM_BASE_URL/LLM_MODEL
-    http: CurlSession
+    llm: LLMClient  # `llm.enabled` False khi chưa cấu hình LLM_BASE_URL/LLM_MODEL
+    http: HttpClient
+    proxies: ProxyPool
     browser: BrowserManager
 
 
@@ -62,7 +66,8 @@ async def open_resources(
     queue: Queue | None = None,
     db_logs: bool = True,
 ) -> AsyncIterator[Resources]:
-    """Mở DB, Redis, SAQ queue, LLM client, HTTP client và browser (lười).
+    """Mở DB, Redis, SAQ queue, LLM client, HTTP client (proxy pool, rate limit, robots,
+    cache) và browser (khởi động lười).
 
     `queue`: dùng queue có sẵn (worker SAQ tự quản lý kết nối của queue này).
     `db_logs`: gắn sink ghi log vào bảng `logs`.
@@ -97,23 +102,40 @@ async def open_resources(
             await queue.connect()
             stack.push_async_callback(queue.disconnect)
 
-        llm: AsyncOpenAI | None = None
-        if settings.llm_enabled:
-            llm = AsyncOpenAI(
-                base_url=settings.llm_base_url,
-                api_key=settings.llm_api_key.get_secret_value(),
-                timeout=settings.llm_timeout_seconds,
-                max_retries=1,
-            )
-            stack.push_async_callback(llm.close)
-        else:
+        llm = LLMClient.from_settings(settings)
+        stack.push_async_callback(llm.close)
+        if not llm.enabled:
             log.warning("llm.disabled", reason="thiếu LLM_BASE_URL hoặc LLM_MODEL")
 
-        http = CurlSession(impersonate="chrome")
-        stack.push_async_callback(http.close)
+        kv = RedisKV(redis, prefix=settings.redis_prefix)
+        proxy_list = load_proxies(settings.proxies_file)
+        if proxy_list:
+            log.info("proxy.loaded", count=len(proxy_list), file=str(settings.proxies_file))
+        else:
+            log.warning(
+                "proxy.none", file=str(settings.proxies_file), reason="đi thẳng, không proxy"
+            )
+        proxies = ProxyPool(
+            kv,
+            proxy_list,
+            sticky_seconds=settings.proxy_sticky_seconds,
+            cooldown_seconds=settings.proxy_cooldown_seconds,
+            max_failures=settings.proxy_max_consecutive_failures,
+            dead_seconds=settings.proxy_dead_seconds,
+        )
 
-        browser = BrowserManager(max_pages=settings.browser_max_pages)
+        browser = BrowserManager(max_pages=settings.browser_max_pages, use_proxies=proxies.enabled)
         stack.push_async_callback(browser.close)
+
+        http = HttpClient(
+            CurlTransport(impersonate=settings.http_impersonate),
+            kv=kv,
+            proxies=proxies,
+            ratelimiter=RedisRateLimiter(redis, prefix=settings.redis_prefix),
+            renderer=browser,
+            config=HttpConfig.from_settings(settings),
+        )
+        stack.push_async_callback(http.close)
 
         yield Resources(
             settings=settings,
@@ -123,5 +145,6 @@ async def open_resources(
             queue=queue,
             llm=llm,
             http=http,
+            proxies=proxies,
             browser=browser,
         )

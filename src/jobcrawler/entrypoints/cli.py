@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json
 import sys
 from collections.abc import Coroutine
 from typing import Annotated, Any, NoReturn
@@ -23,8 +25,10 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Schema Postgres (Alembic).", no_args_is_help=True)
 proxies_app = typer.Typer(help="Proxy pool.", no_args_is_help=True)
+llm_app = typer.Typer(help="LLM (vLLM + Qwen).", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(proxies_app, name="proxies")
+app.add_typer(llm_app, name="llm")
 
 
 @app.callback()
@@ -171,10 +175,116 @@ def eval_(golden: Annotated[str, typer.Argument(help="Thư mục golden set.")] 
     _not_implemented("M6")
 
 
+# --- hạ tầng ----------------------------------------------------------------------------------
+
+
 @proxies_app.command("check")
-def proxies_check() -> None:
-    """Kiểm tra sức khoẻ proxy trong PROXIES_FILE."""
-    _not_implemented("M1")
+def proxies_check(
+    url: Annotated[
+        str | None, typer.Option(help="URL kiểm tra (mặc định PROXY_CHECK_URL).")
+    ] = None,
+    concurrency: Annotated[int, typer.Option(min=1)] = 20,
+    timeout: Annotated[float, typer.Option(help="Giây cho mỗi proxy.")] = 15,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Gọi thử qua từng proxy trong PROXIES_FILE, cập nhật trạng thái pool trên Redis."""
+    from jobcrawler.services import health
+
+    async def go() -> list[health.ProxyCheck] | None:
+        async with open_resources() as res:
+            if not res.proxies.enabled:
+                return None
+            return await health.check_proxies(
+                res, url=url, concurrency=concurrency, timeout=timeout
+            )
+
+    results = _run(go())
+    if results is None:
+        file = get_settings().proxies_file
+        typer.secho(f"Không có proxy nào trong {file}.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(
+            json.dumps([dataclasses.asdict(r) for r in results], ensure_ascii=False, indent=2)
+        )
+    else:
+        for r in sorted(results, key=lambda r: (not r.ok, r.latency_ms or 0)):
+            mark = (
+                typer.style("OK  ", fg=typer.colors.GREEN)
+                if r.ok
+                else typer.style("FAIL", fg=typer.colors.RED)
+            )
+            detail = f"{r.latency_ms} ms  ip={r.exit_ip} loc={r.location}" if r.ok else r.error
+            typer.echo(f"{mark} {r.proxy_id}  {r.proxy}  {detail}")
+        ok = sum(r.ok for r in results)
+        typer.echo(f"{ok}/{len(results)} proxy hoạt động.")
+    if not any(r.ok for r in results):
+        raise typer.Exit(1)
+
+
+@llm_app.command("check")
+def llm_check(json_out: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """Gọi thử LLM với structured output (JSON schema)."""
+    from jobcrawler.services import health
+
+    async def go() -> tuple[Any, bool, bool]:
+        async with open_resources() as res:
+            result, correct = await health.check_llm(res)
+            return result, correct, res.llm.enabled
+
+    result, correct, enabled = _run(go())
+    if not enabled:
+        typer.secho("Chưa cấu hình LLM_BASE_URL / LLM_MODEL.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(1)
+    if json_out:
+        payload = dataclasses.asdict(result) | {"correct": correct}
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    else:
+        status = (
+            typer.style("OK", fg=typer.colors.GREEN)
+            if correct
+            else typer.style("LỖI", fg=typer.colors.RED)
+        )
+        typer.echo(
+            f"{status} model={result.model} {result.duration_ms} ms "
+            f"tokens={result.prompt_tokens}+{result.completion_tokens} attempts={result.attempts}"
+        )
+        typer.echo(
+            f"answer={result.value.model_dump() if result.value else None} error={result.error}"
+        )
+    if not correct:
+        raise typer.Exit(1)
+
+
+@app.command()
+def fetch(
+    url: Annotated[str, typer.Argument()],
+    render: Annotated[bool, typer.Option("--render", help="Mở bằng Chromium.")] = False,
+    robots: Annotated[bool, typer.Option(help="Tôn trọng robots.txt.")] = True,
+    cache: Annotated[bool, typer.Option(help="Dùng HTTP cache trên Redis.")] = True,
+    show: Annotated[int, typer.Option(help="Số ký tự nội dung in ra.")] = 500,
+) -> None:
+    """Fetch thử một URL qua toàn bộ tầng mạng (proxy, rate limit, robots, retry) để debug."""
+    from jobcrawler.services import health
+
+    async def go() -> Any:
+        async with open_resources() as res:
+            return await health.probe_url(
+                res, url, render=render, check_robots=robots, use_cache=cache
+            )
+
+    result = _run(go())
+    typer.echo(
+        f"{result.outcome} status={result.status} {result.duration_ms} ms "
+        f"attempts={result.attempts} proxy={result.proxy_id} cache={result.from_cache} "
+        f"rendered={result.rendered} "
+        f"final_url={result.final_url} error={result.error}"
+    )
+    typer.echo(f"content-type={result.headers.get('content-type')} bytes={len(result.content)}")
+    if show and result.content:
+        typer.echo(result.text[:show])
+    if not result.ok:
+        raise typer.Exit(1)
 
 
 def main() -> None:

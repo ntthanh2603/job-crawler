@@ -3,16 +3,16 @@
 Thu thập tin tuyển dụng đang mở cho ~10.000 doanh nghiệp (chủ yếu tại Việt Nam) từ trang careers,
 ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu PostgreSQL.
 
-- Đặc tả và milestone: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md)
-- Tiến độ: [PROGRESS.md](PROGRESS.md)
-- Nguồn dữ liệu: [docs/sources.md](docs/sources.md)
+Đặc tả và milestone: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md). Tiến độ từng milestone ghi
+trong commit message.
 
 ## Chạy nhanh
 
 Cần [uv](https://docs.astral.sh/uv/) và Docker.
 
 ```bash
-cp .env.example .env          # điền LLM_*, SERP_* khi có
+cp .env.example .env                              # điền LLM_*, SERP_* khi có
+cp config/proxies.example.txt config/proxies.txt  # điền proxy; không có thì đi thẳng
 uv sync
 docker compose up -d          # postgres, redis, migrate, worker ×3
 uv run jobcrawler db upgrade  # migrate cũng tự chạy trong compose
@@ -20,6 +20,15 @@ uv run jobcrawler run "Test"
 ```
 
 Postgres và Redis mở ra host ở cổng 15432 và 16379 (đổi bằng `POSTGRES_PORT`, `REDIS_PORT`).
+Worker đọc proxy từ `./config` (mount read-only vào container).
+
+## Kiểm tra hạ tầng
+
+```bash
+uv run jobcrawler proxies check     # gọi thử qua từng proxy, cập nhật trạng thái pool
+uv run jobcrawler llm check         # gọi thử LLM với structured output
+uv run jobcrawler fetch https://example.com/ [--render]   # fetch qua toàn bộ tầng mạng
+```
 
 ## Phát triển
 
@@ -29,3 +38,5 @@ uv run pyright
 uv run pytest                 # test tích hợp cần TEST_DATABASE_URL (có sẵn trong .env.example)
 uv run jobcrawler db revision -m "mô tả"   # sinh migration mới từ model
 ```
+
+Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng `FakeChatClient`.

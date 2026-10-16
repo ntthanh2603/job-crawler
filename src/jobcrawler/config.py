@@ -42,9 +42,41 @@ class Settings(BaseSettings):
     serp_api_key: SecretStr | None = None
 
     # Crawl và worker.
-    proxies_file: Path = Path("proxies.txt")
+    # Nằm trong thư mục config/ để compose mount cả thư mục (file chưa có cũng không lỗi).
+    proxies_file: Path = Path("config/proxies.txt")
     worker_concurrency: int = Field(default=10, ge=1)
     browser_max_pages: int = Field(default=4, ge=1)
+    # Tiền tố khoá Redis cho proxy pool, rate limit, robots, HTTP cache.
+    redis_prefix: str = "jc"
+
+    # HTTP. Impersonate Chrome; User-Agent do curl_cffi đặt khớp với fingerprint.
+    http_impersonate: str = "chrome"
+    http_timeout_seconds: float = Field(default=20, gt=0)
+    http_max_retries: int = Field(default=3, ge=0)
+    http_backoff_base_seconds: float = Field(default=1.0, ge=0)
+    http_backoff_cap_seconds: float = Field(default=15.0, ge=0)
+    # Retry-After lớn hơn mức này thì dừng nguồn (blocked) thay vì chờ.
+    http_max_retry_after_seconds: float = Field(default=30.0, ge=0)
+    http_cache_ttl_seconds: int = Field(default=3600, ge=0)
+    http_accept_language: str = "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
+
+    # Rate limit theo domain (token bucket trên Redis, dùng chung mọi process).
+    rate_limit_per_second: float = Field(default=1.0, gt=0)
+    rate_limit_burst: int = Field(default=1, ge=1)
+    # Ghi đè theo domain, JSON: RATE_LIMITS='{"www.topcv.vn": 0.5}'.
+    rate_limits: dict[str, float] = Field(default_factory=dict)
+
+    # robots.txt.
+    robots_cache_seconds: int = Field(default=86_400, ge=0)
+    # Product token dùng để chọn nhóm luật trong robots.txt (ngoài "*").
+    robots_user_agents: list[str] = Field(default_factory=lambda: ["*"])
+
+    # Proxy pool.
+    proxy_sticky_seconds: int = Field(default=1800, ge=1)
+    proxy_cooldown_seconds: int = Field(default=300, ge=1)
+    proxy_max_consecutive_failures: int = Field(default=5, ge=1)
+    proxy_dead_seconds: int = Field(default=3600, ge=1)
+    proxy_check_url: str = "https://www.cloudflare.com/cdn-cgi/trace"
     # Deadline mềm: tới mốc này thì huỷ các nguồn chưa xong và lưu kết quả `partial`.
     company_deadline_seconds: float = Field(default=165, gt=0)
     # Timeout cứng của job SAQ `process_company`.

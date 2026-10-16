@@ -245,7 +245,7 @@ def configure_logging(settings: Settings) -> None:
     root.handlers = [handler]
     root.setLevel(settings.log_level)
     # openai/httpx log mỗi request ở INFO, alembic log từng plugin; chỉ giữ cảnh báo.
-    for noisy in ("httpx", "httpcore", "openai", "alembic.runtime.plugins"):
+    for noisy in ("httpx", "httpx2", "httpcore", "openai", "alembic.runtime.plugins"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

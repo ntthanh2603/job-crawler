@@ -9,4 +9,5 @@ golden/
 tests/
 docs/
 proxies.txt
+config/
 *.csv
