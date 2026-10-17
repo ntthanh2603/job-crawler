@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# HTML trang parse lỗi lưu tối đa chừng này ký tự (đã nén zstd trong DB).
+MAX_FAILED_HTML_CHARS = 2_000_000
+
 VN_TZ = timezone(timedelta(hours=7))
 _VN_HINTS = re.compile(
     r"\b(viet ?nam|vn|vnm|ho chi minh|hcm|hcmc|sai gon|saigon|ha ?noi|da nang|hai phong|"
@@ -56,6 +59,10 @@ class FetchRecord:
     items: int | None = None
     from_cache: bool = False
     rendered: bool = False
+    # Trang tải được nhưng không bóc được: lý do + HTML (lưu vào `failed_pages`, không vào
+    # `source_fetches`).
+    failure: str | None = None
+    html: str | None = None
 
     @classmethod
     def from_result(cls, source: str, result: FetchResult) -> FetchRecord:
@@ -80,6 +87,7 @@ class SourceLimits:
     max_rendered_pages: int = 10  # trang mở bằng trình duyệt mỗi nguồn
     detail_concurrency: int = 4
     ats_rate: float = 2.0  # request/giây tới API công khai của ATS
+    max_failed_pages: int = 5  # trang parse lỗi lưu HTML, mỗi nguồn
 
     @classmethod
     def from_settings(cls, s: Settings) -> SourceLimits:
@@ -89,6 +97,7 @@ class SourceLimits:
             max_listing_pages=s.source_max_listing_pages,
             max_rendered_pages=s.source_max_rendered_pages,
             ats_rate=s.ats_rate_per_second,
+            max_failed_pages=s.failed_pages_per_run,
         )
 
 
@@ -102,6 +111,7 @@ class SourceSession:
     limits: SourceLimits = field(default_factory=SourceLimits)
     records: list[FetchRecord] = field(default_factory=list)
     rendered_pages: int = 0
+    failed_pages: int = 0
 
     def _record(self, result: FetchResult) -> FetchResult:
         self.records.append(FetchRecord.from_result(self.name, result))
@@ -127,6 +137,18 @@ class SourceSession:
     async def render(self, url: str, **kwargs: Any) -> FetchResult:
         self.rendered_pages += 1
         return self._record(await self.fetcher.render(url, source=self.name, **kwargs))
+
+    def fail_page(self, result: FetchResult, reason: str) -> None:
+        """Trang tải được nhưng không bóc được: giữ HTML để lưu vào `failed_pages` (tối đa
+        `limits.max_failed_pages` trang mỗi nguồn)."""
+        if self.failed_pages >= self.limits.max_failed_pages:
+            return
+        for record in reversed(self.records):
+            if record.url == result.url and record.failure is None:
+                record.failure = reason[:500]
+                record.html = result.text[:MAX_FAILED_HTML_CHARS]
+                self.failed_pages += 1
+                return
 
     def count(self, result: FetchResult | str, items: int) -> None:
         """Ghi số tin bóc được từ một lần fetch (cột `items`), theo kết quả hoặc URL đã gọi."""
@@ -157,6 +179,25 @@ class Source(ABC):
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.name} {self.url}>"
+
+
+def failed_page_rows(
+    records: Iterable[FetchRecord], *, limit: int, run_id: Any = None
+) -> list[dict[str, Any]]:
+    """Dòng `failed_pages` từ các trang parse lỗi trong `records` (tối đa `limit`)."""
+    rows = [
+        {
+            "url": r.url,
+            "source": r.source,
+            "reason": r.failure,
+            "run_id": run_id,
+            "http_status": r.http_status,
+            "html": r.html,
+        }
+        for r in records
+        if r.failure
+    ]
+    return rows[:limit]
 
 
 # --- tiện ích cho adapter ------------------------------------------------------------------------

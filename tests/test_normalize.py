@@ -527,3 +527,10 @@ async def test_classify_unclear_caches_answers_including_unknown() -> None:
         assert filled == 0
         assert job.unclear_fields == ["level", "employment_type", "work_mode"]
     assert len(chat.calls) == 1  # lượt hai: tin không đổi, LLM đã trả unknown → không hỏi lại
+
+
+def test_zero_salary_means_not_disclosed() -> None:
+    assert parse_salary(None, low=0, high=0, currency="VND") is None
+    s = parse_salary(None, low=0, high=1600, currency="USD")
+    assert s is not None
+    assert (s.min, s.max, s.currency) == (None, 1600, "USD")

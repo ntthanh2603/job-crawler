@@ -28,7 +28,15 @@ from sqlalchemy import delete, func, literal, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, Job, SourceFetch, SourceProfile
+from jobcrawler.db.models import (
+    Company,
+    CompanyAlias,
+    CompanyRun,
+    Job,
+    JobPosting,
+    SourceFetch,
+    SourceProfile,
+)
 from jobcrawler.llm import LLMClient
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import Fetcher
@@ -1017,6 +1025,26 @@ async def resolve_company(
     return Resolved(company=company, how=how, fresh=fresh)
 
 
+async def load_company(
+    session: AsyncSession,
+    company_id: int,
+    company_in: CompanyIn,
+    *,
+    now: datetime | None = None,
+    max_age: timedelta = timedelta(days=30),
+    serp_enabled: bool = False,
+) -> Resolved | None:
+    """Doanh nghiệp theo id (đã `import`, job từ `enqueue`); None nếu bản ghi không còn (đã gộp
+    vào doanh nghiệp khác khi KYC)."""
+    company = await session.get(Company, company_id)
+    if company is None:
+        return None
+    await _add_alias(session, company.id, company_in.name, "input")
+    now = now or datetime.now(UTC)
+    fresh = is_fresh(company, company_in, now=now, max_age=max_age, serp_enabled=serp_enabled)
+    return Resolved(company=company, how="id", fresh=fresh)
+
+
 async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> None:
     """Gộp `src` vào `dst` (cùng pháp nhân): chuyển alias, lượt chạy, fetch, profile, job rồi
     xoá `src`."""
@@ -1033,7 +1061,7 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
         )
         .on_conflict_do_nothing(index_elements=["company_id", "alias_norm"])
     )
-    for model in (CompanyRun, SourceFetch, SourceProfile):
+    for model in (CompanyRun, SourceFetch, SourceProfile, JobPosting):
         await session.execute(
             update(model).where(model.company_id == src.id).values(company_id=dst.id)
         )

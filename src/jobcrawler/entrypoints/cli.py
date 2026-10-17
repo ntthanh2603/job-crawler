@@ -9,7 +9,7 @@ import os
 import sys
 import time
 from collections.abc import Coroutine
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any
 
 import typer
 
@@ -55,11 +55,6 @@ def _run[T](coro: Coroutine[Any, Any, T]) -> T:
         raise typer.Exit(2) from None
 
 
-def _not_implemented(milestone: str) -> NoReturn:
-    typer.secho(f"Chưa cài đặt (milestone {milestone}).", fg=typer.colors.YELLOW, err=True)
-    raise typer.Exit(1)
-
-
 # --- db --------------------------------------------------------------------------------------
 
 
@@ -85,6 +80,46 @@ def db_current() -> None:
     from jobcrawler.db import migrate
 
     migrate.current()
+
+
+@db_app.command("maintain")
+def db_maintain(
+    no_prune: Annotated[bool, typer.Option("--no-prune", help="Không xoá dữ liệu cũ.")] = False,
+    no_compress: Annotated[
+        bool, typer.Option("--no-compress", help="Không huấn luyện từ điển / nén lại.")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Bảo trì (như cron mỗi giờ): lượt chạy treo → failed, xoá dữ liệu cũ, huấn luyện từ điển
+    nén và nén lại dữ liệu."""
+    from jobcrawler.services import maintenance
+
+    async def go() -> maintenance.MaintenanceReport:
+        async with open_resources(db_logs=False) as res:
+            return await maintenance.run_maintenance(
+                res, prune=not no_prune, compression=not no_compress
+            )
+
+    report = _run(go())
+    if json_out:
+        typer.echo(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, default=str))
+        return
+    if report.skipped:
+        typer.secho(report.skipped, fg=typer.colors.YELLOW)
+        return
+    typer.echo(
+        f"lượt chạy treo → failed: {report.abandoned_runs} doanh nghiệp,"
+        f" {report.abandoned_board_runs} index"
+    )
+    if report.deleted:
+        typer.echo("đã xoá: " + ", ".join(f"{t} {n}" for t, n in report.deleted.items()))
+    for t in report.trained:
+        state = f"từ điển mới {t.dict_id}" if t.adopted else t.reason
+        ratio = f" (nén x{t.ratio_before} → x{t.ratio_after})" if t.ratio_after is not None else ""
+        typer.echo(f"từ điển {t.kind}: {state}{ratio}")
+    if report.recompressed:
+        typer.echo("nén lại: " + ", ".join(f"{k} {n}" for k, n in report.recompressed.items()))
+    typer.echo(f"{report.duration_ms / 1000:.1f} s")
 
 
 @db_app.command("revision")
@@ -343,30 +378,121 @@ def site(
 
 
 @app.command()
-def worker() -> None:
-    """Chạy worker SAQ (xử lý `process_company` và cron)."""
+def worker(
+    boards_role: Annotated[
+        bool,
+        typer.Option(
+            "--boards",
+            help="Worker index trang tuyển dụng (queue BOARD_QUEUE_NAME, cron BOARD_INDEX_CRON).",
+        ),
+    ] = False,
+) -> None:
+    """Chạy worker SAQ: mặc định xử lý `process_company` + cron bảo trì; `--boards` chạy lượt
+    index trang tuyển dụng."""
     from jobcrawler.entrypoints.worker import run_worker
 
-    _run(run_worker(get_settings()))
+    _run(run_worker(get_settings(), "boards" if boards_role else "companies"))
 
 
-# --- chưa cài đặt ------------------------------------------------------------------------------
+# --- doanh nghiệp, queue -----------------------------------------------------------------------
+
+
+def _read_csv(path: str) -> Any:
+    from jobcrawler.services import batch
+
+    try:
+        report = batch.read_companies_csv(path)
+    except (OSError, batch.CsvFormatError) as exc:
+        typer.secho(f"Không đọc được {path}: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
+    for message in report.errors[:20]:
+        typer.secho(f"  bỏ {message}", fg=typer.colors.RED, err=True)
+    for message in report.warnings[:20]:
+        typer.secho(f"  {message}", fg=typer.colors.YELLOW, err=True)
+    hidden = len(report.errors) + len(report.warnings) - 40
+    if hidden > 0:
+        typer.echo(f"  … và {hidden} dòng cảnh báo/lỗi khác", err=True)
+    return report
 
 
 @app.command("import")
 def import_companies(path: Annotated[str, typer.Argument(help="File companies.csv.")]) -> None:
-    """Nạp danh sách doanh nghiệp từ CSV."""
-    _not_implemented("M6")
+    """Nạp danh sách doanh nghiệp từ CSV (cột name, tax_code, website, note) vào `companies`
+    (chưa chạy KYC). Chạy lại không tạo trùng."""
+    from jobcrawler.services import batch
+
+    report = _read_csv(path)
+
+    async def go() -> batch.ImportResult:
+        async with open_resources(db_logs=False) as res:
+            return await batch.import_companies(res.sessionmaker, [r.company for r in report.rows])
+
+    result = _run(go())
+    typer.echo(
+        f"{len(report.rows)} dòng hợp lệ · tạo mới {result.created} · cập nhật {result.updated}"
+        f" · giữ nguyên {result.unchanged} · trùng trong file {report.duplicates}"
+        f" · bỏ {len(report.errors)}"
+    )
 
 
 @app.command()
 def enqueue(
-    all_: Annotated[bool, typer.Option("--all")] = False,
-    file: Annotated[str | None, typer.Option("--file")] = None,
-    stale_hours: Annotated[int | None, typer.Option("--stale-hours")] = None,
+    all_: Annotated[bool, typer.Option("--all", help="Mọi doanh nghiệp trong DB.")] = False,
+    file: Annotated[
+        str | None, typer.Option("--file", help="companies.csv (được import trước).")
+    ] = None,
+    stale_hours: Annotated[
+        float | None,
+        typer.Option(
+            "--stale-hours", help="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ qua."
+        ),
+    ] = None,
+    limit: Annotated[int | None, typer.Option(help="Tối đa N doanh nghiệp.")] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Chỉ đếm, không đưa vào queue.")
+    ] = False,
 ) -> None:
-    """Đưa doanh nghiệp vào queue."""
-    _not_implemented("M6")
+    """Đưa doanh nghiệp vào queue (mỗi doanh nghiệp một job `process_company`, timeout
+    COMPANY_TIMEOUT_SECONDS; job cùng doanh nghiệp đang chờ/chạy thì bỏ qua)."""
+    from jobcrawler.services import batch
+
+    if all_ and file:
+        typer.secho("Chọn --all hoặc --file, không dùng cả hai.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    if not (all_ or file or stale_hours is not None):
+        typer.secho("Chọn --all, --file hoặc --stale-hours.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    report = _read_csv(file) if file else None
+
+    async def go() -> tuple[int, batch.EnqueueResult | None, dict[str, int]]:
+        async with open_resources(db_logs=False) as res:
+            ids = None
+            if report is not None:
+                imported = await batch.import_companies(
+                    res.sessionmaker, [r.company for r in report.rows]
+                )
+                ids = imported.company_ids
+            async with res.sessionmaker() as session:
+                companies = await batch.select_companies(
+                    session, company_ids=ids, stale_hours=stale_hours, limit=limit
+                )
+            result = (
+                None
+                if dry_run
+                else await batch.enqueue_companies(res.queue, companies, res.settings)
+            )
+            info = await res.queue.info()
+            return len(companies), result, {"queued": info["queued"], "active": info["active"]}
+
+    selected, result, queue = _run(go())
+    if result is None:
+        typer.echo(f"{selected} doanh nghiệp sẽ được đưa vào queue (--dry-run).")
+    else:
+        typer.echo(
+            f"đưa vào queue {result.enqueued}/{selected} doanh nghiệp"
+            f" ({result.already_queued} đã có job đang chờ/chạy)"
+        )
+    typer.echo(f"queue: {queue['queued']} đang chờ · {queue['active']} đang chạy")
 
 
 @app.command("index-boards")
@@ -487,15 +613,204 @@ def export(
 
 
 @app.command()
-def stats() -> None:
-    """Thống kê các lượt chạy."""
-    _not_implemented("M6")
+def stats(
+    hours: Annotated[
+        float, typer.Option(help="Cửa sổ thời gian (giờ) cho các lượt chạy; 0 = tất cả.")
+    ] = 24,
+    no_storage: Annotated[
+        bool, typer.Option("--no-storage", help="Bỏ phần đo dung lượng nén (nhanh hơn).")
+    ] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Thống kê: queue, lượt chạy (p50/p95, tỉ lệ failed), nguồn, index trang tuyển dụng, dung
+    lượng DB và tỉ lệ nén."""
+    from jobcrawler.services import stats as stats_service
+
+    async def go() -> stats_service.Stats:
+        async with open_resources(db_logs=False) as res:
+            return await stats_service.collect_stats(
+                res, hours=hours or None, storage=not no_storage
+            )
+
+    result = _run(go())
+    if json_out:
+        typer.echo(
+            json.dumps(dataclasses.asdict(result), ensure_ascii=False, indent=2, default=str)
+        )
+        return
+    for line in _stats_lines(result):
+        typer.echo(line)
+
+
+def _mb(size: int) -> str:
+    return f"{size / 1024 / 1024:.1f} MB"
+
+
+def _stats_lines(st: Any) -> list[str]:
+    def fmt_s(v: float | None) -> str:
+        return "-" if v is None else f"{v:.0f} s"
+
+    runs = st.runs
+    window = f"từ {runs.since:%Y-%m-%d %H:%M} UTC" if runs.since else "toàn bộ"
+    lines = ["== Queue"]
+    for q in st.queues:
+        if q.error:
+            lines.append(f"  {q.name}: lỗi {q.error}")
+            continue
+        lines.append(
+            f"  {q.name}: chờ {q.queued} · chạy {q.active} · hẹn giờ {q.scheduled}"
+            f" · {q.workers} worker (xong {q.complete}, lỗi {q.failed}, chạy lại {q.retried},"
+            f" huỷ {q.aborted})"
+        )
+    kyc = ", ".join(f"{k} {v}" for k, v in sorted(st.kyc_status.items()))
+    jobs = ", ".join(f"{k} {v}" for k, v in sorted(st.jobs_by_status.items()))
+    lines += [
+        f"== Doanh nghiệp: {st.companies} ({kyc})",
+        f"== Job: {jobs or '-'}"
+        + (
+            " · đang mở theo nguồn: " + ", ".join(f"{s} {n}" for s, n in st.jobs_by_source[:8])
+            if st.jobs_by_source
+            else ""
+        ),
+        f"== Lượt chạy ({window}): {runs.runs} lượt, {runs.companies} doanh nghiệp"
+        + (f", {runs.per_hour}/giờ" if runs.per_hour else ""),
+        "  trạng thái: "
+        + (", ".join(f"{k} {v}" for k, v in sorted(runs.by_status.items())) or "-"),
+        "  lượt mới nhất mỗi doanh nghiệp: "
+        + (", ".join(f"{k} {v}" for k, v in sorted(runs.latest_by_status.items())) or "-")
+        + f" · có job: {runs.companies_with_jobs}",
+        f"  thời gian: p50 {fmt_s(runs.p50_seconds)} · p95 {fmt_s(runs.p95_seconds)}"
+        f" · max {fmt_s(runs.max_seconds)} · quá timeout {runs.over_timeout}",
+        f"  job tìm thấy {runs.jobs_found} · nhận {runs.jobs_accepted}",
+    ]
+    if runs.incomplete_sources:
+        lines.append(
+            "  nguồn chưa xong: " + ", ".join(f"{s} {n}" for s, n in runs.incomplete_sources)
+        )
+    for error, n in runs.errors[:5]:
+        lines.append(f"  lỗi ×{n}: {error}")
+    if st.sources:
+        lines.append("== Nguồn (lượt chạy doanh nghiệp)")
+        for src in st.sources[:15]:
+            outcomes = ", ".join(f"{k} {v}" for k, v in sorted(src.outcomes.items()))
+            lines.append(
+                f"  {src.kind:<16} {src.fetches:>6} request · {outcomes} · tb {src.avg_ms} ms"
+            )
+    if st.boards:
+        lines.append("== Trang tuyển dụng")
+        for b in st.boards:
+            last = (
+                f"lượt cuối {b.last_status} {b.last_finished or b.last_started:%Y-%m-%d %H:%M}"
+                f" thấy {b.last_urls_seen} tải {b.last_fetched} mới {b.last_new}"
+                f" gỡ {b.last_removed}" + ("" if b.last_complete else " (danh sách chưa đủ)")
+                if b.last_status
+                else "chưa index"
+            )
+            lines.append(
+                f"  {b.source:<13} tin mở {b.active_postings}/{b.postings} · profile map"
+                f" {b.profiles_mapped}/{b.profiles} · {last}"
+            )
+    if st.storage:
+        lines.append("== Nén")
+        for p in st.storage:
+            dicts = ", ".join(
+                f"{'không từ điển' if k == 0 else k}: {n}" for k, n in (p.by_dict or {}).items()
+            )
+            lines.append(
+                f"  {p.table}.{p.kind}: {p.values} giá trị · lưu {_mb(p.stored_bytes)}"
+                f" (gốc ~{_mb(p.original_bytes)}, x{p.ratio or '-'}) · mẫu theo từ điển: {dicts}"
+            )
+    lines.append(
+        "== Dung lượng: " + ", ".join(f"{name} {_mb(size)}" for name, size in st.tables[:8])
+    )
+    lines.append("== Mục tiêu")
+    for t in st.targets:
+        value = (
+            "-"
+            if t.value is None
+            else (f"{t.value:.1%}" if "tỉ lệ" in t.name else f"{t.value:.0f}")
+        )
+        state = {True: "đạt", False: "CHƯA ĐẠT", None: "chưa có dữ liệu"}[t.ok]
+        lines.append(f"  {t.name}: {value} (mục tiêu {t.target}) → {state}")
+    return lines
 
 
 @app.command("eval")
-def eval_(golden: Annotated[str, typer.Argument(help="Thư mục golden set.")] = "golden/") -> None:
-    """Tính precision/recall trên golden set."""
-    _not_implemented("M6")
+def eval_(
+    golden: Annotated[str, typer.Argument(help="Thư mục golden set.")] = "golden/",
+    out: Annotated[str, typer.Option(help="Thư mục ghi báo cáo.")] = "out/eval",
+    sample: Annotated[
+        int, typer.Option(help="Chưa có golden set: số job ngẫu nhiên để kiểm tay.")
+    ] = 50,
+    seed: Annotated[int | None, typer.Option(help="Seed chọn mẫu (lặp lại được).")] = None,
+    reviewed: Annotated[
+        str | None,
+        typer.Option(help="File mẫu đã điền cột `dung` (y/n): tính precision từ đó."),
+    ] = None,
+    all_status: Annotated[
+        bool, typer.Option("--all", help="So cả job đã hết hạn / đã gỡ.")
+    ] = False,
+) -> None:
+    """Precision/recall theo doanh nghiệp và theo nguồn trên golden set (companies.csv +
+    jobs.csv). Chưa có golden set: in và ghi N job ngẫu nhiên để kiểm tay."""
+    from pathlib import Path
+
+    from jobcrawler.services import evaluate
+
+    if reviewed:
+        review = evaluate.read_review(reviewed)
+        typer.echo(
+            f"đã kiểm {review.reviewed} job · đúng {review.correct} · precision"
+            f" {evaluate.pct(review.precision)} (mục tiêu ≥ {evaluate.TARGET_PRECISION:.0%})"
+            + (f" · {review.unknown} dòng chưa điền" if review.unknown else "")
+        )
+        return
+
+    out_dir = Path(out)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    try:
+        golden_set = evaluate.load_golden(golden)
+    except evaluate.GoldenError as exc:
+        golden_set = None
+        typer.secho(f"Chưa có golden set ({exc}): lấy {sample} job ngẫu nhiên.", err=True)
+
+    if golden_set is None:
+
+        async def go_sample() -> list[evaluate.SampleJob]:
+            async with open_resources(db_logs=False) as res, res.sessionmaker() as session:
+                return await evaluate.sample_jobs(session, n=sample, seed=seed)
+
+        jobs = _run(go_sample())
+        csv_path = out_dir / f"sample-{stamp}.csv"
+        md_path = out_dir / f"sample-{stamp}.md"
+        evaluate.write_sample_csv(csv_path, jobs)
+        from datetime import UTC, datetime
+
+        text = evaluate.sample_markdown(jobs, generated_at=datetime.now(UTC), csv_path=csv_path)
+        md_path.write_text(text, encoding="utf-8")
+        typer.echo(text)
+        typer.echo(
+            f"→ {md_path} · điền cột `dung` trong {csv_path} rồi: jobcrawler eval"
+            f" --reviewed {csv_path.as_posix()}"
+        )
+        return
+
+    async def go() -> tuple[evaluate.EvalReport, dict[str, Any]]:
+        async with open_resources(db_logs=False) as res:
+            report = await evaluate.evaluate(res, golden_set, include_inactive=all_status)
+            ids = [c.company_id for c in report.companies if c.company_id is not None]
+            async with res.sessionmaker() as session:
+                perf = await evaluate.latest_run_perf(session, ids)
+            return report, perf
+
+    report, perf = _run(go())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md_path = out_dir / f"eval-{stamp}.md"
+    text = evaluate.markdown_report(report, perf=perf)
+    md_path.write_text(text, encoding="utf-8")
+    (out_dir / f"eval-{stamp}.json").write_text(evaluate.report_json(report), encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"→ {md_path}")
 
 
 # --- hạ tầng ----------------------------------------------------------------------------------

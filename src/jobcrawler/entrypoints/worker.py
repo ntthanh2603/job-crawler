@@ -1,10 +1,17 @@
-"""Cấu hình worker SAQ: functions, cron jobs, startup/shutdown dùng `open_resources`."""
+"""Cấu hình worker SAQ: functions, cron jobs, startup/shutdown dùng `open_resources`.
+
+Hai vai trò, mỗi vai một queue:
+- `companies` (`jobcrawler worker`): job `process_company` (≤ COMPANY_TIMEOUT_SECONDS) và cron
+  bảo trì; chạy nhiều replica, mỗi replica WORKER_CONCURRENCY doanh nghiệp.
+- `boards` (`jobcrawler worker --boards`): job `index_board` (hàng giờ mỗi trang) và cron đưa các
+  trang vào queue; tách riêng để lượt index không chiếm chỗ của doanh nghiệp.
+"""
 
 from __future__ import annotations
 
 import dataclasses
 from contextlib import AsyncExitStack
-from typing import Any, Required
+from typing import Any, Literal, Required
 
 from saq import CronJob, Queue, Worker
 from saq.types import Context
@@ -13,9 +20,11 @@ from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn
-from jobcrawler.services import boards, companies
+from jobcrawler.services import boards, companies, maintenance
 
 log = get_logger(__name__)
+
+WorkerRole = Literal["companies", "boards"]
 
 
 class WorkerContext(Context, total=False):
@@ -48,9 +57,10 @@ async def process_company(
     tax_code: str | None = None,
     website: str | None = None,
     note: str | None = None,
+    company_id: int | None = None,
 ) -> dict[str, Any]:
     company_in = CompanyIn(name=name, tax_code=tax_code, website=website, note=note)
-    result = await companies.process_company(ctx["resources"], company_in)
+    result = await companies.process_company(ctx["resources"], company_in, company_id=company_id)
     return result.model_dump(mode="json", exclude={"jobs"})
 
 
@@ -86,17 +96,40 @@ async def index_boards_cron(ctx: WorkerContext) -> dict[str, Any]:
     return {"enqueued": enqueued}
 
 
-def cron_jobs(settings: Settings) -> list[CronJob[WorkerContext]]:
-    return [CronJob(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
+async def maintenance_cron(ctx: WorkerContext) -> dict[str, Any]:
+    """Cron: dọn dữ liệu cũ, đánh dấu lượt chạy treo, huấn luyện từ điển nén + nén lại."""
+    report = await maintenance.run_maintenance(ctx["resources"])
+    return report.as_dict()
 
 
-def build_worker(settings: Settings) -> Worker[WorkerContext]:
-    queue = Queue.from_url(settings.redis_url, name=settings.queue_name)
+# Bảo trì có thể phải nén lại hàng chục nghìn dòng.
+MAINTENANCE_TIMEOUT = 3600
+CANCEL_GRACE_SECONDS = 10.0
+
+
+def cron_jobs(settings: Settings, role: WorkerRole = "companies") -> list[CronJob[WorkerContext]]:
+    # Cron SAQ có khoá duy nhất theo hàm: nhiều replica cũng chỉ một lần mỗi mốc.
+    if role == "boards":
+        return [CronJob(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
+    return [CronJob(maintenance_cron, cron=settings.maintenance_cron, timeout=MAINTENANCE_TIMEOUT)]
+
+
+def queue_name(settings: Settings, role: WorkerRole = "companies") -> str:
+    return settings.board_queue_name if role == "boards" else settings.queue_name
+
+
+def build_worker(settings: Settings, role: WorkerRole = "companies") -> Worker[WorkerContext]:
+    queue = Queue.from_url(settings.redis_url, name=queue_name(settings, role))
+    boards_role = role == "boards"
     worker: Worker[WorkerContext] = Worker(
         queue,
-        functions=[process_company, index_board],
-        concurrency=settings.worker_concurrency,
-        cron_jobs=cron_jobs(settings),
+        functions=[index_board] if boards_role else [process_company],
+        concurrency=settings.board_worker_concurrency
+        if boards_role
+        else settings.worker_concurrency,
+        cron_jobs=cron_jobs(settings, role),
+        # Job bị huỷ (timeout cứng, worker dừng) còn chừng này giây để ghi `company_runs`.
+        cancellation_hard_deadline_s=CANCEL_GRACE_SECONDS,
         startup=startup,
         shutdown=shutdown,
     )
@@ -104,8 +137,8 @@ def build_worker(settings: Settings) -> Worker[WorkerContext]:
     return worker
 
 
-async def run_worker(settings: Settings) -> None:
-    worker = build_worker(settings)
+async def run_worker(settings: Settings, role: WorkerRole = "companies") -> None:
+    worker = build_worker(settings, role)
     await worker.queue.connect()
     try:
         await worker.start()

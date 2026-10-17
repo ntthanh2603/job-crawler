@@ -18,7 +18,7 @@ import time
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from rapidfuzz import fuzz
 
@@ -236,6 +236,23 @@ _EXPIRED_TEXT = re.compile(
     r"|no longer accepting applications|this job (posting )?(has )?expired"
     r"|position has been filled|job is no longer available|job has been closed"
 )
+# Thời điểm tuyển ghi trong tiêu đề / URL: "Tuyển dụng 11/ 2019", "tháng 3-2024",
+# "tuyen-dung-11-2019".
+_DATED = re.compile(r"(?<![\d/.])(0?[1-9]|1[0-2])\s*[/-]\s*(20\d{2})(?![\d/.])")
+_DATED_MAX_AGE = timedelta(days=183)
+
+
+def _stale_mention(job: NormalizedJob, now: datetime) -> str | None:
+    """Tháng/năm cũ hơn nửa năm trong tiêu đề hoặc URL (bài tuyển dụng cũ còn trên site)."""
+    for text in (job.title, job.url):
+        for m in _DATED.finditer(text):
+            month, year = int(m[1]), int(m[2])
+            mentioned = datetime(year, month, 1, tzinfo=UTC)
+            if mentioned < now - _DATED_MAX_AGE:
+                return f"{month:02d}/{year}"
+    return None
+
+
 _GENERIC_TITLES = frozenset(
     {
         "tuyen dung",
@@ -355,6 +372,8 @@ def check_rules(
         and job.posted_at < now - board_max_age
     ):
         verdict.reject(EXPIRED, f"đăng từ {job.posted_at.date().isoformat()}, không có hạn nộp")
+    elif job.expires_at is None and (stale := _stale_mention(job, now)) is not None:
+        verdict.reject(EXPIRED, f"tiêu đề/URL ghi thời điểm tuyển cũ ({stale})")
 
     # NOT_A_JOB. Doanh nghiệp nhỏ hay đăng tin tuyển dụng ở mục tin tức: URL dạng tin tức chỉ là
     # điểm cần LLM xem.

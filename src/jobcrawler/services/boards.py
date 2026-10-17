@@ -199,6 +199,8 @@ async def _adopt_profile(
         return False
     ref = adapter.parse_profile(page.text, page.final_url) if page.ok else None
     if ref is None:
+        if page.ok:
+            session.fail_page(page, "no_profile: không bóc được trang profile")
         return False
     candidate = SourceProfile(
         source=adapter.name,

@@ -6,18 +6,21 @@ from typing import Any
 
 from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
+from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pages import Link
 from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources.base import SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,
     Page,
+    clean_card_text,
     jd_signals,
     job_links,
     labeled_fields,
     listing_links,
     pick_title,
     scan_listing,
+    slug_hint,
     split_markdown,
 )
 
@@ -248,6 +251,14 @@ async def test_llm_decides_unclear_detail_page() -> None:
     )
     assert len(chat.calls) == 2
 
+    # Có cache: lượt sau trang không đổi thì không hỏi LLM lại.
+    llm.cache = MemoryKV()
+    first = await run(CareersSource(listing), session(fetcher, llm, detail_concurrency=1))
+    calls = len(chat.calls)
+    again = await run(CareersSource(listing), session(fetcher, llm, detail_concurrency=1))
+    assert [j.title for j in again] == [j.title for j in first]
+    assert len(chat.calls) == calls
+
     # Không có LLM: trang không rõ là tin bị bỏ (ưu tiên độ chính xác).
     assert await run(CareersSource(listing), session(fetcher)) == []
 
@@ -314,6 +325,27 @@ def test_pick_title_prefers_heading_matching_listing_text() -> None:
     assert pick_title("Product Owner", [banner], "TMA Solutions") == "Product Owner"
     assert pick_title(None, ["Kế toán trưởng"], "OG") == "Kế toán trưởng"
     assert pick_title(None, [], "OG") == "OG"
+
+
+def test_pick_title_from_card_text_and_url_slug() -> None:
+    # MISA: chữ trên thẻ tin gồm cả nhãn, lương, nơi làm, hạn nộp; <h1> là tên vị trí.
+    card = "NEW Nhân viên Tester/QC Thỏa thuận Thỏa thuận Hà Nội Hà Nội Hạn nộp hồ sơ: 31/10/2026"
+    assert pick_title(card, ["Nhân viên Tester/QC"], "Nhân viên Tester/QC") == (
+        "Nhân viên Tester/QC"
+    )
+    assert pick_title(card, ["Tuyển dụng"], None) == "Nhân viên Tester/QC Hà Nội Hà Nội"
+    # TMA: <h1> là khẩu hiệu, link không có chữ; tên vị trí ở <h5>, khớp chữ trong URL.
+    banner = "TMA tự hào là nơi làm việc tin cậy của"
+    url = "https://www.tma.vn/tuyen-dung/chi-tiet/tester-1061"
+    assert slug_hint(url) == "tester"
+    assert pick_title(None, [banner], "Chi tiết", extra=["Liên hệ", "Tester"], slug="tester") == (
+        "Tester"
+    )
+    # Không gì khớp chữ trong URL: như cũ.
+    assert pick_title(None, ["Kế toán"], None, slug="job") == "Kế toán"
+    assert slug_hint("https://a.vn/jobs/58434444/") is None
+    assert slug_hint("https://a.vn/viec-lam/ke-toan-tong-hop-123.html") == "ke toan tong hop"
+    assert clean_card_text("HOT – Kế toán | Cạnh tranh") == "Kế toán"
 
 
 def test_policy_pages_and_locale_root_are_not_jobs() -> None:

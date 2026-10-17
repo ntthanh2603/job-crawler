@@ -51,21 +51,39 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Doanh nghiệp (`process_company`) + cron bảo trì mỗi giờ. Mỗi replica WORKER_CONCURRENCY
+  # doanh nghiệp song song (mặc định 3 × 10 = 30). Dừng container: job đang chạy được SAQ chạy
+  # lại ở replica khác.
   worker:
     image: jobcrawler:latest
     command: ["jobcrawler", "worker"]
     env_file: *env_file
     environment: *app_env
-    depends_on:
+    depends_on: &worker_deps
       migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    volumes:
+    volumes: &worker_volumes
       # config/proxies.txt (PROXIES_FILE mặc định). Mount cả thư mục: thiếu file vẫn chạy được.
       - ./config:/app/config:ro
     deploy:
       replicas: ${WORKER_REPLICAS:-3}
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped
+
+  # Index trang tuyển dụng (cron BOARD_INDEX_CRON → mỗi trang một job dài hàng giờ) ở queue
+  # riêng, không chiếm chỗ của doanh nghiệp. Một replica là đủ (mỗi trang có khoá riêng).
+  indexer:
+    image: jobcrawler:latest
+    command: ["jobcrawler", "worker", "--boards"]
+    env_file: *env_file
+    environment: *app_env
+    depends_on: *worker_deps
+    volumes: *worker_volumes
+    deploy:
+      replicas: ${INDEXER_REPLICAS:-1}
     init: true
     shm_size: 1gb
     restart: unless-stopped

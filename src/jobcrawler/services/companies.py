@@ -11,7 +11,14 @@ import structlog
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch, SourceProfile
+from jobcrawler.db.models import (
+    Company,
+    CompanyAlias,
+    CompanyRun,
+    FailedPage,
+    SourceFetch,
+    SourceProfile,
+)
 from jobcrawler.logging import get_logger
 from jobcrawler.net.kv import RedisKV
 from jobcrawler.net.urls import parse_domain_input
@@ -32,13 +39,14 @@ from jobcrawler.serp import SerpClient
 from jobcrawler.services import boards as board_service
 from jobcrawler.services import jobs as website_jobs
 from jobcrawler.sources import boards
-from jobcrawler.sources.base import FetchRecord
+from jobcrawler.sources.base import FetchRecord, failed_page_rows
 
 log = get_logger(__name__)
 
 KYC_SOURCE = "kyc"
-# Phần cuối trước timeout SAQ dành cho việc lưu (không chạy LLM nữa).
-SAVE_MARGIN_SECONDS = 5.0
+# Phần cuối trước timeout SAQ dành cho việc lưu (không chạy LLM nữa). Đủ rộng để DB chậm lúc tải
+# cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed).
+SAVE_MARGIN_SECONDS = 8.0
 
 
 @dataclass(slots=True)
@@ -70,9 +78,23 @@ class KycStep:
     incomplete: bool = False  # hết giờ: kết quả dở, không lưu
 
 
-async def resolve(res: Resources, session: AsyncSession, company_in: CompanyIn) -> kyc.Resolved:
-    """Tra cache KYC (MST, alias, trigram); chưa có thì tạo doanh nghiệp."""
+async def resolve(
+    res: Resources, session: AsyncSession, company_in: CompanyIn, company_id: int | None = None
+) -> kyc.Resolved:
+    """Doanh nghiệp theo id (job từ `enqueue`), không có thì tra cache KYC (MST, alias,
+    trigram); chưa có thì tạo doanh nghiệp."""
     s = res.settings
+    if company_id is not None:
+        loaded = await kyc.load_company(
+            session,
+            company_id,
+            company_in,
+            max_age=timedelta(days=s.kyc_cache_days),
+            serp_enabled=s.serp_enabled,
+        )
+        if loaded is not None:
+            return loaded
+        log.info("company.id_gone", company_id=company_id, reason="đã gộp/xoá, tra theo tên")
     return await kyc.resolve_company(
         session,
         company_in,
@@ -331,6 +353,9 @@ async def _finish_run(
 ) -> None:
     async with res.sessionmaker.begin() as session:
         await _insert_fetches(session, run_id, company_id, records)
+        failed = failed_page_rows(records, limit=res.settings.failed_pages_per_run, run_id=run_id)
+        if failed:
+            await session.execute(insert(FailedPage), failed)
         await session.execute(
             update(CompanyRun)
             .where(CompanyRun.run_id == run_id)
@@ -350,8 +375,13 @@ def _display_name(company: Company) -> str:
     return company.legal_name or company.brand_name or company.input_name
 
 
-async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResult:
-    """Chạy toàn bộ pipeline cho một doanh nghiệp và ghi `company_runs`, kể cả khi lỗi."""
+async def process_company(
+    res: Resources, company_in: CompanyIn, *, company_id: int | None = None
+) -> CompanyResult:
+    """Chạy toàn bộ pipeline cho một doanh nghiệp và ghi `company_runs`, kể cả khi lỗi.
+
+    `company_id`: doanh nghiệp đã `import` (job từ `enqueue`) — dùng đúng bản ghi đó thay vì
+    tra theo tên."""
     run_id = uuid4()
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
@@ -359,7 +389,7 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
 
     with structlog.contextvars.bound_contextvars(run_id=str(run_id), company=company_in.name):
         async with res.sessionmaker.begin() as session:
-            resolved = await resolve(res, session, company_in)
+            resolved = await resolve(res, session, company_in, company_id)
             session.add(
                 CompanyRun(
                     run_id=run_id,

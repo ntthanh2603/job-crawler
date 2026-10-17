@@ -413,13 +413,15 @@ class HttpClient:
         rules = await self.robots.rules_for(url)
         if rules.allowed(url):
             return rules, None
-        log.info("source.robots_disallowed", url=url, source=source)
+        # robots.txt không tải được cũng tạm coi như cấm, nhưng ghi rõ để không lẫn với luật cấm.
+        reason = "robots_unreachable" if rules.unreachable else "robots_disallowed"
+        log.info(f"source.{reason}", url=url, source=source)
         denied = FetchResult(
             url=url,
             final_url=url,
             status=None,
             outcome=FetchOutcome.ROBOTS_DISALLOWED,
-            error="robots_disallowed",
+            error=reason,
             source=source,
         )
         return rules, denied

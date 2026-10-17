@@ -248,3 +248,22 @@ async def test_llm_answers_are_cached_per_company_and_content() -> None:
     changed = normalized(raw_job(method=ExtractionMethod.LLM, title="Kế toán thuế"))
     await verify_jobs([changed], ACME, llm, now=NOW, until=until, kv=kv)
     assert len(chat.calls) == 3
+
+
+def test_old_recruitment_date_in_title_or_url_is_expired() -> None:
+    old = rules(
+        {
+            "title": "Tuyển Dụng 11/ 2019: Tìm việc làm công nhân Hà Nội – Thái Nguyên",
+            "url": "https://careers.acme.vn/tuyen-dung-11-2019-tim-viec-lam-cong-nhan/",
+            "expires_at": None,
+            "posted_at": None,
+        }
+    )
+    assert old.code == verify.EXPIRED
+    assert any("11/2019" in r for r in old.reasons)
+    in_url = rules(
+        {"url": "https://careers.acme.vn/tuyen-dung-3-2025-ke-toan/", "expires_at": None}
+    )
+    assert in_url.code == verify.EXPIRED
+    recent = rules({"title": f"Kế toán đợt {NOW.month}/{NOW.year}", "expires_at": None})
+    assert recent.code is None

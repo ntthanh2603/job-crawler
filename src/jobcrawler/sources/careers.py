@@ -14,8 +14,9 @@ Một `CareersSource` bắt đầu từ một trang danh sách (do `pipeline/dis
 
 from __future__ import annotations
 
+import hashlib
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlsplit
 
@@ -48,6 +49,9 @@ _MAX_LLM_LINKS = 150
 _MAX_LLM_LISTINGS = 2
 _LLM_LISTING_CHUNK = 6_000  # ký tự markdown mỗi lời gọi
 _LLM_LISTING_CHUNKS = 4
+# Câu trả lời LLM theo nội dung trang (lượt refresh không hỏi lại trang không đổi).
+LISTING_CACHE_SECONDS = 86_400
+DETAIL_CACHE_SECONDS = 7 * 86_400
 
 # Đoạn đường dẫn hay gặp của trang việc làm (đã bỏ dấu, viết thường).
 JOB_SEGMENTS = frozenset(
@@ -250,6 +254,11 @@ _LABEL_LINE = re.compile(r"^[\s>*_\-#|]*(?P<label>[^:\n]{2,40}?)[\s*_]*[:：][\s
 class JobLink:
     url: str
     title: str | None  # chữ trên link nếu nói lên tên vị trí
+
+
+def content_key(*parts: str) -> str:
+    """Khoá cache LLM theo nội dung đã gửi."""
+    return hashlib.sha256("".join(parts).encode()).hexdigest()[:32]
 
 
 def _plain(text: str) -> str:
@@ -530,25 +539,75 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"\w+", _plain(text)))
 
 
-def pick_title(hint: str | None, headings: list[str], og_title: str | None) -> str | None:
+# Chữ trên link không phải tên vị trí: tiêu đề chỉ gồm các từ này thì bỏ.
+_GENERIC_TITLE = {
+    "tuyen", "dung", "viec", "lam", "co", "hoi", "nghe", "nghiep", "chi", "tiet", "vi", "tri",
+    "thong", "tin", "lien", "he", "job", "jobs", "career", "careers", "detail", "details",
+}  # fmt: skip
+# Nhiễu trên thẻ tin ở trang danh sách: nhãn, lương dạng chữ, hạn nộp.
+_CARD_NOISE = re.compile(
+    r"(?i)(?<!\w)(?:new|hot|gấp|mới)(?!\w)|hạn nộp(?: hồ sơ)?\s*:?\s*\d{1,2}/\d{1,2}/\d{2,4}"
+    r"|th[oỏ]a thuận|cạnh tranh|negotiable"
+)
+
+
+def clean_card_text(text: str) -> str:
+    """ "NEW Nhân viên Tester/QC Thỏa thuận Hà Nội Hạn nộp hồ sơ: 31/10/2026" → bỏ nhãn,
+    lương dạng chữ, hạn nộp (tên tỉnh vẫn còn: không đoán được ranh giới)."""
+    return " ".join(_CARD_NOISE.sub(" ", text).split()).strip(" -–|:")
+
+
+def slug_hint(url: str) -> str | None:
+    """Chữ trong đoạn cuối URL (`/chi-tiet/tester-1061` → "tester"), bỏ số/mã."""
+    segs = path_segments(url)
+    if not segs:
+        return None
+    words = re.split(r"[-_+.]+", re.sub(r"\.(html?|aspx|php)$", "", segs[-1]))
+    kept = [w for w in words if w and not re.search(r"\d", w)]
+    return " ".join(kept) or None
+
+
+def _title_score(want: set[str], candidate: str) -> float:
+    got = _tokens(candidate)
+    if not got or not want or got <= _GENERIC_TITLE:
+        return 0.0
+    inter = len(want & got)
+    jaccard = inter / len(want | got)
+    # Tiêu đề trên trang nằm trọn trong chữ của thẻ tin (thẻ có thêm lương, nơi làm, hạn nộp).
+    contained = inter / len(got) if inter >= 2 else 0.0
+    return max(jaccard, contained)
+
+
+def pick_title(
+    hint: str | None,
+    headings: list[str],
+    og_title: str | None,
+    *,
+    extra: Sequence[str] = (),
+    slug: str | None = None,
+) -> str | None:
     """Tên vị trí của trang chi tiết.
 
     `<h1>` hay là banner chung của site ("TMA tự hào là nơi làm việc..."), nên khi có chữ trên
-    link ở trang danh sách (`hint`) thì chọn tiêu đề trên trang giống nó nhất; không tiêu đề
-    nào giống thì dùng chính `hint`.
+    link ở trang danh sách (`hint`) thì chọn tiêu đề trên trang giống nó nhất (kể cả h3–h5 và
+    phần tử `*title*` trong `extra`); không có `hint` thì so với chữ trong URL (`slug`). Không
+    tiêu đề nào giống: dùng `hint` đã bỏ nhiễu của thẻ, không có thì `<h1>` / og:title.
     """
-    if not hint:
-        return (headings[0] if headings else None) or og_title
-    want = _tokens(hint)
+    fallback = (headings[0] if headings else None) or og_title
+    want_text = hint or slug
+    if not want_text:
+        return fallback
+    want = _tokens(want_text)
     best, best_score = None, 0.0
-    for candidate in [*headings, og_title or ""]:
-        got = _tokens(candidate)
-        if not got or not want:
-            continue
-        score = len(want & got) / len(want | got)
+    for candidate in [*headings, og_title or "", *extra]:
+        score = _title_score(want, candidate)
         if score > best_score:
             best, best_score = candidate, score
-    return best if best is not None and best_score >= 0.5 else hint
+    if best is not None and best_score >= 0.5:
+        return best
+    if hint:
+        return clean_card_text(hint) or hint
+    return fallback
 
 
 def _llm_listing_candidates(scans: list[ListingScan]) -> list[ListingScan]:
@@ -588,8 +647,14 @@ class CareersSource(Source):
         links = "\n".join(f"{i}. {c.text or '-'} — {c.url}" for i, c in enumerate(candidates))
         # Danh sách dài: mỗi lời gọi chỉ đọc một đoạn để kịp sinh JSON trong giới hạn thời gian.
         results = await gather_all(
-            session.llm.structured(
-                job_listing.PROMPT, job_listing.JobListing, url=url, page=chunk, links=links
+            session.llm.cached(
+                job_listing.PROMPT,
+                job_listing.JobListing,
+                key=content_key(url, chunk, links),
+                ttl=LISTING_CACHE_SECONDS,
+                url=url,
+                page=chunk,
+                links=links,
             )
             for chunk in split_markdown(markdown, _LLM_LISTING_CHUNK)[:_LLM_LISTING_CHUNKS]
         )
@@ -656,7 +721,18 @@ class CareersSource(Source):
             if len(sub.job_links) >= _SUB_LISTING_LINKS:
                 more = sub.job_links
         headings = [node_text(h) for h in node.css("h1, h2")]
-        title = pick_title(link.title, [h for h in headings if h], og_title)
+        extra = [
+            text
+            for n in tree.css("h3, h4, h5, [class*=title]")[:40]
+            if (text := node_text(n)) and len(text) <= 150
+        ]
+        title = pick_title(
+            link.title,
+            [h for h in headings if h],
+            og_title,
+            extra=extra,
+            slug=slug_hint(page.url),
+        )
         return await self._parse_detail(session, page, title, markdown, signals), more
 
     async def _parse_detail(
@@ -668,9 +744,11 @@ class CareersSource(Source):
         if signals < _CLEAR_JD:
             if not session.llm.enabled:
                 return None
-            result = await session.llm.structured(
+            result = await session.llm.cached(
                 job_detail.PROMPT,
                 job_detail.JobDetail,
+                key=content_key(page.url, title or "", markdown),
+                ttl=DETAIL_CACHE_SECONDS,
                 url=page.url,
                 title=title or "",
                 page=markdown,

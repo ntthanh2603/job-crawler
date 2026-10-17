@@ -46,6 +46,7 @@ class BoardProfileSource(Source):
             return None
         parsed = self.adapter.parse_job(result.text, url)
         if parsed is None:
+            session.fail_page(result, "no_job: không bóc được tin từ trang chi tiết")
             return None
         session.count(url, 1)
         return parsed.job

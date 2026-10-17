@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from jobcrawler import logging as jlog
 from jobcrawler.config import Settings, get_settings
+from jobcrawler.db import compress
 from jobcrawler.db.session import create_engine, create_sessionmaker
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.browser import BrowserManager
@@ -94,6 +95,14 @@ async def open_resources(
             where = make_url(settings.database_url).render_as_string(hide_password=True)
             raise ResourceUnavailableError(f"Không kết nối được Postgres ({where}): {exc}") from exc
 
+        # Từ điển nén các cột lớn: nạp trước mọi truy vấn, làm mới định kỳ.
+        compress.CODEC.set_level(settings.compression_level)
+        refresher = compress.DictionaryRefresher(
+            engine, interval=settings.compression_dict_refresh_seconds
+        )
+        await refresher.start()
+        stack.push_async_callback(refresher.stop)
+
         if db_logs:
             sink = jlog.PgLogSink(jlog.make_copy_writer(engine), min_level=settings.log_db_level)
             sink.start()
@@ -113,14 +122,18 @@ async def open_resources(
             await queue.connect()
             stack.push_async_callback(queue.disconnect)
 
-        llm = LLMClient.from_settings(settings)
+        kv = RedisKV(redis, prefix=settings.redis_prefix)
+        # Giới hạn request/phút của endpoint LLM dùng chung mọi worker (token bucket trên Redis);
+        # cache câu trả lời theo nội dung trên Redis.
+        llm = LLMClient.from_settings(
+            settings, limiter=RedisRateLimiter(redis, prefix=settings.redis_prefix), cache=kv
+        )
         stack.push_async_callback(llm.close)
         if not llm.enabled:
             log.warning("llm.disabled", reason="thiếu LLM_BASE_URL hoặc LLM_MODEL")
         if not settings.serp_enabled:
             log.warning("serp.disabled", reason="thiếu SERP_API_KEY: KYC bỏ qua bước tìm kiếm")
 
-        kv = RedisKV(redis, prefix=settings.redis_prefix)
         proxy_list: list[Proxy] = []
         if not settings.proxy_enabled:
             log.info("proxy.disabled", reason="PROXY_ENABLED=false: đi thẳng, không proxy")

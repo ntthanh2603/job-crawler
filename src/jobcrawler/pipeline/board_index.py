@@ -27,13 +27,19 @@ from sqlalchemy import case, func, insert, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from jobcrawler.db.models import BoardIndexRun, JobPosting, SourceFetch, SourceProfile
+from jobcrawler.db.models import BoardIndexRun, FailedPage, JobPosting, SourceFetch, SourceProfile
 from jobcrawler.llm import LLMClient
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import Fetcher, FetchResult
 from jobcrawler.pipeline.profiles import map_profiles
 from jobcrawler.schemas import JobStatus, RunStatus
-from jobcrawler.sources.base import FetchRecord, SourceError, SourceLimits, SourceSession
+from jobcrawler.sources.base import (
+    FetchRecord,
+    SourceError,
+    SourceLimits,
+    SourceSession,
+    failed_page_rows,
+)
 from jobcrawler.sources.boards.base import (
     BoardAdapter,
     BoardEntry,
@@ -340,6 +346,8 @@ class BoardIndexer:
                         for r in records
                     ],
                 )
+            if failed := failed_page_rows(records, limit=self.session.limits.max_failed_pages):
+                await s.execute(insert(FailedPage), failed)
 
     async def _mark_missing(self, started_at: datetime) -> None:
         """Tin đang mở nhưng không còn trong danh sách đầy đủ: vắng mặt thêm một lượt."""
@@ -420,9 +428,13 @@ class BoardIndexer:
         elif result.ok:
             try:
                 out.parsed = self.adapter.parse_job(result.text, result.final_url or entry.url)
-            except Exception:  # một trang lạ không được làm hỏng cả lượt
+            except Exception as exc:  # một trang lạ không được làm hỏng cả lượt
                 log.exception("board.parse_error", url=entry.url, source=self.adapter.source)
                 out.parsed = None
+                self.session.fail_page(result, f"parse_error: {type(exc).__name__}: {exc}")
+            else:
+                if out.parsed is None:
+                    self.session.fail_page(result, "no_job: không bóc được tin từ trang chi tiết")
             if out.parsed is not None:
                 # URL trong DB là URL trong sitemap (ổn định), không phải URL sau redirect.
                 out.kind = "parsed"

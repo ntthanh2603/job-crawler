@@ -14,7 +14,7 @@ Cần [uv](https://docs.astral.sh/uv/) và Docker.
 cp .env.example .env                              # điền LLM_*, SERP_* khi có
 cp config/proxies.example.txt config/proxies.txt  # điền proxy; không có thì đi thẳng
 uv sync
-docker compose up -d          # postgres, redis, migrate, worker ×3
+docker compose up -d          # postgres, redis, migrate, worker ×3, indexer
 uv run jobcrawler db upgrade  # migrate cũng tự chạy trong compose
 uv run jobcrawler run "Test"
 ```
@@ -102,6 +102,37 @@ VERIFY_MIN_CONFIDENCE`), gộp trùng (tiêu đề + nơi làm + MinHash JD / c�
 chuẩn ATS/careers > trang tuyển dụng JD đầy đủ > mới nhất) rồi upsert `job_postings` (kèm lý do
 nhận/loại) và `jobs`. Câu trả lời LLM được cache trên Redis theo nội dung tin. `export` mặc định
 chỉ xuất job đang mở; `--all` gồm cả job đã hết hạn / đã gỡ.
+
+## Chạy cả danh sách (10.000 doanh nghiệp)
+
+```bash
+uv run jobcrawler import companies.csv           # cột name (bắt buộc), tax_code, website, note
+uv run jobcrawler enqueue --all                  # hoặc --file companies.csv, --stale-hours 24
+uv run jobcrawler stats [--hours 24] [--json]    # queue, p50/p95, failed, nguồn, trang, nén
+uv run jobcrawler eval golden/                   # precision/recall; chưa có golden: 50 job mẫu
+uv run jobcrawler db maintain                    # như cron mỗi giờ (dọn dữ liệu cũ, nén lại)
+```
+
+- `import` chấp nhận UTF-8 (có BOM), dấu phân cách `,` `;` tab, tiêu đề tiếng Việt ("Tên doanh
+  nghiệp", "MST"); MST bị Excel làm mất số 0 đầu được sửa lại; dòng trùng (cùng tên chuẩn hoá +
+  MST) bỏ. Chạy lại không tạo trùng (khớp MST rồi tên chuẩn hoá).
+- `enqueue`: mỗi doanh nghiệp một job `process_company` (khoá `company:<tên chuẩn hoá>[:MST]`,
+  timeout cứng `COMPANY_TIMEOUT_SECONDS`, chạy lại tối đa `COMPANY_JOB_RETRIES` lần khi worker
+  chết). Job cùng doanh nghiệp đang chờ/chạy thì bỏ qua; `--stale-hours N` chỉ lấy doanh nghiệp
+  chưa có lượt chạy xong (ok/partial/ambiguous) trong N giờ.
+- Compose: `worker` (mặc định 3 replica × `WORKER_CONCURRENCY` 10 = 30 doanh nghiệp song song,
+  cron bảo trì) và `indexer` (`worker --boards`, queue `BOARD_QUEUE_NAME`: lượt index trang tuyển
+  dụng không chiếm chỗ của doanh nghiệp). Ở mốc `COMPANY_DEADLINE_SECONDS` (165 s) các nguồn chưa
+  xong bị huỷ, kết quả lưu với trạng thái `partial` kèm `incomplete_sources`.
+- `eval golden/`: `golden/companies.csv` + `golden/jobs.csv` (cột `company`, `url` và/hoặc
+  `title`); báo cáo ghi ở `out/eval/`. Chưa có golden set: in 50 job ngẫu nhiên và ghi CSV có cột
+  `dung` để điền, rồi `jobcrawler eval --reviewed out/eval/sample-....csv` ra precision.
+
+Dữ liệu lớn được nén zstd trước khi lưu: `job_postings.raw`, `jobs.description_md /
+requirements_md / benefits_md`, `failed_pages.html_zstd` là bytea (đọc qua ORM như bình thường;
+định dạng ở `src/jobcrawler/db/compress.py`). Lượt bảo trì huấn luyện từ điển zstd trên chính dữ
+liệu khi đủ mẫu (nén ~4–6 lần thay vì ~1,8 lần của Postgres) rồi nén lại dần dữ liệu cũ.
+`source_fetches`, `logs` giữ 30 ngày, `failed_pages` 7 ngày.
 
 ## Kiểm tra hạ tầng
 

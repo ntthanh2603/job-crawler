@@ -23,6 +23,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.40",
     "structlog>=26.1.0",
     "typer>=0.27.3",
+    # Nén cột lớn trong Postgres bằng zstd + từ điển (Python 3.12 chưa có zstd trong stdlib).
+    "zstandard>=0.25.0",
 ]
 
 [project.scripts]

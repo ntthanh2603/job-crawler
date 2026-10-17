@@ -6,10 +6,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from jobcrawler.config import Settings
-from jobcrawler.db.models import BoardIndexRun, Company, CompanyAlias, JobPosting, SourceProfile
+from jobcrawler.db.models import (
+    BoardIndexRun,
+    Company,
+    CompanyAlias,
+    FailedPage,
+    JobPosting,
+    SourceProfile,
+)
 from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.http import FetchResult
@@ -281,3 +288,34 @@ async def _company(res: Resources, company_id: int) -> Company:
         company = await s.get(Company, company_id)
         assert company is not None
         return company
+
+
+async def test_unparseable_detail_page_is_kept_in_failed_pages(
+    integration_settings: Settings,
+) -> None:
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        await reset(res)
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(FailedPage).where(FailedPage.source == FakeBoard().source))
+        site = fake_site(JOBS)
+        broken = f"{HOME}viec-lam/bao-ve-13.html"
+        site.add(broken, "<html><body><h1>Bố cục mới</h1>" + "<p>không có JSON-LD</p>" * 50)
+        stats = await indexer(res, site).run()
+        assert stats.failed == 1
+        assert stats.new == 2
+        async with res.sessionmaker() as s:
+            [page] = (
+                await s.scalars(select(FailedPage).where(FailedPage.source == FakeBoard().source))
+            ).all()
+            stored = await s.scalar(
+                select(func.octet_length(text("html_zstd")))
+                .select_from(FailedPage)
+                .where(FailedPage.id == page.id)
+            )
+        assert page.url == broken
+        assert page.reason.startswith("no_job")
+        assert page.http_status == 200
+        assert page.html is not None
+        assert page.html.startswith("<html><body><h1>Bố cục mới</h1>")
+        assert stored is not None
+        assert stored < len(page.html.encode()) / 5  # HTML lưu nén

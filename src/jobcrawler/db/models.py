@@ -25,6 +25,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from jobcrawler.db.compress import Kind, ZstdJSON, ZstdText
 from jobcrawler.schemas import (
     EmploymentType,
     FetchOutcome,
@@ -45,6 +46,7 @@ NAMING_CONVENTION = {
 }
 
 EMPTY_ARRAY = text("'{}'::text[]")
+COMPRESSED = "zstd (db/compress.py): 1 byte phiên bản + 4 byte id từ điển + frame zstd"
 EMPTY_OBJECT = text("'{}'::jsonb")
 
 
@@ -83,6 +85,9 @@ class Company(Base):
 
     id: Mapped[int] = _pk()
     input_name: Mapped[str]
+    # Website và ghi chú từ `companies.csv` (`jobcrawler import`), dùng lại khi enqueue.
+    input_website: Mapped[str | None]
+    note: Mapped[str | None]
     legal_name: Mapped[str | None]
     brand_name: Mapped[str | None]
     tax_code: Mapped[str | None] = mapped_column(unique=True)
@@ -180,7 +185,10 @@ class JobPosting(Base):
     job_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("jobs.id", ondelete="SET NULL", use_alter=True), index=True
     )
-    raw: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
+    # RawJob dạng JSON, nén zstd (xem db/compress.py).
+    raw: Mapped[dict[str, Any]] = mapped_column(
+        ZstdJSON(Kind.POSTING), default=dict, comment=COMPRESSED
+    )
     content_hash: Mapped[str | None]
     first_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -271,9 +279,10 @@ class Job(Base):
     salary_raw: Mapped[str | None]
     experience_years_min: Mapped[float | None]
     experience_years_max: Mapped[float | None]
-    description_md: Mapped[str]
-    requirements_md: Mapped[str | None]
-    benefits_md: Mapped[str | None]
+    # Ba phần nội dung dài nén zstd (xem db/compress.py); đọc qua ORM như chuỗi thường.
+    description_md: Mapped[str] = mapped_column(ZstdText(Kind.JOB_TEXT), comment=COMPRESSED)
+    requirements_md: Mapped[str | None] = mapped_column(ZstdText(Kind.JOB_TEXT), comment=COMPRESSED)
+    benefits_md: Mapped[str | None] = mapped_column(ZstdText(Kind.JOB_TEXT), comment=COMPRESSED)
     skills: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
     posted_at: Mapped[datetime | None]
     expires_at: Mapped[datetime | None]
@@ -294,6 +303,7 @@ class CompanyRun(Base):
     __table_args__ = (
         one_of("status", RunStatus),
         Index("ix_company_runs_company_id_started_at", "company_id", "started_at"),
+        Index("ix_company_runs_started_at", "started_at"),
     )
 
     run_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -314,7 +324,11 @@ class SourceFetch(Base):
     """Mỗi lần gọi một nguồn. `run_id`/`company_id` để trống với lượt index trang tuyển dụng."""
 
     __tablename__ = "source_fetches"
-    __table_args__ = (one_of("outcome", FetchOutcome),)
+    __table_args__ = (
+        one_of("outcome", FetchOutcome),
+        # Dọn theo thời gian (SOURCE_FETCH_RETENTION_DAYS); bảng chỉ ghi thêm nên BRIN là đủ.
+        Index("ix_source_fetches_fetched_at", "fetched_at", postgresql_using="brin"),
+    )
 
     id: Mapped[int] = _pk()
     run_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -353,7 +367,7 @@ class Log(Base):
 
 
 class FailedPage(Base):
-    """HTML (nén zstd) của trang parse lỗi, để debug. Xoá sau 7 ngày."""
+    """HTML (nén zstd) của trang parse lỗi, để debug. Xoá sau FAILED_PAGE_RETENTION_DAYS."""
 
     __tablename__ = "failed_pages"
 
@@ -361,5 +375,22 @@ class FailedPage(Base):
     url: Mapped[str]
     source: Mapped[str]
     reason: Mapped[str]
-    html_zstd: Mapped[bytes | None] = mapped_column(LargeBinary)
+    run_id: Mapped[uuid.UUID | None]
+    http_status: Mapped[int | None]
+    html: Mapped[str | None] = mapped_column("html_zstd", ZstdText(Kind.HTML), comment=COMPRESSED)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), index=True)
+
+
+class CompressionDict(Base):
+    """Từ điển zstd huấn luyện trên dữ liệu (db/compress.py). Không xoá: giá trị cũ cần nó."""
+
+    __tablename__ = "compression_dicts"
+
+    # `dict_id` ngẫu nhiên ghi trong 4 byte đầu mỗi giá trị nén (sau byte phiên bản).
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    kind: Mapped[str]
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    samples: Mapped[int]
+    created_at: Mapped[datetime]
+    # Chỉ dùng để nén từ lúc này (mọi process đã kịp nạp từ điển).
+    usable_at: Mapped[datetime]

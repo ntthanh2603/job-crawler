@@ -9,9 +9,20 @@ import pytest
 from pydantic import BaseModel
 
 from jobcrawler.fakes import FakeChatClient
-from jobcrawler.llm import TRUNCATION_MARK, LLMClient, extract_json, truncate
+from jobcrawler.llm import (
+    MAX_RATE_LIMIT_RETRIES,
+    TRUNCATION_MARK,
+    LLMClient,
+    extract_json,
+    is_rate_cap,
+    retry_after,
+    truncate,
+)
+from jobcrawler.net.ratelimit import MemoryRateLimiter
 from jobcrawler.prompts import Prompt
 from jobcrawler.prompts.healthcheck import PROMPT as HEALTHCHECK
+
+from .conftest import FakeClock
 
 PROMPT = Prompt(
     name="classify",
@@ -160,3 +171,63 @@ def test_healthcheck_prompt_renders() -> None:
     messages = HEALTHCHECK.render({"nonce": "abc123", "sentence": "Xin chào"})
     assert "`abc123`" in messages[1]["content"]
     assert '"Xin chào"' in messages[1]["content"]
+
+
+def rate_limited(error: str, after: float) -> openai.RateLimitError:
+    request = httpx2.Request("POST", "http://llm/v1/chat/completions")
+    return openai.RateLimitError(
+        "Error code: 429",
+        response=httpx2.Response(429, request=request),
+        body={"detail": {"error": error, "retry_after": after}},
+    )
+
+
+OK = '{"is_job": true, "confidence": 1}'
+
+
+async def test_concurrency_429_waits_retry_after_and_retries(clock: FakeClock) -> None:
+    llm, fake = make([rate_limited("key_concurrency_limit", 1), OK], sleep=clock.sleep)
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.value is not None
+    assert result.attempts == 2
+    assert len(fake.calls) == 2
+    assert len(clock.sleeps) == 1
+    assert 1 <= clock.sleeps[0] <= 1.5
+
+
+async def test_rpm_429_pauses_shared_bucket(clock: FakeClock) -> None:
+    limiter = MemoryRateLimiter(clock=clock, sleep=clock.sleep)
+    llm, fake = make(
+        [rate_limited("rpm_limit_exceeded", 20), OK],
+        limiter=limiter,
+        requests_per_minute=60,
+    )
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.value is not None
+    assert len(fake.calls) == 2
+    assert limiter.calls == [("llm", 1.0, 1), ("llm", 1.0, 1)]  # 60/phút = 1 request/giây
+    assert sum(clock.sleeps) >= 20  # lượt sau chờ hết lần tạm dừng chung
+
+
+async def test_rate_limit_gives_up_when_wait_exceeds_timeout(clock: FakeClock) -> None:
+    limiter = MemoryRateLimiter(clock=clock, sleep=clock.sleep)
+    llm, fake = make([rate_limited("rpm_limit_exceeded", 60)], limiter=limiter, timeout=30)
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.unknown
+    assert result.error is not None
+    assert result.error.startswith("http_429")
+    assert len(fake.calls) == 1
+
+    # Bị 429 liên tục: dừng sau MAX_RATE_LIMIT_RETRIES lần thử lại.
+    llm, fake = make([rate_limited("global_concurrency_limit", 0)], sleep=clock.sleep)
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.unknown
+    assert len(fake.calls) == MAX_RATE_LIMIT_RETRIES + 1
+
+
+def test_retry_after_parsing() -> None:
+    assert retry_after(rate_limited("rpm_limit_exceeded", 60)) == 60
+    assert is_rate_cap(rate_limited("rpm_limit_exceeded", 60))
+    assert not is_rate_cap(rate_limited("key_concurrency_limit", 1))
+    assert not is_rate_cap(rate_limited("global_concurrency_limit", 1))
+    assert retry_after(ValueError()) == 1.0

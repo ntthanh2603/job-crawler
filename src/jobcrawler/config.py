@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = Field(default=8, ge=1)
     llm_max_input_chars: int = Field(default=20_000, ge=1_000)
     llm_timeout_seconds: float = Field(default=30, gt=0)
+    # Giới hạn request/phút của endpoint, dùng chung mọi worker qua Redis (để trống = không giới
+    # hạn). Đặt thấp hơn giới hạn của server một chút; LLM_MAX_CONCURRENCY là mỗi process.
+    llm_requests_per_minute: float | None = Field(default=None, gt=0)
 
     # SERP. Thiếu key thì bỏ qua các bước dùng SERP (kèm cảnh báo).
     serp_provider: Literal["serper", "brave"] = "serper"
@@ -144,6 +147,36 @@ class Settings(BaseSettings):
     company_deadline_seconds: float = Field(default=165, gt=0)
     # Timeout cứng của job SAQ `process_company`.
     company_timeout_seconds: int = Field(default=180, gt=0)
+    # Số lần chạy tối đa một job `process_company` (worker chết / timeout cứng thì chạy lại).
+    company_job_retries: int = Field(default=2, ge=1)
+
+    # Queue riêng cho lượt index trang tuyển dụng (job dài hàng giờ) để không chiếm chỗ của
+    # doanh nghiệp: `jobcrawler worker --boards` (service `indexer` trong compose).
+    board_queue_name: str = "jobcrawler-boards"
+    board_worker_concurrency: int = Field(default=10, ge=1)
+
+    # Bảo trì định kỳ (cron SAQ, `jobcrawler db maintain`): dọn dữ liệu cũ, lượt chạy treo,
+    # huấn luyện từ điển nén.
+    maintenance_cron: str = "17 * * * *"  # mỗi giờ
+    source_fetch_retention_days: float = Field(default=30, gt=0)
+    log_retention_days: float = Field(default=30, gt=0)
+    failed_page_retention_days: float = Field(default=7, gt=0)
+    # Số trang parse lỗi tối đa lưu mỗi lượt (doanh nghiệp / index một trang).
+    failed_pages_per_run: int = Field(default=20, ge=0)
+
+    # Nén cột lớn (job_postings.raw, mô tả job, HTML trang lỗi) bằng zstd + từ điển.
+    compression_level: int = Field(default=9, ge=1, le=22)
+    compression_dict_size: int = Field(default=64 * 1024, ge=4096)
+    # Có ít nhất chừng này giá trị mới huấn luyện từ điển; lấy mẫu tối đa `max_samples`.
+    compression_dict_min_samples: int = Field(default=1000, ge=10)
+    compression_dict_max_samples: int = Field(default=5000, ge=10)
+    # Từ điển mới chỉ dùng để nén sau chừng này giây (mọi process đã kịp nạp, xem db/compress).
+    compression_dict_delay_seconds: float = Field(default=900, ge=0)
+    compression_dict_refresh_seconds: float = Field(default=300, gt=0)
+    # Huấn luyện lại khi từ điển đang dùng cũ hơn chừng này ngày.
+    compression_dict_retrain_days: float = Field(default=30, gt=0)
+    # Số dòng tối đa nén lại bằng từ điển mới mỗi lượt bảo trì.
+    compression_recompress_rows: int = Field(default=50_000, ge=0)
 
     # Log.
     log_level: LogLevel = "INFO"
@@ -156,6 +189,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "COMPANY_DEADLINE_SECONDS phải nhỏ hơn COMPANY_TIMEOUT_SECONDS "
                 f"({self.company_deadline_seconds} >= {self.company_timeout_seconds})"
+            )
+        if self.compression_dict_delay_seconds and (
+            self.compression_dict_delay_seconds <= self.compression_dict_refresh_seconds
+        ):
+            raise ValueError(
+                "COMPRESSION_DICT_DELAY_SECONDS phải lớn hơn COMPRESSION_DICT_REFRESH_SECONDS"
             )
         return self
 

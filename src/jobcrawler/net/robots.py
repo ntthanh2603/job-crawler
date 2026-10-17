@@ -48,6 +48,8 @@ class RobotsRules:
     crawl_delay: float | None = None
     sitemaps: list[str] = field(default_factory=list)
     disallow_all: bool = False
+    # Cấm toàn bộ vì không tải được robots.txt (lỗi mạng, 5xx, 429), không phải vì luật.
+    unreachable: bool = False
 
     @classmethod
     def allow_everything(cls) -> RobotsRules:
@@ -162,8 +164,8 @@ class RobotsCache:
         if status is not None and 400 <= status < 500 and status != 429:
             # RFC 9309: robots.txt không có (4xx) → được crawl toàn bộ.
             return RobotsRules.allow_everything(), self._ttl
-        # 5xx, 429, lỗi mạng → tạm coi như cấm toàn bộ.
-        return RobotsRules.deny_everything(), min(self._ttl, ERROR_CACHE_SECONDS)
+        # 5xx, 429, lỗi mạng → tạm coi như cấm toàn bộ (RFC 9309 mục 2.3.1.4).
+        return RobotsRules(disallow_all=True, unreachable=True), min(self._ttl, ERROR_CACHE_SECONDS)
 
     async def rules_for(self, url: str) -> RobotsRules:
         origin = robots_url(url)

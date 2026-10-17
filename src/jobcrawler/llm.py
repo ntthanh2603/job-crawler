@@ -4,13 +4,21 @@ Mọi lời gọi trả JSON theo một schema Pydantic (`response_format=json_s
 lại bằng `model_validate_json`. JSON lỗi thì gửi lại một lần kèm lỗi để model sửa; vẫn lỗi
 thì kết quả là `unknown` (`value=None`). Không ném lỗi ra ngoài: pipeline coi `unknown` là
 "không chắc" và tự quyết định bằng rule.
+
+Endpoint dùng chung có giới hạn request/phút và số lời gọi đồng thời (trả 429 kèm
+`retry_after`). Mọi worker lấy lượt từ một token bucket trên Redis (LLM_REQUESTS_PER_MINUTE);
+429 vì vượt request/phút thì tạm dừng cả cụm trong `retry_after`, 429 vì đồng thời thì chờ
+`retry_after` rồi thử lại. Thời gian chờ tối đa mỗi lời gọi bằng LLM_TIMEOUT_SECONDS; bước gọi
+LLM nào cũng có deadline riêng và huỷ lời gọi đang chờ khi hết giờ.
 """
 
 from __future__ import annotations
 
 import asyncio
+import random
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -22,12 +30,37 @@ from jobcrawler.prompts.base import Prompt
 if TYPE_CHECKING:
     from jobcrawler.config import Settings
     from jobcrawler.net.kv import KeyValueStore
+    from jobcrawler.net.ratelimit import RateLimiter
 
 log = get_logger(__name__)
 
 TRUNCATION_MARK = "\n…[đã cắt bớt]"
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+# Số lần thử lại tối đa khi bị 429 (không tính vào hai lần thử thường).
+MAX_RATE_LIMIT_RETRIES = 6
+LIMITER_KEY = "llm"
+
+
+def retry_after(exc: Any) -> float:
+    """`retry_after` (giây) trong body 429 (`{"detail": {"retry_after": 60}}`) hoặc header
+    Retry-After; mặc định 1."""
+    body = getattr(exc, "body", None)
+    detail = body.get("detail") if isinstance(body, dict) else None
+    value: Any = detail.get("retry_after") if isinstance(detail, dict) else None
+    if value is None:
+        response = getattr(exc, "response", None)
+        value = response.headers.get("retry-after") if response is not None else None
+    try:
+        return max(0.0, float(value)) if value is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def is_rate_cap(exc: Any) -> bool:
+    """429 vì vượt request/phút (khác 429 vì quá nhiều lời gọi đồng thời)."""
+    text = f"{getattr(exc, 'body', '')} {getattr(exc, 'message', '')}".lower()
+    return "rpm" in text or "per minute" in text or ("rate" in text and "concurren" not in text)
 
 
 @dataclass(slots=True)
@@ -83,6 +116,10 @@ class LLMClient:
         max_concurrency: int = 8,
         max_input_chars: int = 20_000,
         timeout: float = 30.0,
+        limiter: RateLimiter | None = None,
+        requests_per_minute: float | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        cache: KeyValueStore | None = None,
     ) -> None:
         self._client = client
         self.model = model
@@ -90,9 +127,19 @@ class LLMClient:
         self._sem = asyncio.Semaphore(max_concurrency)
         self.max_input_chars = max_input_chars
         self._timeout = timeout
+        self._limiter = limiter
+        self._rpm = requests_per_minute
+        self._sleep = sleep
+        # Cache câu trả lời theo nội dung (`cached()`), dùng chung mọi worker (Redis).
+        self.cache = cache
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> LLMClient:
+    def from_settings(
+        cls,
+        settings: Settings,
+        limiter: RateLimiter | None = None,
+        cache: KeyValueStore | None = None,
+    ) -> LLMClient:
         client = None
         if settings.llm_enabled:
             from openai import AsyncOpenAI
@@ -111,6 +158,9 @@ class LLMClient:
             max_concurrency=settings.llm_max_concurrency,
             max_input_chars=settings.llm_max_input_chars,
             timeout=settings.llm_timeout_seconds,
+            limiter=limiter,
+            requests_per_minute=settings.llm_requests_per_minute,
+            cache=cache,
         )
 
     @property
@@ -120,6 +170,42 @@ class LLMClient:
     async def close(self) -> None:
         if self._client is not None:
             await self._client.close()
+
+    async def _wait_turn(self, budget: float) -> bool:
+        """Lấy lượt từ token bucket chung (và chờ hết lần tạm dừng do 429); False nếu phải chờ
+        quá `budget` giây."""
+        if self._limiter is None:
+            return True
+        # Không cấu hình request/phút: bucket rất rộng, chỉ để tôn trọng lần tạm dừng chung.
+        rate, burst = (self._rpm / 60, 1) if self._rpm else (1000.0, 1000)
+        if budget <= 0:
+            return False
+        try:
+            async with asyncio.timeout(budget):
+                await self._limiter.acquire(LIMITER_KEY, rate=rate, burst=burst)
+        except TimeoutError:
+            return False
+        return True
+
+    async def _back_off(self, exc: Any, budget: float) -> bool:
+        """Sau 429: tạm dừng cả cụm (vượt request/phút) hoặc chờ `retry_after` (quá đồng thời).
+        False nếu không còn đủ `budget` giây để thử lại."""
+        delay = retry_after(exc)
+        if is_rate_cap(exc) and self._limiter is not None:
+            await self._limiter.penalize(LIMITER_KEY, delay)
+            return delay < budget  # lần chờ thật nằm ở `_wait_turn`
+        delay += random.uniform(0, 0.5)
+        if delay >= budget:
+            return False
+        await self._sleep(delay)
+        return True
+
+    async def cached[T: BaseModel](
+        self, prompt: Prompt, schema: type[T], *, key: str, ttl: float, **values: str
+    ) -> LLMResult[T]:
+        """Như `structured` nhưng dùng lại câu trả lời cũ cho cùng prompt + `key` (hash nội
+        dung) trong `ttl` giây, nếu client có cache."""
+        return await cached_structured(self, self.cache, key, prompt, schema, ttl=ttl, **values)
 
     def fit(self, prompt: Prompt, values: dict[str, str]) -> dict[str, str]:
         """Cắt các biến dài nhất để prompt người dùng không vượt `max_input_chars`."""
@@ -160,9 +246,21 @@ class LLMClient:
         import openai
 
         started = time.monotonic()
+        waited = 0.0  # tổng thời gian chờ lượt / chờ sau 429, tối đa `timeout`
+        tries = 0  # lần thử thường (lỗi tạm thời, JSON sai): tối đa 2
+        limited = 0  # lần bị 429
         async with self._sem:
-            for attempt in (1, 2):
-                result.attempts = attempt
+            while tries < 2:
+                mark = time.monotonic()
+                turn = await self._wait_turn(self._timeout - waited)
+                waited += time.monotonic() - mark
+                if not turn:
+                    result.error = f"rate_limited: chờ quá {self._timeout:g} s" + (
+                        f" ({result.error})" if result.error else ""
+                    )
+                    break
+                tries += 1
+                result.attempts += 1
                 try:
                     async with asyncio.timeout(self._timeout):
                         resp = await self._client.chat.completions.create(
@@ -176,7 +274,18 @@ class LLMClient:
                     continue
                 except openai.APIStatusError as exc:
                     result.error = f"http_{exc.status_code}: {exc.message}"
-                    if exc.status_code >= 500 or exc.status_code == 429:
+                    if exc.status_code == 429:
+                        tries -= 1  # không tính vào số lần thử thường
+                        limited += 1
+                        mark = time.monotonic()
+                        again = limited <= MAX_RATE_LIMIT_RETRIES and await self._back_off(
+                            exc, self._timeout - waited
+                        )
+                        waited += time.monotonic() - mark
+                        if again:
+                            continue
+                        break
+                    if exc.status_code >= 500:
                         continue
                     break
 

@@ -115,6 +115,7 @@ async def test_robots_disallow_skips_request(clock: FakeClock) -> None:
     rig = make(clock, {ROBOTS: response(ROBOTS, "User-agent: *\nDisallow: /private\n")})
     result = await rig.client.fetch(f"{SITE}/private/1")
     assert result.outcome is FetchOutcome.ROBOTS_DISALLOWED
+    assert result.error == "robots_disallowed"
     assert rig.transport.urls() == [ROBOTS]
 
 
@@ -131,6 +132,7 @@ async def test_robots_server_error_disallows_all(clock: FakeClock) -> None:
     rig = make(clock, {ROBOTS: response(ROBOTS, "", status=503)})
     result = await rig.client.fetch(f"{SITE}/a")
     assert result.outcome is FetchOutcome.ROBOTS_DISALLOWED
+    assert result.error == "robots_unreachable"  # không lẫn với luật cấm trong robots.txt
 
 
 async def test_crawl_delay_and_domain_override_set_rate(clock: FakeClock) -> None:

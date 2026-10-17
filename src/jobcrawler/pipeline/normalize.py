@@ -720,6 +720,9 @@ def parse_salary(
         currency=_norm_currency(currency) or parsed.currency,
         period=(_period(period) if period else None) or parsed.period,
     )
+    # Nguồn ghi 0 khi không công bố ("0 - 0", "0 - 1.600 USD"): 0 không phải mức lương.
+    amounts.low = amounts.low or None
+    amounts.high = amounts.high or None
     if amounts.low is None and amounts.high is None:
         if not raw and not negotiable:
             return None
