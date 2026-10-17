@@ -592,7 +592,7 @@ async def latest_run_perf(session: AsyncSession, company_ids: Sequence[int]) -> 
     durations = sorted((d or 0) / 1000 for _, d in rows)
     p95 = durations[min(len(durations) - 1, round(0.95 * (len(durations) - 1)))]
     failed = sum(1 for s, _ in rows if s == "failed") / len(rows)
-    return {"p95 thời gian (lượt cuối)": f"{p95:.0f} s", "failed (lượt cuối)": pct(failed)}
+    return {"P95 thời gian (lượt cuối)": f"{p95:.0f} s", "Tỉ lệ thất bại (lượt cuối)": pct(failed)}
 
 
 # --- kiểm tay trên giao diện web (bảng job_reviews) ----------------------------------------------

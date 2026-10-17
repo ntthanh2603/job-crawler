@@ -22,8 +22,10 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
+from urllib.parse import urljoin
 
 import ftfy
+from markdown_it import MarkdownIt
 
 from jobcrawler.llm import LLMClient, cache_key, cached_structured
 from jobcrawler.logging import get_logger
@@ -192,7 +194,15 @@ def _plain_line(line: str) -> str:
     return fold(_MD_MARKS.sub(" ", _MD_LINK.sub(r"\1", line)))
 
 
+# Gạch đầu dòng viết liền chữ: "-Khi trở thành..." (không phải "-5%"). "*Tham gia BHXH" do
+# `_fix_emphasis` xử lý.
+_TIGHT_BULLET = re.compile(r"^\s*[-+](?=[^\W\d_])")
+
+
 def _clean_line(line: str) -> str:
+    tight = _TIGHT_BULLET.match(line)
+    if tight is not None:
+        line = "- " + line[tight.end() :]
     bullet = _BULLET.match(line)
     if bullet is not None and bullet.end() < len(line):
         line = "- " + line[bullet.end() :]
@@ -200,15 +210,92 @@ def _clean_line(line: str) -> str:
     return _SPACES.sub(" ", line).strip()
 
 
-def to_markdown(text: str | None, fmt: str = "html") -> str:
-    """Nội dung thô (HTML/markdown/text) → markdown sạch, chưa ẩn liên hệ."""
+# Hai đoạn nhấn mạnh liền nhau: "**Tuổi****:**" → "**Tuổi:**", "***a******b***" → "***ab***".
+_EMPHASIS_JOIN = re.compile(r"(?<=[^\s*])(\*{2,3})\1(?=[^\s*])")
+# Dấu đóng sau dấu câu mà dính chữ thì CommonMark không đóng được: "**Tuổi:**Từ 18" → thêm cách.
+_CLOSE_BEFORE_WORD = re.compile(r"(?:^|(?<=\s))(\*{1,3})(?=[^\s*])([^*\n]*?[^\s\w*])\1(?=[^\W_])")
+# Dấu mở thừa khoảng trắng ở đầu dòng: "** Thu nhập:**" → "**Thu nhập:**".
+_OPEN_SPACE = re.compile(r"^(\*{2,3})\s+([^*\n]*[^\s*])\1(?=\s|$)")
+# Chú thích "(*)", "(**)" (giữ) hoặc một dãy dấu sao nhấn mạnh (bỏ khi dòng vỡ).
+_STAR_RUN = re.compile(r"\(\*+\)|\*+")
+# Dấu sao hiện thành chữ mà vẫn đúng: chú thích "(*)", dính sau chữ/số "5*", "Sun* Inc.", "Pro*C".
+_LITERAL_STAR_OK = re.compile(r"\(\*+\)|(?<=[^\W_])\*")
+# Ký hiệu đầu dòng của markdown (tiêu đề, danh sách): không xét khi tìm dấu sao vỡ.
+_LINE_MARK = re.compile(r"^\s*(?:#{1,6}|[-+*]|\d{1,3}[.)])\s+")
+# Cùng luật CommonMark với lúc hiển thị (web/markdown.py).
+_INLINE_MD = MarkdownIt("commonmark")
+
+
+def _literal_stars(line: str) -> list[str]:
+    """Phần dấu sao còn hiện thành chữ trong từng đoạn chữ khi hiển thị dòng (đoạn đầu rỗng nếu
+    dòng mở đầu bằng in đậm/nghiêng), đã bỏ các dấu sao hợp lệ."""
+    out: list[str] = []
+    for token in _INLINE_MD.parseInline(line):
+        for child in token.children or ():
+            text = _LITERAL_STAR_OK.sub("", child.content) if child.type == "text" else ""
+            out.append(text)
+    return out
+
+
+def _broken_emphasis(line: str) -> bool:
+    """Hiển thị dòng này còn dấu sao thừa (không thành in đậm/nghiêng, không phải chữ thật)."""
+    mark = _LINE_MARK.match(line)
+    return any("*" in t for t in _literal_stars(line[mark.end() :] if mark else line))
+
+
+def _fix_emphasis(line: str) -> str:
+    """Sửa dấu sao vỡ: nối/thêm cách cho in đậm viết dính; còn vỡ (trang dùng "*" làm ký hiệu
+    trang trí bên trong thẻ in đậm, VNPay: "*** Số lượng cần tuyển: 06**") thì bỏ hết dấu nhấn
+    mạnh (giữ chú thích "(*)"); mở đầu bằng một dãy lẻ dấu sao thừa là một mục danh sách."""
+    if "*" not in line:
+        return line
+    mark = _LINE_MARK.match(line)
+    prefix, body = (mark.group(0), line[mark.end() :]) if mark else ("", line)
+    body = _EMPHASIS_JOIN.sub("", body)
+    body = _CLOSE_BEFORE_WORD.sub(r"\1\2\1 ", body)
+    body = _OPEN_SPACE.sub(r"\1\2\1", body)
+    texts = _literal_stars(body)
+    if not any("*" in t for t in texts):
+        return prefix + body
+    lead = len(body) - len(body.lstrip("*"))
+    # "*** Số lượng…", "*Tham gia BHXH" (không phải "** Join…" hay "*Hãy kể* ***…").
+    item = bool(texts) and texts[0].startswith("*") and lead % 2 == 1
+    body = _STAR_RUN.sub(lambda m: m.group(0) if m.group(0)[0] == "(" else "", body)
+    body = _SPACES.sub(" ", body).strip()
+    return f"- {body}" if item and not prefix else prefix + body
+
+
+# Link markdown (chữ có thể chứa một cặp ngoặc, href có thể kèm tiêu đề):
+# "[Tìm hiểu thêm](/careers/why-bosch/ "…")", "[[HN] Data Analyst](/tuyen-dung/hn-data-analyst/)".
+_LINK = re.compile(r"(?<!!)\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\(([^()\s]+)(?:\s+\"[^\"]*\")?\)")
+
+
+def _fix_links(md: str, base_url: str | None) -> str:
+    """Link tương đối → tuyệt đối theo URL tin (để trên giao diện không trỏ về chính app);
+    không có URL gốc hoặc link "#…"/"javascript:" thì chỉ giữ chữ."""
+
+    def repl(m: re.Match[str]) -> str:
+        text, href = m.group(1), m.group(2)
+        if re.match(r"(?:https?|mailto|tel):", href, re.IGNORECASE):
+            return m.group(0)
+        if href.startswith("#") or href.lower().startswith("javascript:") or not base_url:
+            return text
+        return f"[{text}]({urljoin(base_url, href)})"
+
+    return _LINK.sub(repl, md)
+
+
+def to_markdown(text: str | None, fmt: str = "html", base_url: str | None = None) -> str:
+    """Nội dung thô (HTML/markdown/text) → markdown sạch, chưa ẩn liên hệ. `base_url` (URL tin)
+    để đổi link tương đối thành tuyệt đối."""
     if not text or not text.strip():
         return ""
     text = ftfy.fix_text(text)
     md = html_to_markdown(text) if fmt == "html" else text
+    md = _fix_links(md, base_url)
     out: list[str] = []
     for raw_line in md.replace("\r\n", "\n").split("\n"):
-        line = _clean_line(raw_line)
+        line = _fix_emphasis(_clean_line(raw_line))
         if not line:
             if out and out[-1]:
                 out.append("")
@@ -401,19 +488,31 @@ _GENERIC_MAILBOX = frozenset(
         "dn",
     }
 )
+# Nhãn đứng trước tên người liên hệ ("Liên hệ:", "Tên / Chức danh:", "Họ tên:", "Người phụ trách
+# tuyển dụng:"); nhãn dài đặt trước để khớp hết.
 _CONTACT_LABEL = (
-    r"(?:ng(?:ư|u)(?:ờ|o)i\s+li(?:ê|e)n\s+h(?:ệ|e)|li(?:ê|e)n\s+h(?:ệ|e)|lh|contact(?:\s+person)?)"
+    r"(?:t(?:ê|e)n\s*/\s*ch(?:ứ|u)c\s+danh"
+    r"|t(?:ê|e)n\s+ng(?:ư|u)(?:ờ|o)i\s+li(?:ê|e)n\s+h(?:ệ|e)"
+    r"|h(?:ọ|o)\s+(?:v(?:à|a)\s+)?t(?:ê|e)n"
+    r"|ng(?:ư|u)(?:ờ|o)i\s+ph(?:ụ|u)\s+tr(?:á|a)ch(?:\s+tuy(?:ể|e)n\s+d(?:ụ|u)ng)?"
+    r"|ng(?:ư|u)(?:ờ|o)i\s+li(?:ê|e)n\s+h(?:ệ|e)|li(?:ê|e)n\s+h(?:ệ|e)|lh"
+    r"|contact(?:\s+person)?|recruiter)"
 )
 _HONORIFIC = r"(?:mr|ms|mrs|miss|anh|ch(?:ị|i)|a\.|c\.|c(?:ô|o)|th(?:ầ|a)y)"
 _NAME_WORD = r"[^\W\d_][^\W\d_'’.-]*"
+# Khoảng trắng trong một dòng. Tên chỉ được nằm ở dòng sau nhãn khi nhãn có dấu hai chấm
+# ("Liên hệ:\nNguyễn Văn An" từ ô bảng); "Thông tin liên hệ\n- Tên / Chức danh: …" không khớp.
+_SP = r"[^\S\n]"
 # "Liên hệ: Ms. Hương", "Người liên hệ: Nguyễn Văn A", "LH chị Lan"
 _LABELED_NAME = re.compile(
-    rf"(\b{_CONTACT_LABEL}\s*[:\-–]?\s*)"
-    rf"((?:{_HONORIFIC}\.?\s+)?{_NAME_WORD}(?:\s+{_NAME_WORD}){{0,3}})",
+    rf"(\b{_CONTACT_LABEL}{_SP}*(?::\s*|[\-–]{_SP}*|))"
+    rf"((?:{_HONORIFIC}\.?{_SP}+)?{_NAME_WORD}(?:{_SP}+{_NAME_WORD}){{0,3}})",
     re.IGNORECASE,
 )
 # "Ms. Hương", "Mr Nam" ở bất kỳ đâu.
-_TITLED_NAME = re.compile(rf"\b(?:Mr|Ms|Mrs|Miss)\.?\s+{_NAME_WORD}(?:\s+{_NAME_WORD}){{0,3}}")
+_TITLED_NAME = re.compile(
+    rf"\b(?:Mr|Ms|Mrs|Miss)\.?{_SP}+{_NAME_WORD}(?:{_SP}+{_NAME_WORD}){{0,3}}"
+)
 # Từ đầu không phải tên người ("Liên hệ: Phòng Nhân sự", "Liên hệ Công ty").
 _NOT_NAME_START = frozenset(
     {
@@ -482,6 +581,14 @@ def _mask_email(m: re.Match[str]) -> str:
     return CONTACT_MASK
 
 
+# Email Cloudflare giấu ("[email protected]", link /cdn-cgi/l/email-protection): không giải mã,
+# chỉ thay bằng nhãn ẩn.
+_CF_EMAIL = re.compile(
+    r"\[?\[email[\s\xa0]protected\]\]?(?:\([^)\s]*\))?|\[[^\[\]]*\]\([^)\s]*/cdn-cgi/l/email-protection[^)\s]*\)",
+    re.IGNORECASE,
+)
+
+
 def mask_contacts(text: str) -> str:
     """Ẩn số điện thoại, email cá nhân, tên người liên hệ; giữ email ứng tuyển chung của công ty
     (hr@, tuyendung@...) và URL."""
@@ -492,27 +599,39 @@ def mask_contacts(text: str) -> str:
         before = fold(text[max(0, m.start() - 25) : m.start()])
         return m.group(0) if _TAX_LABEL.search(before) else CONTACT_MASK
 
+    text = _CF_EMAIL.sub(CONTACT_MASK, text)
     text = _EMAIL.sub(_mask_email, text)
     text = _PHONE.sub(phone, text)
 
-    def labeled(m: re.Match[str]) -> str:
+    # Không dùng `sub`: khớp bị loại ("Liên hệ: Tên / Chức danh: Vũ Tuấn") không được nuốt phần
+    # sau nhãn, vì phần đó có thể chứa nhãn thật — tìm tiếp từ đầu phần tên.
+    out: list[str] = []
+    pos = 0
+    while m := _LABELED_NAME.search(text, pos):
         name = _person_name(m.group(2))
         if name is None:
-            return m.group(0)
-        return m.group(1) + CONTACT_MASK + m.group(2)[len(name) :]
+            out.append(text[pos : m.start(2)])
+            pos = m.start(2)
+            continue
+        out.append(text[pos : m.start(2)] + CONTACT_MASK)
+        pos = m.start(2) + len(name)
+    text = "".join(out) + text[pos:]
 
     def titled(m: re.Match[str]) -> str:
         name = _person_name(m.group(0))
         return CONTACT_MASK + m.group(0)[len(name) :] if name else m.group(0)
 
-    text = _LABELED_NAME.sub(labeled, text)
     text = _TITLED_NAME.sub(titled, text)
     mask = re.escape(CONTACT_MASK)
+    # Link tới liên hệ đã ẩn ("[[liên hệ đã ẩn]](mailto:[liên hệ đã ẩn])") → chỉ còn nhãn ẩn.
+    text = re.sub(
+        rf"\[(?:[^\[\]]|{mask})*\]\([^()\s]*{mask}[^()\s]*(?:\s+\"[^\"]*\")?\)", CONTACT_MASK, text
+    )
     return re.sub(rf"{mask}(?:[\s,/;:–-]*{mask})+", CONTACT_MASK, text)
 
 
-def clean_text_field(text: str | None, fmt: str = "html") -> str:
-    return mask_contacts(to_markdown(text, fmt))
+def clean_text_field(text: str | None, fmt: str = "html", base_url: str | None = None) -> str:
+    return mask_contacts(to_markdown(text, fmt, base_url))
 
 
 # --- tiêu đề --------------------------------------------------------------------------------------
@@ -1151,9 +1270,9 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
     """Một tin thô → các trường đã chuẩn hoá (chưa xác minh, chưa gộp)."""
     fmt = raw.description_format
     title = clean_title(raw.title)
-    description = clean_text_field(raw.description, fmt)
-    requirements = clean_text_field(raw.requirements, fmt) or None
-    benefits = clean_text_field(raw.benefits, fmt) or None
+    description = clean_text_field(raw.description, fmt, raw.url)
+    requirements = clean_text_field(raw.requirements, fmt, raw.url) or None
+    benefits = clean_text_field(raw.benefits, fmt, raw.url) or None
     # Nguồn hay để cả JD trong mô tả (kèm mục yêu cầu/quyền lợi); "yêu cầu" vài chữ thường chỉ
     # là trình độ ("Đại học").
     if description and (requirements is None or len(requirements) < 50 or benefits is None):

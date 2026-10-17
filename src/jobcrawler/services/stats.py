@@ -105,6 +105,7 @@ class Target:
     value: float | None
     target: str
     ok: bool | None
+    kind: str = "seconds"  # seconds | rate
 
 
 @dataclass(slots=True)
@@ -323,16 +324,17 @@ async def table_sizes(session: AsyncSession) -> list[tuple[str, int]]:
 def targets(runs: RunStats) -> list[Target]:
     return [
         Target(
-            "p95 thời gian / doanh nghiệp (s)",
+            "P95 thời gian mỗi doanh nghiệp",
             runs.p95_seconds,
-            f"≤ {TARGET_P95_SECONDS:g}",
+            f"≤ {TARGET_P95_SECONDS:g} s",
             None if runs.p95_seconds is None else runs.p95_seconds <= TARGET_P95_SECONDS,
         ),
         Target(
-            "tỉ lệ failed (lượt mới nhất)",
+            "Tỉ lệ thất bại (lượt mới nhất)",
             runs.failed_rate,
             f"< {TARGET_FAILED_RATE:.0%}",
             None if runs.failed_rate is None else runs.failed_rate < TARGET_FAILED_RATE,
+            kind="rate",
         ),
     ]
 
@@ -349,7 +351,7 @@ async def collect_stats(res: Resources, *, hours: float | None = 24, storage: bo
     async with res.sessionmaker() as session:
         companies = int(await session.scalar(select(func.count()).select_from(Company)) or 0)
         kyc = {
-            (status or "chưa KYC"): n
+            (status or "none"): n
             for status, n in await session.execute(
                 select(Company.kyc_status, func.count()).group_by(Company.kyc_status)
             )

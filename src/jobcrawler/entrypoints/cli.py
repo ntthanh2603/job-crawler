@@ -684,7 +684,9 @@ def _stats_lines(st: Any) -> list[str]:
             f" · {q.workers} worker (xong {q.complete}, lỗi {q.failed}, chạy lại {q.retried},"
             f" huỷ {q.aborted})"
         )
-    kyc = ", ".join(f"{k} {v}" for k, v in sorted(st.kyc_status.items()))
+    kyc = ", ".join(
+        f"{'chưa KYC' if k == 'none' else k} {v}" for k, v in sorted(st.kyc_status.items())
+    )
     jobs = ", ".join(f"{k} {v}" for k, v in sorted(st.jobs_by_status.items()))
     lines += [
         f"== Doanh nghiệp: {st.companies} ({kyc})",
@@ -750,7 +752,7 @@ def _stats_lines(st: Any) -> list[str]:
         value = (
             "-"
             if t.value is None
-            else (f"{t.value:.1%}" if "tỉ lệ" in t.name else f"{t.value:.0f}")
+            else (f"{t.value:.1%}" if t.kind == "rate" else f"{t.value:.0f} s")
         )
         state = {True: "đạt", False: "CHƯA ĐẠT", None: "chưa có dữ liệu"}[t.ok]
         lines.append(f"  {t.name}: {value} (mục tiêu {t.target}) → {state}")

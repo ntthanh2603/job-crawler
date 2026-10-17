@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from "react"
-import { Route, Routes } from "react-router"
+import { Link, Route, Routes } from "react-router"
 
 import { Empty, Loading, PageHeader } from "@/components/common"
 import { Layout } from "@/components/layout"
@@ -35,7 +35,12 @@ function NotFound() {
   return (
     <>
       <PageHeader title="Không tìm thấy trang" />
-      <Empty>Đường dẫn này không tồn tại.</Empty>
+      <Empty>
+        <p>Đường dẫn này không tồn tại hoặc đã bị đổi.</p>
+        <Link to="/" className="mt-2 inline-block font-medium text-brand hover:underline">
+          Về trang Tổng quan
+        </Link>
+      </Empty>
     </>
   )
 }

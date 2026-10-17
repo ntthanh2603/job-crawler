@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Play, PlayCircle, Search, Upload } from "lucide-react"
 import { useEffect, useState, type FormEvent } from "react"
-import { Link, useSearchParams } from "react-router"
+import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -9,12 +9,14 @@ import {
   Empty,
   ErrorState,
   Field,
+  FilePicker,
   FilterSelect,
   Loading,
   PageHeader,
   Pager,
   Section,
   StatusBadge,
+  TextLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -22,12 +24,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { ago, companyName, duration, num } from "@/lib/format"
+import { ago, cap, companyName, duration, num, sourceLabel } from "@/lib/format"
 import type { CompanyItem, EnqueueResult, ImportOutcome, Meta, Page } from "@/lib/types"
 
 function enqueueMessage(r: EnqueueResult) {
-  return `Đã đưa ${r.enqueued}/${r.selected} doanh nghiệp vào queue${
-    r.already_queued ? ` (${r.already_queued} đã có job chờ/chạy)` : ""
+  return `Đã đưa ${r.enqueued}/${r.selected} doanh nghiệp vào hàng đợi${
+    r.already_queued ? ` (${r.already_queued} đã có việc đang chờ hoặc đang chạy)` : ""
   }`
 }
 
@@ -42,16 +44,16 @@ function ImportCard() {
       form.append("enqueue", String(enqueue))
       return api.form<ImportOutcome>("/companies/import", form)
     },
-    onSuccess: () => {
-      toast.success("Đã nạp danh sách")
+    onSuccess: (r) => {
+      toast.success(`Đã nạp ${num(r.rows)} dòng: ${num(r.created)} mới, ${num(r.updated)} cập nhật`)
       client.invalidateQueries({ queryKey: ["companies"] })
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const r = mutation.data
 
   return (
-    <Section title="Nạp danh sách (CSV)" description="Cột name (bắt buộc), tax_code, website, note. Chạy lại không tạo trùng.">
+    <Section title="Nạp danh sách" description="File CSV: cột name (bắt buộc), tax_code, website, note">
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -59,49 +61,58 @@ function ImportCard() {
           if (file) mutation.mutate()
         }}
       >
-        <Input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <FilePicker
+          file={file}
+          onChange={setFile}
+          title="Chọn file companies.csv"
+          hint="UTF-8, phân cách bằng dấu phẩy, chấm phẩy hoặc tab"
+        />
         <div className="flex items-center gap-2">
           <Checkbox id="enqueue" checked={enqueue} onCheckedChange={(v) => setEnqueue(v === true)} />
           <Label htmlFor="enqueue" className="text-sm font-normal">
-            Đưa luôn vào queue sau khi nạp
+            Đưa vào hàng đợi ngay sau khi nạp
           </Label>
         </div>
-        <Button type="submit" size="sm" disabled={!file || mutation.isPending}>
-          <Upload /> {mutation.isPending ? "Đang nạp…" : "Nạp"}
+        <Button type="submit" size="sm" className="w-full" disabled={!file || mutation.isPending}>
+          <Upload /> {mutation.isPending ? "Đang nạp…" : "Nạp danh sách"}
         </Button>
+        <p className="text-xs text-muted-foreground">Nạp lại cùng file không tạo trùng doanh nghiệp.</p>
       </form>
       {r && (
         <div className="mt-4 space-y-3 border-t pt-4 text-sm">
           <div className="grid grid-cols-3 gap-2 text-center">
-            {[
-              ["Hợp lệ", r.rows],
-              ["Tạo mới", r.created],
-              ["Cập nhật", r.updated],
-              ["Giữ nguyên", r.unchanged],
-              ["Trùng", r.duplicates],
-              ["Bỏ", r.errors.length],
-            ].map(([k, v]) => (
-              <div key={k} className="rounded-md bg-muted px-2 py-1.5">
-                <div className="text-lg font-semibold tabular-nums">{num(v as number)}</div>
+            {(
+              [
+                ["Hợp lệ", r.rows],
+                ["Tạo mới", r.created],
+                ["Cập nhật", r.updated],
+                ["Giữ nguyên", r.unchanged],
+                ["Trùng", r.duplicates],
+                ["Bị bỏ", r.errors.length],
+              ] as [string, number][]
+            ).map(([k, v]) => (
+              <div key={k} className="rounded-lg bg-muted/60 px-2 py-2">
+                <div className="text-base font-semibold tabular-nums">{num(v)}</div>
                 <div className="text-xs text-muted-foreground">{k}</div>
               </div>
             ))}
           </div>
           {r.enqueued !== null && (
             <p className="text-muted-foreground">
-              Vào queue: {r.enqueued} ({r.already_queued} đã có)
+              Đã đưa {r.enqueued} doanh nghiệp vào hàng đợi
+              {r.already_queued ? ` (${r.already_queued} đã có sẵn)` : ""}.
             </p>
           )}
           {(r.errors.length > 0 || r.warnings.length > 0) && (
-            <ul className="max-h-48 space-y-1 overflow-auto text-xs">
+            <ul className="max-h-48 space-y-1 overflow-auto rounded-lg bg-muted/40 p-2 text-xs">
               {r.errors.slice(0, 50).map((m) => (
                 <li key={m} className="text-destructive">
-                  {m}
+                  {cap(m)}
                 </li>
               ))}
               {r.warnings.slice(0, 50).map((m) => (
                 <li key={m} className="text-warning">
-                  {m}
+                  {cap(m)}
                 </li>
               ))}
             </ul>
@@ -150,13 +161,12 @@ export function CompaniesPage() {
       setSelected(new Set())
       client.invalidateQueries({ queryKey: ["companies"] })
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   const items = query.data?.items ?? []
   const allChecked = items.length > 0 && items.every((r) => selected.has(r.company.id))
-  const toggleAll = () =>
-    setSelected(allChecked ? new Set() : new Set(items.map((r) => r.company.id)))
+  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(items.map((r) => r.company.id)))
   const toggle = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev)
@@ -164,35 +174,37 @@ export function CompaniesPage() {
       else next.add(id)
       return next
     })
+  const filtered = Boolean(filters.q || filters.kyc || filters.run || filters.jobs)
 
   return (
     <>
       <PageHeader
         title="Doanh nghiệp"
-        description={query.data ? `${num(query.data.total)} doanh nghiệp khớp bộ lọc` : "Đang tải…"}
+        description={query.data ? `${num(query.data.total)} doanh nghiệp khớp bộ lọc` : "Đang tải danh sách…"}
         actions={
           <>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              chưa chạy trong
+            <div className="flex h-8 items-center gap-1.5 rounded-md border bg-card pr-1 pl-2.5 text-xs text-muted-foreground">
+              Chưa chạy trong
               <Input
                 type="number"
                 min={1}
                 value={staleHours}
                 onChange={(e) => setStaleHours(e.target.value)}
-                className="h-8 w-16"
+                className="h-6 w-14 px-1.5 text-center"
+                aria-label="Số giờ"
               />
               giờ
             </div>
             <ConfirmButton
-              title="Chạy doanh nghiệp cũ?"
-              description={`Đưa các doanh nghiệp chưa có lượt chạy xong trong ${staleHours} giờ qua vào queue.`}
+              title="Chạy các doanh nghiệp lâu chưa cập nhật?"
+              description={`Đưa các doanh nghiệp chưa có lượt chạy xong trong ${staleHours} giờ qua vào hàng đợi.`}
               onConfirm={() => enqueue.mutate({ stale_hours: Number(staleHours) || 24 })}
             >
               <PlayCircle /> Chạy DN cũ
             </ConfirmButton>
             <ConfirmButton
-              title="Chạy TẤT CẢ doanh nghiệp?"
-              description="Mỗi doanh nghiệp một job trong queue; job đang chờ/chạy sẽ không bị nạp trùng."
+              title="Chạy tất cả doanh nghiệp?"
+              description="Mỗi doanh nghiệp một việc trong hàng đợi; doanh nghiệp đang chờ hoặc đang chạy sẽ không bị nạp trùng."
               onConfirm={() => enqueue.mutate({ all: true })}
             >
               <Play /> Chạy tất cả
@@ -201,24 +213,24 @@ export function CompaniesPage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
-          <Section bodyClassName="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <form
-              className="flex items-end gap-2"
+              className="flex items-end"
               onSubmit={(e: FormEvent) => {
                 e.preventDefault()
                 update({ q: search.trim() })
               }}
             >
-              <Field label="Tìm">
+              <Field label="Tìm kiếm">
                 <div className="relative">
                   <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="tên, MST, domain, alias"
-                    className="h-8 w-64 pl-8"
+                    placeholder="Tên, MST, domain, tên gọi khác"
+                    className="h-8 w-72 bg-card pl-8"
                   />
                 </div>
               </Field>
@@ -230,33 +242,33 @@ export function CompaniesPage() {
                 options={[...(meta.data?.kyc_statuses ?? []), "none"]}
               />
             </Field>
-            <Field label="Lượt mới nhất">
+            <Field label="Lượt chạy mới nhất">
               <FilterSelect
                 value={filters.run}
                 onChange={(v) => update({ run: v })}
                 options={[...(meta.data?.run_statuses ?? []), "never"]}
               />
             </Field>
-            <Field label="Job">
+            <Field label="Việc làm">
               <FilterSelect value={filters.jobs} onChange={(v) => update({ jobs: v })} options={["with", "without"]} />
             </Field>
-            {(filters.q || filters.kyc || filters.run || filters.jobs) && (
+            {filtered && (
               <Button variant="ghost" size="sm" onClick={() => setParams({})}>
-                Xoá lọc
+                Xoá bộ lọc
               </Button>
             )}
-          </Section>
+          </div>
 
           <Section
             bodyClassName="p-0"
-            title={selected.size ? `Đã chọn ${selected.size}` : "Danh sách"}
+            title={selected.size ? `Đã chọn ${selected.size} doanh nghiệp` : "Danh sách doanh nghiệp"}
             actions={
               <Button
                 size="sm"
                 disabled={!selected.size || enqueue.isPending}
                 onClick={() => enqueue.mutate({ company_ids: [...selected] })}
               >
-                <Play /> Chạy các DN đã chọn
+                <Play /> Chạy mục đã chọn
               </Button>
             }
           >
@@ -280,10 +292,8 @@ export function CompaniesPage() {
                       </TableHead>
                       <TableHead>Doanh nghiệp</TableHead>
                       <TableHead>KYC</TableHead>
-                      <TableHead>Domain / MST</TableHead>
-                      <TableHead>Lượt mới nhất</TableHead>
-                      <TableHead className="text-right">Thời gian</TableHead>
-                      <TableHead className="pr-4 text-right">Job mở</TableHead>
+                      <TableHead>Lượt chạy mới nhất</TableHead>
+                      <TableHead className="pr-4 text-right">Việc đang mở</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -299,47 +309,55 @@ export function CompaniesPage() {
                               aria-label={`Chọn ${shown}`}
                             />
                           </TableCell>
-                          <TableCell className="max-w-80 min-w-56 whitespace-normal">
-                            <Link to={`/companies/${c.id}`} className="font-medium hover:underline">
+                          <TableCell className="max-w-[26rem] min-w-60 whitespace-normal">
+                            <TextLink to={`/companies/${c.id}`} className="font-medium">
                               {shown}
-                            </Link>
-                            {c.legal_name && c.legal_name !== shown && (
-                              <div className="text-xs text-muted-foreground">{c.legal_name}</div>
+                            </TextLink>
+                            {c.legal_name && cap(c.legal_name) !== shown && (
+                              <div className="text-xs text-muted-foreground">{cap(c.legal_name)}</div>
                             )}
-                            {c.input_name !== shown && c.input_name !== c.legal_name && (
-                              <div className="text-xs text-muted-foreground">nhập: {c.input_name}</div>
+                            {cap(c.input_name) !== shown && c.input_name !== c.legal_name && (
+                              <div className="text-xs text-muted-foreground">Tên nhập: {c.input_name}</div>
+                            )}
+                            {(c.primary_domain || row.input_website || c.tax_code) && (
+                              <div className="mt-0.5 text-xs break-all text-muted-foreground tabular-nums">
+                                {[c.primary_domain || row.input_website, c.tax_code && `MST ${c.tax_code}`]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </div>
                             )}
                           </TableCell>
-                          <TableCell>{c.kyc_status ? <StatusBadge value={c.kyc_status} /> : <span className="text-muted-foreground">–</span>}</TableCell>
-                          <TableCell className="text-xs">
-                            <div>{c.primary_domain || row.input_website || "–"}</div>
-                            {c.tax_code && <div className="text-muted-foreground">{c.tax_code}</div>}
+                          <TableCell>
+                            {c.kyc_status ? (
+                              <StatusBadge value={c.kyc_status} />
+                            ) : (
+                              <StatusBadge value="none" tone="muted" />
+                            )}
                           </TableCell>
-                          <TableCell className="whitespace-normal">
+                          <TableCell className="min-w-44 whitespace-normal">
                             {row.last_status ? (
-                              <div className="flex flex-col gap-0.5">
-                                <span className="flex items-center gap-1.5">
-                                  <StatusBadge value={row.last_status} />
-                                  <span className="text-xs text-muted-foreground">{ago(row.last_started)}</span>
+                              <div className="flex flex-col items-start gap-1">
+                                <StatusBadge value={row.last_status} />
+                                <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                                  {cap(ago(row.last_started))} · {duration(row.last_duration_ms)}
                                 </span>
                                 {row.last_incomplete.length > 0 && (
                                   <span className="text-xs text-muted-foreground">
-                                    chưa xong: {row.last_incomplete.join(", ")}
+                                    Chưa xong: {row.last_incomplete.map(sourceLabel).join(", ")}
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">chưa chạy</span>
+                              <span className="text-xs text-muted-foreground">Chưa chạy</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{duration(row.last_duration_ms)}</TableCell>
                           <TableCell className="pr-4 text-right tabular-nums">
                             {row.active_jobs ? (
-                              <Link to={`/jobs?company_id=${c.id}`} className="text-primary hover:underline">
+                              <TextLink to={`/jobs?company_id=${c.id}`} className="font-medium text-brand">
                                 {row.active_jobs}
-                              </Link>
+                              </TextLink>
                             ) : (
-                              0
+                              <span className="text-muted-foreground">0</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -348,15 +366,12 @@ export function CompaniesPage() {
                   </TableBody>
                 </Table>
               ) : (
-                <Empty>Không có doanh nghiệp nào. Nạp companies.csv ở khung bên.</Empty>
+                <Empty>
+                  {filtered ? "Không có doanh nghiệp nào khớp bộ lọc." : "Chưa có doanh nghiệp nào. Nạp companies.csv ở khung bên phải."}
+                </Empty>
               ))}
             {query.data && (
-              <Pager
-                page={query.data.page}
-                pages={query.data.pages}
-                total={query.data.total}
-                onPage={(p) => update({ page: p })}
-              />
+              <Pager page={query.data.page} pages={query.data.pages} total={query.data.total} onPage={(p) => update({ page: p })} />
             )}
           </Section>
         </div>

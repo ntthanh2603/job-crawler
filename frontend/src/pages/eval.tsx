@@ -1,18 +1,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Download, FolderOpen, Play } from "lucide-react"
 import { useState } from "react"
-import { Link } from "react-router"
 import { toast } from "sonner"
 
-import { Empty, Field, PageHeader, Section, StatCard } from "@/components/common"
+import { Empty, FilePicker, PageHeader, Section, StatCard, TextLink } from "@/components/common"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
-import { pct } from "@/lib/format"
+import { cap, label, pct, sourceLabel } from "@/lib/format"
 import type { EvalReport } from "@/lib/types"
 
 export function EvalPage() {
@@ -33,7 +31,7 @@ export function EvalPage() {
       form.append("include_inactive", String(inactive))
       return api.form<EvalReport>("/eval", form)
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const r = run.data
 
@@ -51,11 +49,11 @@ export function EvalPage() {
     <>
       <PageHeader
         title="Golden set"
-        description="Precision/recall theo doanh nghiệp và theo nguồn, so với danh sách job đúng do người kiểm cung cấp."
+        description="Precision và recall theo doanh nghiệp và theo nguồn, so với danh sách việc làm đúng do người kiểm cung cấp."
         actions={
           r && (
             <Button variant="outline" size="sm" onClick={download}>
-              <Download /> Báo cáo .md
+              <Download /> Tải báo cáo
             </Button>
           )
         }
@@ -63,16 +61,24 @@ export function EvalPage() {
 
       <Section title="Chạy đánh giá" className="mb-6" bodyClassName="space-y-4">
         <div className="flex flex-wrap items-end gap-4">
-          <Field label="companies.csv">
-            <Input type="file" accept=".csv,text/csv" onChange={(e) => setCompanies(e.target.files?.[0] ?? null)} className="w-72" />
-          </Field>
-          <Field label="jobs.csv">
-            <Input type="file" accept=".csv,text/csv" onChange={(e) => setJobs(e.target.files?.[0] ?? null)} className="w-72" />
-          </Field>
+          <FilePicker
+            file={companies}
+            onChange={setCompanies}
+            title="Chọn companies.csv"
+            hint="Danh sách doanh nghiệp trong golden set"
+            className="w-64"
+          />
+          <FilePicker
+            file={jobs}
+            onChange={setJobs}
+            title="Chọn jobs.csv"
+            hint="Các việc làm đúng của từng doanh nghiệp"
+            className="w-64"
+          />
           <div className="flex items-center gap-2 pb-2">
             <Checkbox id="inactive" checked={inactive} onCheckedChange={(v) => setInactive(v === true)} />
             <Label htmlFor="inactive" className="font-normal">
-              So cả job đã hết hạn/gỡ
+              So cả việc đã hết hạn hoặc đã gỡ
             </Label>
           </div>
           <Button onClick={() => run.mutate(false)} disabled={!companies || !jobs || run.isPending}>
@@ -80,18 +86,22 @@ export function EvalPage() {
           </Button>
           {server.data?.available && (
             <Button variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending}>
-              <FolderOpen /> Dùng {server.data.path}/ trên máy chủ
+              <FolderOpen /> Dùng thư mục {server.data.path}/ trên máy chủ
             </Button>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          <code>companies.csv</code> như file đầu vào (name, tax_code, website); <code>jobs.csv</code> gồm <code>company</code>{" "}
-          (tên hoặc MST) và <code>url</code> và/hoặc <code>title</code> của các job đúng. Khớp khi URL trùng hoặc tiêu đề gần
-          như trùng (≥ 90%). Chưa có golden set: dùng trang <Link to="/review" className="text-primary hover:underline">Kiểm tay</Link>.
+        <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+          File <code>companies.csv</code> giống file đầu vào (name, tax_code, website). File <code>jobs.csv</code> gồm cột{" "}
+          <code>company</code> (tên hoặc MST) và <code>url</code> hoặc <code>title</code> của các việc làm đúng. Hai việc khớp
+          nhau khi URL trùng hoặc tiêu đề giống nhau từ 90% trở lên. Chưa có golden set thì dùng trang{" "}
+          <TextLink to="/review" className="text-brand">
+            Kiểm tay
+          </TextLink>
+          .
         </p>
       </Section>
 
-      {!r && !run.isPending && <Empty>Tải golden set lên để xem precision/recall.</Empty>}
+      {!r && !run.isPending && <Empty>Tải golden set lên để xem precision và recall.</Empty>}
 
       {r && (
         <div className="space-y-6">
@@ -99,16 +109,28 @@ export function EvalPage() {
             <StatCard
               label="Precision"
               value={pct(r.precision)}
-              hint={`mục tiêu ≥ ${pct(r.target_precision, 0)}`}
-              tone={r.precision !== null && r.precision >= r.target_precision ? "good" : "bad"}
+              hint={`Mục tiêu ≥ ${pct(r.target_precision, 0)}`}
+              status={
+                r.precision === null
+                  ? undefined
+                  : r.precision >= r.target_precision
+                    ? { tone: "good", text: "Đạt" }
+                    : { tone: "bad", text: "Chưa đạt" }
+              }
             />
             <StatCard
               label="Recall"
               value={pct(r.recall)}
-              hint={`mục tiêu ≥ ${pct(r.target_recall, 0)}`}
-              tone={r.recall !== null && r.recall >= r.target_recall ? "good" : "bad"}
+              hint={`Mục tiêu ≥ ${pct(r.target_recall, 0)}`}
+              status={
+                r.recall === null
+                  ? undefined
+                  : r.recall >= r.target_recall
+                    ? { tone: "good", text: "Đạt" }
+                    : { tone: "bad", text: "Chưa đạt" }
+              }
             />
-            <StatCard label="Golden / tìm được / khớp" value={`${r.golden} / ${r.predicted} / ${r.matched}`} hint={`${r.companies.length} doanh nghiệp`} />
+            <StatCard label="Golden / tìm được / khớp" value={`${r.golden} / ${r.predicted} / ${r.matched}`} hint={`${r.companies.length} doanh nghiệp trong golden set`} />
             {Object.entries(r.perf).map(([k, v]) => (
               <StatCard key={k} label={k} value={v} />
             ))}
@@ -133,15 +155,9 @@ export function EvalPage() {
                 {r.companies.map((c) => (
                   <TableRow key={c.name}>
                     <TableCell className="pl-4">
-                      {c.company_id ? (
-                        <Link to={`/companies/${c.company_id}`} className="hover:underline">
-                          {c.name}
-                        </Link>
-                      ) : (
-                        c.name
-                      )}
+                      {c.company_id ? <TextLink to={`/companies/${c.company_id}`}>{cap(c.name)}</TextLink> : cap(c.name)}
                     </TableCell>
-                    <TableCell className="text-xs">{c.run_status ?? "–"}</TableCell>
+                    <TableCell className="text-xs">{c.run_status ? label(c.run_status) : "–"}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.golden}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.predicted}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.matched}</TableCell>
@@ -169,7 +185,7 @@ export function EvalPage() {
               <TableBody>
                 {r.sources.map((s) => (
                   <TableRow key={s.source}>
-                    <TableCell className="pl-4">{s.source}</TableCell>
+                    <TableCell className="pl-4">{sourceLabel(s.source)}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.predicted}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.matched}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(s.precision)}</TableCell>
@@ -186,7 +202,7 @@ export function EvalPage() {
               <AlertDescription>
                 <ul className="list-disc pl-4 text-xs">
                   {r.warnings.map((w) => (
-                    <li key={w}>{w}</li>
+                    <li key={w}>{cap(w)}</li>
                   ))}
                 </ul>
               </AlertDescription>

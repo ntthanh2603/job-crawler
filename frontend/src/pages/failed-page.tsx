@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router"
 import { ErrorState, Loading, Meta, PageHeader, Section } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { dt, num } from "@/lib/format"
+import { dt, failReason, num, sourceLabel } from "@/lib/format"
 import type { FailedPage } from "@/lib/types"
 
 export function FailedPagePage() {
@@ -19,12 +19,12 @@ export function FailedPagePage() {
     <>
       <PageHeader
         title={`Trang parse lỗi #${p.id}`}
-        description={`${p.source} · ${dt(p.created_at)} · HTTP ${p.http_status ?? "–"}`}
+        description={`${sourceLabel(p.source)} · ${dt(p.created_at)} · HTTP ${p.http_status ?? "–"}`}
         actions={
           <>
             {p.run_id && (
               <Button variant="outline" size="sm" asChild>
-                <Link to={`/runs/${p.run_id}`}>Lượt chạy</Link>
+                <Link to={`/runs/${p.run_id}`}>Xem lượt chạy</Link>
               </Button>
             )}
             <Button variant="outline" size="sm" asChild>
@@ -45,13 +45,14 @@ export function FailedPagePage() {
           <Meta
             items={[
               ["URL", <span className="break-all">{p.url}</span>],
-              ["Lý do", <code className="text-xs">{p.reason}</code>],
-              ["Kích thước", `${num(p.html.length)} ký tự (lưu nén zstd, xoá sau 7 ngày)`],
+              ["Lý do", failReason(p.reason)],
+              ["Mã lý do", <code className="text-xs">{p.reason.split(":")[0]}</code>],
+              ["Kích thước", `${num(p.html.length)} ký tự, lưu nén zstd và tự xoá sau 7 ngày`],
             ]}
           />
         </Section>
-        <Section title="HTML" description="Hiển thị dạng chữ, không chạy nội dung trang">
-          <pre className="max-h-[70vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
+        <Section title="Mã HTML" description="Hiển thị dạng chữ, không chạy nội dung của trang">
+          <pre className="max-h-[70vh] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
             {p.html.slice(0, 200_000)}
           </pre>
         </Section>

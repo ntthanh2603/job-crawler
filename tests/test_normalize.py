@@ -13,6 +13,7 @@ from jobcrawler.pipeline.normalize import (
     classify_employment,
     classify_level,
     classify_work_mode,
+    clean_text_field,
     mask_contacts,
     normalize_title,
     parse_date,
@@ -296,6 +297,108 @@ def test_to_markdown_keeps_bold_and_tables() -> None:
     assert "| --- | --- |" in md
 
 
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        # Hai thẻ in đậm liền nhau.
+        ("- **Tuổi****:** Từ 18 tuổi trở lên", "- **Tuổi:** Từ 18 tuổi trở lên"),
+        (
+            "1. **Lấy** **khách** **hàng** **trọn****g** **tâm**",
+            "1. **Lấy** **khách** **hàng** **trọng** **tâm**",
+        ),
+        # VNPay: "*" trang trí nằm trong thẻ in đậm.
+        ("*** Số lượng cần tuyển: 06**", "- Số lượng cần tuyển: 06"),
+        ("***** **Thông tin liên hệ: P. Nhân sự**", "- Thông tin liên hệ: P. Nhân sự"),
+        ("*****Nice to Have**", "- Nice to Have"),
+        ("*Hãy kể* ***bạn đã làm gì****.", "Hãy kể bạn đã làm gì."),
+        ("***Bosch (BGSV)******is a subsidiary***", "***Bosch (BGSV)is a subsidiary***"),
+        ("- *******Hồ sơ gửi đến email:****** abc", "- Hồ sơ gửi đến email: abc"),
+        (
+            '***Lưu ý: Ứng viên "Từ chối" sẽ không được xét*',
+            '- Lưu ý: Ứng viên "Từ chối" sẽ không được xét',
+        ),
+        ("### **** Mục tiêu\nNội dung", "### Mục tiêu\nNội dung"),
+        # Giữ nguyên: nhấn mạnh cân, chú thích (*), một dấu sao.
+        ("***Đậm nghiêng***", "***Đậm nghiêng***"),
+        ("**Lương:** thoả thuận (*)", "**Lương:** thoả thuận (*)"),
+        ("*** Lương (**) thoả thuận**", "- Lương (**) thoả thuận"),
+        ("Khách sạn 5* ở Đà Nẵng", "Khách sạn 5* ở Đà Nẵng"),
+        ("**Ưu tiên:** khách sạn 5* (**)", "**Ưu tiên:** khách sạn 5* (**)"),
+        (
+            "với***Chính sách bảo vệ dữ liệu***của VNPAY",
+            "với***Chính sách bảo vệ dữ liệu***của VNPAY",
+        ),
+        ("**Đậm đầu** và *nghiêng cuối*", "**Đậm đầu** và *nghiêng cuối*"),
+        ("at Sun* Inc.", "at Sun* Inc."),
+        # In đậm viết dính: thêm cách / bỏ cách thừa để CommonMark hiểu.
+        (
+            "- **Tư vấn khách hàng:**Trực tiếp hướng dẫn",
+            "- **Tư vấn khách hàng:** Trực tiếp hướng dẫn",
+        ),
+        ("*Sales B2B:*Có hiểu biết", "*Sales B2B:* Có hiểu biết"),
+        ("** Thu nhập và đãi ngộ:**", "**Thu nhập và đãi ngộ:**"),
+        ("** Join Katalon as our Director", "Join Katalon as our Director"),
+        ("## ** MÔ TẢ CÔNG VIỆC**\nA", "## **MÔ TẢ CÔNG VIỆC**\nA"),
+        ("## **📌 MÔ TẢ CÔNG VIỆC**\nA", "## **MÔ TẢ CÔNG VIỆC**\nA"),
+        (
+            "*Tử tế thu hút tử tế.*[*Luật*](https://a.vn/x)",
+            "*Tử tế thu hút tử tế.*[*Luật*](https://a.vn/x)",
+        ),
+        (
+            "Online at:* [*https://a.vn/*](https://a.vn/)*,*",
+            "Online at: [https://a.vn/](https://a.vn/),",
+        ),
+    ],
+)
+def test_fix_broken_emphasis(line: str, expected: str) -> None:
+    assert to_markdown(line, "markdown") == expected
+
+
+def test_relative_links_resolved_against_job_url() -> None:
+    md = to_markdown(
+        "[Tìm hiểu thêm](/careers/why-bosch/) · [Mục](#apply) · [Web](https://acme.vn/a)",
+        "markdown",
+        "https://www.bosch.com.vn/careers/job/123",
+    )
+    assert md == (
+        "[Tìm hiểu thêm](https://www.bosch.com.vn/careers/why-bosch/) · Mục · [Web](https://acme.vn/a)"
+    )
+    assert to_markdown("[Tất cả việc làm](/jobs)", "markdown") == "Tất cả việc làm"
+    assert to_markdown("[[HN] Data](/tuyen-dung/hn-data/)", "markdown", "https://ghtk.vn/a/") == (
+        "[[HN] Data](https://ghtk.vn/tuyen-dung/hn-data/)"
+    )
+    assert to_markdown(
+        '[Kế toán](/viec-lam/ke-toan-a1.html "Kế toán")', "markdown", "https://sapo.vn/x"
+    ) == ("[Kế toán](https://sapo.vn/viec-lam/ke-toan-a1.html)")
+
+
+def test_masked_contact_links_collapse() -> None:
+    text = (
+        "Gửi CV: [an.nguyen@gmail.com](mailto:an.nguyen@gmail.com), "
+        "gọi [0912 345 678](tel:0912345678)"
+    )
+    assert mask_contacts(text) == f"Gửi CV: {CONTACT_MASK}, gọi {CONTACT_MASK}"
+    titled = '[Hotline: 0912 345 678](tel:0912345678 "Hotline")'
+    assert mask_contacts(titled) == CONTACT_MASK
+    kept = "[tuyendung@acme.vn](mailto:tuyendung@acme.vn)"
+    assert mask_contacts(kept) == kept
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Gửi CV về email: **[[email protected]](/cdn-cgi/l/email-protection#f4979c9d)**",
+        "Email: [email protected]",
+        "Email: [Gửi thư](https://acme.vn/cdn-cgi/l/email-protection#ab12)",
+    ],
+)
+def test_cloudflare_email_masked(text: str) -> None:
+    out = clean_text_field(text, "markdown", "https://acme.vn/jobs/1")
+    assert CONTACT_MASK in out
+    assert "protected" not in out
+    assert "cdn-cgi" not in out
+
+
 def test_split_sections() -> None:
     md = "## Mô tả công việc\n- Việc A\n\n## Yêu cầu ứng viên\n- Kỹ năng B\n\n**Quyền lợi:**\n- C"
     desc, req, ben = split_sections(md)
@@ -320,7 +423,22 @@ def test_split_sections() -> None:
         ("Người liên hệ: Nguyễn Văn An", f"Người liên hệ: {CONTACT_MASK}"),
         ("LH chị Lan để biết thêm", f"LH {CONTACT_MASK} để biết thêm"),
         ("Gặp Mr John Smith tại văn phòng", f"Gặp {CONTACT_MASK} tại văn phòng"),
+        # KiotViet: "Thông tin liên hệ" có nhãn tên/chức danh.
+        ("- Tên / Chức danh: Vũ Tuấn - HRBP", f"- Tên / Chức danh: {CONTACT_MASK} - HRBP"),
+        (
+            "##### Thông tin liên hệ\n\n- Tên / Chức danh: Vũ Tuấn - HRBP\n\n- Mail: x",
+            f"##### Thông tin liên hệ\n\n- Tên / Chức danh: {CONTACT_MASK} - HRBP\n\n- Mail: x",
+        ),
+        ("Liên hệ:\nNguyễn Văn An", f"Liên hệ:\n{CONTACT_MASK}"),
+        ("Liên hệ: Tên / Chức danh: Vũ Tuấn", f"Liên hệ: Tên / Chức danh: {CONTACT_MASK}"),
+        ("Họ tên: Trần Thị Mai", f"Họ tên: {CONTACT_MASK}"),
+        ("Họ và tên: Lê Minh", f"Họ và tên: {CONTACT_MASK}"),
+        ("Người phụ trách tuyển dụng: Ms Thu", f"Người phụ trách tuyển dụng: {CONTACT_MASK}"),
+        ("Tên người liên hệ: Phạm Quang Huy", f"Tên người liên hệ: {CONTACT_MASK}"),
         # Không phải thông tin cá nhân.
+        ("Tên / Chức danh: Trưởng phòng kinh doanh", None),
+        ("Họ tên: ghi rõ trong CV", None),
+        ("Người phụ trách: Phòng Nhân sự", None),
         ("Liên hệ với khách hàng để chốt đơn", None),
         ("Liên hệ: Phòng Nhân sự", None),
         ("Thông tin liên hệ: Số điện thoại và địa chỉ email", None),
@@ -534,3 +652,15 @@ def test_zero_salary_means_not_disclosed() -> None:
     s = parse_salary(None, low=0, high=1600, currency="USD")
     assert s is not None
     assert (s.min, s.max, s.currency) == (None, 1600, "USD")
+
+
+def test_tight_bullets_become_list_items() -> None:
+    md = to_markdown(
+        "CHÍNH SÁCH:\n-Khi trở thành nhân viên\n*Tham gia BHXH\n*Ghi chú*\n-5% phí\n**Đậm**", "text"
+    )
+    lines = md.splitlines()
+    assert "- Khi trở thành nhân viên" in lines
+    assert "- Tham gia BHXH" in lines
+    assert "*Ghi chú*" in lines  # in nghiêng cả dòng: giữ nguyên
+    assert "-5% phí" in lines
+    assert "**Đậm**" in lines

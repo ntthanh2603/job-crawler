@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
-import { ExternalLinkIcon, SkipForward } from "lucide-react"
+import { ExternalLinkIcon, PartyPopper, SkipForward } from "lucide-react"
 import { useEffect, useState } from "react"
-import { Link } from "react-router"
 
 import {
   Empty,
@@ -13,12 +12,13 @@ import {
   Section,
   StatCard,
   StatusBadge,
+  TextLink,
 } from "@/components/common"
 import { JobBody, ReviewBox } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { ago, date, num, pct, provinces, salary, sourceKind } from "@/lib/format"
+import { ago, cap, date, num, pct, provinces, salary, sourceLabel } from "@/lib/format"
 import type { ReviewPage as ReviewData } from "@/lib/types"
 
 export function ReviewPage() {
@@ -45,7 +45,7 @@ export function ReviewPage() {
     <>
       <PageHeader
         title="Kiểm tay"
-        description="Đánh dấu từng job đúng/sai để đo precision khi chưa có golden set. Job được chọn ngẫu nhiên trong các job đang mở chưa kiểm."
+        description="Đánh dấu từng việc làm đúng hay sai để đo precision khi chưa có golden set. Việc làm được chọn ngẫu nhiên trong các tin đang mở chưa kiểm."
       />
       {query.isError && <ErrorState error={query.error} />}
       {!d && query.isLoading && <Loading rows={8} />}
@@ -55,59 +55,72 @@ export function ReviewPage() {
             <StatCard
               label="Precision"
               value={pct(d.precision)}
-              hint={`mục tiêu ≥ ${pct(d.target, 0)}`}
-              tone={d.precision === null ? undefined : d.precision >= d.target ? "good" : "bad"}
+              hint={`Mục tiêu ≥ ${pct(d.target, 0)}`}
+              status={
+                d.precision === null
+                  ? undefined
+                  : d.precision >= d.target
+                    ? { tone: "good", text: "Đạt" }
+                    : { tone: "bad", text: "Chưa đạt" }
+              }
             />
             <StatCard label="Đã kiểm" value={num(d.reviewed)} hint={`${num(d.correct)} đúng · ${num(d.reviewed - d.correct)} sai`} />
-            <StatCard label="Chưa kiểm" value={num(d.unreviewed_active)} hint="job đang mở" />
+            <StatCard label="Chưa kiểm" value={num(d.unreviewed_active)} hint="Việc làm đang mở" />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
             {next ? (
               <Section
                 title={
-                  <Link to={`/jobs/${next.job.id}`} className="text-base hover:underline">
-                    {next.job.title}
-                  </Link>
+                  <TextLink to={`/jobs/${next.job.id}`} className="text-base">
+                    {cap(next.job.title)}
+                  </TextLink>
                 }
                 actions={
                   <Button variant="outline" size="sm" onClick={() => setSkip(next.job.id)} disabled={query.isFetching}>
-                    <SkipForward /> Bỏ qua <kbd className="rounded border px-1 text-[10px]">N</kbd>
+                    <SkipForward /> Bỏ qua
+                    <kbd className="rounded border px-1 font-mono text-[10px] text-muted-foreground">N</kbd>
                   </Button>
                 }
-                bodyClassName="space-y-4"
+                bodyClassName="space-y-5"
               >
                 <div className="space-y-2 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link to={`/companies/${next.job.company_id}`} className="font-medium text-primary hover:underline">
-                      {next.job.company_name}
-                    </Link>
-                    <span>· {provinces(next.job)}</span>
-                    <span>· {salary(next.job.salary)}</span>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <TextLink to={`/companies/${next.job.company_id}`} className="font-medium">
+                      {cap(next.job.company_name)}
+                    </TextLink>
+                    {provinces(next.job) !== "–" && <span className="text-muted-foreground">· {provinces(next.job)}</span>}
+                    <span className="text-muted-foreground">
+                      · {salary(next.job.salary) === "–" ? "Chưa rõ lương" : salary(next.job.salary)}
+                    </span>
                     <JobTags job={next.job} />
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    Nguồn {next.job.canonical_source} · đăng {date(next.job.posted_at)} · hạn {date(next.job.expires_at)} · tin cậy{" "}
-                    {pct(next.job.confidence, 0)} <ReasonTags reasons={next.job.verification_reasons} />
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>Nguồn {sourceLabel(next.job.canonical_source)}</span>
+                    <span>· Đăng {date(next.job.posted_at)}</span>
+                    <span>· Hạn {date(next.job.expires_at)}</span>
+                    <span>· Tin cậy {pct(next.job.confidence, 0)}</span>
+                    <ReasonTags reasons={next.job.verification_reasons} />
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 pt-1">
                     {next.postings.map((p) => (
                       <Button key={p.id} variant="outline" size="xs" asChild>
                         <a href={p.url} target="_blank" rel="noopener noreferrer">
-                          {sourceKind(p.source)} <ExternalLinkIcon />
+                          Mở trên {sourceLabel(p.source)} <ExternalLinkIcon />
                         </a>
                       </Button>
                     ))}
                   </div>
                 </div>
                 <ReviewBox detail={next} shortcuts onDone={() => setSkip(null)} />
-                <div className="rounded-lg border bg-muted/30 p-4">
+                <div className="rounded-lg border bg-muted/25 px-5 py-4">
+                  <div className="mb-3 text-xs font-medium text-muted-foreground">Nội dung tin</div>
                   <JobBody detail={next} />
                 </div>
               </Section>
             ) : (
               <Section>
-                <Empty>Không còn job đang mở nào chưa kiểm.</Empty>
+                <Empty icon={<PartyPopper />}>Đã kiểm hết các việc làm đang mở.</Empty>
               </Section>
             )}
 
@@ -125,7 +138,7 @@ export function ReviewPage() {
                     <TableBody>
                       {d.by_source.map((s) => (
                         <TableRow key={s.source}>
-                          <TableCell className="pl-4">{s.source}</TableCell>
+                          <TableCell className="pl-4">{sourceLabel(s.source)}</TableCell>
                           <TableCell className="text-right tabular-nums">{s.reviewed}</TableCell>
                           <TableCell className="pr-4 text-right tabular-nums">{pct(s.precision)}</TableCell>
                         </TableRow>
@@ -133,36 +146,36 @@ export function ReviewPage() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <Empty>Chưa kiểm job nào.</Empty>
+                  <Empty>Chưa kiểm việc làm nào.</Empty>
                 )}
               </Section>
               <Section
                 title="Vừa kiểm"
                 actions={
-                  <Link to="/jobs?reviewed=wrong&status=all" className="text-xs text-primary hover:underline">
-                    Job đánh dấu sai →
-                  </Link>
+                  <TextLink to="/jobs?reviewed=wrong&status=all" className="text-xs text-brand">
+                    Các việc bị đánh sai
+                  </TextLink>
                 }
               >
                 {d.recent.length ? (
-                  <ul className="space-y-2.5 text-sm">
+                  <ul className="space-y-3 text-sm">
                     {d.recent.map((r) => (
-                      <li key={r.job_id}>
+                      <li key={r.job_id} className="space-y-0.5">
                         <div className="flex items-start gap-2">
-                          <StatusBadge value={r.correct ? "ok" : "failed"} text={r.correct ? "Đúng" : "Sai"} />
-                          <Link to={`/jobs/${r.job_id}`} className="min-w-0 hover:underline">
-                            {r.title}
-                          </Link>
+                          <StatusBadge value={r.correct ? "correct" : "wrong"} />
+                          <TextLink to={`/jobs/${r.job_id}`} className="min-w-0 leading-5">
+                            {cap(r.title)}
+                          </TextLink>
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {r.company_name} · {ago(r.reviewed_at)}
+                          {cap(r.company_name)} · {ago(r.reviewed_at)}
                           {r.note && <> · {r.note}</>}
                         </div>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Chưa có.</p>
+                  <p className="text-sm text-muted-foreground">Chưa có đánh giá nào.</p>
                 )}
               </Section>
             </aside>

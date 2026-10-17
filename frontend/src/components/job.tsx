@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
-import { ago, pct } from "@/lib/format"
+import { ago, cap, pct, sourceLabel } from "@/lib/format"
 import type { JobDetail } from "@/lib/types"
 
 /** Nội dung tin: HTML do server sinh từ markdown (markdown-it, không cho HTML thô). */
@@ -39,7 +39,7 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
       <TableHeader>
         <TableRow>
           <TableHead className="pl-4">Nguồn</TableHead>
-          <TableHead>URL</TableHead>
+          <TableHead>Đường dẫn</TableHead>
           <TableHead>Trạng thái</TableHead>
           <TableHead>Xác minh</TableHead>
           <TableHead className="pr-4">Thấy lần cuối</TableHead>
@@ -48,7 +48,7 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
       <TableBody>
         {detail.postings.map((p) => (
           <TableRow key={p.id}>
-            <TableCell className="pl-4 text-xs">{p.source}</TableCell>
+            <TableCell className="pl-4 text-xs font-medium">{sourceLabel(p.source)}</TableCell>
             <TableCell className="max-w-80 truncate text-xs">
               <ExternalLink href={p.url}>{p.url}</ExternalLink>
             </TableCell>
@@ -57,13 +57,13 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
             </TableCell>
             <TableCell className="text-xs whitespace-normal">
               <div className="flex flex-wrap items-center gap-1">
-                {p.accepted === true && <StatusBadge value="ok" text="nhận" />}
-                {p.accepted === false && <StatusBadge value="failed" text="loại" />}
-                {p.confidence !== null && <span className="text-muted-foreground">{pct(p.confidence, 0)}</span>}
+                {p.accepted === true && <StatusBadge value="ok" text="Nhận" />}
+                {p.accepted === false && <StatusBadge value="failed" text="Loại" />}
+                {p.confidence !== null && <span className="text-muted-foreground tabular-nums">{pct(p.confidence, 0)}</span>}
                 <ReasonTags reasons={p.verification_reasons} />
               </div>
             </TableCell>
-            <TableCell className="pr-4 text-xs text-muted-foreground">{ago(p.last_seen_at)}</TableCell>
+            <TableCell className="pr-4 text-xs text-muted-foreground">{cap(ago(p.last_seen_at))}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -71,7 +71,7 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
   )
 }
 
-/** Đánh dấu đúng/sai. `onDone` (trang Kiểm tay) chuyển sang job tiếp theo. */
+/** Đánh dấu đúng/sai. `onDone` (trang Kiểm tay) chuyển sang việc tiếp theo. */
 export function ReviewBox({
   detail,
   onDone,
@@ -89,13 +89,13 @@ export function ReviewBox({
   const save = useMutation({
     mutationFn: (correct: boolean) => api.post(`/jobs/${job.id}/review`, { correct, note }),
     onSuccess: (_, correct) => {
-      toast.success(`Đã ghi job #${job.id}: ${correct ? "Đúng" : "Sai"}`)
+      toast.success(`Đã ghi việc #${job.id}: ${correct ? "Đúng" : "Sai"}`)
       client.invalidateQueries({ queryKey: ["job", String(job.id)] })
       client.invalidateQueries({ queryKey: ["review"] })
       client.invalidateQueries({ queryKey: ["jobs"] })
       onDone?.()
     },
-    onError: (e) => toast.error(String(e)),
+    onError: (e) => toast.error(cap(String(e))),
   })
   const remove = useMutation({
     mutationFn: () => api.delete(`/jobs/${job.id}/review`),
@@ -122,29 +122,37 @@ export function ReviewBox({
     <div className="space-y-3">
       {review ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          Đã đánh dấu <StatusBadge value={review.correct ? "ok" : "failed"} text={review.correct ? "Đúng" : "Sai"} />
+          Đã đánh dấu
+          <StatusBadge value={review.correct ? "correct" : "wrong"} />
           <span className="text-xs text-muted-foreground">
-            {review.reviewer} · {ago(review.reviewed_at)}
+            {review.reviewer ? `${review.reviewer} · ` : ""}
+            {ago(review.reviewed_at)}
           </span>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">Tin thật, còn mở, đúng doanh nghiệp, thông tin khớp trang gốc?</p>
+        <p className="text-sm text-muted-foreground">Tin thật, còn mở, đúng doanh nghiệp và khớp trang gốc?</p>
       )}
       <Textarea
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Ghi chú khi sai: tin cũ, nhầm doanh nghiệp, tiêu đề sai…"
-        className="min-h-16"
+        className="min-h-16 bg-background"
       />
       <div className="flex flex-wrap gap-2">
-        <Button className="bg-success text-white hover:bg-success/90" onClick={() => save.mutate(true)} disabled={save.isPending}>
-          <Check /> Đúng {shortcuts && <kbd className="rounded border border-white/40 px-1 text-[10px]">D</kbd>}
+        <Button
+          className="bg-success text-white hover:bg-success/90 dark:text-background"
+          onClick={() => save.mutate(true)}
+          disabled={save.isPending}
+        >
+          <Check /> Đúng
+          {shortcuts && <kbd className="rounded border border-current/40 px-1 font-mono text-[10px] opacity-80">D</kbd>}
         </Button>
         <Button variant="destructive" onClick={() => save.mutate(false)} disabled={save.isPending}>
-          <X /> Sai {shortcuts && <kbd className="rounded border border-white/40 px-1 text-[10px]">S</kbd>}
+          <X /> Sai
+          {shortcuts && <kbd className="rounded border border-current/40 px-1 font-mono text-[10px] opacity-80">S</kbd>}
         </Button>
         {review && !onDone && (
-          <Button variant="ghost" size="sm" onClick={() => remove.mutate()}>
+          <Button variant="ghost" size="sm" className="self-center" onClick={() => remove.mutate()}>
             Xoá đánh giá
           </Button>
         )}

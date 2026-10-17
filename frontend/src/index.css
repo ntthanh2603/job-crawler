@@ -1,75 +1,86 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@fontsource/be-vietnam-pro/400.css";
+@import "@fontsource/be-vietnam-pro/500.css";
+@import "@fontsource/be-vietnam-pro/600.css";
+@import "@fontsource/be-vietnam-pro/700.css";
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Một họ xám lạnh duy nhất (hue 260), một màu nhấn (brand: xanh lam đã giảm bão hoà) cho link,
+ * mục đang chọn, focus, biểu đồ; nút chính màu mực. Màu trạng thái chỉ dùng cho trạng thái.
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.18 0.02 260);
+  --background: oklch(0.982 0.003 260);
+  --foreground: oklch(0.21 0.012 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 260);
+  --card-foreground: oklch(0.21 0.012 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 260);
-  --primary: oklch(0.546 0.215 262.9);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.006 255);
-  --secondary-foreground: oklch(0.25 0.02 260);
-  --muted: oklch(0.96 0.006 255);
-  --muted-foreground: oklch(0.52 0.02 257);
-  --accent: oklch(0.95 0.015 255);
-  --accent-foreground: oklch(0.25 0.03 260);
-  --destructive: oklch(0.577 0.245 27.3);
-  --border: oklch(0.915 0.008 255);
-  --input: oklch(0.905 0.008 255);
-  --ring: oklch(0.62 0.18 262);
-  --success: oklch(0.6 0.16 150);
-  --warning: oklch(0.72 0.16 70);
-  --info: oklch(0.6 0.17 255);
-  --chart-1: oklch(0.6 0.16 150);
-  --chart-2: oklch(0.75 0.16 70);
-  --chart-3: oklch(0.65 0.17 300);
-  --chart-4: oklch(0.6 0.22 25);
-  --chart-5: oklch(0.6 0.17 255);
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.25 0.02 260);
-  --sidebar-accent: oklch(0.95 0.02 262);
-  --sidebar-accent-foreground: oklch(0.45 0.2 262);
-  --sidebar-border: oklch(0.915 0.008 255);
+  --popover-foreground: oklch(0.21 0.012 260);
+  --primary: oklch(0.25 0.014 260);
+  --primary-foreground: oklch(0.985 0.002 260);
+  --secondary: oklch(0.955 0.004 260);
+  --secondary-foreground: oklch(0.26 0.012 260);
+  --muted: oklch(0.955 0.004 260);
+  --muted-foreground: oklch(0.52 0.012 260);
+  --accent: oklch(0.95 0.006 260);
+  --accent-foreground: oklch(0.24 0.012 260);
+  --destructive: oklch(0.56 0.17 25);
+  --border: oklch(0.915 0.005 260);
+  --input: oklch(0.89 0.006 260);
+  --ring: oklch(0.6 0.11 255);
+  --brand: oklch(0.52 0.12 255);
+  --brand-foreground: oklch(0.985 0 0);
+  --success: oklch(0.55 0.11 158);
+  --warning: oklch(0.63 0.12 68);
+  --info: oklch(0.52 0.12 255);
+  --neutral-tone: oklch(0.55 0.05 300);
+  --shadow-color: oklch(0.3 0.02 260 / 0.06);
+  --chart-1: var(--success);
+  --chart-2: var(--warning);
+  --chart-3: var(--neutral-tone);
+  --chart-4: var(--destructive);
+  --chart-5: var(--brand);
+  --sidebar: oklch(0.975 0.004 260);
+  --sidebar-foreground: oklch(0.32 0.012 260);
+  --sidebar-accent: oklch(1 0 0);
+  --sidebar-accent-foreground: oklch(0.21 0.012 260);
+  --sidebar-border: oklch(0.915 0.005 260);
 }
 
 .dark {
-  --background: oklch(0.16 0.012 258);
-  --foreground: oklch(0.94 0.006 255);
-  --card: oklch(0.2 0.014 258);
-  --card-foreground: oklch(0.94 0.006 255);
-  --popover: oklch(0.21 0.014 258);
-  --popover-foreground: oklch(0.94 0.006 255);
-  --primary: oklch(0.68 0.16 262);
-  --primary-foreground: oklch(0.15 0.02 260);
-  --secondary: oklch(0.26 0.015 258);
-  --secondary-foreground: oklch(0.94 0.006 255);
-  --muted: oklch(0.26 0.015 258);
-  --muted-foreground: oklch(0.7 0.015 257);
-  --accent: oklch(0.28 0.025 260);
-  --accent-foreground: oklch(0.94 0.006 255);
-  --destructive: oklch(0.65 0.2 25);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.62 0.15 262);
-  --success: oklch(0.72 0.15 150);
-  --warning: oklch(0.8 0.14 75);
-  --info: oklch(0.72 0.13 255);
-  --chart-1: oklch(0.72 0.15 150);
-  --chart-2: oklch(0.8 0.14 75);
-  --chart-3: oklch(0.72 0.14 300);
-  --chart-4: oklch(0.68 0.19 25);
-  --chart-5: oklch(0.72 0.13 255);
-  --sidebar: oklch(0.19 0.013 258);
-  --sidebar-foreground: oklch(0.9 0.006 255);
-  --sidebar-accent: oklch(0.27 0.04 262);
-  --sidebar-accent-foreground: oklch(0.85 0.1 262);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --background: oklch(0.165 0.006 260);
+  --foreground: oklch(0.94 0.004 260);
+  --card: oklch(0.195 0.007 260);
+  --card-foreground: oklch(0.94 0.004 260);
+  --popover: oklch(0.215 0.008 260);
+  --popover-foreground: oklch(0.94 0.004 260);
+  --primary: oklch(0.94 0.004 260);
+  --primary-foreground: oklch(0.2 0.01 260);
+  --secondary: oklch(0.25 0.008 260);
+  --secondary-foreground: oklch(0.94 0.004 260);
+  --muted: oklch(0.24 0.008 260);
+  --muted-foreground: oklch(0.69 0.01 260);
+  --accent: oklch(0.26 0.009 260);
+  --accent-foreground: oklch(0.94 0.004 260);
+  --destructive: oklch(0.68 0.15 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.68 0.1 252);
+  --brand: oklch(0.73 0.1 252);
+  --brand-foreground: oklch(0.18 0.02 260);
+  --success: oklch(0.74 0.11 158);
+  --warning: oklch(0.8 0.11 78);
+  --info: oklch(0.73 0.1 252);
+  --neutral-tone: oklch(0.72 0.06 300);
+  --shadow-color: oklch(0 0 0 / 0.25);
+  --sidebar: oklch(0.15 0.006 260);
+  --sidebar-foreground: oklch(0.82 0.006 260);
+  --sidebar-accent: oklch(0.225 0.008 260);
+  --sidebar-accent-foreground: oklch(0.97 0.003 260);
+  --sidebar-border: oklch(1 0 0 / 7%);
 }
 
 @theme inline {
@@ -91,9 +102,12 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-neutral-tone: var(--neutral-tone);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -108,7 +122,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -116,14 +130,33 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background font-sans text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  ::selection {
+    @apply bg-brand/20;
   }
 }
 
 /* Nội dung tin tuyển dụng (HTML do server sinh từ markdown, đã escape). */
 .prose-job {
-  @apply text-sm leading-relaxed break-words;
+  @apply max-w-[72ch] text-[0.9rem] leading-7 break-words text-foreground/90;
+}
+.prose-job > div > :first-child {
+  @apply mt-0;
 }
 .prose-job h1,
 .prose-job h2,
@@ -131,22 +164,22 @@
 .prose-job h4,
 .prose-job h5,
 .prose-job h6 {
-  @apply mt-5 mb-2 text-sm font-semibold;
+  @apply mt-6 mb-2 text-sm font-semibold text-foreground;
 }
 .prose-job p {
-  @apply my-2;
+  @apply my-2.5;
 }
 .prose-job ul {
-  @apply my-2 list-disc pl-5;
+  @apply my-2.5 list-disc space-y-1 pl-5 marker:text-muted-foreground;
 }
 .prose-job ol {
-  @apply my-2 list-decimal pl-5;
+  @apply my-2.5 list-decimal space-y-1 pl-5 marker:text-muted-foreground;
 }
-.prose-job li {
-  @apply my-0.5;
+.prose-job strong {
+  @apply font-semibold text-foreground;
 }
 .prose-job a {
-  @apply text-primary underline-offset-2 hover:underline;
+  @apply text-brand underline-offset-2 hover:underline;
 }
 .prose-job table {
   @apply my-3 text-xs;

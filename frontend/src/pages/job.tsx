@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { ExternalLinkIcon } from "lucide-react"
-import { Link, useParams } from "react-router"
+import { useParams } from "react-router"
 
-import { ErrorState, JobTags, Loading, Meta, PageHeader, ReasonTags, Section, StatusBadge, Tag } from "@/components/common"
+import { ErrorState, JobTags, Loading, Meta, PageHeader, ReasonTags, Section, StatusBadge, Tag, TextLink } from "@/components/common"
 import { JobBody, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { date, dt, pct, salary } from "@/lib/format"
+import { cap, date, dt, pct, salary, sourceLabel } from "@/lib/format"
 import type { JobDetail } from "@/lib/types"
 
 export function JobPage() {
@@ -21,13 +21,13 @@ export function JobPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ to: "/jobs", label: "Job" }]}
-        title={j.title}
+        crumbs={[{ to: "/jobs", label: "Việc làm" }]}
+        title={cap(j.title)}
         description={
-          <span className="flex flex-wrap items-center gap-2">
-            <Link to={`/companies/${j.company_id}`} className="text-primary hover:underline">
-              {j.company_name}
-            </Link>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <TextLink to={`/companies/${j.company_id}`} className="font-medium text-foreground">
+              {cap(j.company_name)}
+            </TextLink>
             <StatusBadge value={j.status} />
             <JobTags job={j} />
           </span>
@@ -43,17 +43,17 @@ export function JobPage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-6">
-          <Section title="Mô tả công việc">
+          <Section title="Mô tả công việc" bodyClassName="px-5 py-5">
             <JobBody detail={d} />
           </Section>
-          <Section title="Tin theo nguồn" description={`${d.postings.length} tin gộp thành job này`} bodyClassName="p-0">
+          <Section title="Tin theo nguồn" description={`${d.postings.length} tin được gộp thành việc làm này`} bodyClassName="p-0">
             <PostingsTable detail={d} />
           </Section>
         </div>
-        <aside className="space-y-4">
-          <div className="xl:sticky xl:top-6 space-y-4">
+        <aside>
+          <div className="space-y-4 xl:sticky xl:top-6">
             <ReviewSection detail={d} />
             <Section title="Thông tin">
               <Meta
@@ -61,28 +61,28 @@ export function JobPage() {
                   [
                     "Nơi làm",
                     j.locations.length ? (
-                      <div className="space-y-0.5">
+                      <div className="space-y-1">
                         {j.locations.map((l, i) => (
                           <div key={i}>
-                            {l.province}
+                            {l.province || "–"}
                             {l.address_raw && l.address_raw !== l.province && (
-                              <span className="text-xs text-muted-foreground"> {l.address_raw}</span>
+                              <div className="text-xs text-muted-foreground">{cap(l.address_raw)}</div>
                             )}
                           </div>
                         ))}
                       </div>
                     ) : (
-                      "–"
+                      "Chưa rõ"
                     ),
                   ],
                   [
                     "Lương",
                     <>
                       {salary(j.salary)}
-                      {j.salary?.raw && <div className="text-xs text-muted-foreground">{j.salary.raw}</div>}
+                      {j.salary?.raw && <div className="text-xs text-muted-foreground">{cap(j.salary.raw)}</div>}
                     </>,
                   ],
-                  ["Kinh nghiệm", exp ? `${exp.min ?? "?"}–${exp.max ?? "?"} năm` : "–"],
+                  ["Kinh nghiệm", exp ? `${exp.min ?? "?"}–${exp.max ?? "?"} năm` : "Không ghi"],
                   [
                     "Kỹ năng",
                     j.skills.length ? (
@@ -92,16 +92,16 @@ export function JobPage() {
                         ))}
                       </div>
                     ) : (
-                      "–"
+                      "Không ghi"
                     ),
                   ],
-                  ["Đăng", date(j.posted_at)],
+                  ["Ngày đăng", date(j.posted_at)],
                   ["Hạn nộp", date(j.expires_at)],
-                  ["Nguồn chuẩn", <span className="break-all">{j.canonical_source}</span>],
+                  ["Nguồn chính", sourceLabel(j.canonical_source)],
                   [
                     "Độ tin cậy",
-                    <div className="space-y-1">
-                      {pct(j.confidence, 0)}
+                    <div className="space-y-1.5">
+                      <span className="tabular-nums">{pct(j.confidence, 0)}</span>
                       <ReasonTags reasons={j.verification_reasons} />
                     </div>,
                   ],
