@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import structlog
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch
 from jobcrawler.logging import get_logger
+from jobcrawler.net.kv import RedisKV
+from jobcrawler.pipeline import kyc
 from jobcrawler.resources import Resources
-from jobcrawler.schemas import CompanyIn, CompanyResult, JobOut, RunStatus
+from jobcrawler.schemas import CompanyEntity, CompanyIn, CompanyResult, JobOut, KycStatus, RunStatus
+from jobcrawler.serp import SerpClient
 from jobcrawler.services import jobs as website_jobs
 from jobcrawler.sources.base import FetchRecord
-from jobcrawler.text import normalize_company_name
 
 log = get_logger(__name__)
+
+KYC_SOURCE = "kyc"
 
 
 @dataclass(slots=True)
@@ -29,57 +33,163 @@ class PipelineOutcome:
     jobs: list[JobOut] = field(default_factory=list)
     incomplete_sources: list[str] = field(default_factory=list)
     error: str | None = None
+    kyc_status: KycStatus | None = None
+    website: str | None = None
 
 
-async def ensure_company(session: AsyncSession, company_in: CompanyIn) -> Company:
-    """Tìm doanh nghiệp theo MST hoặc `alias_norm` khớp chính xác; chưa có thì tạo mới."""
-    alias_norm = normalize_company_name(company_in.name)
-    # Khoá theo tên để hai lượt chạy song song cùng tên không tạo hai bản ghi.
-    await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(alias_norm))))
+@dataclass(slots=True)
+class RunState:
+    """Doanh nghiệp đang xử lý. KYC có thể chuyển sang bản ghi khác (trùng MST → gộp)."""
 
-    company: Company | None = None
-    if company_in.tax_code:
-        company = await session.scalar(
-            select(Company).where(Company.tax_code == company_in.tax_code)
+    company: Company
+    fresh: bool  # KYC còn hạn, dùng luôn
+    how: str | None  # cách tìm thấy trong cache: tax_code | alias | trigram
+
+
+@dataclass(slots=True)
+class KycStep:
+    status: KycStatus | None
+    website: str | None  # domain khớp mạnh để tìm nguồn
+    cached: bool
+    result: kyc.KycResult | None = None
+    incomplete: bool = False  # hết giờ: kết quả dở, không lưu
+
+
+async def resolve(res: Resources, session: AsyncSession, company_in: CompanyIn) -> kyc.Resolved:
+    """Tra cache KYC (MST, alias, trigram); chưa có thì tạo doanh nghiệp."""
+    s = res.settings
+    return await kyc.resolve_company(
+        session,
+        company_in,
+        max_age=timedelta(days=s.kyc_cache_days),
+        trigram_threshold=s.kyc_trigram_threshold,
+        serp_enabled=s.serp_enabled,
+    )
+
+
+async def run_kyc_step(
+    res: Resources,
+    state: RunState,
+    company_in: CompanyIn,
+    *,
+    deadline: float,
+    records: list[FetchRecord],
+    refresh: bool = False,
+) -> KycStep:
+    """KYC còn hạn thì dùng luôn; không thì chạy KYC (tối đa KYC_TIMEOUT_SECONDS, không quá
+    `deadline`) và lưu kết quả. Hết giờ giữa chừng: không lưu, chỉ dùng domain khớp mạnh."""
+    company = state.company
+    if state.fresh and not refresh and company.kyc_status:
+        log.info(
+            "kyc.cached",
+            how=state.how,
+            status=company.kyc_status,
+            domain=company.primary_domain,
+            kyc_at=company.kyc_at.isoformat() if company.kyc_at else None,
         )
-    if company is None:
-        company = await session.scalar(
-            select(Company)
-            .join(CompanyAlias, CompanyAlias.company_id == Company.id)
-            .where(CompanyAlias.alias_norm == alias_norm)
-            .order_by(Company.id)
-            .limit(1)
+        return KycStep(
+            status=KycStatus(company.kyc_status), website=company.primary_domain, cached=True
         )
-    if company is None:
-        company = Company(input_name=company_in.name, tax_code=company_in.tax_code)
-        session.add(company)
-        await session.flush()
-        session.add(
-            CompanyAlias(
-                company_id=company.id, alias=company_in.name, alias_norm=alias_norm, kind="input"
-            )
-        )
-    return company
+
+    s = res.settings
+    serp = SerpClient.from_settings(s, res.http, RedisKV(res.redis, prefix=s.redis_prefix))
+    result = await kyc.run_kyc(
+        company_in,
+        fetcher=res.http,
+        llm=res.llm,
+        serp=serp,
+        timeout=min(s.kyc_timeout_seconds, max(1.0, deadline - time.monotonic())),
+        min_confidence=s.kyc_min_confidence,
+        max_sites=s.kyc_max_sites,
+        records=records,
+    )
+    status, website = result.status, result.primary_domain
+    if result.error is None:
+        async with res.sessionmaker.begin() as session:
+            company = await kyc.apply_kyc(session, company.id, result)
+        if company.id != state.company.id:
+            structlog.contextvars.bind_contextvars(company_id=company.id)
+        state.company = company
+        status = KycStatus(company.kyc_status) if company.kyc_status else status
+        website = company.primary_domain
+    log.info(
+        "kyc.done",
+        status=status.value,
+        confidence=round(result.confidence, 2),
+        domain=website,
+        legal_name=result.legal_name,
+        tax_code=result.tax_code,
+        signals=result.signals,
+        candidates=len(result.candidates),
+        serp=result.serp,
+        llm=result.llm,
+        duration_ms=result.duration_ms,
+        error=result.error,
+        saved=result.error is None,
+    )
+    return KycStep(
+        status=status,
+        website=website,
+        cached=False,
+        result=result,
+        incomplete=result.error is not None,
+    )
 
 
 async def _run_pipeline(
     res: Resources,
-    company: Company,
+    state: RunState,
     company_in: CompanyIn,
     deadline: float,
     records: list[FetchRecord],
 ) -> PipelineOutcome:
-    # KYC (M3) sẽ điền primary_domain; trước đó dùng website ghi trong input nếu có.
     # Chuẩn hoá/xác minh/gộp/lưu (M5) gắn sau bước thu thập. Mọi bước dừng ở `deadline`.
-    website = company.primary_domain or company_in.website
+    step = await run_kyc_step(res, state, company_in, deadline=deadline, records=records)
+    incomplete = [KYC_SOURCE] if step.incomplete else []
+    ok = RunStatus.AMBIGUOUS if step.status is KycStatus.AMBIGUOUS else RunStatus.OK
+    # Website người dùng đưa (có thể là URL bảng ATS) luôn được thu; không có thì chỉ dùng domain
+    # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào).
+    website = company_in.website or step.website
     if not website:
-        log.info("company.no_website", reason="chưa có website (KYC ở M3 sẽ tìm)")
-        return PipelineOutcome(status=RunStatus.OK)
+        log.info("company.no_website", kyc_status=step.status.value if step.status else None)
+        return PipelineOutcome(
+            status=RunStatus.PARTIAL if incomplete else ok,
+            incomplete_sources=incomplete,
+            kyc_status=step.status,
+        )
     found = await website_jobs.jobs_for_website(res, website, deadline=deadline, records=records)
+    incomplete += found.incomplete_sources
     return PipelineOutcome(
-        status=RunStatus.PARTIAL if found.incomplete_sources else RunStatus.OK,
+        status=RunStatus.PARTIAL if incomplete else ok,
         jobs_found=len(found.jobs),
-        incomplete_sources=found.incomplete_sources,
+        incomplete_sources=incomplete,
+        kyc_status=step.status,
+        website=website,
+    )
+
+
+async def _insert_fetches(
+    session: AsyncSession, run_id: UUID | None, company_id: int, records: list[FetchRecord]
+) -> None:
+    if not records:
+        return
+    await session.execute(
+        insert(SourceFetch),
+        [
+            {
+                "run_id": run_id,
+                "company_id": company_id,
+                "source": r.source,
+                "url": r.url,
+                "http_status": r.http_status,
+                "proxy_id": r.proxy_id,
+                "duration_ms": r.duration_ms,
+                "items": r.items,
+                "outcome": r.outcome.value,
+                "error": r.error,
+            }
+            for r in records
+        ],
     )
 
 
@@ -93,25 +203,7 @@ async def _finish_run(
     duration_ms: int,
 ) -> None:
     async with res.sessionmaker.begin() as session:
-        if records:
-            await session.execute(
-                insert(SourceFetch),
-                [
-                    {
-                        "run_id": run_id,
-                        "company_id": company_id,
-                        "source": r.source,
-                        "url": r.url,
-                        "http_status": r.http_status,
-                        "proxy_id": r.proxy_id,
-                        "duration_ms": r.duration_ms,
-                        "items": r.items,
-                        "outcome": r.outcome.value,
-                        "error": r.error,
-                    }
-                    for r in records
-                ],
-            )
+        await _insert_fetches(session, run_id, company_id, records)
         await session.execute(
             update(CompanyRun)
             .where(CompanyRun.run_id == run_id)
@@ -127,6 +219,10 @@ async def _finish_run(
         )
 
 
+def _display_name(company: Company) -> str:
+    return company.legal_name or company.brand_name or company.input_name
+
+
 async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResult:
     """Chạy toàn bộ pipeline cho một doanh nghiệp và ghi `company_runs`, kể cả khi lỗi."""
     run_id = uuid4()
@@ -136,24 +232,25 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
 
     with structlog.contextvars.bound_contextvars(run_id=str(run_id), company=company_in.name):
         async with res.sessionmaker.begin() as session:
-            company = await ensure_company(session, company_in)
+            resolved = await resolve(res, session, company_in)
             session.add(
                 CompanyRun(
                     run_id=run_id,
-                    company_id=company.id,
+                    company_id=resolved.company.id,
                     started_at=started_at,
                     status=RunStatus.RUNNING.value,
                 )
             )
+        state = RunState(company=resolved.company, fresh=resolved.fresh, how=resolved.how)
 
-        with structlog.contextvars.bound_contextvars(company_id=company.id):
+        with structlog.contextvars.bound_contextvars(company_id=state.company.id):
             log.info("company.start", tax_code=company_in.tax_code, website=company_in.website)
             # Giá trị khi bị huỷ (timeout SAQ, Ctrl+C): CancelledError không phải Exception.
             outcome = PipelineOutcome(status=RunStatus.FAILED, error="cancelled")
             # Ghi cả khi pipeline lỗi/bị huỷ giữa chừng.
             records: list[FetchRecord] = []
             try:
-                outcome = await _run_pipeline(res, company, company_in, deadline, records)
+                outcome = await _run_pipeline(res, state, company_in, deadline, records)
             except Exception as exc:
                 outcome = PipelineOutcome(
                     status=RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}"
@@ -163,12 +260,14 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
                 finished_at = datetime.now(UTC)
                 duration_ms = int((time.monotonic() - t0) * 1000)
                 await _finish_run(
-                    res, run_id, company.id, outcome, records, finished_at, duration_ms
+                    res, run_id, state.company.id, outcome, records, finished_at, duration_ms
                 )
                 done = log.warning if outcome.status is RunStatus.FAILED else log.info
                 done(
                     "company.done",
                     status=outcome.status.value,
+                    kyc_status=outcome.kyc_status.value if outcome.kyc_status else None,
+                    website=outcome.website,
                     duration_ms=duration_ms,
                     jobs_found=outcome.jobs_found,
                     jobs_accepted=len(outcome.jobs),
@@ -177,9 +276,11 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
 
     return CompanyResult(
         run_id=run_id,
-        company_id=company.id,
-        company_name=company.legal_name or company.brand_name or company.input_name,
+        company_id=state.company.id,
+        company_name=_display_name(state.company),
         status=outcome.status,
+        kyc_status=outcome.kyc_status,
+        website=outcome.website,
         started_at=started_at,
         finished_at=finished_at,
         duration_ms=duration_ms,
@@ -188,4 +289,44 @@ async def process_company(res: Resources, company_in: CompanyIn) -> CompanyResul
         incomplete_sources=outcome.incomplete_sources,
         error=outcome.error,
         jobs=outcome.jobs,
+    )
+
+
+@dataclass(slots=True)
+class KycReport:
+    company: CompanyEntity
+    aliases: list[tuple[str, str]]  # (kind, alias)
+    step: KycStep
+    how: str | None
+    records: list[FetchRecord]
+
+
+async def kyc_company(res: Resources, company_in: CompanyIn, *, refresh: bool = False) -> KycReport:
+    """Chỉ chạy KYC (tra cache, tìm, lưu) cho một doanh nghiệp; fetch ghi vào `source_fetches`
+    (không gắn lượt chạy)."""
+    async with res.sessionmaker.begin() as session:
+        resolved = await resolve(res, session, company_in)
+    state = RunState(company=resolved.company, fresh=resolved.fresh, how=resolved.how)
+    records: list[FetchRecord] = []
+    deadline = time.monotonic() + res.settings.kyc_timeout_seconds
+    with structlog.contextvars.bound_contextvars(
+        company=company_in.name, company_id=state.company.id
+    ):
+        step = await run_kyc_step(
+            res, state, company_in, deadline=deadline, records=records, refresh=refresh
+        )
+    async with res.sessionmaker.begin() as session:
+        await _insert_fetches(session, None, state.company.id, records)
+        rows = await session.execute(
+            select(CompanyAlias.kind, CompanyAlias.alias)
+            .where(CompanyAlias.company_id == state.company.id)
+            .order_by(CompanyAlias.id)
+        )
+        aliases = [(kind or "", alias) for kind, alias in rows]
+    return KycReport(
+        company=CompanyEntity.model_validate(state.company),
+        aliases=aliases,
+        step=step,
+        how=resolved.how,
+        records=records,
     )

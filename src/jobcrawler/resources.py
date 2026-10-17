@@ -117,6 +117,8 @@ async def open_resources(
         stack.push_async_callback(llm.close)
         if not llm.enabled:
             log.warning("llm.disabled", reason="thiếu LLM_BASE_URL hoặc LLM_MODEL")
+        if not settings.serp_enabled:
+            log.warning("serp.disabled", reason="thiếu SERP_API_KEY: KYC bỏ qua bước tìm kiếm")
 
         kv = RedisKV(redis, prefix=settings.redis_prefix)
         proxy_list: list[Proxy] = []

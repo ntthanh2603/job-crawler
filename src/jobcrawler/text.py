@@ -64,6 +64,11 @@ def _tokens(text: str) -> list[str]:
     return _NON_ALNUM.sub(" ", strip_accents(text).lower()).split()
 
 
+def fold(text: str) -> str:
+    """Viết thường, bỏ dấu, chỉ giữ chữ và số (cách nhau một dấu cách): dùng để so chuỗi."""
+    return " ".join(_tokens(text))
+
+
 def normalize_company_name(name: str) -> str:
     """Tên dùng để so khớp (`company_aliases.alias_norm`).
 

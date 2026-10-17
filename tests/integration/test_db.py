@@ -56,7 +56,13 @@ async def test_process_company_writes_run_and_logs(integration_settings: Setting
     assert run.finished_at is not None
     assert run.duration_ms is not None
     assert companies == 1
-    assert events == ["company.start", "company.no_website", "company.done"]
+    assert events == [
+        "company.start",
+        "kyc.serp_disabled",
+        "kyc.done",
+        "company.no_website",
+        "company.done",
+    ]
     assert company_ids == {first.company_id}
 
 

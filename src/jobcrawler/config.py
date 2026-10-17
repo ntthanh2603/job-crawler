@@ -40,6 +40,23 @@ class Settings(BaseSettings):
     # SERP. Thiếu key thì bỏ qua các bước dùng SERP (kèm cảnh báo).
     serp_provider: Literal["serper", "brave"] = "serper"
     serp_api_key: SecretStr | None = None
+    serp_results: int = Field(default=10, ge=1, le=20)
+    serp_rate_per_second: float = Field(default=5.0, gt=0)
+    # Cache kết quả tìm kiếm (giây) để chạy lại không tốn credit.
+    serp_cache_seconds: int = Field(default=30 * 86_400, ge=0)
+    serp_timeout_seconds: float = Field(default=15, gt=0)
+
+    # KYC doanh nghiệp.
+    # Kết quả KYC dùng lại trong chừng này ngày (`companies.kyc_at`).
+    kyc_cache_days: float = Field(default=30, ge=0)
+    # Ngưỡng pg_trgm similarity khi tra cache theo tên gần giống (chỉ khớp DN đã `verified`).
+    kyc_trigram_threshold: float = Field(default=0.7, gt=0, le=1)
+    # LLM phải chắc ít nhất mức này (cùng bằng chứng khớp mạnh) mới đánh `verified`.
+    kyc_min_confidence: float = Field(default=0.8, ge=0, le=1)
+    # Thời gian tối đa cho KYC trong một lượt (SERP + đọc website + LLM).
+    kyc_timeout_seconds: float = Field(default=45, gt=0)
+    # Số website ứng viên mở để đọc footer (tên pháp lý, MST, địa chỉ).
+    kyc_max_sites: int = Field(default=3, ge=0)
 
     # Crawl và worker.
     # false = không dùng proxy (đi thẳng), kể cả khi PROXIES_FILE có proxy. CLI: --no-proxy.

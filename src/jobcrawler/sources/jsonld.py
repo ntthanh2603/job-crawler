@@ -52,6 +52,53 @@ def job_postings(html: str, url: str) -> list[dict[str, Any]]:
     return [node for node in _walk(data) if "jobposting" in _types(node)]
 
 
+_ORG_TYPES = frozenset(
+    {
+        "corporation",
+        "localbusiness",
+        "onlinebusiness",
+        "onlinestore",
+        "store",
+        "bankorcreditunion",
+        "financialservice",
+        "insuranceagency",
+        "airline",
+        "professionalservice",
+    }
+)
+
+
+def organizations(html: str, url: str) -> list[dict[str, Any]]:
+    """Các object Organization (và loại con: Corporation, LocalBusiness...) trên trang."""
+    if "ld+json" not in html:
+        return []
+    try:
+        data = _EXTRACTOR.extract(html, base_url=url)
+    except Exception as exc:
+        log.debug("jsonld.error", url=url, error=str(exc))
+        return []
+    return [
+        node
+        for node in _walk(data)
+        if any(t.endswith("organization") or t in _ORG_TYPES for t in _types(node))
+    ]
+
+
+def organization_facts(node: dict[str, Any]) -> dict[str, str]:
+    """Các trường dùng cho KYC của một Organization, dạng chuỗi gọn."""
+    alternate = node.get("alternateName")
+    facts = {
+        "name": _name(node.get("name")),
+        "legalName": _name(node.get("legalName")),
+        "alternateName": ", ".join(_string_list(alternate)) if alternate else None,
+        "taxID": text_or_none(node.get("taxID")),
+        "vatID": text_or_none(node.get("vatID")),
+        "address": _address(node) if node.get("address") else None,
+        "url": text_or_none(node.get("url")),
+    }
+    return {k: v for k, v in facts.items() if v}
+
+
 def _name(value: Any) -> str | None:
     if isinstance(value, dict):
         return text_or_none(value.get("name") or value.get("legalName"))

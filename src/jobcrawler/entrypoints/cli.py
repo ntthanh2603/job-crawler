@@ -123,11 +123,104 @@ def run(
         incomplete = ", ".join(result.incomplete_sources) or "-"
         typer.echo(
             f"{result.company_name} [{result.status}] {result.duration_ms} ms · "
+            f"KYC {result.kyc_status or '-'} · website {result.website or '-'} · "
             f"job nhận/tìm thấy {result.jobs_accepted}/{result.jobs_found} · "
             f"nguồn chưa xong: {incomplete} · run_id {result.run_id}"
         )
     if result.status is RunStatus.FAILED:
         raise typer.Exit(1)
+
+
+@app.command()
+def kyc(
+    name: Annotated[str, typer.Argument(help="Tên doanh nghiệp.")],
+    tax_code: Annotated[str | None, typer.Option(help="Mã số thuế, nếu biết.")] = None,
+    website: Annotated[str | None, typer.Option(help="Website, nếu biết.")] = None,
+    refresh: Annotated[bool, typer.Option(help="Bỏ qua cache KYC (30 ngày).")] = False,
+    json_out: Annotated[bool, typer.Option("--json", help="In kết quả dạng JSON.")] = False,
+) -> None:
+    """Chỉ chạy KYC: xác định pháp nhân, website, MST, alias (có cache, lưu vào DB)."""
+    from jobcrawler.services import companies
+
+    async def go() -> companies.KycReport:
+        async with open_resources() as res:
+            return await companies.kyc_company(
+                res, CompanyIn(name=name, tax_code=tax_code, website=website), refresh=refresh
+            )
+
+    report = _run(go())
+    c, step = report.company, report.step
+    result = step.result
+    if json_out:
+        payload = {
+            "company": c.model_dump(mode="json"),
+            "aliases": [{"kind": k, "alias": a} for k, a in report.aliases],
+            "cached": step.cached,
+            "cache_hit": report.how,
+            "website": step.website,
+            "result": (
+                {
+                    k: v
+                    for k, v in dataclasses.asdict(result).items()
+                    if k not in ("evidence", "candidates")
+                }
+                | result.record().model_dump(mode="json")
+                if result
+                else None
+            ),
+        }
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        return
+
+    color = {
+        "verified": typer.colors.GREEN,
+        "ambiguous": typer.colors.YELLOW,
+        "not_found": typer.colors.RED,
+    }.get(str(c.kyc_status), typer.colors.WHITE)
+    source = f"cache ({report.how})" if step.cached else "mới"
+    if result is not None and result.error:
+        source += f", lỗi {result.error}: chưa lưu"
+    typer.echo(
+        typer.style(f"[{c.kyc_status or '-'}]", fg=color)
+        + f" {c.display_name} · tin cậy {c.kyc_confidence if c.kyc_confidence is not None else '-'}"
+        + f" · {source}"
+    )
+    for label, value in [
+        ("Tên pháp lý", c.legal_name),
+        ("Thương hiệu", c.brand_name),
+        ("MST", c.tax_code),
+        ("Website", c.primary_domain),
+        ("Domain khác", ", ".join(c.other_domains)),
+        ("Địa chỉ", c.address),
+    ]:
+        if value:
+            typer.echo(f"  {label}: {value}")
+    if report.aliases:
+        typer.echo("  Alias: " + "; ".join(f"{a} ({k})" for k, a in report.aliases))
+    # Kết quả chưa lưu (hết giờ) thì in kết quả của lượt này thay vì bản đã lưu.
+    unsaved = result is not None and result.error is not None
+    record: dict[str, Any] = (
+        result.record().model_dump(mode="json")
+        if result is not None and unsaved
+        else c.kyc_evidence
+        if isinstance(c.kyc_evidence, dict)
+        else {}
+    )
+    if record.get("signals"):
+        typer.echo("  Tín hiệu: " + ", ".join(record["signals"]))
+    if record.get("reason"):
+        typer.echo(f"  Lý do: {record['reason']}")
+    for ev in record.get("evidence") or []:
+        typer.echo(f"  · [{ev['kind']}] {ev['snippet']} — {ev['url']}")
+    for cand in record.get("candidates") or []:
+        mst = f" MST {', '.join(cand['tax_codes'])}" if cand.get("tax_codes") else ""
+        flags = f" [{', '.join(cand['flags'])}]" if cand.get("flags") else ""
+        mark = "→" if cand["id"] == record.get("picked") else " "
+        typer.echo(f"  {mark} {cand['id']} {cand['kind']} {cand['url']}{mst}{flags}")
+    if result is not None:
+        typer.echo(
+            f"  {result.duration_ms} ms · {len(report.records)} request · SERP {result.serp or '-'}"
+        )
 
 
 @app.command()

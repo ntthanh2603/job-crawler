@@ -25,6 +25,22 @@ Worker đọc proxy từ `./config` (mount read-only vào container).
 Không dùng proxy: đặt `PROXY_ENABLED=false` trong `.env` (áp dụng cho cả worker), hoặc thêm
 `--no-proxy` cho một lệnh CLI, ví dụ `uv run jobcrawler --no-proxy run "Test"`.
 
+## KYC doanh nghiệp
+
+```bash
+uv run jobcrawler kyc "Vinamilk"                          # cần SERP_API_KEY nếu chỉ có tên
+uv run jobcrawler kyc "MoMo" --website momo.vn --json
+uv run jobcrawler kyc "Công ty CP Sữa Việt Nam" --tax-code 0300588569 --refresh
+```
+
+Tra cache `company_aliases` (MST → tên chuẩn hoá khớp chính xác → trigram, chỉ doanh nghiệp đã
+`verified`); KYC còn hạn (30 ngày) thì dùng luôn. Không có thì lấy ứng viên từ SERP (website,
+trang tra cứu MST) và website (chân trang, JSON-LD: tên pháp lý, MST, địa chỉ), LLM chọn kèm
+trích đoạn; rule kiểm lại trích đoạn và tín hiệu khớp mạnh (cùng MST, cùng domain đầu vào, website
+tự ghi đúng tên...). Bằng chứng yếu → `ambiguous`, chỉ thu job từ domain khớp mạnh. Kết quả điền
+`companies.primary_domain` để `run` tìm nguồn trên website đó. Thiếu `SERP_API_KEY` thì bỏ qua
+bước tìm kiếm (cảnh báo `kyc.serp_disabled`).
+
 ## Job từ website doanh nghiệp
 
 ```bash

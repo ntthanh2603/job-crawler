@@ -132,6 +132,42 @@ class CompanyEntity(BaseModel):
         return self.brand_name or self.legal_name or self.input_name
 
 
+class KycEvidence(BaseModel):
+    """Một bằng chứng KYC: URL + trích đoạn có trên trang đó."""
+
+    url: str
+    snippet: str
+    # llm (trích đoạn LLM chọn, đã kiểm có trong ứng viên) | tax_code | site_name | domain_name
+    # | panel | input
+    kind: str
+
+
+class KycCandidate(BaseModel):
+    id: str  # W1 (website), R1 (tra cứu MST/đăng ký), C1 (nguồn khác)
+    kind: Literal["website", "registry", "other"]
+    domain: str
+    url: str
+    title: str | None = None
+    snippet: str | None = None
+    tax_codes: list[str] = Field(default_factory=list)
+    rank: int | None = None  # thứ hạng trên SERP
+    flags: list[str] = Field(default_factory=list)  # input | panel | fetched
+
+
+class KycRecord(BaseModel):
+    """Nội dung `companies.kyc_evidence`."""
+
+    evidence: list[KycEvidence] = Field(default_factory=list)
+    signals: list[str] = Field(default_factory=list)  # tín hiệu khớp mạnh / mâu thuẫn
+    candidates: list[KycCandidate] = Field(default_factory=list)
+    picked: str | None = None  # mã ứng viên website được chọn
+    reason: str | None = None
+    serp: str | None = None  # provider nếu đã dùng SERP; None = chưa tìm bằng SERP
+    llm: str | None = None  # "<prompt>@<version>" nếu LLM đã chọn
+    # Lần kiểm lại gần nhất không xác nhận được nhưng giữ kết quả `verified` cũ.
+    last_check: dict[str, Any] | None = None
+
+
 class RawJob(BaseModel):
     """Một tin bóc từ một nguồn, chưa chuẩn hoá (lưu vào `job_postings.raw`).
 
@@ -225,6 +261,8 @@ class CompanyResult(BaseModel):
     company_id: int
     company_name: str
     status: RunStatus
+    kyc_status: KycStatus | None = None
+    website: str | None = None  # domain/URL đã dùng để tìm nguồn
     started_at: datetime
     finished_at: datetime
     duration_ms: int
