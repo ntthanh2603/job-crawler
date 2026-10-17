@@ -1,5 +1,5 @@
 // Thành phần dùng chung giữa các trang.
-import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox } from "lucide-react"
+import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Search } from "lucide-react"
 import { useEffect, type ReactNode } from "react"
 import { Link } from "react-router"
 
@@ -15,6 +15,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cap, label, num } from "@/lib/format"
@@ -83,7 +84,7 @@ export function StatusBadge({
     <span
       title={value ?? undefined}
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 text-xs font-medium whitespace-nowrap",
+        "inline-flex h-5 shrink-0 items-center gap-1.5 text-meta font-medium whitespace-nowrap",
         TONE_CLASS[t],
         className,
       )}
@@ -99,7 +100,7 @@ export function Tag({ children, title, className }: { children: ReactNode; title
     <span
       title={title}
       className={cn(
-        "inline-flex h-[18px] items-center rounded-[3px] border px-1.5 text-[0.7rem] whitespace-nowrap text-muted-foreground",
+        "inline-flex h-5 items-center rounded-[4px] border px-1.5 text-caption whitespace-nowrap text-muted-foreground",
         className,
       )}
     >
@@ -124,7 +125,7 @@ export function ReasonTags({ reasons }: { reasons: string[] }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       {reasons.map((r) => (
-        <Tag key={r} title={r} className="font-mono text-[0.68rem]">
+        <Tag key={r} title={r} className="font-mono tracking-tight">
           {r.split(":")[0]}
         </Tag>
       ))}
@@ -149,25 +150,25 @@ export function PageHeader({
     if (typeof title === "string") document.title = `${cap(title)} · jobcrawler`
   }, [title])
   return (
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b pb-5">
-      <div className="min-w-0 space-y-1.5">
+    <header className="mb-8 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b pb-6">
+      <div className="min-w-0 space-y-2">
         {crumbs && (
-          <nav aria-label="Đường dẫn" className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <nav aria-label="Đường dẫn" className="flex flex-wrap items-center gap-1 text-meta text-muted-foreground">
             {crumbs.map((c) => (
               <span key={c.to} className="inline-flex items-center gap-1">
                 <Link to={c.to} className="transition-colors hover:text-foreground">
                   {cap(c.label)}
                 </Link>
-                <ChevronRight className="size-3 opacity-60" />
+                <ChevronRight className="size-3.5 opacity-60" />
               </span>
             ))}
           </nav>
         )}
-        <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.025em] text-foreground">
+        <h1 className="text-page font-semibold text-foreground">
           {typeof title === "string" ? cap(title) : title}
         </h1>
         {description && (
-          <div className="max-w-3xl text-sm text-muted-foreground">
+          <div className="max-w-2xl text-sm text-muted-foreground">
             {typeof description === "string" ? cap(description) : description}
           </div>
         )}
@@ -201,19 +202,19 @@ export function StatCard({
   className?: string
 }) {
   return (
-    <div className={cn("-mt-px -ml-px border-t border-l px-4 py-3.5", className)}>
+    <div className={cn("-mt-px -ml-px border-t border-l px-5 py-4", className)}>
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.75]">
+        <span className="flex items-center gap-1.5 text-meta text-muted-foreground [&_svg]:size-4 [&_svg]:stroke-[1.75]">
           {icon}
           {cap(title)}
         </span>
         {status && <StatusBadge value={null} tone={status.tone} text={status.text} />}
       </div>
-      <div className="mt-1.5 text-2xl leading-none font-semibold tracking-[-0.03em] text-foreground tabular-nums">
+      <div className="mt-2 text-stat font-semibold text-foreground tabular-nums">
         {value}
       </div>
       {hint && (
-        <div className="mt-1.5 text-xs text-muted-foreground">{typeof hint === "string" ? cap(hint) : hint}</div>
+        <div className="mt-1 text-meta text-muted-foreground">{typeof hint === "string" ? cap(hint) : hint}</div>
       )}
     </div>
   )
@@ -245,13 +246,13 @@ export function Section({
       )}
     >
       {(title || actions) && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-5 py-3.5">
           <div className="min-w-0">
             {title && (
-              <h2 className="text-[0.8125rem] leading-6 font-semibold text-foreground">{typeof title === "string" ? cap(title) : title}</h2>
+              <h2 className="text-title font-semibold text-foreground">{typeof title === "string" ? cap(title) : title}</h2>
             )}
             {description && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 {typeof description === "string" ? cap(description) : description}
               </p>
             )}
@@ -259,7 +260,7 @@ export function Section({
           {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className={cn("p-4", bodyClassName)}>{children}</div>
+      <div className={cn("p-5", bodyClassName)}>{children}</div>
     </section>
   )
 }
@@ -281,7 +282,7 @@ export function ErrorState({ error }: { error: unknown }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/8 p-4 text-sm text-destructive"
+      className="flex items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/8 p-4 text-sm text-destructive"
     >
       <AlertCircle className="mt-0.5 size-4 shrink-0" />
       <div>
@@ -294,7 +295,7 @@ export function ErrorState({ error }: { error: unknown }) {
 
 export function Empty({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
       <div className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-5 [&_svg]:stroke-[1.75]">
         {icon ?? <Inbox />}
       </div>
@@ -323,7 +324,7 @@ export function Pager({
   const first = total ? (page - 1) * size + 1 : 0
   const last = Math.min(total, page * size)
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2.5 text-xs text-muted-foreground">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-meta text-muted-foreground">
       <span className="tabular-nums">
         Hiển thị {num(first)}–{num(last)} / {num(total)}
       </span>
@@ -346,32 +347,94 @@ export function Pager({
 
 const ALL = "__all__"
 
-export function FilterSelect({
+/**
+ * Thanh lọc ở đầu bảng (trong cùng khung với bảng): ô tìm (`search`) và các bộ lọc. Trên điện
+ * thoại ô tìm chiếm một dòng, các bộ lọc thành một hàng vuốt ngang.
+ */
+export function FilterBar({ search, children, className }: { search?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("space-y-2 border-b px-5 py-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:space-y-0", className)}>
+      {search}
+      <div className="-mx-5 flex gap-2 overflow-x-auto px-5 [scrollbar-width:none] max-sm:[&>*]:shrink-0 sm:contents">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/** Ô tìm kiếm: Enter để tìm. */
+export function SearchBox({
   value,
   onChange,
-  options,
-  placeholder = "Tất cả",
-  labels,
+  onSubmit,
+  placeholder,
   className,
 }: {
   value: string
   onChange: (value: string) => void
-  options: string[]
-  placeholder?: string
+  onSubmit: () => void
+  placeholder: string
+  className?: string
+}) {
+  return (
+    <form
+      role="search"
+      className={cn("relative", className)}
+      onSubmit={(e) => {
+        e.preventDefault()
+        onSubmit()
+      }}
+    >
+      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className="h-8 w-full bg-card pl-8 text-sm"
+      />
+    </form>
+  )
+}
+
+/**
+ * Ô chọn bộ lọc, tên bộ lọc nằm trong ô ("Cấp bậc  Tất cả"). `options` là mã (hiện bằng `labels`,
+ * mặc định nhãn tiếng Việt) hoặc cặp [mã, chữ]; `all = null` khi không có lựa chọn "tất cả".
+ */
+export function FilterSelect({
+  value,
+  onChange,
+  options,
+  label: name,
+  labels,
+  all = "Tất cả",
+  className,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: readonly (string | readonly [string, string])[]
+  label?: string
   labels?: (value: string) => string
+  all?: string | null
   className?: string
 }) {
   const text = labels ?? label
+  const items = options.map((o) => (typeof o === "string" ? ([o, text(o)] as const) : o))
+  const active = Boolean(value) && all !== null
   return (
     <Select value={value || ALL} onValueChange={(v) => onChange(v === ALL ? "" : v)}>
-      <SelectTrigger size="sm" className={cn("min-w-36 bg-card", className)}>
-        <SelectValue placeholder={placeholder} />
+      <SelectTrigger
+        size="sm"
+        className={cn("w-auto max-w-64 gap-1.5 bg-card text-sm", active && "border-primary/40 bg-accent/40", className)}
+      >
+        {name && <span className="shrink-0 text-muted-foreground">{name}</span>}
+        <SelectValue placeholder={all ?? undefined} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL}>{placeholder}</SelectItem>
-        {options.map((o) => (
-          <SelectItem key={o} value={o}>
-            {text(o)}
+        {all !== null && <SelectItem value={ALL}>{all}</SelectItem>}
+        {items.map(([v, t]) => (
+          <SelectItem key={v} value={v}>
+            {t}
           </SelectItem>
         ))}
       </SelectContent>
@@ -379,9 +442,54 @@ export function FilterSelect({
   )
 }
 
+/** Ô số nhỏ kèm chữ trước/sau ("Lương từ [15] triệu", "Chưa chạy trong [24] giờ"). */
+export function NumberChip({
+  prefix,
+  suffix,
+  value,
+  onChange,
+  onCommit,
+  min = 0,
+  placeholder,
+  className,
+}: {
+  prefix: string
+  suffix?: string
+  value: string
+  onChange: (value: string) => void
+  onCommit?: () => void
+  min?: number
+  placeholder?: string
+  className?: string
+}) {
+  return (
+    <label
+      className={cn(
+        "flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-sm shadow-xs transition-[box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+        className,
+      )}
+    >
+      <span className="text-muted-foreground">{prefix}</span>
+      <input
+        type="number"
+        min={min}
+        inputMode="numeric"
+        value={value}
+        placeholder={placeholder}
+        aria-label={`${prefix} ${suffix ?? ""}`.trim()}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => onCommit?.()}
+        onKeyDown={(e) => e.key === "Enter" && onCommit?.()}
+        className="w-10 [appearance:textfield] bg-transparent text-center font-medium tabular-nums outline-none placeholder:font-normal placeholder:text-muted-foreground/70 [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      {suffix && <span className="text-muted-foreground">{suffix}</span>}
+    </label>
+  )
+}
+
 export function Field({ label: text, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <label className={cn("flex flex-col gap-1.5 text-xs font-medium text-muted-foreground", className)}>
+    <label className={cn("flex flex-col gap-1.5 text-meta font-medium text-foreground/70", className)}>
       {cap(text)}
       {children}
     </label>
@@ -430,7 +538,7 @@ export function ConfirmButton({
 
 export function Meta({ items }: { items: [string, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[minmax(6.5rem,max-content)_1fr] gap-x-4 gap-y-2.5 text-sm">
+    <dl className="grid grid-cols-[minmax(7rem,max-content)_1fr] gap-x-5 gap-y-3 text-sm">
       {items.map(([k, v], i) => (
         <div key={i} className="contents">
           <dt className="text-muted-foreground">{cap(k)}</dt>
@@ -438,6 +546,20 @@ export function Meta({ items }: { items: [string, ReactNode][] }) {
         </div>
       ))}
     </dl>
+  )
+}
+
+/** Phím tắt bàn phím (nằm trong nút hoặc chữ). */
+export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <kbd
+      className={cn(
+        "inline-grid h-5 min-w-5 place-items-center rounded border border-current/30 px-1 font-mono text-caption leading-none opacity-75",
+        className,
+      )}
+    >
+      {children}
+    </kbd>
   )
 }
 
@@ -493,14 +615,14 @@ export function FilePicker({
   return (
     <label
       className={cn(
-        "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed bg-muted/30 px-4 py-4 text-center transition-colors hover:bg-muted/60 focus-within:ring-2 focus-within:ring-ring/50",
+        "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed bg-muted/40 px-4 py-5 text-center transition-colors hover:bg-muted/60 focus-within:ring-2 focus-within:ring-ring/50",
         file && "border-solid border-brand/40 bg-brand/5",
         className,
       )}
     >
       <FileUp className="size-5 stroke-[1.75] text-muted-foreground" />
       <span className="max-w-full truncate text-sm font-medium">{file ? file.name : title}</span>
-      <span className="text-xs text-muted-foreground">{file ? "Bấm để chọn file khác" : hint}</span>
+      <span className="text-meta text-muted-foreground">{file ? "Bấm để chọn file khác" : hint}</span>
       <input type="file" accept={accept} className="sr-only" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
     </label>
   )

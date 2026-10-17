@@ -98,7 +98,7 @@ export function EvalPage() {
             </Button>
           )}
         </div>
-        <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+        <p className="max-w-3xl text-meta leading-relaxed text-muted-foreground">
           File <code>companies.csv</code> giống file đầu vào (name, tax_code, website). File <code>jobs.csv</code> gồm cột{" "}
           <code>company</code> (tên hoặc MST) và <code>url</code> hoặc <code>title</code> của các việc làm đúng. Hai việc khớp
           nhau khi URL trùng hoặc tiêu đề giống nhau từ 90% trở lên. Chưa có golden set thì dùng trang{" "}
@@ -148,7 +148,7 @@ export function EvalPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Doanh nghiệp</TableHead>
+                  <TableHead>Doanh nghiệp</TableHead>
                   <TableHead>Lượt cuối</TableHead>
                   <TableHead className="text-right">Golden</TableHead>
                   <TableHead className="text-right">Tìm được</TableHead>
@@ -156,23 +156,23 @@ export function EvalPage() {
                   <TableHead className="text-right">Precision</TableHead>
                   <TableHead className="text-right">Recall</TableHead>
                   <TableHead>Thiếu</TableHead>
-                  <TableHead className="pr-4">Thừa</TableHead>
+                  <TableHead>Thừa</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {r.companies.map((c) => (
                   <TableRow key={c.name}>
-                    <TableCell className="pl-4">
+                    <TableCell>
                       {c.company_id ? <TextLink to={`/companies/${c.company_id}`}>{cap(c.name)}</TextLink> : cap(c.name)}
                     </TableCell>
-                    <TableCell className="text-xs">{c.run_status ? label(c.run_status) : "–"}</TableCell>
+                    <TableCell className="text-meta">{c.run_status ? label(c.run_status) : "–"}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.golden}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.predicted}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.matched}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(c.precision)}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(c.recall)}</TableCell>
-                    <TableCell className="max-w-72 text-xs whitespace-normal">{c.missing.join("; ")}</TableCell>
-                    <TableCell className="max-w-72 pr-4 text-xs whitespace-normal text-muted-foreground">{c.extra.join("; ")}</TableCell>
+                    <TableCell className="max-w-72 text-meta whitespace-normal">{c.missing.join("; ")}</TableCell>
+                    <TableCell className="max-w-72 text-meta whitespace-normal text-muted-foreground">{c.extra.join("; ")}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -183,21 +183,21 @@ export function EvalPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Nguồn</TableHead>
+                  <TableHead>Nguồn</TableHead>
                   <TableHead className="text-right">Tin</TableHead>
                   <TableHead className="text-right">Khớp</TableHead>
                   <TableHead className="text-right">Precision</TableHead>
-                  <TableHead className="pr-4 text-right">Recall (độ phủ)</TableHead>
+                  <TableHead className="text-right">Recall (độ phủ)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {r.sources.map((s) => (
                   <TableRow key={s.source}>
-                    <TableCell className="pl-4">{sourceLabel(s.source)}</TableCell>
+                    <TableCell>{sourceLabel(s.source)}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.predicted}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.matched}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(s.precision)}</TableCell>
-                    <TableCell className="pr-4 text-right tabular-nums">{pct(s.recall)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{pct(s.recall)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -208,7 +208,7 @@ export function EvalPage() {
             <Alert>
               <AlertTitle>Cảnh báo</AlertTitle>
               <AlertDescription>
-                <ul className="list-disc pl-4 text-xs">
+                <ul className="list-disc pl-4 text-meta">
                   {r.warnings.map((w) => (
                     <li key={w}>{cap(w)}</li>
                   ))}

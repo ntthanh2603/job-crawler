@@ -68,26 +68,28 @@ export function BoardsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Trang</TableHead>
-                  <TableHead className="text-right">Tin đang mở</TableHead>
+                  <TableHead>Trang</TableHead>
+                  <TableHead className="text-right">Đang mở</TableHead>
                   <TableHead className="text-right">Đã index</TableHead>
-                  <TableHead>Profile đã khớp</TableHead>
+                  <TableHead>Profile khớp</TableHead>
                   <TableHead>Lượt index cuối</TableHead>
-                  <TableHead className="pr-4 text-right">Thao tác</TableHead>
+                  <TableHead className="text-right">
+                    <span className="sr-only">Thao tác</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {d.boards.map((b) => (
                   <TableRow key={b.source}>
-                    <TableCell className="pl-4 font-medium">{sourceLabel(b.source)}</TableCell>
+                    <TableCell className="font-medium">{sourceLabel(b.source)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       <TextLink to={`/jobs?source=${b.source}`} className="text-brand">
                         {num(b.active_postings)}
                       </TextLink>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{num(b.postings)}</TableCell>
-                    <TableCell className="w-44 min-w-36">
-                      <div className="flex items-center justify-between text-xs tabular-nums">
+                    <TableCell className="w-36 min-w-32">
+                      <div className="flex items-center justify-between text-meta tabular-nums">
                         <span>
                           {num(b.profiles_mapped)}/{num(b.profiles)}
                         </span>
@@ -97,7 +99,7 @@ export function BoardsPage() {
                       </div>
                       {b.profiles > 0 && <Progress value={(b.profiles_mapped / b.profiles) * 100} className="mt-1.5 h-1.5" />}
                     </TableCell>
-                    <TableCell className="min-w-60 text-xs whitespace-normal">
+                    <TableCell className="min-w-52 text-meta whitespace-normal">
                       {b.last_status ? (
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
@@ -113,7 +115,7 @@ export function BoardsPage() {
                         <span className="text-muted-foreground">Chưa index</span>
                       )}
                     </TableCell>
-                    <TableCell className="pr-4 text-right">
+                    <TableCell className="text-right">
                       <ConfirmButton
                         title={`Index ${sourceLabel(b.source)} ngay?`}
                         description="Đưa trang này vào hàng đợi index. Đây là việc dài, chạy ở worker index (worker --boards)."
@@ -134,40 +136,40 @@ export function BoardsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="pl-4">Trang</TableHead>
+                    <TableHead>Trang</TableHead>
                     <TableHead>Kết quả</TableHead>
-                    <TableHead className="text-right">Thấy</TableHead>
-                    <TableHead className="text-right">Tải</TableHead>
-                    <TableHead className="text-right">Mới</TableHead>
-                    <TableHead className="text-right">Đổi</TableHead>
-                    <TableHead className="text-right">Lỗi</TableHead>
-                    <TableHead className="text-right">Gỡ</TableHead>
+                    <TableHead className="px-2 text-right">Thấy</TableHead>
+                    <TableHead className="px-2 text-right">Tải</TableHead>
+                    <TableHead className="px-2 text-right">Mới</TableHead>
+                    <TableHead className="px-2 text-right">Đổi</TableHead>
+                    <TableHead className="px-2 text-right">Lỗi</TableHead>
+                    <TableHead className="px-2 text-right">Gỡ</TableHead>
                     <TableHead className="text-right" title="Profile nhà tuyển dụng mới / khớp được doanh nghiệp">
-                      Profile mới / khớp
+                      Profile
                     </TableHead>
-                    <TableHead className="pr-4">Ghi chú</TableHead>
+                    <TableHead>Ghi chú</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {d.runs.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="pl-4">
+                      <TableCell>
                         <div className="font-medium">{sourceLabel(r.source)}</div>
-                        <div className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
+                        <div className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
                       </TableCell>
                       <TableCell>
                         <StatusBadge value={r.status} />
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.urls_seen)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.fetched)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.new)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.updated)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.failed)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(r.removed)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.urls_seen)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.fetched)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.new)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.updated)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.failed)}</TableCell>
+                      <TableCell className="px-2 text-right tabular-nums">{num(r.removed)}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {r.profiles_new} / {r.profiles_matched}
                       </TableCell>
-                      <TableCell className="max-w-56 truncate pr-4 text-xs text-muted-foreground" title={r.error ?? ""}>
+                      <TableCell className="max-w-40 truncate text-meta text-muted-foreground" title={r.error ?? ""}>
                         {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
                       </TableCell>
                     </TableRow>

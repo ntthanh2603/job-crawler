@@ -66,7 +66,7 @@ function ThemeMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-xs text-muted-foreground">
+        <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-meta text-muted-foreground">
           <current.icon className="size-3.5" /> {current.label}
         </Button>
       </DropdownMenuTrigger>
@@ -87,7 +87,7 @@ function Brand() {
       <img src="/logo-mark.png" alt="" width={32} height={32} className="size-8 shrink-0" />
       <div className="leading-tight">
         <div className="text-sm font-semibold tracking-tight text-foreground">jobcrawler</div>
-        <div className="text-[0.7rem] text-muted-foreground">Thu thập tin tuyển dụng</div>
+        <div className="text-caption text-muted-foreground">Thu thập tin tuyển dụng</div>
       </div>
     </div>
   )
@@ -103,7 +103,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav aria-label="Điều hướng chính" className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
         {GROUPS.map((group) => (
           <div key={group.title}>
-            <div className="mb-1.5 px-2.5 text-[0.7rem] font-medium text-muted-foreground/80">{group.title}</div>
+            <div className="mb-1 px-2.5 text-caption font-medium text-muted-foreground">{group.title}</div>
             <div className="space-y-0.5">
               {group.items.map((item) => (
                 <NavLink
@@ -113,7 +113,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     cn(
-                      "group relative flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[0.8125rem] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                      "group relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
                       // Mục đang mở: nền xanh nhạt + vạch màu chính bên trái.
                       isActive &&
                         "bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:inset-y-1.5 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-sidebar-primary",
@@ -144,7 +144,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </nav>
       <div className="flex items-center justify-between gap-2 border-t border-sidebar-border px-3 py-2.5">
-        <span className="flex min-w-0 items-center gap-2 px-1 text-xs text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-2 px-1 text-meta text-muted-foreground">
           <UserRound className="size-3.5 shrink-0" />
           <span className="truncate">{me.data?.user ? me.data.user : "Không đăng nhập"}</span>
         </span>
@@ -199,7 +199,7 @@ export function Layout() {
           </Button>
           <Brand />
         </header>
-        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-7 pb-14 sm:px-6 lg:px-10">
+        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-8 pb-16 sm:px-6 lg:px-10">
           <Outlet />
         </main>
       </div>

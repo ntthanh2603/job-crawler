@@ -6,7 +6,7 @@ import { ErrorState, JobTags, Loading, Meta, PageHeader, ReasonTags, Section, St
 import { JobBody, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { cap, date, dt, pct, salary, sourceLabel } from "@/lib/format"
+import { cap, date, displayName, dt, pct, salary, sourceLabel } from "@/lib/format"
 import type { JobDetail } from "@/lib/types"
 
 export function JobPage() {
@@ -26,7 +26,7 @@ export function JobPage() {
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <TextLink to={`/companies/${j.company_id}`} className="font-medium text-foreground">
-              {cap(j.company_name)}
+              {displayName(j.company_name)}
             </TextLink>
             <StatusBadge value={j.status} />
             <JobTags job={j} />
@@ -66,7 +66,7 @@ export function JobPage() {
                           <div key={i}>
                             {l.province || "–"}
                             {l.address_raw && l.address_raw !== l.province && (
-                              <div className="text-xs text-muted-foreground">{cap(l.address_raw)}</div>
+                              <div className="text-meta text-muted-foreground">{cap(l.address_raw)}</div>
                             )}
                           </div>
                         ))}
@@ -79,7 +79,7 @@ export function JobPage() {
                     "Lương",
                     <>
                       {salary(j.salary)}
-                      {j.salary?.raw && <div className="text-xs text-muted-foreground">{cap(j.salary.raw)}</div>}
+                      {j.salary?.raw && <div className="text-meta text-muted-foreground">{cap(j.salary.raw)}</div>}
                     </>,
                   ],
                   ["Kinh nghiệm", exp ? `${exp.min ?? "?"}–${exp.max ?? "?"} năm` : "Không ghi"],

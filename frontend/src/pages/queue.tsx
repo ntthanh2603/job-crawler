@@ -70,35 +70,35 @@ export function QueuePage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Việc</TableHead>
+                      <TableHead>Việc</TableHead>
                       <TableHead>Loại</TableHead>
                       <TableHead>Trạng thái</TableHead>
                       <TableHead className="text-right">Lần chạy</TableHead>
                       <TableHead>Bắt đầu</TableHead>
-                      <TableHead className="pr-4">Lỗi</TableHead>
+                      <TableHead>Lỗi</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {q.jobs.map((j) => (
                       <TableRow key={j.key}>
-                        <TableCell className="max-w-80 truncate pl-4">
+                        <TableCell className="max-w-80 truncate">
                           {j.company_id ? (
                             <TextLink to={`/companies/${j.company_id}`}>{jobLabel(j)}</TextLink>
                           ) : (
                             jobLabel(j)
                           )}
                         </TableCell>
-                        <TableCell className="text-xs">{FUNCTIONS[j.function] ?? j.function}</TableCell>
+                        <TableCell className="text-meta">{FUNCTIONS[j.function] ?? j.function}</TableCell>
                         <TableCell>
                           <StatusBadge value={j.status} />
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {j.attempts ?? 0}/{j.retries ?? 1}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-meta text-muted-foreground">
                           {j.started ? cap(ago(new Date(j.started).toISOString())) : "Chưa chạy"}
                         </TableCell>
-                        <TableCell className="max-w-64 truncate pr-4 text-xs text-muted-foreground" title={j.error ?? ""}>
+                        <TableCell className="max-w-64 truncate text-meta text-muted-foreground" title={j.error ?? ""}>
                           {j.error ? cap(j.error) : "–"}
                         </TableCell>
                       </TableRow>

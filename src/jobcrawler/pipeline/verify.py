@@ -320,9 +320,11 @@ _LISTING_TITLE = re.compile(
     r"|^(?:xem )?tat ca(?: (?:viec lam|vi tri|co hoi|cong viec))?$"
     r"|^(?:view )?all(?: open)? (?:jobs|roles|positions|openings)$"
 )
-# Trang SEO / khẩu hiệu của site việc làm: "tìm việc làm ở Thanh Hóa", "… 39192 công việc đang chờ".
+# Trang SEO / kết quả tìm / khẩu hiệu của site việc làm: "tìm việc làm ở Thanh Hóa",
+# "Tìm thấy 4 công việc Thiết kế", "… 39192 công việc đang chờ".
 _LISTING_SEO = re.compile(
     r"^(?:tim )?(?:viec lam|cong viec)(?: moi| nhanh)? (?:o|tai) "
+    r"|^tim thay \d+ (?:cong viec|viec lam|vi tri|ket qua)\b"
     r"|\b\d{3,} (?:cong viec|viec lam|vi tri|jobs)\b"
 )
 # Tiêu đề chỉ là tên tỉnh/thành (trang lọc việc theo nơi làm): "Tỉnh Vĩnh Long".

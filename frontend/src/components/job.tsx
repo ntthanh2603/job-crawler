@@ -3,7 +3,7 @@ import { Check, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 
-import { ExternalLink, ReasonTags, Section, StatusBadge } from "@/components/common"
+import { ExternalLink, Kbd, ReasonTags, Section, StatusBadge } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
@@ -39,25 +39,25 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="pl-4">Nguồn</TableHead>
+          <TableHead>Nguồn</TableHead>
           <TableHead>Trạng thái</TableHead>
-          <TableHead className="pr-4">Xác minh</TableHead>
+          <TableHead>Xác minh</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {detail.postings.map((p) => (
           <TableRow key={p.id}>
-            <TableCell className="max-w-64 pl-4">
-              <div className="text-xs font-medium">{sourceLabel(p.source)}</div>
-              <ExternalLink href={p.url} className="block truncate text-xs" title={p.url}>
+            <TableCell className="max-w-64">
+              <div className="text-sm font-medium">{sourceLabel(p.source)}</div>
+              <ExternalLink href={p.url} className="block truncate text-meta" title={p.url}>
                 {p.url.replace(/^https?:\/\/(www\.)?/, "")}
               </ExternalLink>
             </TableCell>
-            <TableCell className="text-xs">
+            <TableCell className="text-meta">
               <StatusBadge value={p.status} />
               <div className="mt-1 text-muted-foreground">Thấy {ago(p.last_seen_at)}</div>
             </TableCell>
-            <TableCell className="pr-4 text-xs whitespace-normal">
+            <TableCell className="text-meta whitespace-normal">
               <div className="flex flex-wrap items-center gap-1">
                 {p.accepted === true && <StatusBadge value="ok" text="Nhận" />}
                 {p.accepted === false && <StatusBadge value="failed" text="Loại" />}
@@ -125,7 +125,7 @@ export function ReviewBox({
         <div className="flex flex-wrap items-center gap-2 text-sm">
           Đã đánh dấu
           <StatusBadge value={review.correct ? "correct" : "wrong"} />
-          <span className="text-xs text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {review.reviewer ? `${review.reviewer} · ` : ""}
             {ago(review.reviewed_at)}
           </span>
@@ -146,11 +146,11 @@ export function ReviewBox({
           disabled={save.isPending}
         >
           <Check /> Đúng
-          {shortcuts && <kbd className="rounded border border-current/40 px-1 font-mono text-[10px] opacity-80">D</kbd>}
+          {shortcuts && <Kbd>D</Kbd>}
         </Button>
         <Button variant="destructive" onClick={() => save.mutate(false)} disabled={save.isPending}>
           <X /> Sai
-          {shortcuts && <kbd className="rounded border border-current/40 px-1 font-mono text-[10px] opacity-80">S</kbd>}
+          {shortcuts && <Kbd>S</Kbd>}
         </Button>
         {review && !onDone && (
           <Button variant="ghost" size="sm" className="self-center" onClick={() => remove.mutate()}>

@@ -1,27 +1,27 @@
 import { useQuery } from "@tanstack/react-query"
-import { Check, Download, Search, X } from "lucide-react"
-import { useEffect, useState, type FormEvent } from "react"
+import { Check, Download, X } from "lucide-react"
+import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
 
 import {
   Empty,
   ErrorState,
-  Field,
+  FilterBar,
   FilterSelect,
   JobTags,
   Loading,
+  NumberChip,
   PageHeader,
   Pager,
+  SearchBox,
   Section,
   StatusBadge,
   TextLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { cap, date, num, provinces, salary, sourceLabel } from "@/lib/format"
+import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
 import type { Job, Meta, Page } from "@/lib/types"
 
 const KEYS = [
@@ -105,117 +105,81 @@ export function JobsPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-end gap-3 rounded-xl border bg-card/60 p-3">
-        <form
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault()
-            update({ q: search.trim(), salary_from: salaryFrom })
-          }}
-          className="flex flex-wrap items-end gap-3"
-        >
-          <Field label="Tìm kiếm">
-            <div className="relative">
-              <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Vị trí hoặc doanh nghiệp"
-                className="h-8 w-64 bg-card pl-8"
-              />
-            </div>
-          </Field>
-          <Field label="Lương từ (triệu)">
-            <Input
-              type="number"
-              min={0}
-              value={salaryFrom}
-              onChange={(e) => setSalaryFrom(e.target.value)}
-              onBlur={() => salaryFrom !== filters.salary_from && update({ salary_from: salaryFrom })}
-              className="h-8 w-28 bg-card"
-              placeholder="Ví dụ 15"
+      <Section bodyClassName="p-0">
+        <FilterBar
+          search={
+            <SearchBox
+              className="sm:w-72"
+              value={search}
+              onChange={setSearch}
+              onSubmit={() => update({ q: search.trim(), salary_from: salaryFrom })}
+              placeholder="Tìm vị trí hoặc doanh nghiệp"
             />
-          </Field>
-          <button type="submit" hidden />
-        </form>
-        <Field label="Tỉnh/thành">
-          <FilterSelect value={filters.province} onChange={(v) => update({ province: v })} options={meta.data?.provinces ?? []} />
-        </Field>
-        <Field label="Cấp bậc">
-          <FilterSelect value={filters.level} onChange={(v) => update({ level: v })} options={meta.data?.levels ?? []} />
-        </Field>
-        <Field label="Loại hình">
+          }
+        >
+          <NumberChip
+            prefix="Lương từ"
+            suffix="triệu"
+            value={salaryFrom}
+            onChange={setSalaryFrom}
+            onCommit={() => salaryFrom !== filters.salary_from && update({ salary_from: salaryFrom })}
+            placeholder="–"
+          />
           <FilterSelect
+            label="Tỉnh/thành"
+            value={filters.province}
+            onChange={(v) => update({ province: v })}
+            options={meta.data?.provinces ?? []}
+          />
+          <FilterSelect label="Cấp bậc" value={filters.level} onChange={(v) => update({ level: v })} options={meta.data?.levels ?? []} />
+          <FilterSelect
+            label="Loại hình"
             value={filters.employment_type}
             onChange={(v) => update({ employment_type: v })}
             options={meta.data?.employment_types ?? []}
           />
-        </Field>
-        <Field label="Hình thức">
-          <FilterSelect value={filters.work_mode} onChange={(v) => update({ work_mode: v })} options={meta.data?.work_modes ?? []} />
-        </Field>
-        <Field label="Nguồn">
           <FilterSelect
+            label="Hình thức"
+            value={filters.work_mode}
+            onChange={(v) => update({ work_mode: v })}
+            options={meta.data?.work_modes ?? []}
+          />
+          <FilterSelect
+            label="Nguồn"
             value={filters.source}
             onChange={(v) => update({ source: v })}
             options={meta.data?.sources ?? []}
             labels={sourceLabel}
           />
-        </Field>
-        <Field label="Kiểm tay">
-          <FilterSelect value={filters.reviewed} onChange={(v) => update({ reviewed: v })} options={["no", "yes", "correct", "wrong"]} />
-        </Field>
-        <Field label="Trạng thái">
-          <Select value={filters.status} onValueChange={(v) => update({ status: v })}>
-            <SelectTrigger size="sm" className="w-36 bg-card">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUSES.map(([v, text]) => (
-                <SelectItem key={v} value={v}>
-                  {text}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label="Sắp xếp">
-          <Select value={filters.sort} onValueChange={(v) => update({ sort: v })}>
-            <SelectTrigger size="sm" className="w-40 bg-card">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SORTS.map(([v, text]) => (
-                <SelectItem key={v} value={v}>
-                  {text}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        {params.toString() && (
-          <Button variant="ghost" size="sm" onClick={() => setParams({})}>
-            Xoá bộ lọc
-          </Button>
-        )}
-      </div>
-
-      {filters.company_id && (
-        <p className="mb-3 text-xs text-muted-foreground">
-          Đang lọc theo doanh nghiệp #{filters.company_id} ·{" "}
-          <TextLink to={`/companies/${filters.company_id}`} className="text-brand">
-            Xem doanh nghiệp
-          </TextLink>
-        </p>
-      )}
-
-      <Section bodyClassName="p-0">
+          <FilterSelect
+            label="Kiểm tay"
+            value={filters.reviewed}
+            onChange={(v) => update({ reviewed: v })}
+            options={["no", "yes", "correct", "wrong"]}
+          />
+          <FilterSelect label="Trạng thái" value={filters.status} onChange={(v) => update({ status: v })} options={STATUSES} all={null} />
+          <FilterSelect label="Sắp xếp" value={filters.sort} onChange={(v) => update({ sort: v })} options={SORTS} all={null} />
+          {filters.company_id && (
+            <span className="inline-flex h-8 items-center gap-1 rounded-md border border-primary/40 bg-accent/40 pr-1 pl-2.5 text-sm">
+              <TextLink to={`/companies/${filters.company_id}`}>Doanh nghiệp #{filters.company_id}</TextLink>
+              <Button variant="ghost" size="icon-xs" aria-label="Bỏ lọc theo doanh nghiệp" onClick={() => update({ company_id: "" })}>
+                <X />
+              </Button>
+            </span>
+          )}
+          {params.toString() && (
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setParams({})}>
+              Xoá bộ lọc
+            </Button>
+          )}
+        </FilterBar>
         {query.isError && (
-          <div className="p-4">
+          <div className="p-5">
             <ErrorState error={query.error} />
           </div>
         )}
         {query.isLoading && (
-          <div className="p-4">
+          <div className="p-5">
             <Loading />
           </div>
         )}
@@ -224,17 +188,17 @@ export function JobsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Vị trí</TableHead>
+                  <TableHead>Vị trí</TableHead>
                   <TableHead>Nơi làm</TableHead>
                   <TableHead>Lương</TableHead>
                   <TableHead>Nguồn</TableHead>
-                  <TableHead className="pr-4">Hạn nộp</TableHead>
+                  <TableHead>Hạn nộp</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((j) => (
                   <TableRow key={j.id}>
-                    <TableCell className="max-w-[28rem] min-w-56 pl-4 whitespace-normal">
+                    <TableCell className="max-w-[30rem] min-w-64 whitespace-normal">
                       <div className="flex items-start gap-1.5">
                         <TextLink to={`/jobs/${j.id}`} className="font-medium">
                           {cap(j.title)}
@@ -242,21 +206,21 @@ export function JobsPage() {
                         {j.reviewed === true && <Check className="mt-0.5 size-4 shrink-0 text-success" aria-label="Đã kiểm: đúng" />}
                         {j.reviewed === false && <X className="mt-0.5 size-4 shrink-0 text-destructive" aria-label="Đã kiểm: sai" />}
                       </div>
-                      <TextLink to={`/companies/${j.company_id}`} className="mt-0.5 block text-xs text-muted-foreground">
-                        {cap(j.company_name)}
+                      <TextLink to={`/companies/${j.company_id}`} className="mt-0.5 block text-meta text-muted-foreground">
+                        {displayName(j.company_name)}
                       </TextLink>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {j.status !== "active" && <StatusBadge value={j.status} />}
                         <JobTags job={j} />
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-44 min-w-28 text-xs whitespace-normal">{provinces(j)}</TableCell>
-                    <TableCell className="text-xs whitespace-nowrap">{salary(j.salary)}</TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell className="max-w-44 min-w-28 text-meta whitespace-normal">{provinces(j)}</TableCell>
+                    <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
+                    <TableCell className="text-meta">
                       {sourceLabel(j.canonical_source)}
                       {j.source_urls.length > 1 && <span className="text-muted-foreground"> +{j.source_urls.length - 1}</span>}
                     </TableCell>
-                    <TableCell className="pr-4 text-xs whitespace-nowrap tabular-nums">
+                    <TableCell className="text-meta whitespace-nowrap tabular-nums">
                       <div>{date(j.expires_at)}</div>
                       {j.posted_at && <div className="text-muted-foreground">Đăng {date(j.posted_at)}</div>}
                     </TableCell>
@@ -271,9 +235,6 @@ export function JobsPage() {
           <Pager page={query.data.page} pages={query.data.pages} total={query.data.total} onPage={(p) => update({ page: p })} />
         )}
       </Section>
-      <p className="mt-3 text-xs text-muted-foreground">
-        Tìm theo tiêu đề và tên doanh nghiệp. Mô tả được lưu nén nên không tìm trong mô tả.
-      </p>
     </>
   )
 }

@@ -18,6 +18,29 @@ const LEVELS: Record<string, [Tone, string]> = {
   critical: ["bad", "Nghiêm trọng"],
 }
 
+function value(v: unknown): string {
+  const text = typeof v === "object" ? JSON.stringify(v) : String(v)
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text
+}
+
+/** Ngữ cảnh của một dòng log: các cặp khoá–giá trị (bỏ giá trị rỗng) thay cho JSON thô. */
+function LogContext({ context }: { context: Record<string, unknown> }) {
+  const entries = Object.entries(context).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0),
+  )
+  if (!entries.length) return null
+  return (
+    <dl className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-meta">
+      {entries.slice(0, 14).map(([k, v]) => (
+        <div key={k} className="flex min-w-0 gap-1">
+          <dt className="text-muted-foreground">{k}</dt>
+          <dd className="min-w-0 break-all text-foreground/80">{value(v)}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 export function RunPage() {
   const { id } = useParams()
   const query = useQuery({ queryKey: ["run", id], queryFn: () => api.get<RunDetail>(`/runs/${id}`) })
@@ -41,7 +64,7 @@ export function RunPage() {
             <StatusBadge value={r.status} />
             <span>Thời gian {duration(r.duration_ms)}</span>
             <span>· Nhận {r.jobs_accepted}/{r.jobs_found} tin</span>
-            <code className="text-xs text-muted-foreground/80">{r.run_id}</code>
+            <code className="text-meta text-muted-foreground/80">{r.run_id}</code>
           </span>
         }
       />
@@ -54,7 +77,7 @@ export function RunPage() {
               ? `Nguồn chưa xong: ${r.incomplete_sources.map(sourceLabel).join(", ")}`
               : "Lượt chạy gặp lỗi"}
           </AlertTitle>
-          {r.error && <AlertDescription className="font-mono text-xs">{r.error}</AlertDescription>}
+          {r.error && <AlertDescription className="font-mono text-meta">{r.error}</AlertDescription>}
         </Alert>
       )}
 
@@ -64,20 +87,20 @@ export function RunPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4">Nguồn</TableHead>
+                  <TableHead>Nguồn</TableHead>
                   <TableHead className="text-right">Request</TableHead>
-                  <TableHead className="pr-4">Kết quả</TableHead>
+                  <TableHead>Kết quả</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {d.by_source.map((s) => (
                   <TableRow key={s.source}>
-                    <TableCell className="max-w-72 pl-4">
+                    <TableCell className="max-w-72">
                       <div className="font-medium">{sourceLabel(s.source)}</div>
-                      <div className="truncate font-mono text-xs text-muted-foreground">{s.source}</div>
+                      <div className="truncate font-mono text-meta text-muted-foreground">{s.source}</div>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{num(s.total)}</TableCell>
-                    <TableCell className="pr-4">
+                    <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {byCount(s.outcomes).map(([k, v]) => (
                           <StatusBadge key={k} value={k} text={`${label(k)} · ${v}`} />
@@ -92,7 +115,7 @@ export function RunPage() {
             <Empty>Không có request nào.</Empty>
           )}
           {d.failed_pages.length > 0 && (
-            <div className="space-y-1.5 border-t p-4 text-xs">
+            <div className="space-y-1.5 border-t px-5 py-4 text-meta">
               <div className="font-medium">Trang parse lỗi</div>
               {d.failed_pages.map((f) => (
                 <div key={f.id}>
@@ -108,17 +131,17 @@ export function RunPage() {
 
         <Section title="Log" description={`${num(d.logs.length)} dòng`} bodyClassName="p-0">
           {d.logs.length ? (
-            <ScrollArea className="h-96">
+            <ScrollArea className="h-[28rem]">
               <div className="divide-y">
                 {d.logs.map((l, i) => {
                   const [tone, text] = LEVELS[l.level] ?? ["muted", cap(l.level)]
                   return (
-                    <div key={i} className="grid grid-cols-[auto_auto_1fr] items-start gap-3 px-4 py-2 text-xs">
-                      <span className="pt-0.5 text-muted-foreground tabular-nums">{hour(l.ts)}</span>
+                    <div key={i} className="grid grid-cols-[auto_6.5rem_1fr] items-start gap-3 px-5 py-2.5 text-meta">
+                      <span className="text-muted-foreground tabular-nums">{hour(l.ts)}</span>
                       <StatusBadge value={l.level} tone={tone} text={text} />
                       <div className="min-w-0">
-                        <code className="font-medium">{l.event}</code>
-                        <div className="break-all text-muted-foreground">{JSON.stringify(l.context).slice(0, 400)}</div>
+                        <code className="font-mono font-medium text-foreground">{l.event}</code>
+                        <LogContext context={l.context} />
                       </div>
                     </div>
                   )
@@ -135,20 +158,20 @@ export function RunPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4">Nguồn</TableHead>
+              <TableHead>Nguồn</TableHead>
               <TableHead>URL</TableHead>
               <TableHead className="text-right">HTTP</TableHead>
               <TableHead>Kết quả</TableHead>
               <TableHead className="text-right">Thời gian</TableHead>
               <TableHead className="text-right">Số tin</TableHead>
-              <TableHead className="pr-4">Lỗi</TableHead>
+              <TableHead>Lỗi</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {d.fetches.map((f, i) => (
               <TableRow key={i}>
-                <TableCell className="pl-4 text-xs">{sourceLabel(f.source)}</TableCell>
-                <TableCell className="max-w-96 truncate text-xs">
+                <TableCell className="text-meta">{sourceLabel(f.source)}</TableCell>
+                <TableCell className="max-w-72 truncate text-meta">
                   <ExternalLink href={f.url}>{f.url}</ExternalLink>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{f.http_status ?? "–"}</TableCell>
@@ -157,7 +180,7 @@ export function RunPage() {
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{duration(f.duration_ms)}</TableCell>
                 <TableCell className="text-right tabular-nums">{f.items ?? "–"}</TableCell>
-                <TableCell className="max-w-64 truncate pr-4 text-xs text-muted-foreground" title={f.error ?? ""}>
+                <TableCell className="max-w-44 truncate text-meta text-muted-foreground" title={f.error ?? ""}>
                   {f.error ? cap(f.error) : ""}
                 </TableCell>
               </TableRow>

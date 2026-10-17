@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
-import { ago, cap, companyName, date, dt, duration, failReason, pct, provinces, salary, sourceLabel } from "@/lib/format"
+import { ago, cap, companyName, date, displayName, dt, duration, failReason, pct, provinces, salary, sourceLabel } from "@/lib/format"
 import type { CompanyDetail, EnqueueResult } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
@@ -93,9 +93,18 @@ export function CompanyPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Tabs defaultValue="jobs" className="min-w-0 gap-4">
           <TabsList>
-            <TabsTrigger value="jobs">Việc đang mở ({d.jobs.length})</TabsTrigger>
-            <TabsTrigger value="runs">Lượt chạy ({d.runs.length})</TabsTrigger>
-            <TabsTrigger value="rejected">Tin bị loại ({d.rejected.length})</TabsTrigger>
+            {(
+              [
+                ["jobs", "Việc đang mở", d.jobs.length],
+                ["runs", "Lượt chạy", d.runs.length],
+                ["rejected", "Tin bị loại", d.rejected.length],
+              ] as const
+            ).map(([value, text, n]) => (
+              <TabsTrigger key={value} value={value} className="px-3">
+                {text}
+                <span className="text-meta font-normal text-muted-foreground tabular-nums">{n}</span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value="jobs">
@@ -108,30 +117,30 @@ export function CompanyPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Vị trí</TableHead>
+                      <TableHead>Vị trí</TableHead>
                       <TableHead>Nơi làm</TableHead>
                       <TableHead>Lương</TableHead>
-                      <TableHead className="pr-4">Hạn nộp</TableHead>
+                      <TableHead>Hạn nộp</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {d.jobs.map((j) => (
                       <TableRow key={j.id}>
-                        <TableCell className="max-w-96 min-w-56 pl-4 whitespace-normal">
+                        <TableCell className="max-w-96 min-w-56 whitespace-normal">
                           <TextLink to={`/jobs/${j.id}`} className="font-medium">
                             {cap(j.title)}
                           </TextLink>
                           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                             <JobTags job={j} />
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-meta text-muted-foreground">
                               {sourceLabel(j.canonical_source)}
                               {j.source_urls.length > 1 && ` +${j.source_urls.length - 1}`}
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="max-w-48 text-xs whitespace-normal">{provinces(j)}</TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">{salary(j.salary)}</TableCell>
-                        <TableCell className="pr-4 text-xs whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
+                        <TableCell className="max-w-48 text-meta whitespace-normal">{provinces(j)}</TableCell>
+                        <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
+                        <TableCell className="text-meta whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -148,28 +157,28 @@ export function CompanyPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Bắt đầu</TableHead>
+                      <TableHead>Bắt đầu</TableHead>
                       <TableHead>Kết quả</TableHead>
                       <TableHead className="text-right">Nhận / thấy</TableHead>
-                      <TableHead className="pr-4">Nguồn chưa xong, lỗi</TableHead>
+                      <TableHead>Nguồn chưa xong, lỗi</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {d.runs.map((r) => (
                       <TableRow key={r.run_id}>
-                        <TableCell className="pl-4 whitespace-nowrap tabular-nums">
+                        <TableCell className="whitespace-nowrap tabular-nums">
                           <TextLink to={`/runs/${r.run_id}`} className="text-brand">
                             {dt(r.started_at)}
                           </TextLink>
                         </TableCell>
                         <TableCell>
                           <StatusBadge value={r.status} />
-                          <div className="text-xs text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
+                          <div className="text-meta text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.jobs_accepted}/{r.jobs_found}
                         </TableCell>
-                        <TableCell className="max-w-96 pr-4 text-xs whitespace-normal [overflow-wrap:anywhere]">
+                        <TableCell className="max-w-96 text-meta whitespace-normal [overflow-wrap:anywhere]">
                           {r.incomplete_sources.length > 0 && r.incomplete_sources.map(sourceLabel).join(", ")}
                           {r.error && <div className="mt-0.5 font-mono text-muted-foreground">{r.error.slice(0, 200)}</div>}
                           {!r.incomplete_sources.length && !r.error && <span className="text-muted-foreground">Không có</span>}
@@ -190,30 +199,30 @@ export function CompanyPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Tin</TableHead>
+                      <TableHead>Tin</TableHead>
                       <TableHead>Nguồn</TableHead>
                       <TableHead>Lý do</TableHead>
-                      <TableHead className="pr-4">Thời điểm</TableHead>
+                      <TableHead>Thời điểm</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {d.rejected.map((p) => (
                       <TableRow key={p.id}>
-                        <TableCell className="max-w-80 min-w-56 pl-4 whitespace-normal">
+                        <TableCell className="max-w-80 min-w-56 whitespace-normal">
                           <ExternalLink href={p.url}>{cap(p.title || p.url)}</ExternalLink>
                         </TableCell>
-                        <TableCell className="text-xs">{sourceLabel(p.source)}</TableCell>
-                        <TableCell className="max-w-96 text-xs whitespace-normal">
+                        <TableCell className="text-meta">{sourceLabel(p.source)}</TableCell>
+                        <TableCell className="max-w-96 text-meta whitespace-normal">
                           {p.verification_reasons
                             .filter((r) => !r.startsWith("SOURCE_"))
                             .map((r) => (
                               <div key={r}>
-                                <span className="font-mono text-[0.7rem] text-muted-foreground">{r.split(":")[0]}</span>
+                                <span className="font-mono text-caption text-muted-foreground">{r.split(":")[0]}</span>
                                 {r.includes(":") && <> · {cap(r.slice(r.indexOf(":") + 1).trim())}</>}
                               </div>
                             ))}
                         </TableCell>
-                        <TableCell className="pr-4 text-xs text-muted-foreground">{cap(ago(p.verified_at))}</TableCell>
+                        <TableCell className="text-meta text-muted-foreground">{cap(ago(p.verified_at))}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -229,8 +238,8 @@ export function CompanyPage() {
           <Section title="Thông tin">
             <Meta
               items={[
-                ["Tên nhập", cap(c.input_name)],
-                ...(c.legal_name ? [["Tên pháp lý", cap(c.legal_name)] as [string, string]] : []),
+                ["Tên nhập", displayName(c.input_name)],
+                ...(c.legal_name ? [["Tên pháp lý", displayName(c.legal_name)] as [string, string]] : []),
                 ...(c.brand_name ? [["Thương hiệu", cap(c.brand_name)] as [string, string]] : []),
                 ["MST", c.tax_code || "–"],
                 [
@@ -260,7 +269,7 @@ export function CompanyPage() {
               </div>
             )}
             {ev.evidence?.length ? (
-              <ul className="space-y-3 text-xs">
+              <ul className="space-y-3 text-meta">
                 {ev.evidence.map((e, i) => (
                   <li key={i} className="space-y-0.5">
                     <ExternalLink href={e.url} className="break-all">
@@ -289,7 +298,7 @@ export function CompanyPage() {
                         <ExternalLinkIcon className="size-3 shrink-0" />
                       </ExternalLink>
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-meta text-muted-foreground">
                       Khớp {p.match_confidence === null ? "–" : pct(p.match_confidence, 0)}
                       {p.match_signal && ` theo ${SIGNALS[p.match_signal] ?? p.match_signal}`} · index {ago(p.indexed_at)}
                     </div>
@@ -313,7 +322,7 @@ export function CompanyPage() {
 
           {d.failed_pages.length > 0 && (
             <Section title="Trang parse lỗi">
-              <ul className="space-y-2.5 text-xs">
+              <ul className="space-y-2.5 text-meta">
                 {d.failed_pages.map((f) => (
                   <li key={f.id}>
                     <TextLink to={`/failed-pages/${f.id}`} className="break-all text-brand">

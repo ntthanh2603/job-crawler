@@ -71,6 +71,7 @@ def test_clean_careers_job_is_accepted_with_reasons() -> None:
         ({"title": "Tỉnh Vĩnh Long"}, verify.NOT_A_JOB),
         ({"title": "Hà Nội"}, verify.NOT_A_JOB),
         ({"title": "tìm việc làm ở Thanh Hóa"}, verify.NOT_A_JOB),
+        ({"title": "Tìm thấy 4 công việc Thiết kế/ UX-UI/ Phát triển sản phẩm"}, verify.NOT_A_JOB),
         ({"title": "Thế giới việc làm, 39192 công việc đang chờ bạn"}, verify.NOT_A_JOB),
         ({"title": "Tuyển dụng nhân sự"}, verify.NOT_A_JOB),
         (

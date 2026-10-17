@@ -130,8 +130,24 @@ export function sourceLabel(value: string | null | undefined): string {
   return SOURCE_NAMES[kind] ?? cap(kind)
 }
 
+// Nguyên âm tiếng Việt (kể cả có dấu): từ không có nguyên âm là viết tắt ("TNHH", "FPT", "MTV").
+const VOWEL = /[aeiouyàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]/i
+
+/**
+ * Tên viết HOA toàn bộ ("CÔNG TY CỔ PHẦN ĐẦU TƯ ĐIỆN MÁY XANH") → viết hoa đầu mỗi từ để dễ đọc;
+ * giữ nguyên từ viết tắt (không có nguyên âm) và tên đã viết thường/hoa lẫn.
+ */
+export function displayName(text: string | null | undefined): string {
+  if (!text) return ""
+  const letters = text.replace(/[^\p{L}]/gu, "")
+  if (letters.length < 4 || letters !== letters.toLocaleUpperCase("vi")) return cap(text)
+  return text.replace(/\p{L}[\p{L}\p{M}'’]*/gu, (word) =>
+    VOWEL.test(word) ? word.charAt(0) + word.slice(1).toLocaleLowerCase("vi") : word,
+  )
+}
+
 export function companyName(c: { brand_name: string | null; legal_name: string | null; input_name: string }): string {
-  return cap(c.brand_name || c.legal_name || c.input_name)
+  return displayName(c.brand_name || c.legal_name || c.input_name)
 }
 
 export const LABELS: Record<string, string> = {

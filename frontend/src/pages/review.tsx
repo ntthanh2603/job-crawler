@@ -6,6 +6,7 @@ import {
   Empty,
   ErrorState,
   JobTags,
+  Kbd,
   Loading,
   PageHeader,
   ReasonTags,
@@ -19,7 +20,7 @@ import { JobBody, ReviewBox } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { ago, cap, date, num, pct, provinces, salary, sourceLabel } from "@/lib/format"
+import { ago, cap, date, displayName, num, pct, provinces, salary, sourceLabel } from "@/lib/format"
 import type { ReviewPage as ReviewData } from "@/lib/types"
 
 export function ReviewPage() {
@@ -80,7 +81,7 @@ export function ReviewPage() {
                 actions={
                   <Button variant="outline" size="sm" onClick={() => setSkip(next.job.id)} disabled={query.isFetching}>
                     <SkipForward /> Bỏ qua
-                    <kbd className="rounded border px-1 font-mono text-[10px] text-muted-foreground">N</kbd>
+                    <Kbd>N</Kbd>
                   </Button>
                 }
                 bodyClassName="space-y-5"
@@ -88,7 +89,7 @@ export function ReviewPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <TextLink to={`/companies/${next.job.company_id}`} className="font-medium">
-                      {cap(next.job.company_name)}
+                      {displayName(next.job.company_name)}
                     </TextLink>
                     {provinces(next.job) !== "–" && <span className="text-muted-foreground">· {provinces(next.job)}</span>}
                     <span className="text-muted-foreground">
@@ -96,7 +97,7 @@ export function ReviewPage() {
                     </span>
                     <JobTags job={next.job} />
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
                     <span>Nguồn {sourceLabel(next.job.canonical_source)}</span>
                     <span>· Đăng {date(next.job.posted_at)}</span>
                     <span>· Hạn {date(next.job.expires_at)}</span>
@@ -115,7 +116,7 @@ export function ReviewPage() {
                 </div>
                 <ReviewBox detail={next} shortcuts onDone={() => setSkip(null)} />
                 <div className="rounded-lg border bg-muted/25 px-5 py-4">
-                  <div className="mb-3 text-xs font-medium text-muted-foreground">Nội dung tin</div>
+                  <div className="mb-3 text-meta font-medium text-muted-foreground">Nội dung tin</div>
                   <JobBody detail={next} />
                 </div>
               </Section>
@@ -131,17 +132,17 @@ export function ReviewPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="pl-4">Nguồn</TableHead>
+                        <TableHead>Nguồn</TableHead>
                         <TableHead className="text-right">Đã kiểm</TableHead>
-                        <TableHead className="pr-4 text-right">Precision</TableHead>
+                        <TableHead className="text-right">Precision</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {d.by_source.map((s) => (
                         <TableRow key={s.source}>
-                          <TableCell className="pl-4">{sourceLabel(s.source)}</TableCell>
+                          <TableCell>{sourceLabel(s.source)}</TableCell>
                           <TableCell className="text-right tabular-nums">{s.reviewed}</TableCell>
-                          <TableCell className="pr-4 text-right tabular-nums">{pct(s.precision)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{pct(s.precision)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -153,7 +154,7 @@ export function ReviewPage() {
               <Section
                 title="Vừa kiểm"
                 actions={
-                  <TextLink to="/jobs?reviewed=wrong&status=all" className="text-xs text-brand">
+                  <TextLink to="/jobs?reviewed=wrong&status=all" className="text-meta text-brand">
                     Các việc bị đánh sai
                   </TextLink>
                 }
@@ -168,8 +169,8 @@ export function ReviewPage() {
                             {cap(r.title)}
                           </TextLink>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {cap(r.company_name)} · {ago(r.reviewed_at)}
+                        <div className="text-meta text-muted-foreground">
+                          {displayName(r.company_name)} · {ago(r.reviewed_at)}
                           {r.note && <> · {r.note}</>}
                         </div>
                       </li>

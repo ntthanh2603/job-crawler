@@ -100,6 +100,33 @@
   --shadow-color: oklch(0 0 0 / 0.3);
 }
 
+/*
+ * Thang cỡ chữ (không dùng cỡ nào ngoài thang này, nhỏ nhất 12px):
+ *   caption 12px — tiêu đề cột, tag, nhãn nhóm, phím tắt
+ *   meta    13px — thông tin phụ: dòng thứ hai trong ô, thời gian, gợi ý, nhãn trạng thái
+ *   sm      14px — nội dung chính: ô bảng, nút, ô nhập, menu (text-sm của Tailwind)
+ *   title   15px — tiêu đề khung
+ *   prose   15px — nội dung tin tuyển dụng
+ *   page    26px — tiêu đề trang
+ *   stat    28px — số liệu lớn
+ */
+@theme {
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.25rem;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.5rem;
+  --text-prose: 0.9375rem;
+  --text-prose--line-height: 1.75rem;
+  --text-page: 1.625rem;
+  --text-page--line-height: 2.125rem;
+  --text-page--letter-spacing: -0.022em;
+  --text-stat: 1.75rem;
+  --text-stat--line-height: 2.25rem;
+  --text-stat--letter-spacing: -0.03em;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -176,18 +203,21 @@
 
 /* Nội dung tin tuyển dụng (HTML do server sinh từ markdown, đã escape). */
 .prose-job {
-  @apply max-w-[72ch] text-[0.9rem] leading-7 break-words text-foreground/90;
+  @apply max-w-[72ch] text-prose break-words text-foreground/90;
 }
 .prose-job > div > :first-child {
   @apply mt-0;
 }
+/* Tiêu đề mục trong tin lớn hơn chữ thường một bậc (h1–h3) hoặc cùng cỡ nhưng đậm (h4–h6). */
 .prose-job h1,
 .prose-job h2,
-.prose-job h3,
+.prose-job h3 {
+  @apply mt-7 mb-2 text-base font-semibold tracking-[-0.01em] text-foreground;
+}
 .prose-job h4,
 .prose-job h5,
 .prose-job h6 {
-  @apply mt-6 mb-2 text-sm font-semibold text-foreground;
+  @apply mt-6 mb-1.5 text-prose font-semibold text-foreground;
 }
 .prose-job p {
   @apply my-2.5;
@@ -205,7 +235,7 @@
   @apply text-brand underline-offset-2 hover:underline;
 }
 .prose-job table {
-  @apply my-3 text-xs;
+  @apply my-3 text-meta;
 }
 .prose-job td,
 .prose-job th {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -405,6 +406,22 @@ def test_relative_links_resolved_against_job_url() -> None:
     assert to_markdown(
         '[Kế toán](/viec-lam/ke-toan-a1.html "Kế toán")', "markdown", "https://sapo.vn/x"
     ) == ("[Kế toán](https://sapo.vn/viec-lam/ke-toan-a1.html)")
+
+
+def test_combining_mark_entities_are_composed() -> None:
+    # Dấu viết bằng entity chỉ được giải mã sau ftfy: kết quả vẫn phải là NFC.
+    md = to_markdown("<p>Đo&#769;ng BHXH theo luật định</p>")
+    assert md == "Đóng BHXH theo luật định"
+    assert unicodedata.is_normalized("NFC", md)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["*+ Kỹ năng giao tiếp**:* lắng nghe tốt", "*- Đóng BHXH đầy đủ.*", "***Lưu ý:** gửi CV sớm*"],
+)
+def test_broken_emphasis_cleanup_is_stable(text: str) -> None:
+    once = to_markdown(text, "markdown")
+    assert to_markdown(once, "markdown") == once
 
 
 def test_cleaning_twice_changes_nothing() -> None:

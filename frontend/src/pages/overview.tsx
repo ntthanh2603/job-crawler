@@ -9,6 +9,7 @@ import {
   ConfirmButton,
   Empty,
   ErrorState,
+  FilterSelect,
   Loading,
   PageHeader,
   Section,
@@ -28,7 +29,6 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
@@ -112,21 +112,10 @@ export function OverviewPage() {
         }
         actions={
           <>
-            <Select value={hours} onValueChange={(v) => setParams({ hours: v })}>
-              <SelectTrigger size="sm" className="w-36 bg-card" aria-label="Khoảng thời gian">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {WINDOWS.map(([v, text]) => (
-                  <SelectItem key={v} value={v}>
-                    {text}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex h-8 items-center gap-2 rounded-md border bg-card px-2.5">
+            <FilterSelect label="Khoảng" value={hours} onChange={(v) => setParams({ hours: v })} options={WINDOWS} all={null} />
+            <div className="flex h-8 items-center gap-2 rounded-md border bg-card px-2.5 shadow-xs">
               <Switch id="auto" checked={auto} onCheckedChange={setAuto} />
-              <Label htmlFor="auto" className="text-xs font-normal">
+              <Label htmlFor="auto" className="text-sm font-normal">
                 Tự làm mới
               </Label>
             </div>
@@ -217,11 +206,11 @@ export function OverviewPage() {
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <Section title="Lượt chạy 24 giờ qua" description="Theo giờ bắt đầu, chia theo kết quả">
-              <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
+              <ChartContainer config={chartConfig} className="aspect-auto h-72 w-full">
                 <BarChart data={data.chart.map((b) => ({ hour: hour(b.hour), ...b.counts }))} margin={{ left: 0, right: 4, top: 4 }}>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" tickLine={false} axisLine={false} interval={2} fontSize={11} tickMargin={8} />
-                  <YAxis tickLine={false} axisLine={false} allowDecimals={false} fontSize={11} width={36} tickMargin={4} />
+                  <XAxis dataKey="hour" tickLine={false} axisLine={false} interval={2} fontSize={12} tickMargin={8} />
+                  <YAxis tickLine={false} axisLine={false} allowDecimals={false} fontSize={12} width={38} tickMargin={4} />
                   <ChartTooltip cursor={{ fillOpacity: 0.06 }} content={<ChartTooltipContent />} />
                   <ChartLegend content={<ChartLegendContent />} />
                   {Object.keys(chartConfig).map((key, i, all) => (
@@ -239,7 +228,7 @@ export function OverviewPage() {
             </Section>
 
             <Section title="Kết quả lượt chạy">
-              <dl className="grid grid-cols-[minmax(7.5rem,max-content)_1fr] gap-x-4 gap-y-3.5 text-sm">
+              <dl className="grid grid-cols-[minmax(8rem,max-content)_1fr] gap-x-5 gap-y-4 text-sm">
                 <dt className="text-muted-foreground">Theo kết quả</dt>
                 <dd className="flex flex-wrap gap-1.5">
                   {byCount(runs.by_status).map(([k, v]) => (
@@ -271,7 +260,7 @@ export function OverviewPage() {
                 <dd className="space-y-1">
                   {runs.errors.length
                     ? runs.errors.slice(0, 4).map(([e, n]) => (
-                        <div key={e} className="text-xs">
+                        <div key={e} className="text-meta">
                           ×{n} <code className="rounded bg-muted px-1 py-0.5">{e}</code>
                         </div>
                       ))
@@ -299,23 +288,23 @@ export function OverviewPage() {
             </Section>
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6 2xl:grid-cols-2">
             <Section title="Lượt chạy gần đây" bodyClassName="p-0">
               {data.recent_runs.length ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Doanh nghiệp</TableHead>
+                      <TableHead>Doanh nghiệp</TableHead>
                       <TableHead>Kết quả</TableHead>
                       <TableHead className="text-right">Thời gian</TableHead>
                       <TableHead className="text-right">Việc làm</TableHead>
-                      <TableHead className="pr-4">Bắt đầu</TableHead>
+                      <TableHead>Bắt đầu</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {data.recent_runs.map((r) => (
                       <TableRow key={r.run_id}>
-                        <TableCell className="max-w-64 truncate pl-4">
+                        <TableCell className="max-w-64 truncate">
                           <TextLink to={`/companies/${r.company_id}`}>
                             {companyName({ brand_name: null, legal_name: null, input_name: r.company_name })}
                           </TextLink>
@@ -329,7 +318,7 @@ export function OverviewPage() {
                         <TableCell className="text-right tabular-nums">
                           {r.jobs_accepted}/{r.jobs_found}
                         </TableCell>
-                        <TableCell className="pr-4 text-muted-foreground">{cap(ago(r.started_at))}</TableCell>
+                        <TableCell className="text-muted-foreground">{cap(ago(r.started_at))}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -344,16 +333,16 @@ export function OverviewPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Nguồn</TableHead>
+                      <TableHead>Nguồn</TableHead>
                       <TableHead className="text-right">Request</TableHead>
                       <TableHead>Kết quả</TableHead>
-                      <TableHead className="pr-4 text-right">Trung bình</TableHead>
+                      <TableHead className="text-right">Trung bình</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {st.sources.slice(0, 12).map((s) => (
                       <TableRow key={s.kind}>
-                        <TableCell className="pl-4 font-medium">{sourceLabel(s.kind)}</TableCell>
+                        <TableCell className="font-medium">{sourceLabel(s.kind)}</TableCell>
                         <TableCell className="text-right tabular-nums">{num(s.fetches)}</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
@@ -362,7 +351,7 @@ export function OverviewPage() {
                             ))}
                           </div>
                         </TableCell>
-                        <TableCell className="pr-4 text-right tabular-nums">{duration(s.avg_ms)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{duration(s.avg_ms)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -390,20 +379,20 @@ export function OverviewPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-4">Dữ liệu</TableHead>
+                      <TableHead>Dữ liệu</TableHead>
                       <TableHead className="text-right">Số giá trị</TableHead>
                       <TableHead className="text-right">Đang lưu</TableHead>
                       <TableHead className="text-right">Gốc (ước tính)</TableHead>
                       <TableHead className="text-right">Tỉ lệ nén</TableHead>
-                      <TableHead className="pr-4">Mẫu theo từ điển</TableHead>
+                      <TableHead>Mẫu theo từ điển</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {st.storage.map((p) => (
                       <TableRow key={p.kind}>
-                        <TableCell className="pl-4">
+                        <TableCell>
                           {STORAGE_NAMES[p.kind] ?? cap(p.kind)}
-                          <div className="font-mono text-xs text-muted-foreground">{p.table}</div>
+                          <div className="font-mono text-meta text-muted-foreground">{p.table}</div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{num(p.values)}</TableCell>
                         <TableCell className="text-right tabular-nums">{bytes(p.stored_bytes)}</TableCell>
@@ -411,7 +400,7 @@ export function OverviewPage() {
                         <TableCell className="text-right font-medium tabular-nums">
                           {p.stored_bytes ? `x${dec(p.original_bytes / p.stored_bytes, 2)}` : "–"}
                         </TableCell>
-                        <TableCell className="pr-4">
+                        <TableCell>
                           <div className="flex flex-wrap gap-1">
                             {Object.entries(p.by_dict ?? {}).map(([k, n]) => (
                               <Tag key={k}>
@@ -427,7 +416,7 @@ export function OverviewPage() {
               </div>
             )}
             <div>
-              <div className="mb-2 text-xs font-medium text-muted-foreground">Dung lượng bảng</div>
+              <div className="mb-2 text-meta font-medium text-foreground/70">Dung lượng bảng</div>
               <div className="flex flex-wrap gap-1.5">
                 {st.tables.map(([name, size]) => (
                   <Tag key={name} title={name}>

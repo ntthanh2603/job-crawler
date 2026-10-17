@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Play, PlayCircle, Search, Upload } from "lucide-react"
-import { useEffect, useState, type FormEvent } from "react"
+import { Play, PlayCircle, Upload } from "lucide-react"
+import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
@@ -8,23 +8,24 @@ import {
   ConfirmButton,
   Empty,
   ErrorState,
-  Field,
   FilePicker,
+  FilterBar,
   FilterSelect,
   Loading,
+  NumberChip,
   PageHeader,
   Pager,
+  SearchBox,
   Section,
   StatusBadge,
   TextLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { ago, cap, companyName, duration, num, sourceLabel } from "@/lib/format"
+import { ago, cap, companyName, displayName, duration, num, sourceLabel } from "@/lib/format"
 import type { CompanyItem, EnqueueResult, ImportOutcome, Meta, Page } from "@/lib/types"
 
 function enqueueMessage(r: EnqueueResult) {
@@ -32,6 +33,10 @@ function enqueueMessage(r: EnqueueResult) {
     r.already_queued ? ` (${r.already_queued} đã có việc đang chờ hoặc đang chạy)` : ""
   }`
 }
+
+// Hai cách viết của cùng một tên (khác hoa/thường, khoảng trắng) thì không hiện lặp.
+const normName = (s: string | null) => (s ?? "").toLocaleLowerCase("vi").replace(/\s+/g, " ").trim()
+const sameName = (a: string | null, b: string | null) => normName(a) === normName(b)
 
 const IMPORT_ID = "nap-danh-sach"
 
@@ -83,7 +88,7 @@ function ImportCard() {
         <Button type="submit" size="sm" className="w-full" disabled={!file || mutation.isPending}>
           <Upload /> {mutation.isPending ? "Đang nạp…" : "Nạp danh sách"}
         </Button>
-        <p className="text-xs text-muted-foreground">Nạp lại cùng file không tạo trùng doanh nghiệp.</p>
+        <p className="text-meta text-muted-foreground">Nạp lại cùng file không tạo trùng doanh nghiệp.</p>
       </form>
       {r && (
         <div className="mt-4 space-y-3 border-t pt-4 text-sm">
@@ -100,7 +105,7 @@ function ImportCard() {
             ).map(([k, v]) => (
               <div key={k} className="rounded-lg bg-muted/60 px-2 py-2">
                 <div className="text-base font-semibold tabular-nums">{num(v)}</div>
-                <div className="text-xs text-muted-foreground">{k}</div>
+                <div className="text-meta text-muted-foreground">{k}</div>
               </div>
             ))}
           </div>
@@ -111,7 +116,7 @@ function ImportCard() {
             </p>
           )}
           {(r.errors.length > 0 || r.warnings.length > 0) && (
-            <ul className="max-h-48 space-y-1 overflow-auto rounded-lg bg-muted/40 p-2 text-xs">
+            <ul className="max-h-48 space-y-1 overflow-auto rounded-lg bg-muted/40 p-2 text-meta">
               {r.errors.slice(0, 50).map((m) => (
                 <li key={m} className="text-destructive">
                   {cap(m)}
@@ -198,18 +203,7 @@ export function CompaniesPage() {
             >
               <Upload /> Nạp CSV
             </Button>
-            <div className="flex h-8 items-center gap-1.5 rounded-md border bg-card pr-1 pl-2.5 text-xs text-muted-foreground">
-              Chưa chạy trong
-              <Input
-                type="number"
-                min={1}
-                value={staleHours}
-                onChange={(e) => setStaleHours(e.target.value)}
-                className="h-6 w-14 px-1.5 text-center"
-                aria-label="Số giờ"
-              />
-              giờ
-            </div>
+            <NumberChip prefix="Chưa chạy trong" suffix="giờ" value={staleHours} onChange={setStaleHours} min={1} />
             <ConfirmButton
               title="Chạy các doanh nghiệp lâu chưa cập nhật?"
               description={`Đưa các doanh nghiệp chưa có lượt chạy xong trong ${staleHours} giờ qua vào hàng đợi.`}
@@ -231,50 +225,6 @@ export function CompaniesPage() {
       {/* Khung nạp CSV nằm bên phải khi đủ rộng (≥ 1536px), hẹp hơn thì xuống dưới để bảng không tràn. */}
       <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <form
-              className="flex items-end"
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault()
-                update({ q: search.trim() })
-              }}
-            >
-              <Field label="Tìm kiếm">
-                <div className="relative">
-                  <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Tên, MST, domain, tên gọi khác"
-                    className="h-8 w-72 bg-card pl-8"
-                  />
-                </div>
-              </Field>
-            </form>
-            <Field label="KYC">
-              <FilterSelect
-                value={filters.kyc}
-                onChange={(v) => update({ kyc: v })}
-                options={[...(meta.data?.kyc_statuses ?? []), "none"]}
-              />
-            </Field>
-            <Field label="Lượt chạy mới nhất">
-              <FilterSelect
-                value={filters.run}
-                onChange={(v) => update({ run: v })}
-                options={[...(meta.data?.run_statuses ?? []), "never"]}
-              />
-            </Field>
-            <Field label="Việc làm">
-              <FilterSelect value={filters.jobs} onChange={(v) => update({ jobs: v })} options={["with", "without"]} />
-            </Field>
-            {filtered && (
-              <Button variant="ghost" size="sm" onClick={() => setParams({})}>
-                Xoá bộ lọc
-              </Button>
-            )}
-          </div>
-
           <Section
             bodyClassName="p-0"
             title={selected.size ? `Đã chọn ${selected.size} doanh nghiệp` : "Danh sách doanh nghiệp"}
@@ -288,13 +238,43 @@ export function CompaniesPage() {
               </Button>
             }
           >
+            <FilterBar
+              search={
+                <SearchBox
+                  className="sm:w-80"
+                  value={search}
+                  onChange={setSearch}
+                  onSubmit={() => update({ q: search.trim() })}
+                  placeholder="Tên, MST, domain, tên gọi khác"
+                />
+              }
+            >
+              <FilterSelect
+                label="KYC"
+                value={filters.kyc}
+                onChange={(v) => update({ kyc: v })}
+                options={[...(meta.data?.kyc_statuses ?? []), "none"]}
+              />
+              <FilterSelect
+                label="Lượt chạy mới nhất"
+                value={filters.run}
+                onChange={(v) => update({ run: v })}
+                options={[...(meta.data?.run_statuses ?? []), "never"]}
+              />
+              <FilterSelect label="Việc làm" value={filters.jobs} onChange={(v) => update({ jobs: v })} options={["with", "without"]} />
+              {filtered && (
+                <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setParams({})}>
+                  Xoá bộ lọc
+                </Button>
+              )}
+            </FilterBar>
             {query.isError && (
-              <div className="p-4">
+              <div className="p-5">
                 <ErrorState error={query.error} />
               </div>
             )}
             {query.isLoading && (
-              <div className="p-4">
+              <div className="p-5">
                 <Loading />
               </div>
             )}
@@ -303,13 +283,13 @@ export function CompaniesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10 pl-4">
+                      <TableHead className="w-10">
                         <Checkbox checked={allChecked} onCheckedChange={toggleAll} aria-label="Chọn tất cả" />
                       </TableHead>
                       <TableHead>Doanh nghiệp</TableHead>
                       <TableHead>KYC</TableHead>
                       <TableHead>Lượt chạy mới nhất</TableHead>
-                      <TableHead className="pr-4 text-right">Việc đang mở</TableHead>
+                      <TableHead className="text-right">Việc đang mở</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -318,7 +298,7 @@ export function CompaniesPage() {
                       const shown = companyName(c)
                       return (
                         <TableRow key={c.id} data-state={selected.has(c.id) ? "selected" : undefined}>
-                          <TableCell className="pl-4">
+                          <TableCell>
                             <Checkbox
                               checked={selected.has(c.id)}
                               onCheckedChange={() => toggle(c.id)}
@@ -329,14 +309,14 @@ export function CompaniesPage() {
                             <TextLink to={`/companies/${c.id}`} className="font-medium">
                               {shown}
                             </TextLink>
-                            {c.legal_name && cap(c.legal_name) !== shown && (
-                              <div className="text-xs text-muted-foreground">{cap(c.legal_name)}</div>
+                            {c.legal_name && !sameName(c.legal_name, shown) && (
+                              <div className="text-meta text-muted-foreground">{displayName(c.legal_name)}</div>
                             )}
-                            {cap(c.input_name) !== shown && c.input_name !== c.legal_name && (
-                              <div className="text-xs text-muted-foreground">Tên nhập: {c.input_name}</div>
+                            {!sameName(c.input_name, shown) && !sameName(c.input_name, c.legal_name) && (
+                              <div className="text-meta text-muted-foreground">Tên nhập: {displayName(c.input_name)}</div>
                             )}
                             {(c.primary_domain || row.input_website || c.tax_code) && (
-                              <div className="mt-0.5 text-xs break-all text-muted-foreground tabular-nums">
+                              <div className="mt-0.5 text-meta break-all text-muted-foreground tabular-nums">
                                 {[c.primary_domain || row.input_website, c.tax_code && `MST ${c.tax_code}`]
                                   .filter(Boolean)
                                   .join(" · ")}
@@ -354,20 +334,20 @@ export function CompaniesPage() {
                             {row.last_status ? (
                               <div className="flex flex-col items-start gap-1">
                                 <StatusBadge value={row.last_status} />
-                                <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                                <span className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">
                                   {cap(ago(row.last_started))} · {duration(row.last_duration_ms)}
                                 </span>
                                 {row.last_incomplete.length > 0 && (
-                                  <span className="text-xs text-muted-foreground">
+                                  <span className="text-meta text-muted-foreground">
                                     Chưa xong: {row.last_incomplete.map(sourceLabel).join(", ")}
                                   </span>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Chưa chạy</span>
+                              <span className="text-meta text-muted-foreground">Chưa chạy</span>
                             )}
                           </TableCell>
-                          <TableCell className="pr-4 text-right tabular-nums">
+                          <TableCell className="text-right tabular-nums">
                             {row.active_jobs ? (
                               <TextLink to={`/jobs?company_id=${c.id}`} className="font-medium text-brand">
                                 {row.active_jobs}

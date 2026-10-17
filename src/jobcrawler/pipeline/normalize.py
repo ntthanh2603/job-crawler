@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import re
 import time
+import unicodedata
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -294,10 +295,15 @@ def to_markdown(text: str | None, fmt: str = "html", base_url: str | None = None
     # (lần đầu ngoặc cong còn nằm trong entity HTML).
     text = ftfy.fix_text(text, uncurl_quotes=False)
     md = html_to_markdown(text) if fmt == "html" else text
+    # Dấu viết bằng entity ("o&#769;") chỉ được giải mã ở bước trên, sau ftfy: dựng lại NFC.
+    md = unicodedata.normalize("NFC", md)
     md = _fix_links(md, base_url)
     out: list[str] = []
     for raw_line in md.replace("\r\n", "\n").split("\n"):
-        line = _fix_emphasis(_clean_line(raw_line))
+        cleaned = _clean_line(raw_line)
+        line = _fix_emphasis(cleaned)
+        if line != cleaned:  # bỏ dấu sao có thể lộ ký hiệu đầu dòng ("*+ Kỹ năng…*" → "+ Kỹ năng…")
+            line = _clean_line(line)
         if not line:
             if out and out[-1]:
                 out.append("")

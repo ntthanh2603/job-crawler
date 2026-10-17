@@ -46,13 +46,13 @@ export function FailedPagePage() {
             items={[
               ["URL", <span className="break-all">{p.url}</span>],
               ["Lý do", failReason(p.reason)],
-              ["Mã lý do", <code className="text-xs">{p.reason.split(":")[0]}</code>],
+              ["Mã lý do", <code className="text-meta">{p.reason.split(":")[0]}</code>],
               ["Kích thước", `${num(p.html.length)} ký tự, lưu nén zstd và tự xoá sau 7 ngày`],
             ]}
           />
         </Section>
         <Section title="Mã HTML" description="Hiển thị dạng chữ, không chạy nội dung của trang">
-          <pre className="max-h-[70vh] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+          <pre className="max-h-[70vh] overflow-auto rounded-lg bg-muted/60 p-3 font-mono text-meta leading-relaxed break-all whitespace-pre-wrap">
             {p.html.slice(0, 200_000)}
           </pre>
         </Section>
