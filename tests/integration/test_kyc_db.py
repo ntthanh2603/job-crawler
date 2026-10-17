@@ -205,6 +205,7 @@ async def test_process_company_runs_kyc_then_sources(integration_settings: Setti
             "discovery_cache_seconds": 0,
             "discovery_negative_cache_seconds": 0,
             "kyc_max_sites": 1,
+            "board_serp_lookup": False,  # test này chỉ xét SERP của KYC
         }
     )
     configure_logging(settings)

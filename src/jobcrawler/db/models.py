@@ -126,18 +126,36 @@ class SourceProfile(Base):
     """Profile nhà tuyển dụng trên một trang tuyển dụng, map về `companies`."""
 
     __tablename__ = "source_profiles"
-    __table_args__ = (UniqueConstraint("source", "external_id"),)
+    __table_args__ = (
+        UniqueConstraint("source", "external_id"),
+        Index(
+            "ix_source_profiles_name_norm_trgm",
+            "name_norm",
+            postgresql_using="gin",
+            postgresql_ops={"name_norm": "gin_trgm_ops"},
+        ),
+    )
 
     id: Mapped[int] = _pk()
     source: Mapped[str]
     external_id: Mapped[str]
     url: Mapped[str]
     name_on_source: Mapped[str]
+    # Tên đã chuẩn hoá như `company_aliases.alias_norm`, để so trigram khi map.
+    name_norm: Mapped[str | None]
+    website: Mapped[str | None]  # website doanh nghiệp ghi trên trang tuyển dụng
+    tax_code: Mapped[str | None]
+    # Thông tin khác trên trang (logo, địa chỉ, quy mô...).
+    info: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
     company_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("companies.id", ondelete="SET NULL"), index=True
     )
     match_confidence: Mapped[float | None]
     match_evidence: Mapped[Any | None] = mapped_column(JSONB)
+    # Lần cuối đã thử map (kể cả không map được) — để chỉ map lại khi có doanh nghiệp mới.
+    matched_at: Mapped[datetime | None]
+    # Lần cuối mọi tin của profile này được làm mới (bởi lượt index hoặc crawl trực tiếp).
+    indexed_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -167,6 +185,44 @@ class JobPosting(Base):
     first_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     status: Mapped[str] = mapped_column(server_default=JobStatus.ACTIVE.value)
+    # Crawl tăng dần: `lastmod` trong sitemap, ETag/Last-Modified của trang chi tiết.
+    lastmod: Mapped[datetime | None]
+    etag: Mapped[str | None]
+    http_last_modified: Mapped[str | None]
+    fetched_at: Mapped[datetime | None]  # lần cuối tải trang chi tiết
+    expires_at: Mapped[datetime | None]  # hạn nộp (validThrough) nếu nguồn ghi
+    # Số lượt index liên tiếp không còn thấy tin trên nguồn (≥ 2 → removed).
+    missed_runs: Mapped[int] = mapped_column(server_default=text("0"))
+
+
+class BoardIndexRun(Base):
+    """Một lượt index tăng dần một trang tuyển dụng (`jobcrawler index-boards`, cron)."""
+
+    __tablename__ = "board_index_runs"
+    __table_args__ = (
+        one_of("status", RunStatus),
+        Index("ix_board_index_runs_source_started_at", "source", "started_at"),
+    )
+
+    id: Mapped[int] = _pk()
+    source: Mapped[str]
+    started_at: Mapped[datetime]
+    finished_at: Mapped[datetime | None]
+    status: Mapped[str] = mapped_column(server_default=RunStatus.RUNNING.value)
+    # Danh sách URL tin đọc đủ (sitemap/listing không lỗi, không bị cắt) — mới được đánh dấu
+    # tin không còn thấy.
+    complete: Mapped[bool] = mapped_column(server_default=text("false"))
+    urls_seen: Mapped[int] = mapped_column(server_default=text("0"))
+    fetched: Mapped[int] = mapped_column(server_default=text("0"))
+    new: Mapped[int] = mapped_column(server_default=text("0"))
+    updated: Mapped[int] = mapped_column(server_default=text("0"))
+    unchanged: Mapped[int] = mapped_column(server_default=text("0"))
+    failed: Mapped[int] = mapped_column(server_default=text("0"))
+    removed: Mapped[int] = mapped_column(server_default=text("0"))
+    profiles_new: Mapped[int] = mapped_column(server_default=text("0"))
+    profiles_matched: Mapped[int] = mapped_column(server_default=text("0"))
+    error: Mapped[str | None]
+    stats: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
 
 
 class Job(Base):

@@ -75,3 +75,31 @@ def test_login_path_requested_directly_is_not_a_redirect() -> None:
 
 def test_plain_403() -> None:
     assert check(403, "Forbidden") == "http_403"
+
+
+def test_cloudflare_passive_bot_script_is_not_a_block() -> None:
+    """JobsGO: trang thường (cả 404 ngắn) nhúng script jsd của Cloudflare."""
+    body = (
+        "<html><body><h1>Tuyển dụng</h1>"
+        "<script src='/cdn-cgi/challenge-platform/scripts/jsd/main.js'></script>"
+        "<script src='/cdn-cgi/challenge-platform/h/g/scripts/jsd/abc/main.js'></script>"
+        "</body></html>"
+    )
+    assert check(200, body) is None
+    assert check(404, body) is None
+    challenge = "<script src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1'></script>"
+    assert check(200, challenge) == "cloudflare_challenge"
+
+
+def test_full_page_captcha_with_status_200() -> None:
+    """CareerLink: trang 200 dài > 15 KB nhưng toàn trang là reCAPTCHA."""
+    body = (
+        "<html><body>"
+        + "<nav>menu</nav>" * 2000
+        + "<h1>Xác nhận</br>bạn không phải robot</h1><p>Chúng tôi nhận thấy có điều bất thường."
+        " Hãy xác nhận bạn không phải robot để tiếp tục.</p>"
+        '<form id="recaptcha_confirm_form" action="/recaptcha" method="post"></form>'
+        "</body></html>"
+    )
+    assert len(body) > 15_000
+    assert check(200, body) == "captcha"

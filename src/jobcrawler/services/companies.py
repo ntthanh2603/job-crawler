@@ -18,6 +18,7 @@ from jobcrawler.pipeline import kyc
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyEntity, CompanyIn, CompanyResult, JobOut, KycStatus, RunStatus
 from jobcrawler.serp import SerpClient
+from jobcrawler.services import boards as board_service
 from jobcrawler.services import jobs as website_jobs
 from jobcrawler.sources.base import FetchRecord
 
@@ -150,14 +151,27 @@ async def _run_pipeline(
     # Website người dùng đưa (có thể là URL bảng ATS) luôn được thu; không có thì chỉ dùng domain
     # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào).
     website = company_in.website or step.website
-    if not website:
+    # Profile trên các trang tuyển dụng đã map khi index; trang nào chưa có thì tìm bằng SERP
+    # `site:`. KYC chưa chắc thì chỉ dùng profile khớp mạnh (cùng MST hoặc cùng website).
+    await board_service.lookup_profiles(
+        res,
+        state.company,
+        timeout=min(res.settings.board_serp_lookup_seconds, max(0.0, deadline - time.monotonic())),
+        records=records,
+    )
+    board = await board_service.board_sources(
+        res, state.company.id, strong_only=step.status is not KycStatus.VERIFIED
+    )
+    if not website and not board:
         log.info("company.no_website", kyc_status=step.status.value if step.status else None)
         return PipelineOutcome(
             status=RunStatus.PARTIAL if incomplete else ok,
             incomplete_sources=incomplete,
             kyc_status=step.status,
         )
-    found = await website_jobs.jobs_for_website(res, website, deadline=deadline, records=records)
+    found = await website_jobs.jobs_for_website(
+        res, website, deadline=deadline, records=records, extra_sources=board
+    )
     incomplete += found.incomplete_sources
     return PipelineOutcome(
         status=RunStatus.PARTIAL if incomplete else ok,

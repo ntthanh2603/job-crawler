@@ -1,0 +1,33 @@
+
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/seo-pages.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/cms.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/static-pages.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/mbti.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/cv-templates.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/cover-letter-templates.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/categories.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/cities.xml</loc>
+    </sitemap>
+    <sitemap>
+        <loc>https://www.topcv.vn/sitemap/jobs.xml</loc>
+    </sitemap>
+    <sitemap>
+            <loc>https://www.topcv.vn/sitemap/companies.xml</loc>
+        </sitemap>
+</sitemapindex>

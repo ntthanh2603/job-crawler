@@ -56,6 +56,35 @@ ATS có adapter: Greenhouse, Lever, Ashby, Workable, Workday, BambooHR, Recruite
 (SmartRecruiters chỉ nhận diện: robots.txt cấm API). Trang careers khác: JSON-LD → parser chung →
 LLM; mở bằng Chromium khi HTML không có danh sách tin.
 
+## Index trang tuyển dụng
+
+```bash
+uv run jobcrawler index-boards --list                      # các trang và trạng thái
+uv run jobcrawler index-boards --source itviec             # index tăng dần một trang
+uv run jobcrawler index-boards --max-jobs 50 --budget-minutes 10   # chạy thử mọi trang
+uv run jobcrawler index-boards --map-only                  # map lại profile ↔ doanh nghiệp
+```
+
+Worker chạy cron `BOARD_INDEX_CRON` (mặc định mỗi 5 giờ), mỗi trang một job `index_board`.
+Mỗi lượt đọc danh sách tin (sitemap kèm `lastmod`, trang danh sách, API của trang hoặc RSS), chỉ
+tải trang chi tiết của tin mới / đã đổi / lâu chưa tải (gửi kèm ETag), lưu `job_postings` và
+`source_profiles`, đánh dấu tin vắng 2 lượt là gỡ, rồi map profile có tên gần với doanh nghiệp
+đầu vào (MST → website → tên; mơ hồ thì LLM). `process_company` lấy tin từ index của profile đã
+map (cũ hơn `BOARD_STALE_HOURS` thì crawl trực tiếp trang profile).
+
+| Trang | Danh sách | Ghi chú |
+|---|---|---|
+| TopCV | sitemap (~45 nghìn tin) | profile: website trong Organization JSON-LD |
+| CareerLink | trang danh sách (~34 nghìn) | hiện CAPTCHA nếu đi nhanh: 1 request / 5 giây |
+| JobsGO | sitemap (~28 nghìn) | MST trong mô tả profile |
+| CareerViet | sitemap (~19,5 nghìn) | website trong JSON-LD tin, MST trong dữ liệu profile |
+| VietnamWorks | API tìm kiếm của trang (~9,8 nghìn) | chi tiết từ payload React |
+| Glints | sitemap, không có lastmod (~5,7 nghìn) | |
+| TopDev | sitemap (~2,6 nghìn) | |
+| Vieclam24h | trang danh sách (chỉ ~1 nghìn tin mới nhất) | website + MST trong dữ liệu trang tin |
+| ITviec | sitemap, lastmod vô dụng (~650) | |
+| 123job | RSS + trang danh sách | |
+
 ## Kiểm tra hạ tầng
 
 ```bash

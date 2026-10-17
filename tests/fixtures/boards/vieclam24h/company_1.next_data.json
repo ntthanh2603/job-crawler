@@ -1,0 +1,295 @@
+{
+ "_source": "__NEXT_DATA__ props.initialState.api.employerDetail.data (contact/billing removed) + searchJob.data (trimmed job fields)",
+ "page": "/general/employer-detail",
+ "buildId": "cNy4AotwB0Hpk5f5rvfRE",
+ "employerDetail": {
+  "id": 4082455,
+  "channel_code": "vl24h",
+  "branch_code": "vl24h.north",
+  "name": "Ngân Hàng TMCP Việt Nam Thịnh Vượng - VPBank",
+  "slug": "ngan-hang-tmcp-viet-nam-thinh-vuong-vpbank",
+  "minisite_slug": null,
+  "address": "Khối Quản trị Nguồn Nhân Lực - Tòa tháp VPBank - Số 89 Láng Hạ, Đống Đa, Hà Nội",
+  "province_id": 73,
+  "description": "<p><strong>CHÀO MỪNG BẠN ĐẾN VỚI VPBank - NGÔI NHÀ NHÂN TÀI</strong></p><p><strong>Trong chiến lược phát triển giai đoạn 2022-2026, VPBank đặt mục tiêu trở thành&nbsp;Top 3 ngân hàng lớn nhất Việt Nam</strong>&nbsp;và&nbsp;<strong>Top 100 ngân hàng hàng đầu châu Á</strong>, góp phần kiến tạo nền tài chính bền vững cho cộng đồng. Để hiện thực hóa tầm nhìn này, chúng tôi tập trung kiến tạo&nbsp;<strong>\"Home of Talents\"</strong>&nbsp;- nơi ươm mầm và phát triển những nhân tài xuất sắc nhất.</p><h3><strong>VPBank - Nơi nhân tài tỏa sáng</strong></h3><p>Chúng tôi tin rằng sự thành công của mỗi cá nhân được xây dựng trên&nbsp;<strong>4 trụ cột thịnh vượng</strong>:</p><p>✅&nbsp;<strong>Thân - Trí</strong>: Môi trường làm việc hiện đại, chế độ đào tạo liên tục.</p><p>✅&nbsp;<strong>Tinh thần</strong>: Văn hóa tôn trọng, minh bạch và gắn kết.</p><p>✅&nbsp;<strong>Tài chính</strong>: Chính sách lương, thưởng cạnh tranh cùng cơ hội thăng tiến rõ ràng.</p><p>✅&nbsp;<strong>Cộng đồng</strong>: Các hoạt động thiện nguyện, phát triển bền vững vì xã hội.</p><h3><strong>Tại sao chọn VPBank?</strong></h3><ul><li><strong>Top 5</strong>&nbsp;ngân hàng có môi trường làm việc tốt nhất Việt Nam (Theo Anphabe 2023).</li><li><strong>Lộ trình thăng tiến</strong>&nbsp;cá nhân hóa, ghi nhận xứng đáng mọi đóng góp.</li><li><strong>Văn hóa đổi mới</strong>: Khuyến khích sáng tạo, dám nghĩ dám làm.</li></ul><p>VPBank không chỉ là nơi làm việc - mà là ngôi nhà chung để bạn&nbsp;<strong>phá bỏ giới hạn</strong>, cùng chúng tôi kiến tạo tương lai tài chính Việt Nam.</p><p><strong>Hãy gia nhập VPBank ngay hôm nay để trở thành phiên bản xuất sắc nhất của chính mình!</strong></p>",
+  "description_html": "<p><strong>CHÀO MỪNG BẠN ĐẾN VỚI VPBank - NGÔI NHÀ NHÂN TÀI</strong></p><p><strong>Trong chiến lược phát triển giai đoạn 2022-2026, VPBank đặt mục tiêu trở thành&nbsp;Top 3 ngân hàng lớn nhất Việt Nam</strong>&nbsp;và&nbsp;<strong>Top 100 ngân hàng hàng đầu châu Á</strong>, góp phần kiến tạo nền tài chính bền vững cho cộng đồng. Để hiện thực hóa tầm nhìn này, chúng tôi tập trung kiến tạo&nbsp;<strong>\"Home of Talents\"</strong>&nbsp;- nơi ươm mầm và phát triển những nhân tài xuất sắc nhất.</p><h3><strong>VPBank - Nơi nhân tài tỏa sáng</strong></h3><p>Chúng tôi tin rằng sự thành công của mỗi cá nhân được xây dựng trên&nbsp;<strong>4 trụ cột thịnh vượng</strong>:</p><p>✅&nbsp;<strong>Thân - Trí</strong>: Môi trường làm việc hiện đại, chế độ đào tạo liên tục.</p><p>✅&nbsp;<strong>Tinh thần</strong>: Văn hóa tôn trọng, minh bạch và gắn kết.</p><p>✅&nbsp;<strong>Tài chính</strong>: Chính sách lương, thưởng cạnh tranh cùng cơ hội thăng tiến rõ ràng.</p><p>✅&nbsp;<strong>Cộng đồng</strong>: Các hoạt động thiện nguyện, phát triển bền vững vì xã hội.</p><h3><strong>Tại sao chọn VPBank?</strong></h3><ul><li><strong>Top 5</strong>&nbsp;ngân hàng có môi trường làm việc tốt nhất Việt Nam (Theo Anphabe 2023).</li><li><strong>Lộ trình thăng tiến</strong>&nbsp;cá nhân hóa, ghi nhận xứng đáng mọi đóng góp.</li><li><strong>Văn hóa đổi mới</strong>: Khuyến khích sáng tạo, dám nghĩ dám làm.</li></ul><p>VPBank không chỉ là nơi làm việc - mà là ngôi nhà chung để bạn&nbsp;<strong>phá bỏ giới hạn</strong>, cùng chúng tôi kiến tạo tương lai tài chính Việt Nam.</p><p><strong>Hãy gia nhập VPBank ngay hôm nay để trở thành phiên bản xuất sắc nhất của chính mình!</strong></p>",
+  "folder": 3,
+  "folder_at": false,
+  "logo": "https://cdn1.vieclam24h.vn/images/employer_avatar/2023/05/15/screenshot_1684122799_168412282123.png",
+  "website": "https://tuyendung.vpbank.com.vn/vi",
+  "fax": null,
+  "tax_code": "0100233583",
+  "number_of_employer": 0,
+  "company_size": 20,
+  "fields_activity": [
+   82
+  ],
+  "industry_ids": [
+   134
+  ],
+  "support_info": [],
+  "staff_age_range": 0,
+  "founded_year": 1993,
+  "latitude": null,
+  "longitude": null,
+  "status": 1,
+  "last_revision_status": 1,
+  "premium_job_status": 1,
+  "premium_status": 1,
+  "total_seeker_follow": 214,
+  "created_at": 1489457959,
+  "updated_at": 1792191767,
+  "banner_cover": "https://cdn1.vieclam24h.vn/images/default/2023/05/15/filename_168412347341.jpeg",
+  "is_freemium": false,
+  "rate_response": "0.00",
+  "rate_response_time": 0
+ },
+ "searchJob": {
+  "args": {
+   "employer_id": "4082455",
+   "page": null,
+   "per_page": 10,
+   "sort_q": null
+  },
+  "pagination": {
+   "current": 1,
+   "total_pages": 2,
+   "total_items": 13
+  },
+  "items": [
+   {
+    "id": 200958285,
+    "title": "CVC/CVCC Điều Phối Kinh Doanh Và Quản Trị Chất Lượng - HN/HCM - ID5592",
+    "title_slug": "cvc-cvcc-dieu-phoi-kinh-doanh-va-quan-tri-chat-luong-hn-hcm-id5592",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160,
+     210000187
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791361201,
+    "updated_at": 1792191767,
+    "refresh_at": 1792202880,
+    "actived_at_by_box": 1791361259
+   },
+   {
+    "id": 200960516,
+    "title": "Nhân Viên / Chuyên Viên Bán Sản Phẩm Tín Chấp – Id8247 (Hồ Chí Minh)",
+    "title_slug": "nhan-vien-chuyen-vien-ban-san-pham-tin-chap-id8247-ho-chi-minh",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000187
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791533533,
+    "updated_at": 1792033416,
+    "refresh_at": 1792202880,
+    "actived_at_by_box": 1791533954
+   },
+   {
+    "id": 200960464,
+    "title": "Nhân Viên / Chuyên Viên Khách Hàng Doanh Nghiệp – Id6265",
+    "title_slug": "nhan-vien-chuyen-vien-khach-hang-doanh-nghiep-id6265",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791532006,
+    "updated_at": 1792136533,
+    "refresh_at": 1792202580,
+    "actived_at_by_box": 1791533770
+   },
+   {
+    "id": 200958272,
+    "title": "CVCC Tổng Đài Chăm Sóc Khách Hàng (Mảng bảo hiểm - VPLife) - TT 247 - ID11727",
+    "title_slug": "cvcc-tong-dai-cham-soc-khach-hang-mang-bao-hiem-vplife-tt-247-id11727",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160
+    ],
+    "occupation_ids_main": [
+     19,
+     18,
+     13
+    ],
+    "field_ids_main": 154,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791360701,
+    "updated_at": 1792047748,
+    "refresh_at": 1792202280,
+    "actived_at_by_box": 1791361536
+   },
+   {
+    "id": 200960472,
+    "title": "Nhân Viên / Chuyên Viên Bán Sản Phẩm Tín Chấp – Id8247",
+    "title_slug": "nhan-vien-chuyen-vien-ban-san-pham-tin-chap-id8247",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791532367,
+    "updated_at": 1791860581,
+    "refresh_at": 1792201980,
+    "actived_at_by_box": 1791534047
+   },
+   {
+    "id": 200960463,
+    "title": "Giao Dịch Viên (Chuyên Viên Dịch Vụ Khách Hàng) – Id3355",
+    "title_slug": "giao-dich-vien-chuyen-vien-dich-vu-khach-hang-id3355",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791531891,
+    "updated_at": 1792136511,
+    "refresh_at": 1792199280,
+    "actived_at_by_box": 1791533735
+   },
+   {
+    "id": 200965080,
+    "title": "Nhân Viên / Chuyên Viên Thu Hồi Nợ Hiện Trường - Hồ Chí Minh - Id859",
+    "title_slug": "nhan-vien-chuyen-vien-thu-hoi-no-hien-truong-ho-chi-minh-id859",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000187
+    ],
+    "occupation_ids_main": [
+     18,
+     19,
+     30
+    ],
+    "field_ids_main": 178,
+    "salary_min": 15000000,
+    "salary_max": 30000000,
+    "salary_unit": 0,
+    "resume_apply_expired": 1794070799,
+    "created_at": 1792030193,
+    "updated_at": 1792148566,
+    "refresh_at": 1792030355,
+    "actived_at_by_box": 1792030302
+   },
+   {
+    "id": 200965074,
+    "title": "Nhân Viên / Chuyên Viên Thu Hồi Nợ Hiện Trường - Hà Nội - Id12134",
+    "title_slug": "nhan-vien-chuyen-vien-thu-hoi-no-hien-truong-ha-noi-id12134",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160
+    ],
+    "occupation_ids_main": [
+     18,
+     19,
+     30
+    ],
+    "field_ids_main": 178,
+    "salary_min": 15000000,
+    "salary_max": 30000000,
+    "salary_unit": 0,
+    "resume_apply_expired": 1794070799,
+    "created_at": 1792030075,
+    "updated_at": 1792172960,
+    "refresh_at": 1792030340,
+    "actived_at_by_box": 1792030319
+   },
+   {
+    "id": 200963969,
+    "title": "CVCC / Cg Tư Vấn Bảo Hiểm Khách Hàng Private Tại Hà Nội / Hồ Chí Minh – Id12169",
+    "title_slug": "cvcc-cg-tu-van-bao-hiem-khach-hang-private-tai-ha-noi-ho-chi-minh-id12169",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160,
+     210000187
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791942082,
+    "updated_at": 1792154836,
+    "refresh_at": 1791942357,
+    "actived_at_by_box": 1791942357
+   },
+   {
+    "id": 200963975,
+    "title": "CVC / CVCC Tư Vấn Bảo Hiểm Khách Hàng Vay Tại Hà Nội / Hồ Chí Minh – Id12171",
+    "title_slug": "cvc-cvcc-tu-van-bao-hiem-khach-hang-vay-tai-ha-noi-ho-chi-minh-id12171",
+    "employer_id": 4082455,
+    "province_ids": [
+     210000160,
+     210000187
+    ],
+    "occupation_ids_main": [
+     19,
+     13,
+     23
+    ],
+    "field_ids_main": 124,
+    "salary_min": 0,
+    "salary_max": 0,
+    "salary_unit": 0,
+    "resume_apply_expired": 1793465999,
+    "created_at": 1791942187,
+    "updated_at": 1791947727,
+    "refresh_at": 1791942336,
+    "actived_at_by_box": 1791942336
+   }
+  ]
+ }
+}

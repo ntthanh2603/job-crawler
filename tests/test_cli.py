@@ -35,7 +35,7 @@ def test_db_help_lists_subcommands() -> None:
         assert command in result.output
 
 
-@pytest.mark.parametrize("args", [["stats"], ["export"], ["index-boards"], ["import", "x.csv"]])
+@pytest.mark.parametrize("args", [["stats"], ["export"], ["import", "x.csv"]])
 def test_unimplemented_commands_exit_nonzero(args: list[str]) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 1
@@ -53,3 +53,9 @@ def test_no_proxy_flag_disables_proxies(monkeypatch: pytest.MonkeyPatch) -> None
         assert get_settings().proxy_enabled is False
     finally:
         get_settings.cache_clear()
+
+
+def test_index_boards_rejects_unknown_source() -> None:
+    result = runner.invoke(app, ["index-boards", "--source", "khong-co"])
+    assert result.exit_code == 2
+    assert "không có adapter khong-co" in result.output

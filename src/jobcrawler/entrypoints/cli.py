@@ -333,9 +333,84 @@ def enqueue(
 
 
 @app.command("index-boards")
-def index_boards(source: Annotated[str | None, typer.Option("--source")] = None) -> None:
-    """Index tăng dần các trang tuyển dụng."""
-    _not_implemented("M4")
+def index_boards(
+    source: Annotated[
+        list[str] | None, typer.Option("--source", help="Tên trang (lặp được), vd. topcv.")
+    ] = None,
+    max_jobs: Annotated[
+        int | None,
+        typer.Option(help="Số trang chi tiết tối đa mỗi trang (BOARD_MAX_JOBS_PER_RUN)."),
+    ] = None,
+    budget_minutes: Annotated[
+        float | None, typer.Option(help="Thời gian tối đa mỗi trang (BOARD_INDEX_BUDGET_SECONDS).")
+    ] = None,
+    full: Annotated[bool, typer.Option(help="Tải lại mọi tin, bỏ qua lastmod/ETag.")] = False,
+    map_only: Annotated[
+        bool, typer.Option("--map-only", help="Chỉ map lại profile ↔ doanh nghiệp.")
+    ] = False,
+    list_boards: Annotated[bool, typer.Option("--list", help="Liệt kê các trang.")] = False,
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Index tăng dần các trang tuyển dụng vào job_postings + source_profiles, rồi map profile."""
+    from jobcrawler.services import boards as board_service
+    from jobcrawler.sources import boards
+
+    if list_boards:
+        for adapter in boards.registry().values():
+            state = "bật" if adapter.enabled else "tắt"
+            typer.echo(f"{adapter.name:<14} {state:<4} {adapter.home} {adapter.note}")
+        return
+    try:
+        board_service.selected_boards(get_settings(), source)
+    except board_service.UnknownBoardError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
+
+    if map_only:
+
+        async def go_map() -> board_service.MapReport:
+            async with open_resources() as res:
+                return await board_service.map_all_profiles(res, source)
+
+        report = _run(go_map())
+        typer.echo(
+            f"map được {report.matched} profile mới · tổng {report.mapped_total}/{report.profiles}"
+            " profile đã map"
+        )
+        return
+
+    async def go() -> list[Any]:
+        async with open_resources() as res:
+            return await board_service.index_boards(
+                res,
+                source,
+                max_jobs=max_jobs,
+                budget_seconds=budget_minutes * 60 if budget_minutes else None,
+                full=full,
+            )
+
+    results = _run(go())
+    if json_out:
+        typer.echo(
+            json.dumps([dataclasses.asdict(r) for r in results], ensure_ascii=False, indent=2)
+        )
+    else:
+        for r in results:
+            color = {"ok": typer.colors.GREEN, "partial": typer.colors.YELLOW}.get(
+                r.status.value, typer.colors.RED
+            )
+            typer.echo(
+                typer.style(f"{r.source:<14} {r.status.value:<8}", fg=color)
+                + f" thấy {r.urls_seen} · tải {r.fetched}/{r.to_fetch} · mới {r.new}"
+                f" · đổi {r.updated} · không đổi {r.unchanged} · lỗi {r.failed}"
+                f" · gỡ {r.removed} · profile mới {r.profiles_new} · map {r.profiles_matched}"
+                f" · {r.duration_ms / 1000:.0f} s"
+                + (" · danh sách chưa đủ" if not r.complete else "")
+                + (" · còn tin chưa tải" if r.truncated else "")
+                + (f" · {r.error or r.skipped}" if (r.error or r.skipped) else "")
+            )
+    if any(r.status.value == "failed" for r in results):
+        raise typer.Exit(1)
 
 
 @app.command()

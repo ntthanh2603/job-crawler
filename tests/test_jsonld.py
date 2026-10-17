@@ -135,3 +135,42 @@ def test_parse_datetime_formats() -> None:
     assert parse_datetime(1786469891368) == datetime.fromtimestamp(1786469891.368, UTC)
     for vague in ("Posted 30+ Days Ago", "2 ngày trước", "", None, True):
         assert parse_datetime(vague) is None
+
+
+def test_salary_text_values() -> None:
+    """Lương dạng chữ (Vieclam24h, TopDev, ITviec) giữ nguyên văn, không thành "VND/MONTH"."""
+    for value, raw in [
+        ({"currency": "VND", "value": {"value": "Thỏa thuận", "unitText": "MONTH"}}, "Thỏa thuận"),
+        ({"currency": "USD", "value": "Negotiable"}, "Negotiable"),
+        (
+            {
+                "currency": "USD",
+                "value": {"minValue": 1000, "maxValue": 2000, "value": "1,000 - 2,000 USD"},
+            },
+            "1,000 - 2,000 USD",
+        ),
+    ]:
+        [job] = jsonld.raw_jobs(
+            _page({"@type": "JobPosting", "title": "x", "baseSalary": value}), "https://a.vn/"
+        )
+        assert job.salary_raw == raw
+    [job] = jsonld.raw_jobs(
+        _page(
+            {
+                "@type": "JobPosting",
+                "title": "x",
+                "baseSalary": {
+                    "currency": "VND",
+                    "minValue": 8000000,
+                    "maxValue": 15000000,
+                    "unitText": "MONTH",
+                },
+            }
+        ),
+        "https://a.vn/",
+    )
+    assert (job.salary_min, job.salary_max, job.salary_raw) == (
+        8_000_000,
+        15_000_000,
+        "8000000 - 15000000 VND/MONTH",
+    )

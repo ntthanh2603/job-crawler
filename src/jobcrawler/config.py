@@ -110,6 +110,25 @@ class Settings(BaseSettings):
     # Ghi đè từng host bằng RATE_LIMITS.
     ats_rate_per_second: float = Field(default=2.0, gt=0)
 
+    # Index các trang tuyển dụng (cron SAQ, `jobcrawler index-boards`).
+    # Danh sách nguồn chạy (rỗng = mọi adapter đang bật), JSON: BOARDS='["topcv","itviec"]'.
+    boards: list[str] = Field(default_factory=list)
+    board_index_cron: str = "0 */5 * * *"  # mỗi 5 giờ
+    # Mỗi lượt index tối đa chừng này giây / trang chi tiết; phần còn lại để lượt sau.
+    board_index_budget_seconds: float = Field(default=4 * 3600, gt=0)
+    board_max_jobs_per_run: int = Field(default=20_000, ge=1)
+    # Tải lại tin không đổi `lastmod` sau chừng này ngày (kèm ETag/Last-Modified).
+    board_refresh_days: float = Field(default=7, gt=0)
+    board_concurrency: int = Field(default=4, ge=1)
+    # process_company: index của profile cũ hơn chừng này giờ thì crawl trực tiếp trang profile.
+    board_stale_hours: float = Field(default=24, gt=0)
+    # Map profile ↔ doanh nghiệp: ngưỡng trigram để xét, độ tin cậy tối thiểu để nhận.
+    profile_match_trigram: float = Field(default=0.6, gt=0, le=1)
+    profile_match_min_confidence: float = Field(default=0.8, ge=0, le=1)
+    # Doanh nghiệp chưa có profile trên một trang: tìm bằng SERP `site:` (cần SERP_API_KEY).
+    board_serp_lookup: bool = True
+    board_serp_lookup_seconds: float = Field(default=20, gt=0)
+
     # Deadline mềm: tới mốc này thì huỷ các nguồn chưa xong và lưu kết quả `partial`.
     company_deadline_seconds: float = Field(default=165, gt=0)
     # Timeout cứng của job SAQ `process_company`.

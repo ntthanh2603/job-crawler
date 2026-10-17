@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from contextlib import AsyncExitStack
 from typing import Any, Required
 
@@ -12,7 +13,7 @@ from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn
-from jobcrawler.services import companies
+from jobcrawler.services import boards, companies
 
 log = get_logger(__name__)
 
@@ -53,16 +54,49 @@ async def process_company(
     return result.model_dump(mode="json", exclude={"jobs"})
 
 
-CRON_JOBS: list[CronJob[WorkerContext]] = []  # M4: index các trang tuyển dụng
+def board_job_timeout(settings: Settings) -> int:
+    # Ngân sách của lượt index + thời gian ghi DB/map profile cuối lượt.
+    return int(settings.board_index_budget_seconds) + 900
+
+
+async def index_board(ctx: WorkerContext, *, source: str) -> dict[str, Any]:
+    """Index tăng dần một trang tuyển dụng."""
+    res = ctx["resources"]
+    [adapter] = boards.selected_boards(res.settings, [source])
+    stats = await boards.index_board(res, adapter, boards.index_options(res.settings))
+    return dataclasses.asdict(stats)
+
+
+async def index_boards_cron(ctx: WorkerContext) -> dict[str, Any]:
+    """Cron: đưa mỗi trang tuyển dụng đang bật thành một job `index_board` riêng (key theo
+    trang nên không nạp trùng khi lượt trước chưa xong)."""
+    settings = ctx["settings"]
+    queue = ctx["worker"].queue
+    enqueued: list[str] = []
+    for adapter in boards.selected_boards(settings):
+        job = await queue.enqueue(
+            "index_board",
+            source=adapter.name,
+            key=f"board:{adapter.name}",
+            timeout=board_job_timeout(settings),
+        )
+        if job is not None:
+            enqueued.append(adapter.name)
+    log.info("boards.cron", enqueued=enqueued)
+    return {"enqueued": enqueued}
+
+
+def cron_jobs(settings: Settings) -> list[CronJob[WorkerContext]]:
+    return [CronJob(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
 
 
 def build_worker(settings: Settings) -> Worker[WorkerContext]:
     queue = Queue.from_url(settings.redis_url, name=settings.queue_name)
     worker: Worker[WorkerContext] = Worker(
         queue,
-        functions=[process_company],
+        functions=[process_company, index_board],
         concurrency=settings.worker_concurrency,
-        cron_jobs=CRON_JOBS,
+        cron_jobs=cron_jobs(settings),
         startup=startup,
         shutdown=shutdown,
     )

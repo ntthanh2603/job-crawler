@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from jobcrawler.llm import LLMClient
@@ -14,7 +15,7 @@ from jobcrawler.pipeline.collect import CollectResult, collect
 from jobcrawler.pipeline.discovery import TIMEOUT, DiscoveryResult, discover, sources_for
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import RawJob
-from jobcrawler.sources.base import FetchRecord, SourceLimits, SourceSession
+from jobcrawler.sources.base import FetchRecord, Source, SourceLimits, SourceSession
 
 log = get_logger(__name__)
 
@@ -39,7 +40,7 @@ class WebsiteJobs:
 
 
 async def website_jobs(
-    website: str,
+    website: str | None,
     *,
     fetcher: Fetcher,
     llm: LLMClient,
@@ -52,12 +53,27 @@ async def website_jobs(
     negative_ttl: float = 86_400,
     discovery_timeout: float | None = None,
     records: list[FetchRecord] | None = None,
+    extra_sources: Sequence[Source] = (),
 ) -> WebsiteJobs:
     """Tìm nguồn trên `website` (domain hoặc URL) rồi thu thập song song tới `deadline`
-    (`time.monotonic()`). Bước tìm nguồn dùng tối đa `discovery_timeout` giây; hết giờ thì
-    thu thập từ những nguồn đã tìm được và ghi `discovery:<domain>` vào `incomplete_sources`."""
+    (`time.monotonic()`), cùng các nguồn có sẵn `extra_sources` (vd. profile trên trang tuyển
+    dụng). Bước tìm nguồn dùng tối đa `discovery_timeout` giây; hết giờ thì thu thập từ những
+    nguồn đã tìm được và ghi `discovery:<domain>` vào `incomplete_sources`. Không có website
+    thì chỉ thu thập `extra_sources`."""
     limits = limits or SourceLimits()
     records = records if records is not None else []
+    if website is None:
+        out = WebsiteJobs(website="", domain="", discovery=None)
+        out.collected = await collect(
+            list(extra_sources),
+            fetcher=fetcher,
+            llm=llm,
+            deadline=deadline,
+            limits=limits,
+            records=records,
+        )
+        out.incomplete_sources = out.collected.incomplete_sources
+        return out
     domain = parse_domain_input(website)
     out = WebsiteJobs(website=website, domain=domain, discovery=None)
     out.collected.records = records
@@ -78,7 +94,7 @@ async def website_jobs(
     if discover_only:
         return out
     out.collected = await collect(
-        sources_for(out.discovery),
+        [*sources_for(out.discovery), *extra_sources],
         fetcher=fetcher,
         llm=llm,
         deadline=deadline,
@@ -91,12 +107,13 @@ async def website_jobs(
 
 async def jobs_for_website(
     res: Resources,
-    website: str,
+    website: str | None,
     *,
     deadline: float | None = None,
     refresh: bool = False,
     discover_only: bool = False,
     records: list[FetchRecord] | None = None,
+    extra_sources: Sequence[Source] = (),
 ) -> WebsiteJobs:
     s = res.settings
     return await website_jobs(
@@ -112,4 +129,5 @@ async def jobs_for_website(
         negative_ttl=s.discovery_negative_cache_seconds,
         discovery_timeout=s.discovery_timeout_seconds,
         records=records,
+        extra_sources=extra_sources,
     )

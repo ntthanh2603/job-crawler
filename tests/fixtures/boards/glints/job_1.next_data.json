@@ -1,0 +1,291 @@
+{
+ "_source": "__NEXT_DATA__ props.pageProps.initialData.data (creator/recruiter fields removed)",
+ "page": "/opportunities/jobs/id",
+ "buildId": "v8.532.0-5313-gdf30c1723",
+ "data": {
+  "CityId": 0,
+  "CitySubDivisionId": null,
+  "CompanyId": "7d4ed919-9af9-44a8-8645-86fc53d048fd",
+  "CountryCode": "VN",
+  "DistrictId": "1e361346-5b9e-442c-9664-b5da7e0bd1b8",
+  "HierarchicalJobCategoryId": "4268c9d3-2fb2-4738-b191-9644a2ad5362",
+  "JobSkills": [
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "79446c9d-5169-44ae-8251-6b29215c93b4",
+     "name": "Python",
+     "translationKey": "text-skill-python"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "db1718f4-85e8-4e62-a9e3-e57b0993aabd",
+     "name": "AI Systems",
+     "translationKey": "text-skill-ai-systems"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "7900f778-3de4-46c8-9833-8329ea13adff",
+     "name": "SQL",
+     "translationKey": "text-skill-sql"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "9c96741d-9500-4bae-9929-17bfc5c1f716",
+     "name": "Chatbots",
+     "translationKey": "text-skill-chatbots"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "5854a5e8-6203-4d20-a279-2e3f28930a64",
+     "name": "English Language",
+     "translationKey": "text-skill-english-languange"
+    }
+   }
+  ],
+  "acceptsForeignApplications": false,
+  "attachmentsJsonString": "[]",
+  "bannerPic": null,
+  "benefits": [
+   {
+    "benefit": "PERFORM_BONUS_FINANCIAL_BENEFITS",
+    "description": "",
+    "logo": "",
+    "title": "Perform Bonus"
+   },
+   {
+    "benefit": "CAREER_GROWTH",
+    "description": "",
+    "logo": "career_growth",
+    "title": "Career Path"
+   }
+  ],
+  "closedAt": null,
+  "company": {
+   "IndustryId": 118,
+   "LocationId": "9f4287bd-76a1-4da6-9396-589ea47c93e2",
+   "address": "Tầng 41, Tòa nhà Landmark72, Mễ Trì, Nam Từ Liêm, Hà Nội",
+   "bannerPic": "2ea27224a54fe496789d9e852ec6fd9d.png",
+   "brandName": null,
+   "createdAt": "2023-07-03T08:57:47.089000Z",
+   "descriptionJsonString": "{\"blocks\":[{\"key\":\"52k1u\",\"data\":{},\"text\":\"Viettel Cyber Security (Công ty An ninh mạng Viettel) là đơn vị trực thuộc  Tập đoàn Công nghiệp - Viễn thông Quân đội với nhiệm vụ chính là thực hiện toàn trình từ nghiên cứu chuyên sâu, phát triển các giải pháp về ATTT trên môi trường viễn thông, CNTT đến cung cấp các sản phẩm/dịch vụ ATTT do chính Công ty xây dựng tới khách hàng lớn trong và ngoài nước.  Viettel Cyber Security tự hào có đội ngũ nhân sự giỏi, những chuyên gia hàng đầu trong lĩnh vực Công nghệ thông tin nói chung và ATTT nói riêng. Với môi trường làm việc trẻ trung, năng động và hiện đại, Viettel Cyber Security luôn mong muốn có thể thu hút được nhiều nhân tài gia nhập vào đại gia đình Viettel.\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]}],\"entityMap\":{}}",
+   "displayName": "Viettel Cyber Security",
+   "id": "7d4ed919-9af9-44a8-8645-86fc53d048fd",
+   "industry": {
+    "id": 118,
+    "name": "Computer & Network Security",
+    "translationName": "Computer & Network Security"
+   },
+   "isApprovedToTalentHunt": false,
+   "isHiring": false,
+   "isVIP": false,
+   "isVIPFreeTrial": false,
+   "localOffice": true,
+   "logo": "4ea0c5265faab6dc0e68ec3f43f8d001.jpeg",
+   "name": "Viettel Cyber Security",
+   "photosJsonString": "[]",
+   "size": "BETWEEN_201_AND_500",
+   "socialMediaSitesJsonString": "{\"twitter\":null,\"facebook\":\"anninhmangviettel\",\"linkedin\":null,\"instagram\":null}",
+   "status": "VERIFIED",
+   "tagline": "Be proactive in the cyber battle. Take the shield!",
+   "verificationTier": {
+    "type": "LEGAL_DOCUMENTS"
+   },
+   "video": null,
+   "website": "https://viettelcybersecurity.com"
+  },
+  "country": {
+   "callingCode": "VN",
+   "callingCodes": [
+    "+84"
+   ],
+   "code": "VN",
+   "currency": [
+    "VND"
+   ],
+   "demonym": "Vietnamese",
+   "id": "VN",
+   "name": "Vietnam"
+  },
+  "createdAt": "2026-03-25T02:37:25.386Z",
+  "descriptionJsonString": "{\"blocks\":[{\"key\":\"bh1es\",\"data\":{},\"text\":\"1. CHI TIẾT CÔNG VIỆC\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[{\"style\":\"BOLD\",\"length\":21,\"offset\":0}]},{\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"656aq\",\"data\":{},\"text\":\"Tham gia thiết kế, phát triển và vận hành các luồng xử lý dữ liệu (batch & streaming) trên nền tảng Big Data\"},{\"inlineStyleRanges\":[],\"key\":\"9doqs\",\"data\":{},\"text\":\"Phối hợp xây dựng và tối ưu hệ thống xử lý dữ liệu thời gian thực, đảm bảo độ ổn định và hiệu năng\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"key\":\"7r2a3\",\"data\":{},\"text\":\"Xây dựng và quản lý quy trình điều phối dữ liệu (orchestration), đảm bảo dữ liệu được xử lý đúng hạn và có thể theo dõi\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"inlineStyleRanges\":[],\"key\":\"25ns9\",\"data\":{},\"text\":\"Thực hiện các hoạt động đảm bảo chất lượng dữ liệu, giám sát và cảnh báo khi có sự cố\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"dml6e\",\"data\":{},\"text\":\"Phối hợp thiết kế mô hình dữ liệu và truy vấn dữ liệu, phục vụ nhu cầu phân tích, báo cáo và các hệ thống downstream\",\"type\":\"unordered-list-item\"},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"euucf\",\"data\":{},\"text\":\"Tuân thủ và triển khai các yêu cầu về data governance: phân quyền truy cập, quản lý metadata, truy vết dữ liệu\",\"type\":\"unordered-list-item\"},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"8v33l\",\"data\":{},\"text\":\"Chuẩn hoá và mô tả dữ liệu để phục vụ các ứng dụng AI/Chatbot, đảm bảo dữ liệu được sử dụng đúng ngữ cảnh và an toàn\",\"type\":\"unordered-list-item\",\"depth\":0},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"42smq\",\"data\":{},\"text\":\"Phối hợp với các team liên quan (Product, AI, BI, Infra) để triển khai các dự án dữ liệu\",\"type\":\"unordered-list-item\",\"depth\":0},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"bum4b\",\"data\":{},\"text\":\"Tham gia chia sẻ kiến thức và mentor cho các thành viên level thấp hơn\\n\",\"type\":\"unordered-list-item\",\"depth\":0},{\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[{\"style\":\"BOLD\",\"length\":10,\"offset\":0}],\"key\":\"ldah\",\"data\":{},\"text\":\"2. YÊU CẦU\"},{\"inlineStyleRanges\":[],\"key\":\"1vmg0\",\"data\":{},\"text\":\"Tốt nghiệp Đại học bằng Khá trở lên, chuyên ngành Công nghệ Thông tin, An toàn Thông tin hoặc các chuyên ngành liên quan\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"66rit\",\"data\":{},\"text\":\"Có từ 3 năm kinh nghiệm trở lên làm việc ở vị trí Data Engineer \"},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"55fdb\",\"data\":{},\"text\":\"Có kinh nghiệm phát triển và vận hành hệ thống xử lý dữ liệu batch và/hoặc streaming trong môi trường production\",\"type\":\"unordered-list-item\",\"depth\":0},{\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"1paub\",\"data\":{},\"text\":\"Sử dụng tốt SQL để khai thác, xử lý và tối ưu dữ liệu\"},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"4omvj\",\"data\":{},\"text\":\"Có khả năng lập trình với Python phục vụ xử lý dữ liệu\",\"type\":\"unordered-list-item\"},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"db2vh\",\"data\":{},\"text\":\"Hiểu các khái niệm về data pipeline, data quality, monitoring và vận hành hệ thống dữ liệu\",\"type\":\"unordered-list-item\",\"depth\":0},{\"key\":\"8goss\",\"data\":{},\"text\":\"Tiếng Anh tương đương Toeic 550 trở lên\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"text\":\"Ưu tiên:\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[{\"style\":\"BOLD\",\"length\":8,\"offset\":0}],\"key\":\"27dhs\",\"data\":{}},{\"inlineStyleRanges\":[],\"key\":\"464dr\",\"data\":{},\"text\":\"– Đã từng làm việc với các nền tảng Big Data/Data Platform\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[]},{\"inlineStyleRanges\":[],\"key\":\"v2lp\",\"data\":{},\"text\":\"– Có kinh nghiệm với hệ thống xử lý dữ liệu thời gian thực\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[]},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"8ssti\",\"data\":{},\"text\":\"– Hiểu biết về data governance, bảo mật dữ liệu\",\"type\":\"unstyled\"},{\"key\":\"aa2ab\",\"data\":{},\"text\":\"– Có kinh nghiệm tham gia các dự án AI/Analytics/Chatbot là lợi thế.\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"data\":{},\"text\":\"– Kinh nghiệm dẫn dắt đội nhóm\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"8nhcq\"},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[{\"style\":\"BOLD\",\"length\":20,\"offset\":0}],\"key\":\"cdss1\",\"data\":{},\"text\":\"3. CHẾ ĐỘ PHÚC LỢI: \",\"type\":\"unstyled\"},{\"key\":\"48tui\",\"data\":{},\"text\":\"Offer theo tổng thu nhập năm\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"1giqe\",\"data\":{},\"text\":\"12 ngày phép hàng năm theo Luật Lao Động và 3 ngày nghỉ mát, nghỉ ngày lễ 22/1 \",\"type\":\"unordered-list-item\"},{\"text\":\"Bảo hiểm sức khỏe và tai nạn cá nhân của MIC (Hạn mức chi trả lên đến 600 triệu/năm)\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"eqdv6\",\"data\":{}},{\"inlineStyleRanges\":[],\"key\":\"92gpk\",\"data\":{},\"text\":\"Review lương định kì vào tháng 3 hàng năm \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"key\":\"56ht8\",\"data\":{},\"text\":\"Khám sức khỏe định kì hàng năm \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"data\":{},\"text\":\"Giải thưởng ghi nhận năng lực, các đóng góp nổi bật kịp thời \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"4l43b\"},{\"key\":\"6eiq8\",\"data\":{},\"text\":\" Làm việc tại văn phòng Hạng A - tòa Landmark 72 với tổ hợp không gian xanh và khu  vực riêng dành cho Tập Gym, giải trí (chơi Bi-a, Pes, Café, Đọc sách) \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]},{\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"855a3\",\"data\":{},\"text\":\"Thư giãn 30 phút mỗi ngày với hoạt động Happy hours (16h-16h30) \",\"type\":\"unordered-list-item\",\"depth\":0},{\"data\":{},\"text\":\"02 phần quà Tết gửi tặng gia đình, người thân \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"5cscv\"},{\"inlineStyleRanges\":[],\"key\":\"1v58s\",\"data\":{},\"text\":\"Tham gia các event Công ty: hoạt động Teambuilding hàng quý, Sinh nhật hàng tháng,  Year End Party, nghỉ mát, ngày lễ 08/03, 20/10 (các chị em được nghỉ ½ ngày), ngày sinh  nhật tập đoàn 01/06, v.v \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"inlineStyleRanges\":[],\"key\":\"33kcl\",\"data\":{},\"text\":\"Tổ chức sinh nhật cá nhân: Phần quà và bánh sinh nhật từ phía Công ty ∙ Các hoạt động thể thao: câu lạc bộ Bóng đá, Bi-a, Pocker, Pes, v.v \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[]},{\"entityRanges\":[],\"inlineStyleRanges\":[{\"offset\":0,\"style\":\"BOLD\",\"length\":21}],\"key\":\"cgpbv\",\"data\":{},\"text\":\"4. THỜI GIAN LÀM VIỆC\",\"type\":\"unstyled\",\"depth\":0},{\"data\":{},\"text\":\"Từ thứ 2 tới thứ 6 hàng tuần\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"2iu0p\"},{\"text\":\"Bắt đầu từ 8h30/9h00 tới 18h00/18h30 – nghỉ trưa 1 tiếng 30 phút\",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[],\"key\":\"8nl20\",\"data\":{}},{\"key\":\"58eug\",\"data\":{},\"text\":\"5. ĐỊA ĐIỂM LÀM VIỆC\",\"type\":\"unstyled\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[{\"offset\":0,\"style\":\"BOLD\",\"length\":20}]},{\"key\":\"2nsg4\",\"data\":{},\"text\":\"Tầng 41, Tòa nhà Landmark72, Mễ Trì, Nam Từ Liêm, Hà Nội \",\"type\":\"unordered-list-item\",\"depth\":0,\"entityRanges\":[],\"inlineStyleRanges\":[]}],\"entityMap\":{}}",
+  "educationLevel": "BACHELOR_DEGREE",
+  "endDate": null,
+  "expInfo": "",
+  "expiryDate": "2026-11-21",
+  "externalApplyURL": null,
+  "fraudReportFlag": null,
+  "gender": null,
+  "hierarchicalJobCategory": {
+   "defaultName": "Data Engineer",
+   "id": "4268c9d3-2fb2-4738-b191-9644a2ad5362",
+   "isPaidJobPossible": false,
+   "level": 3,
+   "name": "Data Engineer",
+   "parents": [
+    {
+     "defaultName": "Computer & Software",
+     "id": "9dd9bc4d-38d5-4b5e-876a-de19bc22da45",
+     "isPaidJobPossible": false,
+     "level": 1,
+     "name": "Computer & Software"
+    },
+    {
+     "defaultName": "Data",
+     "id": "1f21f824-8846-4df3-8cb0-3980b88133e8",
+     "isPaidJobPossible": false,
+     "level": 2,
+     "name": "Data",
+     "parents": [
+      {
+       "defaultName": "Computer & Software",
+       "id": "9dd9bc4d-38d5-4b5e-876a-de19bc22da45",
+       "isPaidJobPossible": false,
+       "level": 1,
+       "name": "Computer & Software"
+      }
+     ]
+    }
+   ],
+   "HierarchicalJobCategoryId": "4268c9d3-2fb2-4738-b191-9644a2ad5362"
+  },
+  "id": "7f1c0e92-3a4d-46f5-8676-f21acf6b13fe",
+  "interviewProcessJsonString": null,
+  "isActivelyHiring": false,
+  "isCoverLetterMandatory": false,
+  "isEducationRequiredForCandidate": false,
+  "isHot": false,
+  "isLocationRequiredForCandidate": false,
+  "isProfilePicRequired": false,
+  "isPublic": true,
+  "isRemote": false,
+  "isResumeRequiredForCandidate": false,
+  "jobSource": "EMPLOYER",
+  "labels": [],
+  "location": {
+   "administrativeLevelName": "City",
+   "countryCode": "VN",
+   "formattedName": "Quận Nam Từ Liêm",
+   "id": "1e361346-5b9e-442c-9664-b5da7e0bd1b8",
+   "latitude": 21.0364,
+   "level": 3,
+   "longitude": 105.76324,
+   "name": "Quận Nam Từ Liêm",
+   "parents": [
+    {
+     "administrativeLevelName": "Province",
+     "countryCode": "VN",
+     "formattedName": "Hà Nội",
+     "id": "9f4287bd-76a1-4da6-9396-589ea47c93e2",
+     "latitude": 21,
+     "level": 2,
+     "longitude": 105.75,
+     "name": "Hà Nội",
+     "parents": [
+      {
+       "administrativeLevelName": "Country",
+       "countryCode": "VN",
+       "formattedName": "Vietnam",
+       "id": "7c10b915-18a7-4e3b-9195-33b9efaa1324",
+       "latitude": 14.058324,
+       "level": 1,
+       "longitude": 108.277199,
+       "name": "Vietnam",
+       "slug": "vietnam"
+      }
+     ],
+     "slug": "ha-noi"
+    },
+    {
+     "administrativeLevelName": "Country",
+     "countryCode": "VN",
+     "formattedName": "Vietnam",
+     "id": "7c10b915-18a7-4e3b-9195-33b9efaa1324",
+     "latitude": 14.058324,
+     "level": 1,
+     "longitude": 108.277199,
+     "name": "Vietnam",
+     "slug": "vietnam"
+    }
+   ],
+   "slug": "quan-nam-tu-liem"
+  },
+  "maxAge": null,
+  "maxYearsOfExperience": 3,
+  "minAge": null,
+  "minYearsOfExperience": 1,
+  "resumeRequiredStatus": "OPTIONAL",
+  "salaries": [
+   {
+    "CurrencyCode": "VND",
+    "id": "b24c782c-8735-4b08-aaf8-120025b405d1",
+    "maxAmount": 30000000,
+    "minAmount": 20000000,
+    "paymentFrequency": null,
+    "salaryMode": "MONTH",
+    "salaryType": "BASIC"
+   }
+  ],
+  "screeningQuestionsEnabled": false,
+  "shouldPublishOnLinkedin": false,
+  "shouldShowBenefits": true,
+  "shouldShowSalary": true,
+  "skills": [
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "79446c9d-5169-44ae-8251-6b29215c93b4",
+     "name": "Python",
+     "translationKey": "text-skill-python"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "db1718f4-85e8-4e62-a9e3-e57b0993aabd",
+     "name": "AI Systems",
+     "translationKey": "text-skill-ai-systems"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "7900f778-3de4-46c8-9833-8329ea13adff",
+     "name": "SQL",
+     "translationKey": "text-skill-sql"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "9c96741d-9500-4bae-9929-17bfc5c1f716",
+     "name": "Chatbots",
+     "translationKey": "text-skill-chatbots"
+    }
+   },
+   {
+    "mustHave": true,
+    "skill": {
+     "id": "5854a5e8-6203-4d20-a279-2e3f28930a64",
+     "name": "English Language",
+     "translationKey": "text-skill-english-languange"
+    }
+   }
+  ],
+  "source": "NATIVE",
+  "startDate": null,
+  "status": "OPEN",
+  "title": "Data Engineer",
+  "type": "FULL_TIME",
+  "updatedAt": "2026-10-16T14:27:46.780664Z",
+  "workArrangementOption": "ONSITE"
+ }
+}

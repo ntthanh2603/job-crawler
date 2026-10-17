@@ -1,0 +1,279 @@
+"""Index các trang tuyển dụng và map profile (gọi từ CLI `index-boards` và cron SAQ)."""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from jobcrawler.config import Settings
+from jobcrawler.db.models import Company, JobPosting, SourceProfile
+from jobcrawler.logging import get_logger
+from jobcrawler.net.kv import RedisKV
+from jobcrawler.net.urls import host_of, registrable_domain
+from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions, IndexStats
+from jobcrawler.pipeline.profiles import decide, map_profiles
+from jobcrawler.resources import Resources
+from jobcrawler.schemas import JobStatus, RawJob
+from jobcrawler.serp import SerpClient
+from jobcrawler.sources import boards
+from jobcrawler.sources.base import FetchRecord, Source, SourceError, SourceLimits, SourceSession
+from jobcrawler.sources.boards.base import BoardAdapter
+from jobcrawler.sources.boards.profile_source import BoardProfileSource
+from jobcrawler.text import normalize_company_name
+
+log = get_logger(__name__)
+
+
+class UnknownBoardError(ValueError):
+    pass
+
+
+def selected_boards(settings: Settings, names: list[str] | None = None) -> list[BoardAdapter]:
+    """Adapter cần chạy: theo `names`, không có thì theo BOARDS, rỗng thì mọi adapter đang bật."""
+    registry = boards.registry()
+    wanted = names or settings.boards
+    if wanted:
+        unknown = [n for n in wanted if n not in registry]
+        if unknown:
+            raise UnknownBoardError(
+                f"không có adapter {', '.join(unknown)} (có: {', '.join(registry)})"
+            )
+        return [registry[n] for n in wanted]
+    return [a for a in registry.values() if a.enabled]
+
+
+def index_options(
+    settings: Settings,
+    *,
+    max_jobs: int | None = None,
+    budget_seconds: float | None = None,
+    full: bool = False,
+    map_profiles: bool = True,
+) -> IndexOptions:
+    return IndexOptions(
+        max_jobs=max_jobs if max_jobs is not None else settings.board_max_jobs_per_run,
+        budget_seconds=budget_seconds or settings.board_index_budget_seconds,
+        refresh_days=settings.board_refresh_days,
+        concurrency=settings.board_concurrency,
+        full=full,
+        map_profiles=map_profiles,
+        profile_trigram=settings.profile_match_trigram,
+        profile_min_confidence=settings.profile_match_min_confidence,
+    )
+
+
+async def index_board(res: Resources, adapter: BoardAdapter, options: IndexOptions) -> IndexStats:
+    indexer = BoardIndexer(
+        adapter,
+        engine=res.engine,
+        sessionmaker=res.sessionmaker,
+        fetcher=res.http,
+        llm=res.llm,
+        options=options,
+        limits=SourceLimits.from_settings(res.settings),
+    )
+    return await indexer.run()
+
+
+async def index_boards(
+    res: Resources,
+    names: list[str] | None = None,
+    *,
+    max_jobs: int | None = None,
+    budget_seconds: float | None = None,
+    full: bool = False,
+) -> list[IndexStats]:
+    """Index song song các trang (rate limit theo domain nên không giẫm chân nhau)."""
+    adapters = selected_boards(res.settings, names)
+    options = index_options(
+        res.settings, max_jobs=max_jobs, budget_seconds=budget_seconds, full=full
+    )
+    return list(await asyncio.gather(*(index_board(res, a, options) for a in adapters)))
+
+
+STRONG_SIGNALS = frozenset({"mst", "website"})
+
+
+async def load_indexed_jobs(res: Resources, profile_id: int) -> list[RawJob]:
+    """Tin đang mở của một profile trong index."""
+    async with res.sessionmaker() as session:
+        raws = await session.scalars(
+            select(JobPosting.raw).where(
+                JobPosting.source_profile_id == profile_id,
+                JobPosting.status == JobStatus.ACTIVE.value,
+            )
+        )
+        return [RawJob.model_validate(raw) for raw in raws]
+
+
+async def board_sources(
+    res: Resources, company_id: int, *, strong_only: bool = False, now: datetime | None = None
+) -> list[Source]:
+    """Nguồn tin của doanh nghiệp trên các trang tuyển dụng (profile đã map)."""
+    now = now or datetime.now(UTC)
+    stale_before = now - timedelta(hours=res.settings.board_stale_hours)
+    registry = boards.registry()
+    async with res.sessionmaker() as session:
+        profiles = (
+            await session.scalars(
+                select(SourceProfile)
+                .where(SourceProfile.company_id == company_id)
+                .order_by(SourceProfile.id)
+            )
+        ).all()
+    sources: list[Source] = []
+    for profile in profiles:
+        adapter = registry.get(profile.source)
+        if adapter is None or not adapter.enabled:
+            continue
+        signal = (profile.match_evidence or {}).get("signal")
+        if strong_only and signal not in STRONG_SIGNALS:
+            continue
+        fresh = profile.indexed_at is not None and profile.indexed_at >= stale_before
+        sources.append(
+            BoardProfileSource(
+                adapter,
+                external_id=profile.external_id,
+                url=profile.url,
+                fresh=fresh,
+                load_indexed=functools.partial(load_indexed_jobs, res, profile.id),
+            )
+        )
+    return sources
+
+
+MAX_SERP_PROFILES = 3
+
+
+async def lookup_profiles(
+    res: Resources, company: Company, *, timeout: float, records: list[FetchRecord]
+) -> int:
+    """Doanh nghiệp chưa có profile trên một số trang tuyển dụng: tìm `"<tên>" site:...` bằng
+    SERP, mở trang profile tìm được và map bằng rule (tên/website/MST khớp). Trả số profile mới.
+
+    Không có SERP_API_KEY (hoặc BOARD_SERP_LOOKUP=false) thì bỏ qua."""
+    s = res.settings
+    serp = SerpClient.from_settings(s, res.http, RedisKV(res.redis, prefix=s.redis_prefix))
+    if not s.board_serp_lookup or not serp.enabled:
+        return 0
+    async with res.sessionmaker() as session:
+        mapped = set(
+            await session.scalars(
+                select(SourceProfile.source).where(SourceProfile.company_id == company.id)
+            )
+        )
+    remaining = [a for a in selected_boards(s) if a.name not in mapped]
+    name = company.legal_name or company.brand_name or company.input_name
+    if not remaining or not name:
+        return 0
+    sites = " OR ".join(f"site:{registrable_domain(host_of(a.home))}" for a in remaining)
+    found = 0
+    try:
+        async with asyncio.timeout(timeout):
+            response = await serp.search(f'"{name}" ({sites})', records=records)
+            candidates: list[tuple[BoardAdapter, str]] = []
+            for item in response.items:
+                for adapter in remaining:
+                    if adapter.profile_id(item.url) and all(u != item.url for _, u in candidates):
+                        candidates.append((adapter, item.url))
+            for adapter, url in candidates[:MAX_SERP_PROFILES]:
+                if await _adopt_profile(res, company, adapter, url, records):
+                    found += 1
+    except TimeoutError:
+        log.info("boards.serp_lookup_timeout", company_id=company.id)
+    return found
+
+
+async def _adopt_profile(
+    res: Resources, company: Company, adapter: BoardAdapter, url: str, records: list[FetchRecord]
+) -> bool:
+    session = SourceSession(adapter.source, res.http, res.llm, SourceLimits(), records)
+    try:
+        page = await session.fetch(url, rate=adapter.rate)
+    except SourceError:
+        return False
+    ref = adapter.parse_profile(page.text, page.final_url) if page.ok else None
+    if ref is None:
+        return False
+    candidate = SourceProfile(
+        source=adapter.name,
+        external_id=ref.external_id,
+        url=ref.url,
+        name_on_source=ref.name,
+        name_norm=normalize_company_name(ref.name),
+        website=ref.website,
+        tax_code=ref.tax_code,
+        info=ref.info,
+    )
+    names = [n for n in (company.legal_name, company.brand_name, company.input_name) if n]
+    decision = decide(candidate, [(company, normalize_company_name(n), 1.0) for n in names])
+    if decision is None or decision.company_id is None:
+        log.info("boards.serp_profile_rejected", url=url, profile=ref.name)
+        return False
+    async with res.sessionmaker.begin() as db:
+        stmt = pg_insert(SourceProfile).values(
+            source=adapter.name,
+            external_id=ref.external_id,
+            url=ref.url,
+            name_on_source=ref.name,
+            name_norm=candidate.name_norm,
+            website=ref.website,
+            tax_code=ref.tax_code,
+            info=ref.info,
+            company_id=company.id,
+            match_confidence=decision.confidence,
+            match_evidence={**decision.evidence, "via": "serp"},
+            matched_at=datetime.now(UTC),
+        )
+        await db.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[SourceProfile.source, SourceProfile.external_id],
+                set_={
+                    "company_id": stmt.excluded.company_id,
+                    "match_confidence": stmt.excluded.match_confidence,
+                    "match_evidence": stmt.excluded.match_evidence,
+                    "matched_at": stmt.excluded.matched_at,
+                    "website": func.coalesce(stmt.excluded.website, SourceProfile.website),
+                },
+                where=SourceProfile.company_id.is_(None),
+            )
+        )
+    log.info("boards.serp_profile", source=adapter.name, url=url, company_id=company.id)
+    return True
+
+
+@dataclass(slots=True)
+class MapReport:
+    matched: int
+    profiles: int
+    mapped_total: int
+
+
+async def map_all_profiles(res: Resources, names: list[str] | None = None) -> MapReport:
+    """Map lại profile chưa map của các trang (vd. sau khi nạp doanh nghiệp mới)."""
+    s = res.settings
+    matched = 0
+    async with res.sessionmaker.begin() as session:
+        for adapter in selected_boards(s, names):
+            matched += await map_profiles(
+                session,
+                source=adapter.name,
+                llm=res.llm,
+                trigram_threshold=s.profile_match_trigram,
+                min_confidence=s.profile_match_min_confidence,
+            )
+        profiles = await session.scalar(select(func.count()).select_from(SourceProfile)) or 0
+        mapped = (
+            await session.scalar(
+                select(func.count())
+                .select_from(SourceProfile)
+                .where(SourceProfile.company_id.is_not(None))
+            )
+            or 0
+        )
+    return MapReport(matched=matched, profiles=profiles, mapped_total=mapped)

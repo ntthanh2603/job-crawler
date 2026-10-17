@@ -35,6 +35,16 @@ _CAPTCHA_MARKERS = (
     "are you a robot",
 )
 _SHORT_PAGE_BYTES = 15_000
+# Trang chắn toàn trang (không phải widget trong form ứng tuyển): chặn bất kể độ dài/mã HTTP.
+# CareerLink trả trang 200, ~27 KB "Xác nhận bạn không phải robot" với form /recaptcha.
+_CAPTCHA_PAGE_MARKERS = (
+    "recaptcha_confirm_form",
+    'action="/recaptcha"',
+    "hãy xác nhận bạn không phải robot",
+    "chúng tôi nhận thấy có điều bất thường",
+)
+
+_CF_PASSIVE = re.compile(r"cdn-cgi/challenge-platform/(?:h/\w+/)?scripts/jsd/")
 
 _LOGIN_PATH = re.compile(
     r"/(log-?in|sign-?in|dang-?nhap|auth|account/login|users?/login|sso)(/|$|\?)", re.IGNORECASE
@@ -66,7 +76,9 @@ def detect_block(
     if headers.get("cf-mitigated", "").lower() == "challenge":
         return "cloudflare_challenge"
 
-    sample = body[:50_000].lower()
+    # Script phát hiện bot thụ động của Cloudflare có trên trang bình thường (JobsGO...), không
+    # phải trang thử thách: bỏ khỏi mẫu trước khi tìm dấu hiệu.
+    sample = _CF_PASSIVE.sub("", body[:50_000].lower())
     if status in (403, 429, 503) and ("just a moment" in sample or "cf-chl" in sample):
         return "cloudflare_challenge"
     for marker, reason in _WAF_MARKERS:
@@ -78,6 +90,8 @@ def detect_block(
     if _is_login_redirect(requested_url, final_url):
         return "login_required"
 
+    if any(m in sample for m in _CAPTCHA_PAGE_MARKERS):
+        return "captcha"
     if any(m in sample for m in _CAPTCHA_MARKERS) and (
         status in (403, 429, 503) or len(body) < _SHORT_PAGE_BYTES
     ):

@@ -178,25 +178,35 @@ def _salary(value: Any) -> dict[str, Any]:
     amount = value.get("value")
     unit: str | None = None
     low = high = None
+    # Chữ thay cho số ("Thỏa thuận", "Negotiable", "1,000 - 2,000 USD"): giữ nguyên văn.
+    text: str | None = None
     if isinstance(amount, dict):
         unit = text_or_none(amount.get("unitText"))
         low = _number(amount.get("minValue"))
         high = _number(amount.get("maxValue"))
+        inner = amount.get("value")
         if low is None and high is None:
-            low = high = _number(amount.get("value"))
+            low = high = _number(inner)
+        if isinstance(inner, str) and _number(inner) is None:
+            text = text_or_none(inner)
     else:
         low = high = _number(amount)
+        if isinstance(amount, str) and low is None:
+            text = text_or_none(amount)
+    if low is None and high is None:
+        # MonetaryAmount phẳng: {"currency": "VND", "minValue": 8000000, "maxValue": ...}.
+        low, high = _number(value.get("minValue")), _number(value.get("maxValue"))
     unit = unit or text_or_none(value.get("unitText"))
-    if low is None and high is None and currency is None:
+    if low is None and high is None and currency is None and text is None:
         return {}
     span = " - ".join(_fmt(v) for v in dict.fromkeys(x for x in (low, high) if x is not None))
-    raw = join_nonempty([span, currency.upper() if currency else None], " ")
+    raw = join_nonempty([span, currency.upper() if currency else None], " ") if span else None
     return {
         "salary_min": low,
         "salary_max": high,
         "salary_currency": currency.upper() if currency else None,
         "salary_period": unit,
-        "salary_raw": f"{raw}/{unit}" if raw and unit else raw,
+        "salary_raw": text or (f"{raw}/{unit}" if raw and unit else raw),
     }
 
 
