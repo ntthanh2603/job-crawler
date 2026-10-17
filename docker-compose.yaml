@@ -73,6 +73,23 @@ services:
     shm_size: 1gb
     restart: unless-stopped
 
+  # Giao diện web + API JSON (React build sẵn trong image). Chỉ mở ở 127.0.0.1; đặt UI_PASSWORD
+  # trong .env nếu mở ra ngoài.
+  api:
+    image: jobcrawler:latest
+    command: ["jobcrawler", "ui", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: *env_file
+    environment: *app_env
+    depends_on: *worker_deps
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # Index trang tuyển dụng (cron BOARD_INDEX_CRON → mỗi trang một job dài hàng giờ) ở queue
   # riêng, không chiếm chỗ của doanh nghiệp. Một replica là đủ (mỗi trang có khoá riêng).
   indexer:

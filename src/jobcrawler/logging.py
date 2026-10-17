@@ -206,8 +206,17 @@ def _console_colors() -> bool:
     return True
 
 
+def _utf8_streams() -> None:
+    """Console Windows / stdout bị chuyển hướng hay dùng cp1252: log tiếng Việt làm crash."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")  # pyright: ignore[reportAttributeAccessIssue]
+
+
 def configure_logging(settings: Settings) -> None:
     """Cấu hình structlog + logging chuẩn (SAQ, Alembic...) dùng chung một renderer."""
+    _utf8_streams()
     shared: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,

@@ -394,6 +394,28 @@ def worker(
     _run(run_worker(get_settings(), "boards" if boards_role else "companies"))
 
 
+@app.command()
+def ui(
+    host: Annotated[str, typer.Option(help="Địa chỉ lắng nghe (0.0.0.0 trong container).")] = (
+        "127.0.0.1"
+    ),
+    port: Annotated[int, typer.Option(help="Cổng.")] = 8000,
+    reload: Annotated[bool, typer.Option(help="Tự nạp lại khi sửa code (dev).")] = False,
+) -> None:
+    """Giao diện web + API JSON (đăng nhập bằng UI_USERNAME / UI_PASSWORD nếu đặt)."""
+    import uvicorn
+
+    uvicorn.run(
+        "jobcrawler.web.app:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        proxy_headers=True,
+        log_level=get_settings().log_level.lower(),
+    )
+
+
 # --- doanh nghiệp, queue -----------------------------------------------------------------------
 
 

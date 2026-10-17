@@ -178,6 +178,13 @@ class Settings(BaseSettings):
     # Số dòng tối đa nén lại bằng từ điển mới mỗi lượt bảo trì.
     compression_recompress_rows: int = Field(default=50_000, ge=0)
 
+    # Giao diện web (`jobcrawler ui`, service api trong compose). Không đặt UI_PASSWORD thì không
+    # hỏi đăng nhập: chỉ mở ở 127.0.0.1.
+    ui_username: str = "admin"
+    ui_password: SecretStr | None = None
+    # Thư mục bản build React (`npm run build` trong frontend/); trống = src/jobcrawler/web/dist.
+    ui_dist: Path | None = None
+
     # Log.
     log_level: LogLevel = "INFO"
     log_format: Literal["console", "json"] = "console"

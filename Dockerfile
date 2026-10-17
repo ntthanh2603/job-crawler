@@ -1,4 +1,14 @@
 # syntax=docker/dockerfile:1
+
+# --- Giao diện React (frontend/) -------------------------------------------------------------------
+FROM node:22-slim AS ui
+WORKDIR /ui
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build -- --outDir /ui/dist
+
+# --- Ứng dụng Python -------------------------------------------------------------------------------
 # Tag image phải khớp phiên bản `playwright` trong pyproject.toml (browser có sẵn ở /ms-playwright).
 FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
 
@@ -24,6 +34,10 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
+
+# Bản build giao diện cho `jobcrawler ui` (service api).
+COPY --from=ui /ui/dist /app/ui
+ENV UI_DIST=/app/ui
 
 USER pwuser
 CMD ["jobcrawler", "worker"]

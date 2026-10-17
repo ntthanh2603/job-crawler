@@ -14,7 +14,7 @@ Cần [uv](https://docs.astral.sh/uv/) và Docker.
 cp .env.example .env                              # điền LLM_*, SERP_* khi có
 cp config/proxies.example.txt config/proxies.txt  # điền proxy; không có thì đi thẳng
 uv sync
-docker compose up -d          # postgres, redis, migrate, worker ×3, indexer
+docker compose up -d          # postgres, redis, migrate, worker ×3, indexer, api (giao diện)
 uv run jobcrawler db upgrade  # migrate cũng tự chạy trong compose
 uv run jobcrawler run "Test"
 ```
@@ -133,6 +133,30 @@ requirements_md / benefits_md`, `failed_pages.html_zstd` là bytea (đọc qua O
 định dạng ở `src/jobcrawler/db/compress.py`). Lượt bảo trì huấn luyện từ điển zstd trên chính dữ
 liệu khi đủ mẫu (nén ~4–6 lần thay vì ~1,8 lần của Postgres) rồi nén lại dần dữ liệu cũ.
 `source_fetches`, `logs` giữ 30 ngày, `failed_pages` 7 ngày.
+
+## Giao diện web
+
+React + shadcn/ui + Tailwind (thư mục `frontend/`), gọi API JSON của FastAPI (`/api/...`, tài
+liệu ở `/api/docs`). Trang: Tổng quan (p95, tỉ lệ failed, biểu đồ lượt chạy, nguồn, nén), Doanh
+nghiệp (lọc, nạp CSV, chạy theo lựa chọn / doanh nghiệp cũ / tất cả, chi tiết KYC, profile, lượt
+chạy, tin bị loại), Lượt chạy (request, log, trang parse lỗi), Job (lọc theo tỉnh, cấp bậc, lương,
+nguồn; tải CSV/JSONL), Kiểm tay (đánh dấu đúng/sai, phím D/S/N, precision theo nguồn), Golden set
+(tải companies.csv + jobs.csv → precision/recall), Trang tuyển dụng, Queue.
+
+```bash
+docker compose up -d api                 # http://127.0.0.1:8000 (image đã build sẵn giao diện)
+```
+
+Chạy trên máy (dev):
+
+```bash
+cd frontend && npm install && npm run build   # bản build vào src/jobcrawler/web/dist
+uv run jobcrawler ui                           # http://127.0.0.1:8000
+cd frontend && npm run dev                     # sửa giao diện: http://localhost:5173 (gọi API cổng 8000)
+```
+
+Đặt `UI_PASSWORD` (và `UI_USERNAME`) để hỏi đăng nhập (HTTP Basic); API chặn request ghi đến từ
+site khác.
 
 ## Kiểm tra hạ tầng
 

@@ -27,10 +27,11 @@ from pathlib import Path
 from typing import Any
 
 from rapidfuzz import fuzz
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, Job, JobPosting
+from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, Job, JobPosting, JobReview
 from jobcrawler.net.urls import normalize_url
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyIn, JobStatus
@@ -592,3 +593,91 @@ async def latest_run_perf(session: AsyncSession, company_ids: Sequence[int]) -> 
     p95 = durations[min(len(durations) - 1, round(0.95 * (len(durations) - 1)))]
     failed = sum(1 for s, _ in rows if s == "failed") / len(rows)
     return {"p95 thời gian (lượt cuối)": f"{p95:.0f} s", "failed (lượt cuối)": pct(failed)}
+
+
+# --- kiểm tay trên giao diện web (bảng job_reviews) ----------------------------------------------
+
+
+@dataclass(slots=True)
+class SourceReview:
+    source: str
+    reviewed: int
+    correct: int
+
+    @property
+    def precision(self) -> float | None:
+        return ratio(self.correct, self.reviewed)
+
+
+@dataclass(slots=True)
+class ReviewSummary:
+    reviewed: int
+    correct: int
+    by_source: list[SourceReview]
+    unreviewed_active: int
+
+    @property
+    def precision(self) -> float | None:
+        return ratio(self.correct, self.reviewed)
+
+
+async def record_review(
+    session: AsyncSession,
+    job_id: int,
+    *,
+    correct: bool,
+    note: str | None = None,
+    reviewer: str | None = None,
+) -> None:
+    """Ghi (hoặc sửa) đánh giá đúng/sai của một job."""
+    values = {
+        "correct": correct,
+        "note": (note or "").strip() or None,
+        "reviewer": reviewer,
+        "reviewed_at": func.now(),
+    }
+    stmt = pg_insert(JobReview).values(job_id=job_id, **values)
+    await session.execute(
+        stmt.on_conflict_do_update(index_elements=[JobReview.job_id], set_=values)
+    )
+
+
+async def delete_review(session: AsyncSession, job_id: int) -> None:
+    await session.execute(delete(JobReview).where(JobReview.job_id == job_id))
+
+
+async def review_summary(session: AsyncSession) -> ReviewSummary:
+    kind = func.split_part(Job.canonical_source, ":", 1)
+    rows = await session.execute(
+        select(kind, func.count(), func.count().filter(JobReview.correct.is_(True)))
+        .join(Job, Job.id == JobReview.job_id)
+        .group_by(kind)
+        .order_by(func.count().desc())
+    )
+    by_source = [SourceReview(source=s, reviewed=n, correct=c) for s, n, c in rows]
+    unreviewed = await session.scalar(
+        select(func.count())
+        .select_from(Job)
+        .outerjoin(JobReview, JobReview.job_id == Job.id)
+        .where(Job.status == JobStatus.ACTIVE.value, JobReview.id.is_(None))
+    )
+    return ReviewSummary(
+        reviewed=sum(s.reviewed for s in by_source),
+        correct=sum(s.correct for s in by_source),
+        by_source=by_source,
+        unreviewed_active=int(unreviewed or 0),
+    )
+
+
+async def next_unreviewed(session: AsyncSession, *, exclude: int | None = None) -> int | None:
+    """Id một job đang mở chưa kiểm, chọn ngẫu nhiên."""
+    stmt = (
+        select(Job.id)
+        .outerjoin(JobReview, JobReview.job_id == Job.id)
+        .where(Job.status == JobStatus.ACTIVE.value, JobReview.id.is_(None))
+        .order_by(func.random())
+        .limit(1)
+    )
+    if exclude is not None:
+        stmt = stmt.where(Job.id != exclude)
+    return await session.scalar(stmt)

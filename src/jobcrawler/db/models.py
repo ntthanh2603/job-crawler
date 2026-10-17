@@ -298,6 +298,21 @@ class Job(Base):
     updated_at: Mapped[datetime] = _updated_at()
 
 
+class JobReview(Base):
+    """Người kiểm đánh dấu một job đúng/sai (precision khi chưa có golden set, trang Kiểm tay)."""
+
+    __tablename__ = "job_reviews"
+
+    id: Mapped[int] = _pk()
+    job_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
+    )
+    correct: Mapped[bool]
+    note: Mapped[str | None]
+    reviewer: Mapped[str | None]
+    reviewed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
 class CompanyRun(Base):
     __tablename__ = "company_runs"
     __table_args__ = (

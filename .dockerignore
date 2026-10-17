@@ -11,3 +11,7 @@ docs/
 proxies.txt
 config/
 *.csv
+frontend/node_modules
+src/jobcrawler/web/dist
+.claude/
+skills-lock.json

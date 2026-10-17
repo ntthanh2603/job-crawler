@@ -10,19 +10,24 @@ dependencies = [
     "curl-cffi>=0.16",
     "datasketch>=1.6",
     "extruct>=0.18.0",
+    # API cho giao diện web (`jobcrawler ui`, React ở frontend/): FastAPI, uvicorn, upload, markdown.
+    "fastapi>=0.143.3",
     "ftfy>=6.3",
+    "markdown-it-py>=4.2.0",
     "markdownify>=1.2.3",
     "openai>=3.31.0",
     # Khớp đúng tag image mcr.microsoft.com/playwright/python trong Dockerfile.
     "playwright==1.63.0",
     "pydantic>=2.14",
     "pydantic-settings>=2.16.0",
+    "python-multipart>=0.0.32",
     "rapidfuzz>=3.10",
     "saq[redis]>=0.26.4",
     "selectolax>=1.0.0",
     "sqlalchemy[asyncio]>=2.0.40",
     "structlog>=26.1.0",
     "typer>=0.27.3",
+    "uvicorn>=0.54.0",
     # Nén cột lớn trong Postgres bằng zstd + từ điển (Python 3.12 chưa có zstd trong stdlib).
     "zstandard>=0.25.0",
 ]
@@ -36,6 +41,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

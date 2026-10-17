@@ -12,8 +12,8 @@ def _script() -> ScriptDirectory:
 
 def test_single_linear_head() -> None:
     script = _script()
-    assert script.get_heads() == ["0004"]
-    assert [r.revision for r in script.walk_revisions()] == ["0004", "0003", "0002", "0001"]
+    assert script.get_heads() == ["0005"]
+    assert [r.revision for r in script.walk_revisions()] == ["0005", "0004", "0003", "0002", "0001"]
 
 
 def test_migrations_create_every_model_table() -> None:
