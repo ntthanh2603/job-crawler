@@ -13,6 +13,7 @@ import {
   PageHeader,
   Section,
   StatCard,
+  StatGrid,
   StatusBadge,
   Tag,
   TextLink,
@@ -44,11 +45,11 @@ const WINDOWS = [
 ] as const
 
 const chartConfig = {
-  ok: { label: "Thành công", color: "var(--chart-1)" },
-  partial: { label: "Một phần", color: "var(--chart-2)" },
-  ambiguous: { label: "Chưa rõ", color: "var(--chart-3)" },
-  failed: { label: "Thất bại", color: "var(--chart-4)" },
-  running: { label: "Đang chạy", color: "var(--chart-5)" },
+  ok: { label: "Thành công", color: "var(--success)" },
+  partial: { label: "Một phần", color: "var(--warning)" },
+  ambiguous: { label: "Chưa rõ", color: "var(--neutral-tone)" },
+  failed: { label: "Thất bại", color: "var(--destructive)" },
+  running: { label: "Đang chạy", color: "var(--info)" },
 } satisfies ChartConfig
 
 const TABLE_NAMES: Record<string, string> = {
@@ -154,10 +155,10 @@ export function OverviewPage() {
 
       {st && runs && data && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <StatGrid className="grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {p95 && (
               <StatCard
-                label="P95 thời gian mỗi doanh nghiệp"
+                label="P95 mỗi doanh nghiệp"
                 value={p95.value === null ? "–" : `${Math.round(p95.value)} s`}
                 hint={`Mục tiêu ${p95.target}`}
                 status={p95.ok === null ? undefined : { tone: p95.ok ? "good" : "bad", text: p95.ok ? "Đạt" : "Chưa đạt" }}
@@ -212,7 +213,7 @@ export function OverviewPage() {
                 </span>
               }
             />
-          </div>
+          </StatGrid>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <Section title="Lượt chạy 24 giờ qua" description="Theo giờ bắt đầu, chia theo kết quả">

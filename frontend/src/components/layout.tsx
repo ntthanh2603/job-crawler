@@ -10,7 +10,6 @@ import {
   Menu,
   Monitor,
   Moon,
-  ScanSearch,
   Sun,
   Target,
   UserRound,
@@ -85,11 +84,9 @@ function ThemeMenu() {
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-        <ScanSearch className="size-4 stroke-[2]" aria-hidden />
-      </div>
+      <img src="/logo-mark.png" alt="" width={32} height={32} className="size-8 shrink-0" />
       <div className="leading-tight">
-        <div className="text-sm font-semibold tracking-tight">jobcrawler</div>
+        <div className="text-sm font-semibold tracking-tight text-foreground">jobcrawler</div>
         <div className="text-[0.7rem] text-muted-foreground">Thu thập tin tuyển dụng</div>
       </div>
     </div>
@@ -116,9 +113,10 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     cn(
-                      "group relative flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                      "group relative flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[0.8125rem] text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+                      // Mục đang mở: nền xanh nhạt + vạch màu chính bên trái.
                       isActive &&
-                        "bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-[0_1px_2px_0_var(--shadow-color)] ring-1 ring-sidebar-border",
+                        "bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:inset-y-1.5 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-sidebar-primary",
                     )
                   }
                 >

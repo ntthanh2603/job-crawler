@@ -26,6 +26,7 @@ from jobcrawler.llm import LLMClient, cache_key, cached_structured
 from jobcrawler.logging import get_logger
 from jobcrawler.net.kv import KeyValueStore
 from jobcrawler.net.urls import host_of, path_segments, registrable_domain
+from jobcrawler.pipeline import provinces
 from jobcrawler.pipeline.dedup import Signatures, connected_groups, jd_similarity, title_similarity
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.prompts import job_verify
@@ -238,7 +239,8 @@ _EXPIRED_TEXT = re.compile(
 )
 # Thời điểm tuyển ghi trong tiêu đề / URL: "Tuyển dụng 11/ 2019", "tháng 3-2024",
 # "tuyen-dung-11-2019".
-_DATED = re.compile(r"(?<![\d/.])(0?[1-9]|1[0-2])\s*[/-]\s*(20\d{2})(?![\d/.])")
+# "11-2019" trong tiêu đề / URL; dấu "/" ngay sau năm vẫn được (cuối đường dẫn "…-11-2019/").
+_DATED = re.compile(r"(?<![\d/.])(0?[1-9]|1[0-2])\s*[/-]\s*(20\d{2})(?![\d.]|/\d)")
 _DATED_MAX_AGE = timedelta(days=183)
 
 
@@ -265,6 +267,9 @@ _GENERIC_TITLES = frozenset(
         "openings",
         "viec lam",
         "tin tuyen dung",
+        "tuyen dung nhan su",
+        "thong tin tuyen dung",
+        "co hoi viec lam",
         "join us",
         "join our team",
         "work with us",
@@ -308,6 +313,20 @@ _NEWS_SEGMENTS = frozenset(
     }
 )
 _TITLE_FILLERS = re.compile(r"\b(tai|at|cua|of|with|voi|cung)\b")
+# Trang danh sách / điều hướng của site tuyển dụng: "11 việc làm đang chờ bạn", "Tất cả việc làm".
+_LISTING_TITLE = re.compile(
+    r"^(?:\d+ )?(?:co hoi nghe nghiep|co hoi|viec lam|vi tri|cong viec|jobs?|positions?|openings?)"
+    r"(?: (?:dang cho ban|dang tuyen|dang mo|hien co|moi nhat|available|open))?$"
+    r"|^(?:xem )?tat ca(?: (?:viec lam|vi tri|co hoi|cong viec))?$"
+    r"|^(?:view )?all(?: open)? (?:jobs|roles|positions|openings)$"
+)
+# Trang SEO / khẩu hiệu của site việc làm: "tìm việc làm ở Thanh Hóa", "… 39192 công việc đang chờ".
+_LISTING_SEO = re.compile(
+    r"^(?:tim )?(?:viec lam|cong viec)(?: moi| nhanh)? (?:o|tai) "
+    r"|\b\d{3,} (?:cong viec|viec lam|vi tri|jobs)\b"
+)
+# Tiêu đề chỉ là tên tỉnh/thành (trang lọc việc theo nơi làm): "Tỉnh Vĩnh Long".
+_PLACE_PREFIX = re.compile(r"^(?:tinh|thanh pho|tp|khu vuc|mien) ")
 
 
 def _fold_head(text: str | None, limit: int = 4000) -> str:
@@ -338,6 +357,10 @@ def _not_a_job(job: NormalizedJob, ctx: CompanyContext) -> str | None:
         return "trang danh mục/giới thiệu"
     if _MULTI_POSITION_TITLE.match(title):
         return "thông báo tuyển nhiều vị trí"
+    if _LISTING_TITLE.match(title) or _LISTING_SEO.search(title):
+        return "trang danh sách việc làm"
+    if provinces.province_pattern().fullmatch(_PLACE_PREFIX.sub("", title)):
+        return "trang lọc theo tỉnh/thành"
     return None
 
 

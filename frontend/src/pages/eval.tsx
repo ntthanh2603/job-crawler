@@ -3,7 +3,15 @@ import { Download, FolderOpen, Play } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
-import { Empty, FilePicker, PageHeader, Section, StatCard, TextLink } from "@/components/common"
+import {
+  Empty,
+  FilePicker,
+  PageHeader,
+  Section,
+  StatCard,
+  StatGrid,
+  TextLink,
+} from "@/components/common"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -105,7 +113,7 @@ export function EvalPage() {
 
       {r && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatGrid className="grid-cols-2 lg:grid-cols-5">
             <StatCard
               label="Precision"
               value={pct(r.precision)}
@@ -134,7 +142,7 @@ export function EvalPage() {
             {Object.entries(r.perf).map(([k, v]) => (
               <StatCard key={k} label={k} value={v} />
             ))}
-          </div>
+          </StatGrid>
 
           <Section title="Theo doanh nghiệp" bodyClassName="p-0">
             <Table>

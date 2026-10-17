@@ -33,6 +33,8 @@ function enqueueMessage(r: EnqueueResult) {
   }`
 }
 
+const IMPORT_ID = "nap-danh-sach"
+
 function ImportCard() {
   const client = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
@@ -53,7 +55,12 @@ function ImportCard() {
   const r = mutation.data
 
   return (
-    <Section title="Nạp danh sách" description="File CSV: cột name (bắt buộc), tax_code, website, note">
+    <Section
+      title="Nạp danh sách"
+      description="File CSV: cột name (bắt buộc), tax_code, website, note"
+      className="scroll-mt-6"
+      id={IMPORT_ID}
+    >
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -183,6 +190,14 @@ export function CompaniesPage() {
         description={query.data ? `${num(query.data.total)} doanh nghiệp khớp bộ lọc` : "Đang tải danh sách…"}
         actions={
           <>
+            <Button
+              variant="outline"
+              size="sm"
+              className="2xl:hidden"
+              onClick={() => document.getElementById(IMPORT_ID)?.scrollIntoView({ behavior: "smooth" })}
+            >
+              <Upload /> Nạp CSV
+            </Button>
             <div className="flex h-8 items-center gap-1.5 rounded-md border bg-card pr-1 pl-2.5 text-xs text-muted-foreground">
               Chưa chạy trong
               <Input
@@ -213,7 +228,8 @@ export function CompaniesPage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {/* Khung nạp CSV nằm bên phải khi đủ rộng (≥ 1536px), hẹp hơn thì xuống dưới để bảng không tràn. */}
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <form
@@ -367,7 +383,7 @@ export function CompaniesPage() {
                 </Table>
               ) : (
                 <Empty>
-                  {filtered ? "Không có doanh nghiệp nào khớp bộ lọc." : "Chưa có doanh nghiệp nào. Nạp companies.csv ở khung bên phải."}
+                  {filtered ? "Không có doanh nghiệp nào khớp bộ lọc." : "Chưa có doanh nghiệp nào. Nạp companies.csv ở khung Nạp danh sách."}
                 </Empty>
               ))}
             {query.data && (

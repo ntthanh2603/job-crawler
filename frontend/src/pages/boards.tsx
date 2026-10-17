@@ -135,7 +135,6 @@ export function BoardsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="pl-4">Trang</TableHead>
-                    <TableHead>Bắt đầu</TableHead>
                     <TableHead>Kết quả</TableHead>
                     <TableHead className="text-right">Thấy</TableHead>
                     <TableHead className="text-right">Tải</TableHead>
@@ -143,15 +142,19 @@ export function BoardsPage() {
                     <TableHead className="text-right">Đổi</TableHead>
                     <TableHead className="text-right">Lỗi</TableHead>
                     <TableHead className="text-right">Gỡ</TableHead>
-                    <TableHead className="text-right">Profile mới / khớp</TableHead>
+                    <TableHead className="text-right" title="Profile nhà tuyển dụng mới / khớp được doanh nghiệp">
+                      Profile mới / khớp
+                    </TableHead>
                     <TableHead className="pr-4">Ghi chú</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {d.runs.map((r) => (
                     <TableRow key={r.id}>
-                      <TableCell className="pl-4 font-medium">{sourceLabel(r.source)}</TableCell>
-                      <TableCell className="text-xs whitespace-nowrap tabular-nums">{dt(r.started_at)}</TableCell>
+                      <TableCell className="pl-4">
+                        <div className="font-medium">{sourceLabel(r.source)}</div>
+                        <div className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
+                      </TableCell>
                       <TableCell>
                         <StatusBadge value={r.status} />
                       </TableCell>
@@ -164,7 +167,7 @@ export function BoardsPage() {
                       <TableCell className="text-right tabular-nums">
                         {r.profiles_new} / {r.profiles_matched}
                       </TableCell>
-                      <TableCell className="max-w-72 truncate pr-4 text-xs text-muted-foreground" title={r.error ?? ""}>
+                      <TableCell className="max-w-56 truncate pr-4 text-xs text-muted-foreground" title={r.error ?? ""}>
                         {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
                       </TableCell>
                     </TableRow>

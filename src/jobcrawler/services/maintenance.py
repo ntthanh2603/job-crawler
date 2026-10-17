@@ -3,6 +3,8 @@
 - Lượt chạy còn `running` quá timeout (worker chết, container bị kill) → `failed`.
 - Xoá dữ liệu cũ theo lô: `failed_pages` (7 ngày), `source_fetches` và `logs` (30 ngày).
 - Huấn luyện từ điển nén khi đủ dữ liệu / từ điển đã cũ, rồi nén lại dần các dòng cũ.
+
+`reclean_jobs` (`jobcrawler db reclean`, chạy tay): áp lại bộ làm sạch nội dung lên job đã lưu.
 """
 
 from __future__ import annotations
@@ -18,8 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.config import Settings
 from jobcrawler.db import compress
-from jobcrawler.db.models import BoardIndexRun, CompanyRun
+from jobcrawler.db.models import BoardIndexRun, CompanyRun, Job
 from jobcrawler.logging import get_logger
+from jobcrawler.pipeline.normalize import clean_text_field
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import RunStatus
 
@@ -103,6 +106,60 @@ def train_options(settings: Settings) -> compress.TrainOptions:
         delay_seconds=settings.compression_dict_delay_seconds,
         retrain_days=settings.compression_dict_retrain_days,
     )
+
+
+RECLEAN_BATCH = 500
+
+
+@dataclass(slots=True)
+class RecleanReport:
+    scanned: int = 0
+    changed: int = 0
+
+
+async def reclean_jobs(
+    sessionmaker: async_sessionmaker[AsyncSession], *, dry_run: bool = False
+) -> RecleanReport:
+    """Áp lại bộ làm sạch nội dung (`normalize.clean_text_field`: che liên hệ, sửa dấu sao, link
+    tương đối, email Cloudflare…) lên mô tả / yêu cầu / quyền lợi của job đã lưu — khi đổi luật
+    làm sạch mà không muốn chạy lại doanh nghiệp. Nội dung đã sạch đi qua không đổi."""
+    report = RecleanReport()
+    last_id = 0
+    while True:
+        async with sessionmaker.begin() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        Job.id,
+                        Job.apply_url,
+                        Job.description_md,
+                        Job.requirements_md,
+                        Job.benefits_md,
+                    )
+                    .where(Job.id > last_id)
+                    .order_by(Job.id)
+                    .limit(RECLEAN_BATCH)
+                )
+            ).all()
+            if not rows:
+                return report
+            for row in rows:
+                report.scanned += 1
+                values: dict[str, str] = {}
+                for column in ("description_md", "requirements_md", "benefits_md"):
+                    before = getattr(row, column)
+                    after = clean_text_field(before, "markdown", row.apply_url) if before else ""
+                    if after and after != before:
+                        values[column] = after
+                if values:
+                    report.changed += 1
+                    if not dry_run:
+                        await session.execute(
+                            update(Job)
+                            .where(Job.id == row.id)
+                            .values(**values, updated_at=func.now())
+                        )
+            last_id = rows[-1].id
 
 
 async def run_maintenance(

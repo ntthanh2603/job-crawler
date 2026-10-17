@@ -43,20 +43,21 @@ const TONE: Record<string, Tone> = {
   aborted: "bad",
 }
 
+// Chữ của nhãn: màu chữ thường, chỉ "lỗi" mới đổi màu; màu nằm ở chấm.
 const TONE_CLASS: Record<Tone, string> = {
-  good: "bg-success/12 text-success ring-success/20",
-  warn: "bg-warning/14 text-warning ring-warning/25",
-  bad: "bg-destructive/12 text-destructive ring-destructive/20",
-  info: "bg-brand/12 text-brand ring-brand/20",
-  neutral: "bg-neutral-tone/12 text-neutral-tone ring-neutral-tone/20",
-  muted: "bg-muted text-muted-foreground ring-border",
+  good: "text-foreground/85",
+  warn: "text-foreground/85",
+  bad: "text-destructive",
+  info: "text-foreground/85",
+  neutral: "text-foreground/85",
+  muted: "text-muted-foreground",
 }
 
 const DOT_CLASS: Record<Tone, string> = {
   good: "bg-success",
   warn: "bg-warning",
   bad: "bg-destructive",
-  info: "bg-brand",
+  info: "bg-info",
   neutral: "bg-neutral-tone",
   muted: "bg-muted-foreground/60",
 }
@@ -82,12 +83,12 @@ export function StatusBadge({
     <span
       title={value ?? undefined}
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
+        "inline-flex h-5 shrink-0 items-center gap-1.5 text-xs font-medium whitespace-nowrap",
         TONE_CLASS[t],
         className,
       )}
     >
-      <span className={cn("size-1.5 rounded-full", DOT_CLASS[t])} aria-hidden />
+      <span className={cn("size-[7px] shrink-0 rounded-full", DOT_CLASS[t])} aria-hidden />
       {typeof text === "string" ? cap(text) : (text ?? label(value))}
     </span>
   )
@@ -98,7 +99,7 @@ export function Tag({ children, title, className }: { children: ReactNode; title
     <span
       title={title}
       className={cn(
-        "inline-flex h-5 items-center rounded-md bg-muted px-1.5 text-xs whitespace-nowrap text-muted-foreground",
+        "inline-flex h-[18px] items-center rounded-[3px] border px-1.5 text-[0.7rem] whitespace-nowrap text-muted-foreground",
         className,
       )}
     >
@@ -148,7 +149,7 @@ export function PageHeader({
     if (typeof title === "string") document.title = `${cap(title)} · jobcrawler`
   }, [title])
   return (
-    <header className="mb-7 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b pb-5">
       <div className="min-w-0 space-y-1.5">
         {crumbs && (
           <nav aria-label="Đường dẫn" className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
@@ -162,7 +163,7 @@ export function PageHeader({
             ))}
           </nav>
         )}
-        <h1 className="text-[1.7rem] leading-tight font-semibold tracking-[-0.02em]">
+        <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.025em] text-foreground">
           {typeof title === "string" ? cap(title) : title}
         </h1>
         {description && (
@@ -176,7 +177,14 @@ export function PageHeader({
   )
 }
 
-/** Ô số liệu. `status` (đạt / chưa đạt) hiện cạnh tiêu đề thay cho viền màu. */
+/** Dải số liệu: các ô chia bằng đường kẻ mảnh, số cột do `className`. */
+export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("grid overflow-hidden rounded-lg border bg-card", className)}>{children}</div>
+  )
+}
+
+/** Một ô số liệu trong `StatGrid`. `status` (đạt / chưa đạt) hiện cạnh tiêu đề. */
 export function StatCard({
   label: title,
   value,
@@ -193,24 +201,26 @@ export function StatCard({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-xl border bg-card p-4 shadow-[0_1px_2px_0_var(--shadow-color)]", className)}>
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[0.8rem] leading-snug font-medium text-muted-foreground">{cap(title)}</span>
-        {status ? (
-          <StatusBadge value={null} tone={status.tone} text={status.text} />
-        ) : (
-          icon && <span className="text-muted-foreground/60 [&_svg]:size-4 [&_svg]:stroke-[1.75]">{icon}</span>
-        )}
+    <div className={cn("-mt-px -ml-px border-t border-l px-4 py-3.5", className)}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3.5 [&_svg]:stroke-[1.75]">
+          {icon}
+          {cap(title)}
+        </span>
+        {status && <StatusBadge value={null} tone={status.tone} text={status.text} />}
       </div>
-      <div className="mt-2 text-[1.65rem] leading-none font-semibold tracking-[-0.02em] tabular-nums">{value}</div>
+      <div className="mt-1.5 text-2xl leading-none font-semibold tracking-[-0.03em] text-foreground tabular-nums">
+        {value}
+      </div>
       {hint && (
-        <div className="mt-2 text-xs text-muted-foreground">{typeof hint === "string" ? cap(hint) : hint}</div>
+        <div className="mt-1.5 text-xs text-muted-foreground">{typeof hint === "string" ? cap(hint) : hint}</div>
       )}
     </div>
   )
 }
 
 export function Section({
+  id,
   title,
   description,
   actions,
@@ -218,6 +228,7 @@ export function Section({
   className,
   bodyClassName,
 }: {
+  id?: string
   title?: ReactNode
   description?: ReactNode
   actions?: ReactNode
@@ -227,16 +238,17 @@ export function Section({
 }) {
   return (
     <section
+      id={id}
       className={cn(
-        "overflow-hidden rounded-xl border bg-card text-card-foreground shadow-[0_1px_2px_0_var(--shadow-color)]",
+        "overflow-hidden rounded-lg border bg-card text-card-foreground",
         className,
       )}
     >
       {(title || actions) && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-4 py-2.5">
           <div className="min-w-0">
             {title && (
-              <h2 className="text-sm leading-6 font-semibold">{typeof title === "string" ? cap(title) : title}</h2>
+              <h2 className="text-[0.8125rem] leading-6 font-semibold text-foreground">{typeof title === "string" ? cap(title) : title}</h2>
             )}
             {description && (
               <p className="text-xs text-muted-foreground">
@@ -429,10 +441,21 @@ export function Meta({ items }: { items: [string, ReactNode][] }) {
   )
 }
 
-export function ExternalLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
+export function ExternalLink({
+  href,
+  children,
+  className,
+  title,
+}: {
+  href: string
+  children: ReactNode
+  className?: string
+  title?: string
+}) {
   return (
     <a
       href={href}
+      title={title}
       target="_blank"
       rel="noopener noreferrer"
       className={cn("text-brand underline-offset-2 transition-colors hover:underline", className)}

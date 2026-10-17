@@ -20,6 +20,7 @@ from jobcrawler.pipeline.verify import Verdict
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn, JobOut, JobStatus
 from jobcrawler.services import export as export_service
+from jobcrawler.services import maintenance
 from jobcrawler.services.companies import process_company
 from jobcrawler.sources import boards
 
@@ -108,6 +109,37 @@ async def test_process_company_saves_clean_jobs_idempotently(
             res, fmt="jsonl", out=tmp_path, companies=[ACME], include_inactive=True
         )
         assert everything.count == 2
+
+
+async def test_reclean_jobs_applies_new_cleaning_rules(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        company_id = await reset(res)
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(Job).where(Job.company_id == company_id))
+        await indexer(res, fake_site(JOBS)).run()
+        offline = dataclasses.replace(res, http=FakeFetcher())  # pyright: ignore[reportArgumentType]
+        await process_company(offline, CompanyIn(name=ACME))
+        job_id = (await company_jobs(res, company_id))[0].id
+        # Nội dung lưu từ trước khi có luật làm sạch mới.
+        dirty = "- **Tuổi****:** Từ 18\n\n- Tên / Chức danh: Vũ Tuấn - HRBP"
+        async with res.sessionmaker.begin() as s:
+            await s.execute(update(Job).where(Job.id == job_id).values(description_md=dirty))
+
+        dry = await maintenance.reclean_jobs(res.sessionmaker, dry_run=True)
+        assert dry.changed >= 1
+        async with res.sessionmaker() as s:
+            assert await s.scalar(select(Job.description_md).where(Job.id == job_id)) == dirty
+
+        done = await maintenance.reclean_jobs(res.sessionmaker)
+        assert done.changed == dry.changed
+        async with res.sessionmaker() as s:
+            cleaned = await s.scalar(select(Job.description_md).where(Job.id == job_id))
+        assert cleaned == "- **Tuổi:** Từ 18\n\n- Tên / Chức danh: [liên hệ đã ẩn] - HRBP"
+        # Chạy lại: nội dung đã sạch không đổi.
+        assert (await maintenance.reclean_jobs(res.sessionmaker)).changed == 0
 
 
 async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: Settings) -> None:

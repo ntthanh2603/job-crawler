@@ -34,28 +34,30 @@ export function JobBody({ detail }: { detail: JobDetail }) {
 }
 
 export function PostingsTable({ detail }: { detail: JobDetail }) {
+  // Ba cột (nguồn + đường dẫn, trạng thái + lần thấy cuối, xác minh) để vừa khung ~550px.
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead className="pl-4">Nguồn</TableHead>
-          <TableHead>Đường dẫn</TableHead>
           <TableHead>Trạng thái</TableHead>
-          <TableHead>Xác minh</TableHead>
-          <TableHead className="pr-4">Thấy lần cuối</TableHead>
+          <TableHead className="pr-4">Xác minh</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {detail.postings.map((p) => (
           <TableRow key={p.id}>
-            <TableCell className="pl-4 text-xs font-medium">{sourceLabel(p.source)}</TableCell>
-            <TableCell className="max-w-80 truncate text-xs">
-              <ExternalLink href={p.url}>{p.url}</ExternalLink>
+            <TableCell className="max-w-64 pl-4">
+              <div className="text-xs font-medium">{sourceLabel(p.source)}</div>
+              <ExternalLink href={p.url} className="block truncate text-xs" title={p.url}>
+                {p.url.replace(/^https?:\/\/(www\.)?/, "")}
+              </ExternalLink>
             </TableCell>
-            <TableCell>
+            <TableCell className="text-xs">
               <StatusBadge value={p.status} />
+              <div className="mt-1 text-muted-foreground">Thấy {ago(p.last_seen_at)}</div>
             </TableCell>
-            <TableCell className="text-xs whitespace-normal">
+            <TableCell className="pr-4 text-xs whitespace-normal">
               <div className="flex flex-wrap items-center gap-1">
                 {p.accepted === true && <StatusBadge value="ok" text="Nhận" />}
                 {p.accepted === false && <StatusBadge value="failed" text="Loại" />}
@@ -63,7 +65,6 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
                 <ReasonTags reasons={p.verification_reasons} />
               </div>
             </TableCell>
-            <TableCell className="pr-4 text-xs text-muted-foreground">{cap(ago(p.last_seen_at))}</TableCell>
           </TableRow>
         ))}
       </TableBody>

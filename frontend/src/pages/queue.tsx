@@ -1,6 +1,16 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { Empty, ErrorState, Loading, PageHeader, Section, StatCard, StatusBadge, TextLink } from "@/components/common"
+import {
+  Empty,
+  ErrorState,
+  Loading,
+  PageHeader,
+  Section,
+  StatCard,
+  StatGrid,
+  StatusBadge,
+  TextLink,
+} from "@/components/common"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
 import { ago, cap, num, sourceLabel } from "@/lib/format"
@@ -18,9 +28,6 @@ function jobLabel(j: QueueJob) {
   if (j.label) return cap(j.label)
   return FUNCTIONS[j.function] ?? j.key
 }
-
-// Ô số liệu nằm trong khung: nền nhạt, không đổ bóng.
-const INNER = "bg-muted/30 shadow-none"
 
 function queueTitle(name: string) {
   return name.includes("board") ? "Hàng đợi index trang tuyển dụng" : "Hàng đợi doanh nghiệp"
@@ -42,24 +49,22 @@ export function QueuePage() {
             description={q.error ? `Lỗi kết nối: ${q.error}` : `Tên hàng đợi: ${q.name}`}
             bodyClassName="space-y-4"
           >
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-              <StatCard className={INNER} label="Đang chờ" value={num(q.queued)} />
-              <StatCard className={INNER} label="Đang chạy" value={num(q.active)} />
-              <StatCard className={INNER} label="Hẹn giờ" value={num(q.scheduled)} hint="Cron và việc chờ chạy lại" />
+            <StatGrid className="grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+              <StatCard label="Đang chờ" value={num(q.queued)} />
+              <StatCard label="Đang chạy" value={num(q.active)} />
+              <StatCard label="Hẹn giờ" value={num(q.scheduled)} hint="Cron và việc chờ chạy lại" />
               <StatCard
-                className={INNER}
                 label="Worker"
                 value={num(q.workers)}
                 status={q.workers ? undefined : { tone: "warn", text: "Không có" }}
               />
-              <StatCard className={INNER} label="Đã xong" value={num(q.complete)} hint="Từ khi worker khởi động" />
+              <StatCard label="Đã xong" value={num(q.complete)} hint="Từ khi worker khởi động" />
               <StatCard
-                className={INNER}
                 label="Lỗi / chạy lại / huỷ"
                 value={`${num(q.failed)} / ${num(q.retried)} / ${num(q.aborted)}`}
                 status={q.failed ? { tone: "bad", text: "Có lỗi" } : undefined}
               />
-            </div>
+            </StatGrid>
             {q.jobs.length ? (
               <div className="overflow-hidden rounded-lg border">
                 <Table>

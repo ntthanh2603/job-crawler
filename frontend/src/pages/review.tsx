@@ -11,6 +11,7 @@ import {
   ReasonTags,
   Section,
   StatCard,
+  StatGrid,
   StatusBadge,
   TextLink,
 } from "@/components/common"
@@ -51,7 +52,7 @@ export function ReviewPage() {
       {!d && query.isLoading && <Loading rows={8} />}
       {d && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <StatGrid className="sm:grid-cols-3">
             <StatCard
               label="Precision"
               value={pct(d.precision)}
@@ -66,7 +67,7 @@ export function ReviewPage() {
             />
             <StatCard label="Đã kiểm" value={num(d.reviewed)} hint={`${num(d.correct)} đúng · ${num(d.reviewed - d.correct)} sai`} />
             <StatCard label="Chưa kiểm" value={num(d.unreviewed_active)} hint="Việc làm đang mở" />
-          </div>
+          </StatGrid>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
             {next ? (

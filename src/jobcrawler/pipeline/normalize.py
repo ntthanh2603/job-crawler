@@ -290,7 +290,9 @@ def to_markdown(text: str | None, fmt: str = "html", base_url: str | None = None
     để đổi link tương đối thành tuyệt đối."""
     if not text or not text.strip():
         return ""
-    text = ftfy.fix_text(text)
+    # Giữ ngoặc kép cong “…”: đúng chính tả, và uncurl khiến làm sạch lần hai cho kết quả khác
+    # (lần đầu ngoặc cong còn nằm trong entity HTML).
+    text = ftfy.fix_text(text, uncurl_quotes=False)
     md = html_to_markdown(text) if fmt == "html" else text
     md = _fix_links(md, base_url)
     out: list[str] = []
@@ -409,12 +411,24 @@ def split_sections(md: str) -> tuple[str, str | None, str | None]:
             if section != "description":
                 continue  # tiêu đề mục đã thành tên trường
         parts[current].append(line)
-    req = "\n".join(parts["requirements"]).strip()
-    ben = "\n".join(parts["benefits"]).strip()
+    req = _tidy(parts["requirements"])
+    ben = _tidy(parts["benefits"])
     if not req and not ben:
         return md, None, None
-    desc = "\n".join(parts["description"]).strip()
-    return desc, req or None, ben or None
+    return _tidy(parts["description"]), req or None, ben or None
+
+
+def _tidy(lines: list[str]) -> str:
+    """Gộp dòng trống liên tiếp, bỏ dòng trống / tiêu đề mục không có nội dung ở cuối (sau khi
+    tách mục, như cuối `to_markdown`)."""
+    out: list[str] = []
+    for line in lines:
+        if not line.strip() and (not out or not out[-1].strip()):
+            continue
+        out.append(line)
+    while out and (not out[-1].strip() or out[-1].lstrip().startswith("#")):
+        out.pop()
+    return "\n".join(out).strip()
 
 
 # --- ẩn liên hệ cá nhân ---------------------------------------------------------------------------
@@ -631,7 +645,14 @@ def mask_contacts(text: str) -> str:
 
 
 def clean_text_field(text: str | None, fmt: str = "html", base_url: str | None = None) -> str:
-    return mask_contacts(to_markdown(text, fmt, base_url))
+    masked = mask_contacts(to_markdown(text, fmt, base_url))
+    if "*" not in masked or CONTACT_MASK not in masked:
+        return masked
+    # Nhãn ẩn có ngoặc vuông nên có thể làm vỡ in đậm/nghiêng bao quanh: "*0222…*" → "*[liên hệ
+    # đã ẩn]*" — sửa lại các dòng đó.
+    return "\n".join(
+        _fix_emphasis(line) if CONTACT_MASK in line else line for line in masked.split("\n")
+    )
 
 
 # --- tiêu đề --------------------------------------------------------------------------------------
@@ -868,6 +889,52 @@ def parse_salary(
         negotiable=negotiable,
         raw=raw,
     )
+
+
+# Nhãn lương trong nội dung tin (đã bỏ dấu): "Mức lương:", "**Thu nhập:**", "##### Mức thu nhập".
+_SALARY_LABEL = re.compile(
+    r"^[\s#>*_-]*(?:\d+[.)]\s*)?[*_]*"
+    r"(?:muc luong|luong|muc thu nhap|thu nhap|salary|compensation)"
+    r"(?:\s+(?:co ban|tham khao|du kien|offer|range|thang|gross|net))*"
+    r"[*_]*\s*[:\-–]?\s*[*_]*\s*(.*)$"
+)
+# Giá trị trông như mức lương: khoảng số, số kèm đơn vị tiền, hoặc số lớn ("8.000.000").
+_SALARY_VALUE = re.compile(
+    r"\d[\d.,]*\s*(?:-|–|~|den|to)\s*\$?\d"
+    r"|\d[\d.,]*\s*(?:trieu|tr\b|vnd|d\b|usd|\$|k\b|m\b)"
+    r"|\$\s*\d"
+    r"|\d{1,3}(?:[.,]\d{3}){2,}"
+)
+
+# Giá trị chỉ là "thoả thuận" (không nhận "Lương thưởng hấp dẫn").
+_NEGOTIABLE_VALUE = re.compile(r"(thoa thuan|thuong luong|negotiable|canh tranh|competitive)\b")
+
+
+def salary_in_text(*texts: str | None) -> Salary | None:
+    """Mức lương ghi trong nội dung tin (nguồn không có trường lương riêng): dòng có nhãn lương
+    và giá trị ngay sau nhãn hoặc ở dòng kế tiếp. Chỉ nhận khi giá trị có số tiền rõ ràng hoặc là
+    "thoả thuận" — không nhận "Lương tháng 13", "Lương thưởng hấp dẫn"."""
+    for text in texts:
+        lines = [line.strip() for line in (text or "").splitlines()]
+        for i, line in enumerate(lines):
+            plain = strip_accents(line).lower()  # giữ dấu câu (khác `fold`)
+            m = _SALARY_LABEL.match(plain)
+            if m is None:
+                continue
+            # Bỏ dấu không đổi độ dài với chữ dựng sẵn (NFC): cắt giá trị gốc theo cùng vị trí.
+            value = (line[m.start(1) :] if len(plain) == len(line) else m.group(1)).strip()
+            if not value:  # nhãn đứng riêng một dòng (tiêu đề mục): giá trị ở dòng có chữ kế tiếp
+                value = next((v for v in lines[i + 1 : i + 3] if v), "")
+            value = _SPACES.sub(" ", _MD_MARKS.sub(" ", value)).strip(" -–:.…")
+            if not value or len(value) > 80:
+                continue
+            if _SALARY_VALUE.search(strip_accents(value).lower()):
+                salary = parse_salary(value)
+                if salary is not None and (salary.min is not None or salary.max is not None):
+                    return salary
+            elif _NEGOTIABLE_VALUE.match(fold(value)) and len(value) <= 30:
+                return Salary(negotiable=True, raw=value)
+    return None
 
 
 def _salary_raw(a: _Amounts) -> str:
@@ -1291,6 +1358,15 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
     experience = parse_experience(raw.experience_raw) or parse_experience(
         requirements or description, require_context=True
     )
+    salary = parse_salary(
+        raw.salary_raw,
+        low=raw.salary_min,
+        high=raw.salary_max,
+        currency=raw.salary_currency,
+        period=raw.salary_period,
+    )
+    if salary is None:  # trang careers hay ghi lương trong nội dung tin
+        salary = salary_in_text(description, benefits, requirements)
     return NormalizedJob(
         raw=raw,
         board=board,
@@ -1303,13 +1379,7 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
         employment_type=employment,
         work_mode=classify_work_mode(raw.work_mode, title, location_texts),
         locations=locations,
-        salary=parse_salary(
-            raw.salary_raw,
-            low=raw.salary_min,
-            high=raw.salary_max,
-            currency=raw.salary_currency,
-            period=raw.salary_period,
-        ),
+        salary=salary,
         experience_years=experience,
         skills=clean_skills(raw.skills, title),
         posted_at=raw.posted_at or parse_date(raw.posted_raw, now=now),

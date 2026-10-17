@@ -111,29 +111,26 @@ export function CompanyPage() {
                       <TableHead className="pl-4">Vị trí</TableHead>
                       <TableHead>Nơi làm</TableHead>
                       <TableHead>Lương</TableHead>
-                      <TableHead>Nguồn</TableHead>
                       <TableHead className="pr-4">Hạn nộp</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {d.jobs.map((j) => (
                       <TableRow key={j.id}>
-                        <TableCell className="max-w-96 min-w-64 pl-4 whitespace-normal">
+                        <TableCell className="max-w-96 min-w-56 pl-4 whitespace-normal">
                           <TextLink to={`/jobs/${j.id}`} className="font-medium">
                             {cap(j.title)}
                           </TextLink>
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                             <JobTags job={j} />
+                            <span className="text-xs text-muted-foreground">
+                              {sourceLabel(j.canonical_source)}
+                              {j.source_urls.length > 1 && ` +${j.source_urls.length - 1}`}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell className="max-w-48 text-xs whitespace-normal">{provinces(j)}</TableCell>
                         <TableCell className="text-xs whitespace-nowrap">{salary(j.salary)}</TableCell>
-                        <TableCell className="text-xs">
-                          {sourceLabel(j.canonical_source)}
-                          {j.source_urls.length > 1 && (
-                            <span className="text-muted-foreground"> +{j.source_urls.length - 1}</span>
-                          )}
-                        </TableCell>
                         <TableCell className="pr-4 text-xs whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
                       </TableRow>
                     ))}
@@ -153,7 +150,6 @@ export function CompanyPage() {
                     <TableRow>
                       <TableHead className="pl-4">Bắt đầu</TableHead>
                       <TableHead>Kết quả</TableHead>
-                      <TableHead className="text-right">Thời gian</TableHead>
                       <TableHead className="text-right">Nhận / thấy</TableHead>
                       <TableHead className="pr-4">Nguồn chưa xong, lỗi</TableHead>
                     </TableRow>
@@ -168,12 +164,12 @@ export function CompanyPage() {
                         </TableCell>
                         <TableCell>
                           <StatusBadge value={r.status} />
+                          <div className="text-xs text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{duration(r.duration_ms)}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.jobs_accepted}/{r.jobs_found}
                         </TableCell>
-                        <TableCell className="max-w-96 pr-4 text-xs whitespace-normal">
+                        <TableCell className="max-w-96 pr-4 text-xs whitespace-normal [overflow-wrap:anywhere]">
                           {r.incomplete_sources.length > 0 && r.incomplete_sources.map(sourceLabel).join(", ")}
                           {r.error && <div className="mt-0.5 font-mono text-muted-foreground">{r.error.slice(0, 200)}</div>}
                           {!r.incomplete_sources.length && !r.error && <span className="text-muted-foreground">Không có</span>}

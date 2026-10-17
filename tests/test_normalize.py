@@ -131,6 +131,41 @@ def test_parse_salary_without_amount_drops_default_currency() -> None:
     assert parse_salary(None) is None
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # KiotViet: nhãn là tiêu đề mục, giá trị ở dòng sau.
+        ("##### Mức thu nhập\n\n15 - 30 Triệu/Tháng", (15e6, 30e6, False)),
+        ("- **Mức lương:** Từ 9.000.000 VND đến 20.000.000 VND", (9e6, 20e6, False)),
+        ("Thu nhập: Up to 1.000 USD...", (None, 1000, False)),
+        ("Salary range: $1,500 - $2,500", (1500, 2500, False)),
+        ("**Mức lương:** Thỏa thuận", (None, None, True)),
+        # Không phải mức lương.
+        ("- Lương tháng 13, thưởng lễ Tết", None),
+        ("- Lương thưởng hấp dẫn", None),
+        ("Thu nhập không giới hạn theo năng lực", None),
+        ("Doanh thu năm 2023 đạt 1.000 tỷ", None),
+    ],
+)
+def test_salary_in_text(text: str, expected: tuple[object, ...] | None) -> None:
+    salary = normalize.salary_in_text(text)
+    if expected is None:
+        assert salary is None
+    else:
+        assert salary is not None
+        assert (salary.min, salary.max, salary.negotiable) == expected
+
+
+def test_normalize_job_takes_salary_from_body_only_when_missing() -> None:
+    body = "<h5>Mức thu nhập</h5><p>15 - 30 Triệu</p>"
+    from_body = normalized(raw_job(description=body, salary_raw=None))
+    assert from_body.salary is not None
+    assert (from_body.salary.min, from_body.salary.max) == (15e6, 30e6)
+    structured = normalized(raw_job(description=body, salary_raw="20 - 25 triệu"))
+    assert structured.salary is not None
+    assert structured.salary.min == 20e6
+
+
 # --- kinh nghiệm, ngày ----------------------------------------------------------------------------
 
 
@@ -370,6 +405,29 @@ def test_relative_links_resolved_against_job_url() -> None:
     assert to_markdown(
         '[Kế toán](/viec-lam/ke-toan-a1.html "Kế toán")', "markdown", "https://sapo.vn/x"
     ) == ("[Kế toán](https://sapo.vn/viec-lam/ke-toan-a1.html)")
+
+
+def test_cleaning_twice_changes_nothing() -> None:
+    """`jobcrawler db reclean` chạy lại bộ làm sạch trên nội dung đã lưu: phải không đổi gì."""
+    html = (
+        "<p>Chương trình &ldquo;Đối tác&rdquo; cho Bachelor&lsquo;s</p>"
+        "<h3>Chúng tôi tìm ai?</h3><h3>Yêu cầu</h3><p><b>Tuổi</b><b>:</b> 18</p>"
+        "<p>Tên / Chức danh: Vũ Tuấn - HRBP</p><p><b>*** Số lượng: 02</b></p>"
+        "<h3>Quyền lợi</h3><p><a href='/ve-chung-toi'>Văn hoá</a></p>"
+    )
+    url = "https://acme.vn/jobs/1"
+    desc, req, ben = split_sections(clean_text_field(html, "html", url))
+    assert "“Đối tác”" in desc
+    for part in (desc, req, ben):
+        assert part
+        assert clean_text_field(part, "markdown", url) == part
+
+
+def test_masking_inside_emphasis_leaves_no_stray_stars() -> None:
+    out = clean_text_field(
+        "- ***Mọi thông tin xin liên hệ :*0222 390 6766*– P. Nhân sự***", "markdown"
+    )
+    assert out == f"- Mọi thông tin xin liên hệ :{CONTACT_MASK}– P. Nhân sự"
 
 
 def test_masked_contact_links_collapse() -> None:

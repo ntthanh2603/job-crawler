@@ -63,6 +63,20 @@ def test_clean_careers_job_is_accepted_with_reasons() -> None:
         ({"title": "Tuyển dụng"}, verify.NOT_A_JOB),
         ({"title": "Careers at ACME"}, verify.NOT_A_JOB),
         ({"title": "Tuyển dụng tháng 10/2026"}, verify.NOT_A_JOB),
+        # Trang danh sách / lọc theo nơi làm của site tuyển dụng (Điện Máy Xanh).
+        ({"title": "1 CƠ HỘI NGHỀ NGHIỆP ĐANG CHỜ BẠN"}, verify.NOT_A_JOB),
+        ({"title": "11 VIỆC LÀM ĐANG CHỜ BẠN"}, verify.NOT_A_JOB),
+        ({"title": "TẤT CẢ VIỆC LÀM"}, verify.NOT_A_JOB),
+        ({"title": "View all jobs"}, verify.NOT_A_JOB),
+        ({"title": "Tỉnh Vĩnh Long"}, verify.NOT_A_JOB),
+        ({"title": "Hà Nội"}, verify.NOT_A_JOB),
+        ({"title": "tìm việc làm ở Thanh Hóa"}, verify.NOT_A_JOB),
+        ({"title": "Thế giới việc làm, 39192 công việc đang chờ bạn"}, verify.NOT_A_JOB),
+        ({"title": "Tuyển dụng nhân sự"}, verify.NOT_A_JOB),
+        (
+            {"expires_at": None, "url": "https://worklink.vn/tuyen-dung-ke-toan-update-11-2019/"},
+            verify.EXPIRED,
+        ),
         ({"apply_url": "https://tuyendung-gap.xyz/apply"}, verify.EMPLOYER_MISMATCH),
         (
             {"description": JD + "<p>Khách hàng của chúng tôi là tập đoàn FDI.</p>"},

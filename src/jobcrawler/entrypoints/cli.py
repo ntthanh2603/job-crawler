@@ -122,6 +122,23 @@ def db_maintain(
     typer.echo(f"{report.duration_ms / 1000:.1f} s")
 
 
+@db_app.command("reclean")
+def db_reclean(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Chỉ đếm, không ghi.")] = False,
+) -> None:
+    """Áp lại bộ làm sạch nội dung (che liên hệ, sửa định dạng) lên job đã lưu, không cần chạy
+    lại doanh nghiệp."""
+    from jobcrawler.services import maintenance
+
+    async def go() -> maintenance.RecleanReport:
+        async with open_resources(db_logs=False) as res:
+            return await maintenance.reclean_jobs(res.sessionmaker, dry_run=dry_run)
+
+    report = _run(go())
+    verb = "cần sửa" if dry_run else "đã sửa"
+    typer.echo(f"đã quét {report.scanned} job · {verb} {report.changed}")
+
+
 @db_app.command("revision")
 def db_revision(
     message: Annotated[str, typer.Option("-m", "--message")],
