@@ -286,6 +286,60 @@ def test_vietnamworks_payload_skips_contact_fields() -> None:
     assert parsed.job.requirements
 
 
+def test_topdev_reads_jd_sections_from_page() -> None:
+    """JSON-LD chỉ có tiêu đề "Your role…/Your skills…" + quyền lợi: mô tả/yêu cầu lấy từ HTML,
+    quyền lợi giữ `jobBenefits`."""
+    adapter = REGISTRY["topdev"]
+    html, url = page("topdev", "job_2.html")
+    parsed = adapter.parse_job(html, url)
+    assert parsed is not None
+    job = parsed.job
+    assert job.description is not None
+    assert "Your role" not in job.description
+    assert "Vai trò &amp; trách nhiệm của bạn" in job.description
+    assert "pipeline ETL/ELT" in job.description
+    assert job.requirements is not None
+    assert "Spark / PySpark" in job.requirements
+    assert "Airflow, dbt" in job.requirements
+    assert job.benefits is not None
+    assert "PEOPLE DEVELOPMENT POLICY" in job.benefits  # jobBenefits (JSON-LD)
+
+    # Phần giới thiệu đầu `description` JSON-LD được giữ trước mục vai trò.
+    html, url = page("topdev", "job_1.html")
+    parsed = adapter.parse_job(html, url)
+    assert parsed is not None
+    job = parsed.job
+    assert job.description is not None
+    assert job.description.index("Đơn vị tuyển dụng") < job.description.index("giám sát quy trình")
+    assert job.requirements is not None
+    assert "01 năm kinh nghiệm tại vị trí QA/QC" in job.requirements
+
+
+def test_topdev_keeps_jsonld_when_complete_or_page_lacks_sections() -> None:
+    adapter = REGISTRY["topdev"]
+    html, url = page("topdev", "job_2.html")
+    headings = "Your role & responsibilities<br><br>Your skills & qualifications<br><br>"
+    assert headings in html
+    # JSON-LD đủ nội dung: dùng nguyên.
+    full = html.replace(
+        headings,
+        "Your role & responsibilities<br><ul><li>Viết pipeline</li></ul>"
+        "<br>Your skills & qualifications<br><ul><li>Biết SQL</li></ul><br>",
+    )
+    parsed = adapter.parse_job(full, url)
+    assert parsed is not None
+    assert parsed.job.description is not None
+    assert "Viết pipeline" in parsed.job.description
+    assert "Spark / PySpark" not in parsed.job.description
+    assert parsed.job.requirements is None
+    # Trang không có mục JD: giữ nguyên (bước xác minh sẽ loại EMPTY_JD).
+    parsed = adapter.parse_job(html.replace("prose-ul", "prose"), url)
+    assert parsed is not None
+    assert parsed.job.description is not None
+    assert headings in parsed.job.description
+    assert parsed.job.requirements is None
+
+
 # --- trang profile ------------------------------------------------------------------------------
 
 PROFILES: list[tuple[str, str, dict[str, Any]]] = [

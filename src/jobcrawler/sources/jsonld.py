@@ -210,6 +210,17 @@ def _salary(value: Any) -> dict[str, Any]:
     }
 
 
+def _requirements(value: Any) -> str | None:
+    """`qualifications` / `educationRequirements`: chuỗi HTML, hoặc object
+    EducationalOccupationalCredential → "Trình độ: <alternateName | credentialCategory>"."""
+    if isinstance(value, list):
+        return _html_text([text for v in value if (text := _requirements(v))])
+    if isinstance(value, dict):
+        level = _name(value.get("alternateName")) or _name(value.get("credentialCategory"))
+        return f"Trình độ: {level}" if level else text_or_none(value.get("description"))
+    return _html_text(value)
+
+
 def _experience(value: Any) -> str | None:
     if isinstance(value, dict):
         months = value.get("monthsOfExperience")
@@ -266,7 +277,7 @@ def to_raw_job(
         title=title,
         company_name=_name(node.get("hiringOrganization")),
         description=_html_text(node.get("description")),
-        requirements=_html_text(
+        requirements=_requirements(
             node.get("qualifications") or node.get("educationRequirements") or None
         ),
         benefits=_html_text(node.get("jobBenefits")),

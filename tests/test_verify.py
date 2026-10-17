@@ -134,11 +134,14 @@ def test_staffing_agency_on_board_is_agency_posting() -> None:
     assert later.code == verify.AGENCY_POSTING
 
 
-def test_topdev_headings_only_description_is_empty_jd() -> None:
+def test_topdev_jd_from_page_when_jsonld_has_only_headings() -> None:
+    # JSON-LD chỉ có tiêu đề mục + quyền lợi; mô tả/yêu cầu đọc từ HTML trang nên tin được nhận.
     job = normalized(board_job("topdev", "job_2.html"))
+    assert len(job.jd_text) >= 200
     ctx = CompanyContext(company_id=5, name="F88", names=["F88 Business JSC"])
     v = check_rules(job, ctx, now=NOW)
-    assert v.code == verify.EMPTY_JD
+    assert v.accepted, v.reasons
+    assert v.code is None
 
 
 def test_employer_score() -> None:

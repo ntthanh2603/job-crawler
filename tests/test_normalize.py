@@ -378,8 +378,7 @@ def test_board_fixture_jobs_normalize(name: str, raw: object) -> None:
     assert job.title
     assert job.title_normalized
     assert job.title_normalized == job.title_normalized.lower()
-    if name != "topdev/job_2.html":  # JSON-LD của TopDev chỉ có tiêu đề mục (xem test_verify)
-        assert len(job.jd_text) >= 200, name
+    assert len(job.jd_text) >= 200, name
     assert "<" not in job.description_md.replace("<br", "")  # đã chuyển HTML
     assert "{'@type'" not in job.jd_text
     # Mọi tin thật đều ở Việt Nam: có tỉnh/thành chuẩn.

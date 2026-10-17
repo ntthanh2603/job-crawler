@@ -174,3 +174,54 @@ def test_salary_text_values() -> None:
         15_000_000,
         "8000000 - 15000000 VND/MONTH",
     )
+
+
+def test_education_requirements_object() -> None:
+    """`educationRequirements` dạng EducationalOccupationalCredential (CareerViet, Glints, JobsGO)
+    → tên trình độ, không phải repr của dict."""
+    for value, want in [
+        (
+            {
+                "@type": "EducationalOccupationalCredential",
+                "credentialCategory": "bachelor degree",
+                "alternateName": "Đại học/Cử nhân",
+            },
+            "Trình độ: Đại học/Cử nhân",
+        ),
+        (
+            {"@type": "EducationalOccupationalCredential", "credentialCategory": "bachelor degree"},
+            "Trình độ: bachelor degree",
+        ),
+        (
+            [
+                {"@type": "EducationalOccupationalCredential", "credentialCategory": "high school"},
+                "Tốt nghiệp THPT",
+            ],
+            "Trình độ: high school\nTốt nghiệp THPT",
+        ),
+        ("Cao đẳng trở lên", "Cao đẳng trở lên"),
+        ({"@type": "EducationalOccupationalCredential"}, None),
+    ]:
+        [job] = jsonld.raw_jobs(
+            _page({"@type": "JobPosting", "title": "x", "educationRequirements": value}),
+            "https://a.vn/",
+        )
+        assert job.requirements == want
+    # `qualifications` vẫn được ưu tiên.
+    [job] = jsonld.raw_jobs(
+        _page(
+            {
+                "@type": "JobPosting",
+                "title": "x",
+                "qualifications": "<ul><li>SQL</li></ul>",
+                "educationRequirements": {"credentialCategory": "bachelor degree"},
+            }
+        ),
+        "https://a.vn/",
+    )
+    assert job.requirements == "<ul><li>SQL</li></ul>"
+    # Trang thật.
+    boards = Path(__file__).parent / "fixtures" / "boards"
+    html = (boards / "careerviet" / "job_1.html").read_text(encoding="utf-8")
+    [job] = jsonld.raw_jobs(html, "https://careerviet.vn/")
+    assert job.requirements == "Trình độ: Đại học/Cử nhân"
