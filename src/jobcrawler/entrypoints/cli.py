@@ -16,7 +16,7 @@ import typer
 from jobcrawler.config import get_settings
 from jobcrawler.logging import configure_logging
 from jobcrawler.resources import ResourceUnavailableError, open_resources
-from jobcrawler.schemas import CompanyIn, CompanyResult, RunStatus
+from jobcrawler.schemas import CompanyIn, CompanyResult, JobOut, RunStatus
 
 app = typer.Typer(
     name="jobcrawler",
@@ -108,12 +108,45 @@ async def _run_company(company_in: CompanyIn) -> CompanyResult:
         return await companies.process_company(res, company_in)
 
 
+def _salary_text(job: JobOut) -> str:
+    s = job.salary
+    if s is None:
+        return "-"
+    if s.min is None and s.max is None:
+        return "thoả thuận" if s.negotiable else (s.raw or "-")
+
+    def amount(v: float | None) -> str:
+        if v is None:
+            return "?"
+        if s.currency == "VND" and v >= 1_000_000:
+            return f"{v / 1_000_000:g} tr"
+        return f"{v:,.0f}"
+
+    span = amount(s.min) if s.min == s.max else f"{amount(s.min)}-{amount(s.max)}"
+    period = f"/{s.period.value}" if s.period else ""
+    return f"{span} {s.currency or ''}{period}".strip()
+
+
+def _job_line(job: JobOut) -> str:
+    places = ", ".join(dict.fromkeys(loc.province for loc in job.locations if loc.province)) or "-"
+    tags = "/".join(
+        v.value for v in (job.level, job.employment_type, job.work_mode) if v.value != "unknown"
+    )
+    sources = f" +{len(job.source_urls) - 1} nguồn" if len(job.source_urls) > 1 else ""
+    return (
+        f"  {job.title} — {places} — {_salary_text(job)}"
+        + (f" [{tags}]" if tags else "")
+        + f" · {job.canonical_source}{sources} · {job.apply_url or (job.source_urls or ['-'])[0]}"
+    )
+
+
 @app.command()
 def run(
     name: Annotated[str, typer.Argument(help="Tên doanh nghiệp.")],
     tax_code: Annotated[str | None, typer.Option(help="Mã số thuế, nếu biết.")] = None,
     website: Annotated[str | None, typer.Option(help="Website, nếu biết.")] = None,
     json_out: Annotated[bool, typer.Option("--json", help="In kết quả dạng JSON.")] = False,
+    show: Annotated[int, typer.Option(help="Số job in ra (dạng text).")] = 50,
 ) -> None:
     """Chạy pipeline cho một doanh nghiệp ngay trong process này (không qua queue)."""
     result = _run(_run_company(CompanyIn(name=name, tax_code=tax_code, website=website)))
@@ -127,6 +160,10 @@ def run(
             f"job nhận/tìm thấy {result.jobs_accepted}/{result.jobs_found} · "
             f"nguồn chưa xong: {incomplete} · run_id {result.run_id}"
         )
+        for job in result.jobs[:show]:
+            typer.echo(_job_line(job))
+        if len(result.jobs) > show:
+            typer.echo(f"  … và {len(result.jobs) - show} job khác (--show, --json).")
     if result.status is RunStatus.FAILED:
         raise typer.Exit(1)
 
@@ -415,12 +452,38 @@ def index_boards(
 
 @app.command()
 def export(
-    format_: Annotated[str, typer.Option("--format")] = "jsonl",
-    out: Annotated[str, typer.Option("--out")] = "out/",
-    company: Annotated[str | None, typer.Option("--company")] = None,
+    format_: Annotated[str, typer.Option("--format", help="jsonl (JobOut) hoặc csv.")] = "jsonl",
+    out: Annotated[
+        str, typer.Option("--out", help="Thư mục (ghi jobs.<format>) hoặc đường dẫn file.")
+    ] = "out/",
+    company: Annotated[
+        list[str] | None,
+        typer.Option("--company", help="Id hoặc tên doanh nghiệp (lặp được)."),
+    ] = None,
+    all_status: Annotated[
+        bool, typer.Option("--all", help="Gồm cả job đã hết hạn / đã gỡ.")
+    ] = False,
 ) -> None:
-    """Export job ra JSONL/CSV."""
-    _not_implemented("M5")
+    """Export job đã chuẩn hoá ra JSONL (mỗi dòng một JobOut) hoặc CSV."""
+    from jobcrawler.services import export as export_service
+
+    if format_ not in export_service.FORMATS:
+        typer.secho(f"--format phải là {' | '.join(export_service.FORMATS)}", fg="red", err=True)
+        raise typer.Exit(2)
+    fmt: export_service.ExportFormat = "csv" if format_ == "csv" else "jsonl"
+
+    async def go() -> export_service.ExportResult:
+        async with open_resources(db_logs=False) as res:
+            return await export_service.export_jobs(
+                res, fmt=fmt, out=out, companies=company or (), include_inactive=all_status
+            )
+
+    try:
+        result = _run(go())
+    except export_service.UnknownCompanyError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
+    typer.echo(f"{result.count} job → {result.path}")
 
 
 @app.command()

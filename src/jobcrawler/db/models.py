@@ -193,6 +193,14 @@ class JobPosting(Base):
     expires_at: Mapped[datetime | None]  # hạn nộp (validThrough) nếu nguồn ghi
     # Số lượt index liên tiếp không còn thấy tin trên nguồn (≥ 2 → removed).
     missed_runs: Mapped[int] = mapped_column(server_default=text("0"))
+    # Kết quả xác minh lần gần nhất (`pipeline/verify.py`), ghi cho cả tin bị loại.
+    company_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("companies.id", ondelete="SET NULL"), index=True
+    )
+    accepted: Mapped[bool | None]
+    confidence: Mapped[float | None]
+    verification_reasons: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
+    verified_at: Mapped[datetime | None]
 
 
 class BoardIndexRun(Base):

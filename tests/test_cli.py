@@ -35,7 +35,7 @@ def test_db_help_lists_subcommands() -> None:
         assert command in result.output
 
 
-@pytest.mark.parametrize("args", [["stats"], ["export"], ["import", "x.csv"]])
+@pytest.mark.parametrize("args", [["stats"], ["import", "x.csv"]])
 def test_unimplemented_commands_exit_nonzero(args: list[str]) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 1

@@ -21,6 +21,7 @@ from jobcrawler.prompts.base import Prompt
 
 if TYPE_CHECKING:
     from jobcrawler.config import Settings
+    from jobcrawler.net.kv import KeyValueStore
 
 log = get_logger(__name__)
 
@@ -40,6 +41,7 @@ class LLMResult[T: BaseModel]:
     completion_tokens: int | None = None
     attempts: int = 0
     error: str | None = None
+    cached: bool = False  # lấy từ cache (`cached_structured`), không gọi LLM
 
     @property
     def unknown(self) -> bool:
@@ -218,3 +220,37 @@ class LLMClient:
             error=result.error,
         )
         return result
+
+
+def cache_key(prompt: Prompt, key: str) -> str:
+    return f"llm:{prompt.name}:{prompt.version}:{key}"
+
+
+async def cached_structured[T: BaseModel](
+    llm: LLMClient,
+    kv: KeyValueStore | None,
+    key: str,
+    prompt: Prompt,
+    schema: type[T],
+    *,
+    ttl: float,
+    **values: str,
+) -> LLMResult[T]:
+    """`LLMClient.structured` có cache: cùng prompt (cả version) và cùng `key` (vd. hash nội dung
+    tin) thì dùng lại câu trả lời cũ trong `ttl` giây. Chỉ lưu câu trả lời hợp lệ."""
+    full_key = cache_key(prompt, key)
+    if kv is not None and (cached := await kv.get(full_key)) is not None:
+        try:
+            return LLMResult(
+                value=schema.model_validate_json(cached),
+                prompt=prompt.name,
+                version=prompt.version,
+                model=llm.model,
+                cached=True,
+            )
+        except ValidationError:
+            pass
+    result = await llm.structured(prompt, schema, **values)
+    if kv is not None and result.value is not None:
+        await kv.set(full_key, result.value.model_dump_json(), ttl=ttl)
+    return result

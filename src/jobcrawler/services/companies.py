@@ -11,20 +11,34 @@ import structlog
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch
+from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch, SourceProfile
 from jobcrawler.logging import get_logger
 from jobcrawler.net.kv import RedisKV
-from jobcrawler.pipeline import kyc
+from jobcrawler.net.urls import parse_domain_input
+from jobcrawler.pipeline import dedup, kyc, normalize, store, verify
+from jobcrawler.pipeline.verify import CompanyContext
 from jobcrawler.resources import Resources
-from jobcrawler.schemas import CompanyEntity, CompanyIn, CompanyResult, JobOut, KycStatus, RunStatus
+from jobcrawler.schemas import (
+    CompanyEntity,
+    CompanyIn,
+    CompanyResult,
+    FetchOutcome,
+    JobOut,
+    KycStatus,
+    RawJob,
+    RunStatus,
+)
 from jobcrawler.serp import SerpClient
 from jobcrawler.services import boards as board_service
 from jobcrawler.services import jobs as website_jobs
+from jobcrawler.sources import boards
 from jobcrawler.sources.base import FetchRecord
 
 log = get_logger(__name__)
 
 KYC_SOURCE = "kyc"
+# Phần cuối trước timeout SAQ dành cho việc lưu (không chạy LLM nữa).
+SAVE_MARGIN_SECONDS = 5.0
 
 
 @dataclass(slots=True)
@@ -137,6 +151,94 @@ async def run_kyc_step(
     )
 
 
+async def company_context(res: Resources, company: Company, website: str | None) -> CompanyContext:
+    """Tên, alias, profile đã map, domain của doanh nghiệp: để đối chiếu tin khi xác minh."""
+    async with res.sessionmaker() as session:
+        aliases = (
+            await session.scalars(
+                select(CompanyAlias.alias).where(CompanyAlias.company_id == company.id)
+            )
+        ).all()
+        profiles = (
+            await session.scalars(
+                select(SourceProfile.name_on_source).where(SourceProfile.company_id == company.id)
+            )
+        ).all()
+    names = [n for n in (company.legal_name, company.brand_name, company.input_name) if n]
+    domains = [d for d in (company.primary_domain, *(company.other_domains or [])) if d]
+    if website:
+        domains.append(parse_domain_input(website))
+    return CompanyContext(
+        company_id=company.id,
+        name=_display_name(company),
+        names=list(dict.fromkeys([*names, *aliases])),
+        profile_names=list(dict.fromkeys(profiles)),
+        domains=domains,
+        tax_code=company.tax_code,
+        kyc_status=company.kyc_status,
+    )
+
+
+async def process_jobs(
+    res: Resources,
+    company: Company,
+    raws: list[RawJob],
+    *,
+    website: str | None,
+    deadline: float,
+    complete: bool,
+) -> list[JobOut]:
+    """Chuẩn hoá → xác minh → gộp → lưu các tin đã thu thập; trả job đã nhận.
+
+    Bước LLM (chấm tin nghi ngờ, phân loại trường mơ hồ) được chạy tới `deadline` cộng phần
+    đệm trước timeout SAQ (chừa SAVE_MARGIN_SECONDS để lưu)."""
+    s = res.settings
+    now = datetime.now(UTC)
+    until = deadline + max(
+        0.0, s.company_timeout_seconds - s.company_deadline_seconds - SAVE_MARGIN_SECONDS
+    )
+    board_names = set(boards.registry())
+    normalized = normalize.normalize_jobs(raws, now=now, is_board=board_names.__contains__)
+    ctx = await company_context(res, company, website)
+    sigs = dedup.Signatures()
+    kv = RedisKV(res.redis, prefix=s.redis_prefix)  # cache câu trả lời LLM theo nội dung tin
+    verdicts = await verify.verify_jobs(
+        normalized,
+        ctx,
+        res.llm,
+        now=now,
+        until=until,
+        min_confidence=s.verify_min_confidence,
+        min_jd_chars=s.verify_min_jd_chars,
+        board_max_age=timedelta(days=s.verify_board_max_age_days),
+        max_llm=s.verify_llm_max_jobs,
+        sigs=sigs,
+        kv=kv,
+    )
+    accepted = [job for job, v in zip(normalized, verdicts, strict=True) if v.accepted]
+    clusters = dedup.cluster_jobs(accepted, sigs=sigs)
+    log.info("dedup.done", accepted=len(accepted), jobs=len(clusters))
+    await normalize.classify_unclear(
+        [c.canonical for c in clusters],
+        res.llm,
+        until=until,
+        max_jobs=s.normalize_llm_max_jobs,
+        kv=kv,
+    )
+    async with res.sessionmaker.begin() as session:
+        saved = await store.save_company_jobs(
+            session,
+            company_id=company.id,
+            company_name=_display_name(company),
+            jobs=normalized,
+            verdicts=verdicts,
+            clusters=clusters,
+            now=now,
+            complete=complete,
+        )
+    return saved.jobs
+
+
 async def _run_pipeline(
     res: Resources,
     state: RunState,
@@ -144,7 +246,7 @@ async def _run_pipeline(
     deadline: float,
     records: list[FetchRecord],
 ) -> PipelineOutcome:
-    # Chuẩn hoá/xác minh/gộp/lưu (M5) gắn sau bước thu thập. Mọi bước dừng ở `deadline`.
+    # Mọi bước thu thập dừng ở `deadline`; sau đó chuẩn hoá/xác minh/gộp/lưu.
     step = await run_kyc_step(res, state, company_in, deadline=deadline, records=records)
     incomplete = [KYC_SOURCE] if step.incomplete else []
     ok = RunStatus.AMBIGUOUS if step.status is KycStatus.AMBIGUOUS else RunStatus.OK
@@ -173,9 +275,20 @@ async def _run_pipeline(
         res, website, deadline=deadline, records=records, extra_sources=board
     )
     incomplete += found.incomplete_sources
+    # Nguồn lỗi/bị chặn (không phải hết giờ) cũng khiến lượt chạy không đủ để coi job cũ đã gỡ.
+    failed = [r.name for r in found.collected.reports if r.outcome is not FetchOutcome.OK]
+    jobs = await process_jobs(
+        res,
+        state.company,
+        found.jobs,
+        website=website,
+        deadline=deadline,
+        complete=not incomplete and not failed,
+    )
     return PipelineOutcome(
         status=RunStatus.PARTIAL if incomplete else ok,
         jobs_found=len(found.jobs),
+        jobs=jobs,
         incomplete_sources=incomplete,
         kyc_status=step.status,
         website=website,

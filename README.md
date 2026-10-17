@@ -85,6 +85,24 @@ map (cũ hơn `BOARD_STALE_HOURS` thì crawl trực tiếp trang profile).
 | ITviec | sitemap, lastmod vô dụng (~650) | |
 | 123job | RSS + trang danh sách | |
 
+## Chuẩn hoá, xác minh, gộp, export
+
+```bash
+uv run jobcrawler run "KiotViet" --website kiotviet.vn   # in job đã làm sạch (--json: CompanyResult)
+uv run jobcrawler export --format jsonl --out out/        # out/jobs.jsonl, mỗi dòng một JobOut
+uv run jobcrawler export --format csv --out out/ --company KiotViet --company 42 [--all]
+```
+
+Sau bước thu thập, `process_company` chuẩn hoá từng tin (HTML → markdown sạch, ftfy, bỏ
+boilerplate; lương; 34 tỉnh/thành sau sáp nhập 2025, tên cũ → mới; cấp bậc/loại hình/hình thức
+bằng rule rồi LLM kèm trích đoạn bằng chứng; ngày về UTC; ẩn SĐT/email cá nhân/tên người liên
+hệ), xác minh (`EXPIRED`, `EMPTY_JD`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_SIGNALS`,
+`NOT_A_JOB`, `SPAM_REPOST`; tin còn nghi ngờ do LLM chấm, nhận khi `confidence ≥
+VERIFY_MIN_CONFIDENCE`), gộp trùng (tiêu đề + nơi làm + MinHash JD / cùng link ứng tuyển; bản
+chuẩn ATS/careers > trang tuyển dụng JD đầy đủ > mới nhất) rồi upsert `job_postings` (kèm lý do
+nhận/loại) và `jobs`. Câu trả lời LLM được cache trên Redis theo nội dung tin. `export` mặc định
+chỉ xuất job đang mở; `--all` gồm cả job đã hết hạn / đã gỡ.
+
 ## Kiểm tra hạ tầng
 
 ```bash

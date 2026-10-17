@@ -1,0 +1,160 @@
+from __future__ import annotations
+
+from datetime import timedelta
+
+from jobcrawler.pipeline.dedup import cluster_jobs, jd_minhash, jd_similarity, merge
+from jobcrawler.schemas import ExtractionMethod, WorkMode
+
+from .jobs_fixtures import NOW, board_job, normalized, raw_job
+
+JD = raw_job().description or ""
+
+
+def careers(**kw: object):
+    return normalized(raw_job(**kw), board=False)
+
+
+def board(**kw: object):
+    values: dict[str, object] = {
+        "source": "topcv",
+        "external_id": "t1",
+        "url": "https://www.topcv.vn/viec-lam/ke-toan-tong-hop/1.html",
+        "title": "Kế Toán Tổng Hợp - Hà Nội (Tuyển Gấp)",
+        "salary_raw": None,
+    } | kw
+    return normalized(raw_job(**values), board=True)
+
+
+def test_jd_minhash_similarity() -> None:
+    a = jd_minhash("Hạch toán chứng từ, lập báo cáo tài chính, báo cáo thuế định kỳ hằng tháng")
+    b = jd_minhash("Hạch toán chứng từ, lập báo cáo tài chính, báo cáo thuế định kỳ hằng tháng.")
+    c = jd_minhash("Lập trình backend Java Spring, thiết kế API, tối ưu cơ sở dữ liệu PostgreSQL")
+    assert jd_similarity(a, b) == 1.0
+    assert jd_similarity(a, c) < 0.2
+    assert jd_similarity(jd_minhash(""), a) == 0.0
+
+
+def test_same_job_on_board_and_careers_is_one_cluster_with_careers_canonical() -> None:
+    site = careers(salary_raw=None)
+    topcv = board(salary_raw="15 - 20 triệu", posted_at=NOW)
+    [cluster] = cluster_jobs([topcv, site])
+    assert cluster.canonical is site  # trang careers của doanh nghiệp thắng trang tuyển dụng
+    assert cluster.source_urls == [site.url, topcv.url]
+    job = merge(cluster)
+    assert job.url == site.url
+    assert job.salary is not None
+    assert job.salary.min == 15e6
+    assert job.posted_at == site.posted_at  # ngày đăng sớm nhất
+
+
+def test_different_place_or_title_or_jd_are_not_merged() -> None:
+    site = careers()
+    danang = board(locations=["Đà Nẵng"])
+    other_title = board(external_id="t2", title="Kế toán kho")
+    other_jd = board(
+        external_id="t3",
+        description="<p>" + "Lập trình backend Java Spring, thiết kế API REST. " * 10 + "</p>",
+    )
+    clusters = cluster_jobs([site, danang, other_title, other_jd])
+    assert len(clusters) == 4
+
+
+def test_same_apply_url_merges_despite_different_jd() -> None:
+    a = careers(apply_url="https://acme.vn/apply/42")
+    b = board(
+        apply_url="https://acme.vn/apply/42?utm_source=topcv",
+        description="<p>"
+        + "Mô tả ngắn gọn khác hẳn, đăng lại trên trang tuyển dụng. " * 6
+        + "</p>",
+    )
+    assert len(cluster_jobs([a, b])) == 1
+
+
+def test_unknown_location_does_not_block_merge() -> None:
+    assert len(cluster_jobs([careers(), board(locations=[])])) == 1
+
+
+def test_canonical_among_boards_prefers_fuller_jd_then_newest() -> None:
+    short = board(external_id="a", source="vietnamworks", posted_at=NOW)
+    longer = board(
+        external_id="b",
+        source="itviec",
+        description=JD + "<p>Được đào tạo thêm.</p>",
+        posted_at=NOW - timedelta(days=5),
+    )
+    [cluster] = cluster_jobs([short, longer])
+    assert cluster.canonical is longer
+    newer = board(external_id="c", source="careerviet", posted_at=NOW + timedelta(hours=1))
+    [cluster] = cluster_jobs([short, newer])
+    assert cluster.canonical is newer
+
+
+def test_ats_beats_careers_page() -> None:
+    page = careers(method=ExtractionMethod.HEURISTIC)
+    ats = careers(source="greenhouse", external_id="acme:1", method=ExtractionMethod.ATS_API)
+    [cluster] = cluster_jobs([page, ats])
+    assert cluster.canonical is ats
+
+
+def test_vietnamworks_jsonld_and_parser_copies_merge() -> None:
+    a = normalized(board_job("vietnamworks", "job_2.html"))
+    b = normalized(board_job("vietnamworks", "job_2_http.html"))
+    other = normalized(board_job("vietnamworks", "job_1.html"))
+    clusters = cluster_jobs([a, b, other])
+    assert sorted(len(c.members) for c in clusters) == [1, 2]
+    merged = merge(next(c for c in clusters if len(c.members) == 2))
+    assert merged.work_mode is WorkMode.UNKNOWN
+    assert merged.provinces == {"Hải Phòng"}
+
+
+def test_job_without_location_does_not_chain_provinces() -> None:
+    """Tin không rõ địa điểm khớp mọi nơi nhưng không được nối tin Hải Phòng với tin Thái Nguyên."""
+    hp = careers(external_id="hp", url="https://careers.acme.vn/jobs/hp", locations=["Hải Phòng"])
+    tn = careers(external_id="tn", url="https://careers.acme.vn/jobs/tn", locations=["Thái Nguyên"])
+    anywhere = board(title="Kế toán tổng hợp", locations=[])
+    clusters = cluster_jobs([hp, anywhere, tn])
+    assert [[m.external_id for m in c.members] for c in clusters] == [["hp", "t1"], ["tn"]]
+
+
+def test_same_source_postings_need_same_known_place() -> None:
+    """Cùng trang careers: "[Hải Dương]" và "[Hải Phòng]" là hai nơi tuyển (cùng Hải Phòng sau sáp
+    nhập); tin không ghi nơi làm cũng là tin riêng."""
+    hd = careers(
+        external_id="hd",
+        url="https://careers.acme.vn/jobs/hd",
+        title="[Hải Dương] Chuyên Viên Kinh Doanh Phần Mềm",
+        locations=[],
+    )
+    hp = careers(
+        external_id="hp",
+        url="https://careers.acme.vn/jobs/hp",
+        title="[Hải Phòng] Chuyên Viên Kinh Doanh Phần Mềm",
+        locations=[],
+    )
+    plain = careers(
+        external_id="x",
+        url="https://careers.acme.vn/jobs/x",
+        title="Chuyên Viên Kinh Doanh Phần Mềm",
+        locations=[],
+    )
+    assert hd.provinces == hp.provinces == {"Hải Phòng"}
+    assert (hd.places, hp.places) == ({"Hải Dương"}, {"Hải Phòng"})
+    assert hd.title_normalized == hp.title_normalized == plain.title_normalized
+    assert len(cluster_jobs([hd, plain, hp])) == 3
+
+
+def test_old_province_in_title_beats_new_province_in_address() -> None:
+    lam_dong = careers(
+        external_id="ld",
+        url="https://careers.acme.vn/jobs/ld",
+        title="Lâm Đồng| Chuyên Viên Kinh Doanh Phần Mềm",
+        locations=["Số 187 Phù Đổng Thiên Vương, phường Lâm Viên - Đà Lạt, tỉnh Lâm Đồng."],
+    )
+    binh_thuan = careers(
+        external_id="bt",
+        url="https://careers.acme.vn/jobs/bt",
+        title="Bình Thuận| Chuyên Viên Kinh Doanh Phần Mềm",
+        locations=["J46 Tôn Đức Thắng, phường Hàm Thắng, tỉnh Lâm Đồng."],
+    )
+    assert binh_thuan.places == {"Bình Thuận"}
+    assert len(cluster_jobs([lam_dong, binh_thuan])) == 2

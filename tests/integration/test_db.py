@@ -93,8 +93,13 @@ async def test_process_company_with_website_records_source_fetches(
 
     assert result.status is RunStatus.OK
     assert result.jobs_found == 3
+    # Tin từ API ATS của chính doanh nghiệp, đúng nhà tuyển dụng: nhận cả 3 (không cần LLM).
+    assert result.jobs_accepted == 3
+    assert {j.canonical_source for j in result.jobs} == {"greenhouse"}
+    assert all("SOURCE_GREENHOUSE" in j.verification_reasons for j in result.jobs)
     assert run is not None
     assert run.jobs_found == 3
+    assert run.jobs_accepted == 3
     [fetch] = fetches
     assert fetch.company_id == result.company_id
     assert fetch.source == "greenhouse:gitlab"
