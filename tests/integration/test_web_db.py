@@ -28,6 +28,7 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
+from jobcrawler.services import maintenance
 from jobcrawler.web.app import create_app
 
 from .test_batch_db import drop_queue
@@ -198,6 +199,8 @@ async def seed(app_state: object, tag: str) -> tuple[int, str, int, int, int]:
             ]
         )
         await s.flush()
+        # Chèn thẳng vào bảng (không qua pipeline): tính các cột tóm tắt như lượt bảo trì.
+        await maintenance.refresh_company_summaries(s)
         return company.id, str(run_id), job.id, expired.id, page.id
 
 
@@ -250,6 +253,18 @@ async def test_overview_and_stats(web: Seed) -> None:
     assert len(data["chart"]) == 24
     assert sum(b["total"] for b in data["chart"]) >= 1
     assert any(r["run_id"] == web.run_id for r in data["recent_runs"])
+    assert len(data["fetch_chart"]) == 24
+    charts = data["charts"]
+    assert charts["totals"]["active_jobs"] >= 1
+    assert len(charts["jobs_by_day"]) == 30
+    assert "careers" in dict(charts["jobs_by_source"])
+    assert "Hà Nội" in dict(charts["jobs_by_province"])
+    top = charts["top_companies"]
+    counts = [c["active_jobs"] for c in top]
+    assert top
+    assert counts == sorted(counts, reverse=True)
+    if len(top) < 10:  # DB test dùng chung: đủ 10 thì doanh nghiệp seed (1 việc) có thể bị đẩy ra
+        assert any(c["id"] == web.company_id for c in top)
     assert (await web.client.get("/api/stats", params={"hours": 0})).status_code == 200
 
 
@@ -266,18 +281,37 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
     d = (await web.client.get(f"/api/companies/{web.company_id}")).json()
     assert d["kyc_evidence"]["reason"] == "website ghi đúng MST"
     assert [p["match_signal"] for p in d["profiles"]] == ["name"]
-    assert [j["id"] for j in d["jobs"]] == [web.job_id]
-    assert d["inactive_jobs"] == 1
-    assert [p["title"] for p in d["rejected"]] == ["Tin cũ"]
+    assert (d["active_jobs"], d["inactive_jobs"], d["runs_total"], d["rejected_total"]) == (
+        1,
+        1,
+        1,
+        1,
+    )
     assert [f["id"] for f in d["failed_pages"]] == [web.failed_page_id]
     assert (await web.client.get("/api/companies/999999999")).status_code == 404
+    # Danh sách con lấy theo trang.
+    base = f"/api/companies/{web.company_id}"
+    jobs = (await web.client.get(f"{base}/jobs")).json()
+    assert [j["id"] for j in jobs["items"]] == [web.job_id]
+    assert (jobs["total"], jobs["page"], jobs["pages"], jobs["exact"]) == (1, 1, 1, True)
+    inactive = (await web.client.get(f"{base}/jobs", params={"status": "inactive"})).json()
+    assert [j["id"] for j in inactive["items"]] == [web.expired_job_id]
+    runs = (await web.client.get(f"{base}/runs")).json()
+    assert [r["run_id"] for r in runs["items"]] == [web.run_id]
+    rejected = (await web.client.get(f"{base}/rejected", params={"page": 9})).json()
+    assert [p["title"] for p in rejected["items"]] == ["Tin cũ"]
+    assert rejected["page"] == 1  # trang vượt quá → trang cuối
 
     run = (await web.client.get(f"/api/runs/{web.run_id}")).json()
     assert run["company_name"] == f"Công ty Cổ phần Web {web.tag}"
     assert run["by_source"] == [
         {"source": "careers:web.vn", "total": 2, "outcomes": {"ok": 1, "timeout": 1}}
     ]
-    assert [log["event"] for log in run["logs"]] == ["company.start"]
+    assert (run["fetches_total"], run["logs_total"]) == (2, 1)
+    logs = (await web.client.get(f"/api/runs/{web.run_id}/logs")).json()
+    assert [log["event"] for log in logs["items"]] == ["company.start"]
+    fetches = (await web.client.get(f"/api/runs/{web.run_id}/fetches")).json()
+    assert fetches["total"] == 2
 
     page_ = (await web.client.get(f"/api/failed-pages/{web.failed_page_id}")).json()
     assert page_["html"].startswith("<html><script>")
@@ -387,6 +421,8 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
 
     boards = (await web.client.get("/api/boards")).json()
     assert "topcv" in {b["source"] for b in boards["boards"]}
+    runs = (await web.client.get("/api/boards/runs")).json()
+    assert {"items", "total", "page", "pages", "exact"} <= set(runs)
     assert boards["queue"]["name"] == web.settings.board_queue_name
     indexed = (await web.client.post("/api/boards/topcv/index")).json()
     assert indexed == {"queued": True, "workers": 0}

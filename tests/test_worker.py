@@ -4,16 +4,19 @@ from jobcrawler.config import Settings
 from jobcrawler.entrypoints import worker
 
 
-def test_company_worker_runs_companies_and_maintenance(clean_env: None) -> None:
-    settings = Settings(worker_concurrency=7, maintenance_cron="5 * * * *")
+def test_company_worker_runs_companies_maintenance_and_overview(clean_env: None) -> None:
+    settings = Settings(
+        worker_concurrency=7, maintenance_cron="5 * * * *", overview_cron="*/3 * * * *"
+    )
     w = worker.build_worker(settings)
-    assert set(w.functions) == {"process_company", "maintenance_cron"}
+    assert set(w.functions) == {"process_company", "maintenance_cron", "overview_cron"}
     assert w.queue.name == "jobcrawler"
     assert w.concurrency == 7
-    [cron] = w.cron_jobs
-    assert cron.cron == "5 * * * *"
-    assert cron.function is worker.maintenance_cron
-    assert cron.unique  # nhiều replica vẫn chỉ một lượt mỗi mốc
+    maintenance, overview = w.cron_jobs
+    assert (maintenance.cron, maintenance.function) == ("5 * * * *", worker.maintenance_cron)
+    assert (overview.cron, overview.function) == ("*/3 * * * *", worker.overview_cron)
+    assert maintenance.unique  # nhiều replica vẫn chỉ một lượt mỗi mốc
+    assert overview.unique
 
 
 def test_board_worker_has_own_queue_and_index_cron(clean_env: None) -> None:

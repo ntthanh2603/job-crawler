@@ -1,6 +1,7 @@
 // Thành phần dùng chung giữa các trang.
+import { useQuery } from "@tanstack/react-query"
 import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Search } from "lucide-react"
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import {
@@ -18,8 +19,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { api } from "@/lib/api"
 import { cap, label, num } from "@/lib/format"
-import type { Job } from "@/lib/types"
+import type { Job, Page } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // --- trạng thái -----------------------------------------------------------------------------------
@@ -308,25 +310,40 @@ export function Empty({ children, icon }: { children: ReactNode; icon?: ReactNod
 
 // --- phân trang, chọn, xác nhận ---------------------------------------------------------------------
 
+/**
+ * Phân trang dưới bảng. Nhận thẳng một `Page` từ API (`page`, `pages`, `total`, `size`, `exact`);
+ * `exact = false` nghĩa là server chỉ đếm tới `total` (10.000) — hiện "10.000+".
+ */
 export function Pager({
   page,
   pages,
   total,
   size = 50,
+  exact = true,
   onPage,
+  className,
 }: {
   page: number
   pages: number
   total: number
   size?: number
+  exact?: boolean
   onPage: (page: number) => void
+  className?: string
 }) {
   const first = total ? (page - 1) * size + 1 : 0
   const last = Math.min(total, page * size)
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-meta text-muted-foreground">
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-meta text-muted-foreground",
+        className,
+      )}
+    >
       <span className="tabular-nums">
         Hiển thị {num(first)}–{num(last)} / {num(total)}
+        {!exact && "+"}
+        {!exact && page >= pages && " · lọc hẹp hơn để xem tiếp"}
       </span>
       {pages > 1 && (
         <div className="flex items-center gap-1">
@@ -341,6 +358,48 @@ export function Pager({
           </Button>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Danh sách con lấy theo trang từ API (`url` trả `Page<T>`): tự lo trạng thái tải / lỗi / rỗng và
+ * phân trang; `children` vẽ các dòng của trang hiện tại.
+ */
+export function PagedList<T>({
+  queryKey,
+  url,
+  empty,
+  children,
+}: {
+  queryKey: unknown[]
+  url: string
+  empty: ReactNode
+  children: (items: T[]) => ReactNode
+}) {
+  const [page, setPage] = useState(1)
+  const query = useQuery({
+    queryKey: [...queryKey, page],
+    queryFn: () => api.get<Page<T>>(`${url}${url.includes("?") ? "&" : "?"}page=${page}`),
+    placeholderData: (prev) => prev,
+  })
+  if (query.isError)
+    return (
+      <div className="p-5">
+        <ErrorState error={query.error} />
+      </div>
+    )
+  if (!query.data)
+    return (
+      <div className="p-5">
+        <Loading rows={5} />
+      </div>
+    )
+  const d = query.data
+  return (
+    <div className={cn(query.isFetching && "opacity-70 transition-opacity")}>
+      {d.items.length ? children(d.items) : <Empty>{empty}</Empty>}
+      {d.pages > 1 && <Pager {...d} onPage={setPage} />}
     </div>
   )
 }

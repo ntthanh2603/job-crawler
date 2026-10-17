@@ -5,6 +5,8 @@ ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu P
 
 Đặc tả và milestone: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md). Tiến độ từng milestone ghi
 trong commit message.
+Vận hành (dịch vụ, giới hạn khi chưa có proxy, quy mô dữ liệu, chống trùng, bảo trì):
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Chạy nhanh
 
@@ -71,6 +73,7 @@ tải trang chi tiết của tin mới / đã đổi / lâu chưa tải (gửi k
 `source_profiles`, đánh dấu tin vắng 2 lượt là gỡ, rồi map profile có tên gần với doanh nghiệp
 đầu vào (MST → website → tên; mơ hồ thì LLM). `process_company` lấy tin từ index của profile đã
 map (cũ hơn `BOARD_STALE_HOURS` thì crawl trực tiếp trang profile).
+Giới hạn đang đặt khi chưa có proxy và cách nới: [docs/OPERATIONS.md](docs/OPERATIONS.md#index-trang-tuyển-dụng--đang-chạy-không-proxy).
 
 | Trang | Danh sách | Ghi chú |
 |---|---|---|

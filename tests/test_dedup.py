@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from jobcrawler.pipeline.dedup import cluster_jobs, jd_minhash, jd_similarity, merge
+from jobcrawler.pipeline.dedup import (
+    cluster_jobs,
+    jd_minhash,
+    jd_similarity,
+    job_fingerprint,
+    merge,
+    stored_fingerprint,
+)
 from jobcrawler.schemas import ExtractionMethod, WorkMode
 
 from .jobs_fixtures import NOW, board_job, normalized, raw_job
@@ -158,3 +165,39 @@ def test_old_province_in_title_beats_new_province_in_address() -> None:
     )
     assert binh_thuan.places == {"Bình Thuận"}
     assert len(cluster_jobs([lam_dong, binh_thuan])) == 2
+
+
+def test_reposted_job_without_place_is_merged() -> None:
+    """Doanh nghiệp đăng lại cùng tin với mã mới (MISA /tuyen-dung/5883 và /5920), không ghi nơi
+    làm: một job."""
+    first = careers(external_id="5883", url="https://careers.acme.vn/jobs/5883", locations=[])
+    again = careers(external_id="5920", url="https://careers.acme.vn/jobs/5920", locations=[])
+    assert not first.places
+    assert not again.places
+    assert len(cluster_jobs([first, again])) == 1
+    assert job_fingerprint(first) == job_fingerprint(again)
+
+
+def test_same_title_without_place_but_different_jd_stays_separate() -> None:
+    a = careers(external_id="a", url="https://careers.acme.vn/jobs/a", locations=[])
+    b = careers(
+        external_id="b",
+        url="https://careers.acme.vn/jobs/b",
+        locations=[],
+        description="<p>Phụ trách kế toán kho, kiểm kê hàng tồn và đối chiếu công nợ nhà cung cấp "
+        "hằng tuần; lập báo cáo nhập xuất tồn cho chi nhánh miền Trung.</p>" * 2,
+    )
+    assert len(cluster_jobs([a, b])) == 2
+    assert job_fingerprint(a) != job_fingerprint(b)
+
+
+def test_fingerprint_distinguishes_places_and_matches_stored_row() -> None:
+    hd = careers(external_id="hd", title="[Hải Dương] Kế toán tổng hợp", locations=[])
+    hp = careers(external_id="hp", title="[Hải Phòng] Kế toán tổng hợp", locations=[])
+    assert job_fingerprint(hd) != job_fingerprint(hp)
+    # Cách tính từ một dòng `jobs` (điền lại cho dữ liệu cũ) khớp với lúc lưu.
+    job = careers()
+    locations = [loc.model_dump(mode="json") for loc in job.locations]
+    assert stored_fingerprint(
+        job.title, locations, job.description_md, job.requirements_md
+    ) == job_fingerprint(job)

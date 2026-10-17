@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select, true
+from sqlalchemy import Select, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.db.models import (
@@ -27,8 +28,12 @@ from jobcrawler.db.models import (
 from jobcrawler.pipeline.provinces import PROVINCES
 from jobcrawler.pipeline.store import job_to_out
 from jobcrawler.schemas import EmploymentType, JobLevel, JobOut, JobStatus, RunStatus, WorkMode
+from jobcrawler.text import normalize_company_name
 
 PAGE_SIZE = 50
+# Đếm tối đa chừng này dòng (COUNT trên bảng lớn có lọc rất tốn): quá thì hiện "10.000+" và chỉ
+# cho đi tới trang cuối trong giới hạn — muốn xem tiếp thì lọc hẹp lại.
+COUNT_CAP = 10_000
 PROVINCE_NAMES = sorted(PROVINCES)
 
 
@@ -50,6 +55,7 @@ class Page[T]:
     total: int
     page: int
     size: int = PAGE_SIZE
+    exact: bool = True  # False: có hơn `total` (= COUNT_CAP) dòng
 
     @property
     def pages(self) -> int:
@@ -64,25 +70,34 @@ class Page[T]:
         return min(self.total, self.page * self.size)
 
 
-def _page(page: int | None) -> int:
-    return max(1, page or 1)
+async def _count(session: AsyncSession, stmt: Any, cap: int = COUNT_CAP) -> tuple[int, bool]:
+    """Số dòng của `stmt`, đếm tối đa `cap` (+1 để biết có vượt không): (số, có chính xác không)."""
+    limited = stmt.order_by(None).limit(cap + 1).subquery()
+    n = int(await session.scalar(select(func.count()).select_from(limited)) or 0)
+    return min(n, cap), n <= cap
 
 
-async def _count(session: AsyncSession, stmt: Any) -> int:
-    return int(await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+async def paginate[T](
+    session: AsyncSession,
+    stmt: Any,
+    page: int | None,
+    *,
+    order_by: Sequence[Any],
+    size: int = PAGE_SIZE,
+    scalars: bool = True,
+    convert: Callable[[Any], T] | None = None,
+) -> Page[T]:
+    """Một trang của `stmt` (OFFSET trên index của `order_by`), tổng đếm có giới hạn."""
+    total, exact = await _count(session, stmt)
+    pages = max(1, math.ceil(total / size))
+    current = min(max(1, page or 1), pages)
+    query = stmt.order_by(*order_by).limit(size).offset((current - 1) * size)
+    rows: list[Any] = list(await (session.scalars(query) if scalars else session.execute(query)))
+    items = [convert(r) for r in rows] if convert else rows
+    return Page(items=items, total=total, page=current, size=size, exact=exact)
 
 
 # --- doanh nghiệp ------------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class CompanyRow:
-    company: Company
-    last_status: str | None
-    last_started: datetime | None
-    last_duration_ms: int | None
-    last_incomplete: list[str]
-    active_jobs: int
 
 
 @dataclass(slots=True)
@@ -97,79 +112,32 @@ class CompanyFilters:
         return {"q": self.q, "kyc": self.kyc, "run": self.run, "jobs": self.jobs}
 
 
-async def list_companies(session: AsyncSession, f: CompanyFilters) -> Page[CompanyRow]:
-    last = (
-        select(
-            CompanyRun.status,
-            CompanyRun.started_at,
-            CompanyRun.duration_ms,
-            CompanyRun.incomplete_sources,
+async def list_companies(session: AsyncSession, f: CompanyFilters) -> Page[Company]:
+    """Lọc trên các cột ghi sẵn của `companies` (lượt mới nhất, số job đang mở) — không truy vấn
+    con theo từng dòng; tìm kiếm qua `search_text` / `company_aliases.alias_norm` (GIN trigram)."""
+    stmt = select(Company)
+    if q := f.q.strip():
+        # Hai nhánh, mỗi nhánh một index trigram, hợp bằng UNION (OR với EXISTS sẽ quét cả bảng).
+        matches = union(
+            select(Company.id).where(Company.search_text.ilike(f"%{q}%")),
+            select(CompanyAlias.company_id).where(
+                CompanyAlias.alias_norm.ilike(f"%{normalize_company_name(q)}%")
+            ),
         )
-        .where(CompanyRun.company_id == Company.id)
-        .order_by(CompanyRun.started_at.desc())
-        .limit(1)
-        .lateral("last_run")
-    )
-    active = (
-        select(func.count())
-        .where(Job.company_id == Company.id, Job.status == JobStatus.ACTIVE.value)
-        .correlate(Company)
-        .scalar_subquery()
-    )
-    stmt = select(
-        Company,
-        last.c.status,
-        last.c.started_at,
-        last.c.duration_ms,
-        last.c.incomplete_sources,
-        active.label("active_jobs"),
-    ).outerjoin(last, true())
-    if f.q:
-        pattern = f"%{f.q.strip()}%"
-        alias_match = (
-            select(CompanyAlias.id)
-            .where(CompanyAlias.company_id == Company.id, CompanyAlias.alias.ilike(pattern))
-            .exists()
-        )
-        stmt = stmt.where(
-            or_(
-                Company.input_name.ilike(pattern),
-                Company.legal_name.ilike(pattern),
-                Company.brand_name.ilike(pattern),
-                Company.tax_code.ilike(pattern),
-                Company.primary_domain.ilike(pattern),
-                alias_match,
-            )
-        )
+        stmt = stmt.where(Company.id.in_(matches))
     if f.kyc == "none":
         stmt = stmt.where(Company.kyc_status.is_(None))
     elif f.kyc:
         stmt = stmt.where(Company.kyc_status == f.kyc)
     if f.run == "never":
-        stmt = stmt.where(last.c.status.is_(None))
+        stmt = stmt.where(Company.last_run_status.is_(None))
     elif f.run:
-        stmt = stmt.where(last.c.status == f.run)
+        stmt = stmt.where(Company.last_run_status == f.run)
     if f.jobs == "with":
-        stmt = stmt.where(active > 0)
+        stmt = stmt.where(Company.active_jobs > 0)
     elif f.jobs == "without":
-        stmt = stmt.where(active == 0)
-    total = await _count(session, stmt)
-    page = _page(f.page)
-    rows = await session.execute(
-        stmt.order_by(Company.id.desc()).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE)
-    )
-    items = [
-        CompanyRow(
-            company=c,
-            last_status=status,
-            last_started=started,
-            last_duration_ms=dur,
-            last_incomplete=list(incomplete or []),
-            active_jobs=int(n or 0),
-        )
-        for c, status, started, dur, incomplete, n in rows
-    ]
-    return Page(items=items, total=total, page=page)
+        stmt = stmt.where(Company.active_jobs == 0)
+    return await paginate(session, stmt, f.page, order_by=[Company.id.desc()])
 
 
 @dataclass(slots=True)
@@ -177,23 +145,24 @@ class CompanyDetail:
     company: Company
     aliases: list[CompanyAlias]
     profiles: list[SourceProfile]
-    runs: list[CompanyRun]
-    jobs: list[JobItem]
     inactive_jobs: int
-    rejected: list[JobPosting]
+    runs: int  # số lượt chạy (đếm có giới hạn)
+    rejected: int  # số tin bị loại (đếm có giới hạn)
     failed_pages: list[FailedPage]
 
 
 async def company_detail(session: AsyncSession, company_id: int) -> CompanyDetail | None:
+    """Thông tin doanh nghiệp + số đếm cho các tab; danh sách việc làm / lượt chạy / tin bị loại
+    lấy theo trang (`company_jobs`, `company_runs`, `company_rejected`)."""
     company = await session.get(Company, company_id)
     if company is None:
         return None
-    now = datetime.now(UTC)
     aliases = list(
         await session.scalars(
             select(CompanyAlias)
             .where(CompanyAlias.company_id == company_id)
             .order_by(CompanyAlias.id)
+            .limit(200)
         )
     )
     profiles = list(
@@ -201,59 +170,80 @@ async def company_detail(session: AsyncSession, company_id: int) -> CompanyDetai
             select(SourceProfile)
             .where(SourceProfile.company_id == company_id)
             .order_by(SourceProfile.source)
-        )
-    )
-    runs = list(
-        await session.scalars(
-            select(CompanyRun)
-            .where(CompanyRun.company_id == company_id)
-            .order_by(CompanyRun.started_at.desc())
-            .limit(30)
-        )
-    )
-    rows = list(
-        await session.scalars(
-            select(Job)
-            .where(Job.company_id == company_id, Job.status == JobStatus.ACTIVE.value)
-            .order_by(Job.first_seen_at.desc())
-            .limit(300)
-        )
-    )
-    inactive = await session.scalar(
-        select(func.count()).where(
-            Job.company_id == company_id, Job.status != JobStatus.ACTIVE.value
-        )
-    )
-    rejected = list(
-        await session.scalars(
-            select(JobPosting)
-            .where(JobPosting.company_id == company_id, JobPosting.accepted.is_(False))
-            .order_by(JobPosting.verified_at.desc().nulls_last())
             .limit(100)
         )
     )
-    run_ids = [r.run_id for r in runs]
-    failed = (
-        list(
-            await session.scalars(
-                select(FailedPage)
-                .where(FailedPage.run_id.in_(run_ids))
-                .order_by(FailedPage.created_at.desc())
-                .limit(50)
-            )
+    inactive, _ = await _count(
+        session,
+        select(Job.id).where(Job.company_id == company_id, Job.status != JobStatus.ACTIVE.value),
+    )
+    runs, _ = await _count(
+        session, select(CompanyRun.run_id).where(CompanyRun.company_id == company_id)
+    )
+    rejected, _ = await _count(session, _rejected_query(company_id))
+    recent = select(CompanyRun.run_id).where(CompanyRun.company_id == company_id)
+    failed = list(
+        await session.scalars(
+            select(FailedPage)
+            .where(FailedPage.run_id.in_(recent.order_by(CompanyRun.started_at.desc()).limit(30)))
+            .order_by(FailedPage.created_at.desc())
+            .limit(50)
         )
-        if run_ids
-        else []
     )
     return CompanyDetail(
         company=company,
         aliases=aliases,
         profiles=profiles,
+        inactive_jobs=inactive,
         runs=runs,
-        jobs=[job_item(r, now=now) for r in rows],
-        inactive_jobs=int(inactive or 0),
         rejected=rejected,
         failed_pages=failed,
+    )
+
+
+async def company_jobs(
+    session: AsyncSession, company_id: int, *, active: bool = True, page: int | None = 1
+) -> Page[JobItem]:
+    """Việc làm của một doanh nghiệp (index company_id, status, first_seen_at)."""
+    status = (
+        Job.status == JobStatus.ACTIVE.value if active else Job.status != JobStatus.ACTIVE.value
+    )
+    now = datetime.now(UTC)
+    return await paginate(
+        session,
+        select(Job).where(Job.company_id == company_id, status),
+        page,
+        order_by=[Job.first_seen_at.desc(), Job.id.desc()],
+        convert=lambda row: job_item(row, now=now),
+    )
+
+
+async def company_runs(
+    session: AsyncSession, company_id: int, page: int | None = 1
+) -> Page[CompanyRun]:
+    return await paginate(
+        session,
+        select(CompanyRun).where(CompanyRun.company_id == company_id),
+        page,
+        order_by=[CompanyRun.started_at.desc()],
+    )
+
+
+def _rejected_query(company_id: int) -> Select[JobPosting]:
+    return select(JobPosting).where(
+        JobPosting.company_id == company_id, JobPosting.accepted.is_(False)
+    )
+
+
+async def company_rejected(
+    session: AsyncSession, company_id: int, page: int | None = 1
+) -> Page[JobPosting]:
+    """Tin bị loại (index ix_job_postings_company_rejected)."""
+    return await paginate(
+        session,
+        _rejected_query(company_id),
+        page,
+        order_by=[JobPosting.verified_at.desc(), JobPosting.id.desc()],
     )
 
 
@@ -261,36 +251,59 @@ async def company_detail(session: AsyncSession, company_id: int) -> CompanyDetai
 class RunDetail:
     run: CompanyRun
     company: Company | None
-    fetches: list[SourceFetch]
-    logs: list[Log]
+    fetches: int
+    logs: int
     failed_pages: list[FailedPage]
     by_source: list[tuple[str, int, dict[str, int]]] = field(default_factory=list)
 
 
 async def run_detail(session: AsyncSession, run_id: uuid.UUID) -> RunDetail | None:
+    """Tóm tắt một lượt chạy; request và log lấy theo trang (`run_fetches`, `run_logs`)."""
     run = await session.get(CompanyRun, run_id)
     if run is None:
         return None
-    fetches = list(
-        await session.scalars(
-            select(SourceFetch).where(SourceFetch.run_id == run_id).order_by(SourceFetch.id)
-        )
-    )
-    logs = list(
-        await session.scalars(select(Log).where(Log.run_id == run_id).order_by(Log.ts).limit(1000))
-    )
-    failed = list(await session.scalars(select(FailedPage).where(FailedPage.run_id == run_id)))
     grouped: dict[str, dict[str, int]] = {}
-    for fetch in fetches:
-        outcomes = grouped.setdefault(fetch.source, {})
-        outcomes[fetch.outcome] = outcomes.get(fetch.outcome, 0) + 1
+    rows = await session.execute(
+        select(SourceFetch.source, SourceFetch.outcome, func.count())
+        .where(SourceFetch.run_id == run_id)
+        .group_by(SourceFetch.source, SourceFetch.outcome)
+    )
+    for source, outcome, n in rows:
+        grouped.setdefault(source, {})[outcome] = n
+    logs, _ = await _count(session, select(Log.id).where(Log.run_id == run_id))
+    failed = list(
+        await session.scalars(select(FailedPage).where(FailedPage.run_id == run_id).limit(100))
+    )
     return RunDetail(
         run=run,
         company=await session.get(Company, run.company_id),
-        fetches=fetches,
+        fetches=sum(sum(o.values()) for o in grouped.values()),
         logs=logs,
         failed_pages=failed,
-        by_source=[(s, sum(o.values()), o) for s, o in grouped.items()],
+        by_source=sorted(
+            ((s, sum(o.values()), o) for s, o in grouped.items()), key=lambda x: -x[1]
+        ),
+    )
+
+
+async def run_fetches(
+    session: AsyncSession, run_id: uuid.UUID, page: int | None = 1
+) -> Page[SourceFetch]:
+    return await paginate(
+        session,
+        select(SourceFetch).where(SourceFetch.run_id == run_id),
+        page,
+        order_by=[SourceFetch.id],
+    )
+
+
+async def run_logs(session: AsyncSession, run_id: uuid.UUID, page: int | None = 1) -> Page[Log]:
+    return await paginate(
+        session,
+        select(Log).where(Log.run_id == run_id),
+        page,
+        order_by=[Log.ts, Log.id],
+        size=100,
     )
 
 
@@ -371,19 +384,18 @@ def job_query(f: JobFilters) -> Select[Job]:
 
 
 async def list_jobs(session: AsyncSession, f: JobFilters) -> Page[JobItem]:
-    stmt = job_query(f)
-    total = await _count(session, stmt)
-    page = _page(f.page)
+    """Một trang việc làm. Mỗi kiểu sắp xếp có index (status, khoá sắp xếp, id); tìm kiếm tiêu đề /
+    tên doanh nghiệp dùng GIN trigram; tổng đếm tối đa COUNT_CAP."""
     review = select(JobReview.correct).where(JobReview.job_id == Job.id).scalar_subquery()
-    rows = await session.execute(
-        stmt.add_columns(review)
-        .order_by(*SORTS.get(f.sort, SORTS["new"]))
-        .limit(PAGE_SIZE)
-        .offset((page - 1) * PAGE_SIZE)
-    )
     now = datetime.now(UTC)
-    items = [job_item(row, now=now, reviewed=correct) for row, correct in rows]
-    return Page(items=items, total=total, page=page)
+    return await paginate(
+        session,
+        job_query(f).add_columns(review),
+        f.page,
+        order_by=SORTS.get(f.sort, SORTS["new"]),
+        scalars=False,
+        convert=lambda r: job_item(r[0], now=now, reviewed=r[1]),
+    )
 
 
 async def job_sources(session: AsyncSession) -> list[str]:
@@ -454,11 +466,9 @@ async def runs_per_hour(session: AsyncSession, *, hours: int = 24) -> list[HourB
     return list(buckets.values())
 
 
-async def recent_board_runs(session: AsyncSession, limit: int = 40) -> list[BoardIndexRun]:
-    return list(
-        await session.scalars(
-            select(BoardIndexRun).order_by(BoardIndexRun.started_at.desc()).limit(limit)
-        )
+async def board_runs(session: AsyncSession, page: int | None = 1) -> Page[BoardIndexRun]:
+    return await paginate(
+        session, select(BoardIndexRun), page, order_by=[BoardIndexRun.started_at.desc()], size=20
     )
 
 

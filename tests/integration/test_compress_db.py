@@ -45,8 +45,9 @@ async def test_migration_compresses_existing_rows(test_database_url: str) -> Non
             )
             job_id = await conn.fetchval(
                 "INSERT INTO jobs (company_id, cluster_key, title, title_normalized, company_name,"
-                " description_md, requirements_md, canonical_source, confidence)"
-                " VALUES ($1, $2, 'Kế toán', 'ke toan', 'X', $3, NULL, 'test', 0.9) RETURNING id",
+                " description_md, requirements_md, canonical_source, source_urls, confidence)"
+                " VALUES ($1, $2, 'Kế toán', 'ke toan', 'X', $3, NULL, 'test',"
+                " ARRAY['https://x.vn/1'], 0.9) RETURNING id",
                 company_id,
                 tag,
                 description,

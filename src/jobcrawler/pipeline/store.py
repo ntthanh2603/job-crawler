@@ -13,13 +13,26 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from datasketch import MinHash
 from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Job, JobPosting
+from jobcrawler.db.models import Company, Job, JobPosting
 from jobcrawler.logging import get_logger
-from jobcrawler.pipeline.dedup import Cluster, merge
+from jobcrawler.pipeline import provinces
+from jobcrawler.pipeline.dedup import (
+    TITLE_THRESHOLD,
+    Cluster,
+    ExistingJob,
+    jd_minhash,
+    jd_similarity,
+    job_fingerprint,
+    merge,
+    same_existing,
+    title_similarity,
+)
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.pipeline.verify import EXPIRED, Verdict
 from jobcrawler.schemas import (
@@ -191,6 +204,136 @@ def job_to_out(row: Job, *, now: datetime | None = None) -> JobOut:
     )
 
 
+async def refresh_active_jobs(session: AsyncSession, company_id: int) -> None:
+    """Ghi lại `companies.active_jobs` (danh sách doanh nghiệp đọc cột này, không đếm lại)."""
+    count = (
+        select(func.count())
+        .where(Job.company_id == company_id, Job.status == JobStatus.ACTIVE.value)
+        .scalar_subquery()
+    )
+    await session.execute(update(Company).where(Company.id == company_id).values(active_jobs=count))
+
+
+async def _upsert_job(session: AsyncSession, values: dict[str, Any]) -> Job:
+    """Upsert theo (company_id, cluster_key). Nếu một job đang mở khác đã có cùng dấu vân tay
+    (index duy nhất `ux_jobs_company_fingerprint_active`), ghi vào job đó thay vì tạo job trùng."""
+
+    def statement(row: dict[str, Any]) -> Any:
+        stmt = pg_insert(Job).values(**row)
+        updates = {k: v for k, v in row.items() if k not in ("company_id", "cluster_key")}
+        updates["first_seen_at"] = func.least(Job.first_seen_at, stmt.excluded.first_seen_at)
+        updates["updated_at"] = func.now()
+        return stmt.on_conflict_do_update(
+            index_elements=[Job.company_id, Job.cluster_key], set_=updates
+        ).returning(Job)
+
+    try:
+        async with session.begin_nested():
+            return (await session.execute(statement(values))).scalar_one()
+    except IntegrityError:
+        key = await session.scalar(
+            select(Job.cluster_key).where(
+                Job.company_id == values["company_id"],
+                Job.fingerprint == values["fingerprint"],
+                Job.status == JobStatus.ACTIVE.value,
+            )
+        )
+        if key is None:
+            raise
+        return (await session.execute(statement(values | {"cluster_key": key}))).scalar_one()
+
+
+class _ExistingMatcher:
+    """Tìm job đã lưu (đang mở) của doanh nghiệp mà một cụm mới thực chất là nó. Mỗi job chỉ được
+    nhận một lần; `claimed` là các job đã gắn tin của lượt này."""
+
+    def __init__(self, session: AsyncSession, company_id: int, *, claimed: set[int]) -> None:
+        self.session = session
+        self.company_id = company_id
+        self.claimed = claimed
+        self._meta: list[Any] | None = None
+        self._loaded: dict[int, tuple[ExistingJob, MinHash]] = {}
+
+    async def find(self, job: NormalizedJob, fp: str) -> str | None:
+        exact = (
+            await self.session.execute(
+                select(Job.id, Job.cluster_key).where(
+                    Job.company_id == self.company_id,
+                    Job.status == JobStatus.ACTIVE.value,
+                    Job.fingerprint == fp,
+                )
+            )
+        ).first()
+        if exact is not None and exact.id not in self.claimed:
+            self.claimed.add(exact.id)
+            return exact.cluster_key
+        if self._meta is None:
+            self._meta = list(
+                await self.session.execute(
+                    select(
+                        Job.id,
+                        Job.cluster_key,
+                        Job.title,
+                        Job.title_normalized,
+                        Job.canonical_source,
+                        Job.locations,
+                    ).where(Job.company_id == self.company_id, Job.status == JobStatus.ACTIVE.value)
+                )
+            )
+        candidates = [
+            m
+            for m in self._meta
+            if m.id not in self.claimed
+            and title_similarity(job.title_normalized, m.title_normalized) >= TITLE_THRESHOLD
+        ]
+        if not candidates:
+            return None
+        await self._load([m for m in candidates if m.id not in self._loaded])
+        signature = jd_minhash(job.jd_text)
+        best: tuple[float, ExistingJob] | None = None
+        for m in candidates:
+            existing, existing_signature = self._loaded[m.id]
+            if not same_existing(job, existing, signature, existing_signature):
+                continue
+            score = jd_similarity(signature, existing_signature)
+            if best is None or score > best[0]:
+                best = (score, existing)
+        if best is None:
+            return None
+        self.claimed.add(best[1].id)
+        return best[1].cluster_key
+
+    async def _load(self, metas: list[Any]) -> None:
+        """Nội dung (giải nén) và MinHash của các job ứng viên — chỉ những job trùng tiêu đề."""
+        if not metas:
+            return
+        rows = await self.session.execute(
+            select(Job.id, Job.description_md, Job.requirements_md).where(
+                Job.id.in_([m.id for m in metas])
+            )
+        )
+        texts = {row.id: row for row in rows}
+        for m in metas:
+            text_row = texts[m.id]
+            jd = "\n\n".join(p for p in (text_row.description_md, text_row.requirements_md) if p)
+            locations = m.locations or []
+            places = provinces.most_specific(
+                {u for loc in locations if (u := provinces.unit_of(loc.get("address_raw")))}
+                | set(provinces.find_units(m.title))
+            )
+            existing = ExistingJob(
+                id=m.id,
+                cluster_key=m.cluster_key,
+                title=m.title,
+                title_normalized=m.title_normalized,
+                source=m.canonical_source,
+                places=places,
+                provinces=frozenset(p for loc in locations if (p := loc.get("province"))),
+                jd_text=jd,
+            )
+            self._loaded[m.id] = (existing, jd_minhash(jd))
+
+
 async def save_company_jobs(
     session: AsyncSession,
     *,
@@ -227,19 +370,44 @@ async def save_company_jobs(
         )
         previous = {job_id: key for job_id, key in result}
 
-    out: list[JobOut] = []
-    touched: set[int] = set()
+    # Bước 1: cụm có tin đã gắn job từ lượt trước giữ khoá của job đó.
+    keys: list[str | None] = []
     used_keys: set[str] = set()
     for cluster in clusters:
         rows = [postings[_key(m)] for m in cluster.members]
         old = sorted({r.job_id for r in rows if r.job_id in previous})
         key = next((previous[j] for j in old if previous[j] not in used_keys), None)
-        key = key or cluster_key(cluster.canonical)
-        if key in used_keys:  # hai cụm của lượt này cùng tin chuẩn cũ: không xảy ra, phòng hờ
-            key = cluster_key(cluster.canonical) + f"-{len(used_keys)}"
-        used_keys.add(key)
+        if key is not None:
+            used_keys.add(key)
+        keys.append(key)
 
-        merged = merge(cluster)
+    # Bước 2: cụm mới có thể là job đã lưu (doanh nghiệp đăng lại tin với mã / URL khác): cùng dấu
+    # vân tay, hoặc khớp mờ với một job đang mở chưa gắn tin nào của lượt này → ghi vào job đó.
+    merged_jobs = [merge(c) for c in clusters]
+    fingerprints = [job_fingerprint(m) for m in merged_jobs]
+    reused = 0
+    if any(k is None for k in keys):
+        matcher = _ExistingMatcher(session, company_id, claimed=set(previous))
+        for i, merged in enumerate(merged_jobs):
+            if keys[i] is not None:
+                continue
+            hit = await matcher.find(merged, fingerprints[i])
+            if hit is not None and hit not in used_keys:
+                keys[i] = hit
+                used_keys.add(hit)
+                reused += 1
+    for i, cluster in enumerate(clusters):
+        if keys[i] is None:
+            key = cluster_key(cluster.canonical)
+            if key in used_keys:  # hai cụm của lượt này cùng tin chuẩn: không xảy ra, phòng hờ
+                key += f"-{len(used_keys)}"
+            keys[i] = key
+            used_keys.add(key)
+
+    out: list[JobOut] = []
+    touched: set[int] = set()
+    for cluster, merged, fp, key in zip(clusters, merged_jobs, fingerprints, keys, strict=True):
+        rows = [postings[_key(m)] for m in cluster.members]
         member_verdicts = [verdict_of[_key(m)] for m in cluster.members]
         reasons = list(verdict_of[_key(cluster.canonical)].reasons)
         if len(cluster.members) > 1:
@@ -254,21 +422,12 @@ async def save_company_jobs(
         )
         values |= {
             "cluster_key": key,
+            "fingerprint": fp,
             "canonical_posting_id": postings[_key(cluster.canonical)].id,
             "first_seen_at": min(r.first_seen_at for r in rows),
             "last_seen_at": max(r.last_seen_at for r in rows),
         }
-        stmt = pg_insert(Job).values(**values)
-        updates = {k: v for k, v in values.items() if k not in ("company_id", "cluster_key")}
-        updates["first_seen_at"] = func.least(Job.first_seen_at, stmt.excluded.first_seen_at)
-        updates["updated_at"] = func.now()
-        job_row = (
-            await session.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=[Job.company_id, Job.cluster_key], set_=updates
-                ).returning(Job)
-            )
-        ).scalar_one()
+        job_row = await _upsert_job(session, values)
         touched.add(job_row.id)
         await session.execute(
             update(JobPosting)
@@ -305,12 +464,14 @@ async def save_company_jobs(
         .returning(Job.id)
     )
     removed = len((await session.execute(stale)).all())
+    await refresh_active_jobs(session, company_id)
     log.info(
         "jobs.saved",
         postings=len(postings),
         jobs=len(out),
         rejected=len(rejected),
         removed=removed,
+        reused_existing=reused,
         complete=complete,
     )
     return SaveResult(jobs=out, postings=len(postings), removed=removed)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 import tempfile
 import uuid
 from datetime import datetime
@@ -16,7 +17,7 @@ from saq import Queue
 
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyEntity, EmploymentType, JobLevel, KycStatus, WorkMode
-from jobcrawler.services import batch, evaluate, stats
+from jobcrawler.services import batch, evaluate, overview, stats
 from jobcrawler.web import actions, queries
 from jobcrawler.web.markdown import to_html
 
@@ -42,9 +43,22 @@ def user_of(request: Request) -> str | None:
 
 class PageOut[T](BaseModel):
     items: list[T]
-    total: int
+    total: int  # đếm tối đa queries.COUNT_CAP
     page: int
     pages: int
+    size: int = queries.PAGE_SIZE
+    exact: bool = True  # False: thực tế nhiều hơn `total`
+
+
+def _page_out[T](page: queries.Page[Any], items: list[T]) -> PageOut[T]:
+    return PageOut(
+        items=items,
+        total=page.total,
+        page=page.page,
+        pages=page.pages,
+        size=page.size,
+        exact=page.exact,
+    )
 
 
 class CompanyItem(BaseModel):
@@ -115,10 +129,11 @@ class CompanyDetailOut(BaseModel):
     kyc_evidence: Any
     aliases: list[AliasOut]
     profiles: list[ProfileOut]
-    runs: list[RunOut]
-    jobs: list[queries.JobItem]
+    # Số đếm cho các tab; danh sách lấy theo trang ở /companies/{id}/jobs|runs|rejected.
+    active_jobs: int
     inactive_jobs: int
-    rejected: list[PostingOut]
+    runs_total: int
+    rejected_total: int
     failed_pages: list[FailedPageItem]
 
 
@@ -149,8 +164,9 @@ class RunDetailOut(BaseModel):
     run: RunOut
     company_name: str | None
     by_source: list[SourceCount]
-    fetches: list[FetchOut]
-    logs: list[LogOut]
+    # Request / log lấy theo trang ở /runs/{id}/fetches|logs.
+    fetches_total: int
+    logs_total: int
     failed_pages: list[FailedPageItem]
 
 
@@ -345,16 +361,9 @@ async def get_overview(
     hours: Annotated[float, Query(description="Cửa sổ giờ; 0 = tất cả")] = 24,
     storage: bool = False,
 ) -> dict[str, Any]:
-    res = res_of(request)
-    st = await stats.collect_stats(res, hours=hours or None, storage=storage)
-    async with res.sessionmaker() as session:
-        chart = await queries.runs_per_hour(session, hours=24)
-        recent = await queries.recent_runs(session)
-    return {
-        "stats": dataclasses.asdict(st),
-        "chart": [{"hour": b.hour, "counts": b.counts, "total": b.total} for b in chart],
-        "recent_runs": [{**_run(run).model_dump(), "company_name": name} for run, name in recent],
-    }
+    """Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,
+    phần theo cửa sổ cache 60 giây)."""
+    return await overview.build_overview(res_of(request), hours=hours or None, storage=storage)
 
 
 @router.get("/stats")
@@ -382,22 +391,20 @@ async def get_companies(
     f = queries.CompanyFilters(q=q, kyc=kyc, run=run, jobs=jobs, page=page)
     async with res_of(request).sessionmaker() as session:
         result = await queries.list_companies(session, f)
-    return PageOut(
-        items=[
+    return _page_out(
+        result,
+        [
             CompanyItem(
-                company=CompanyEntity.model_validate(r.company),
-                input_website=r.company.input_website,
-                last_status=r.last_status,
-                last_started=r.last_started,
-                last_duration_ms=r.last_duration_ms,
-                last_incomplete=r.last_incomplete,
-                active_jobs=r.active_jobs,
+                company=CompanyEntity.model_validate(c),
+                input_website=c.input_website,
+                last_status=c.last_run_status,
+                last_started=c.last_run_at,
+                last_duration_ms=c.last_run_duration_ms,
+                last_incomplete=list(c.last_run_incomplete or []),
+                active_jobs=c.active_jobs,
             )
-            for r in result.items
+            for c in result.items
         ],
-        total=result.total,
-        page=result.page,
-        pages=result.pages,
     )
 
 
@@ -430,12 +437,42 @@ async def get_company(request: Request, company_id: int) -> CompanyDetailOut:
             )
             for p in d.profiles
         ],
-        runs=[_run(r) for r in d.runs],
-        jobs=d.jobs,
+        active_jobs=c.active_jobs,
         inactive_jobs=d.inactive_jobs,
-        rejected=[_posting(p) for p in d.rejected],
+        runs_total=d.runs,
+        rejected_total=d.rejected,
         failed_pages=[_failed_item(f) for f in d.failed_pages],
     )
+
+
+@router.get("/companies/{company_id}/jobs")
+async def get_company_jobs(
+    request: Request,
+    company_id: int,
+    status: Annotated[str, Query(description="active | inactive")] = "active",
+    page: int = 1,
+) -> PageOut[queries.JobItem]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.company_jobs(
+            session, company_id, active=status != "inactive", page=page
+        )
+    return _page_out(result, result.items)
+
+
+@router.get("/companies/{company_id}/runs")
+async def get_company_runs(request: Request, company_id: int, page: int = 1) -> PageOut[RunOut]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.company_runs(session, company_id, page)
+    return _page_out(result, [_run(r) for r in result.items])
+
+
+@router.get("/companies/{company_id}/rejected")
+async def get_company_rejected(
+    request: Request, company_id: int, page: int = 1
+) -> PageOut[PostingOut]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.company_rejected(session, company_id, page)
+    return _page_out(result, [_posting(p) for p in result.items])
 
 
 @router.post("/companies/import")
@@ -474,7 +511,19 @@ async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
         if company
         else None,
         by_source=[SourceCount(source=s, total=n, outcomes=o) for s, n, o in d.by_source],
-        fetches=[
+        fetches_total=d.fetches,
+        logs_total=d.logs,
+        failed_pages=[_failed_item(f) for f in d.failed_pages],
+    )
+
+
+@router.get("/runs/{run_id}/fetches")
+async def get_run_fetches(request: Request, run_id: uuid.UUID, page: int = 1) -> PageOut[FetchOut]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.run_fetches(session, run_id, page)
+    return _page_out(
+        result,
+        [
             FetchOut(
                 source=f.source,
                 url=f.url,
@@ -484,10 +533,18 @@ async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
                 items=f.items,
                 error=f.error,
             )
-            for f in d.fetches
+            for f in result.items
         ],
-        logs=[LogOut(ts=x.ts, level=x.level, event=x.event, context=x.context) for x in d.logs],
-        failed_pages=[_failed_item(f) for f in d.failed_pages],
+    )
+
+
+@router.get("/runs/{run_id}/logs")
+async def get_run_logs(request: Request, run_id: uuid.UUID, page: int = 1) -> PageOut[LogOut]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.run_logs(session, run_id, page)
+    return _page_out(
+        result,
+        [LogOut(ts=x.ts, level=x.level, event=x.event, context=x.context) for x in result.items],
     )
 
 
@@ -557,7 +614,7 @@ async def get_jobs(
     )
     async with res_of(request).sessionmaker() as session:
         result = await queries.list_jobs(session, f)
-    return PageOut(items=result.items, total=result.total, page=result.page, pages=result.pages)
+    return _page_out(result, result.items)
 
 
 @router.get("/jobs/export")
@@ -760,15 +817,20 @@ def _board_run(r: Any) -> dict[str, Any]:
 async def get_boards(request: Request) -> dict[str, Any]:
     async with res_of(request).sessionmaker() as session:
         board_rows = await stats.board_stats(session)
-        runs = await queries.recent_board_runs(session)
     known = {b.source for b in board_rows}
     board_rows += [stats.BoardStats(source=n) for n in actions.board_names() if n not in known]
     queue = await stats.queue_stats(board_queue_of(request))
     return {
         "boards": [dataclasses.asdict(b) for b in board_rows],
-        "runs": [_board_run(r) for r in runs],
         "queue": dataclasses.asdict(queue),
     }
+
+
+@router.get("/boards/runs")
+async def get_board_runs(request: Request, page: int = 1) -> PageOut[dict[str, Any]]:
+    async with res_of(request).sessionmaker() as session:
+        result = await queries.board_runs(session, page)
+    return _page_out(result, [_board_run(r) for r in result.items])
 
 
 @router.post("/boards/{name}/index")
@@ -798,16 +860,31 @@ def _queue_job(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+QUEUE_PAGE = 25
+
+
 @router.get("/queue")
-async def get_queue(request: Request) -> dict[str, Any]:
-    """Hai queue (doanh nghiệp, trang tuyển dụng): số job, worker, các job đang chạy/sắp chạy."""
+async def get_queue(request: Request, page: int = 1, board_page: int = 1) -> dict[str, Any]:
+    """Hai queue (doanh nghiệp, trang tuyển dụng): số job, worker, và một trang các job đang
+    chạy / đang chờ của mỗi queue (`page`, `board_page`; mỗi trang QUEUE_PAGE job)."""
     out: list[dict[str, Any]] = []
-    for queue in (res_of(request).queue, board_queue_of(request)):
+    for queue, wanted in ((res_of(request).queue, page), (board_queue_of(request), board_page)):
         st = await stats.queue_stats(queue)
+        listed = st.queued + st.active
+        pages = max(1, math.ceil(listed / QUEUE_PAGE))
+        current = min(max(1, wanted), pages)
         try:
-            info = await queue.info(jobs=True, limit=50)
+            info = await queue.info(jobs=True, offset=(current - 1) * QUEUE_PAGE, limit=QUEUE_PAGE)
             jobs = [_queue_job(j) for j in info.get("jobs") or []]
         except Exception:  # Redis lỗi: vẫn trả số đếm
             jobs = []
-        out.append({**dataclasses.asdict(st), "jobs": jobs})
+        out.append(
+            {
+                **dataclasses.asdict(st),
+                "jobs": jobs,
+                "page": current,
+                "pages": pages,
+                "total": listed,
+            }
+        )
     return {"queues": out}

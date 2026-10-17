@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -79,9 +80,28 @@ def _updated_at() -> Mapped[datetime]:
     return mapped_column(server_default=func.now(), onupdate=func.now())
 
 
+# Chuỗi tìm kiếm doanh nghiệp (cột sinh + GIN trigram): `||` thay concat_ws vì cột sinh cần hàm
+# IMMUTABLE.
+COMPANY_SEARCH_TEXT = (
+    "coalesce(input_name, '') || ' ' || coalesce(legal_name, '') || ' ' || "
+    "coalesce(brand_name, '') || ' ' || coalesce(tax_code, '') || ' ' || "
+    "coalesce(primary_domain, '')"
+)
+
+
 class Company(Base):
     __tablename__ = "companies"
-    __table_args__ = (one_of("kyc_status", KycStatus),)
+    __table_args__ = (
+        one_of("kyc_status", KycStatus),
+        Index(
+            "ix_companies_search_text",
+            "search_text",
+            postgresql_using="gin",
+            postgresql_ops={"search_text": "gin_trgm_ops"},
+        ),
+        Index("ix_companies_last_run_status", "last_run_status"),
+        Index("ix_companies_kyc_status", "kyc_status"),
+    )
 
     id: Mapped[int] = _pk()
     input_name: Mapped[str]
@@ -99,6 +119,16 @@ class Company(Base):
     # Danh sách bằng chứng [{url, snippet}] (hoặc ứng viên khi `ambiguous`).
     kyc_evidence: Mapped[Any | None] = mapped_column(JSONB)
     kyc_at: Mapped[datetime | None]
+    # Ghi sẵn để danh sách doanh nghiệp lọc/hiện không cần truy vấn con theo từng dòng: lượt chạy
+    # mới nhất (cập nhật khi lượt bắt đầu / kết thúc) và số job đang mở (sau mỗi lần lưu job;
+    # bảo trì định kỳ đối chiếu lại).
+    active_jobs: Mapped[int] = mapped_column(server_default=text("0"))
+    last_run_id: Mapped[uuid.UUID | None]
+    last_run_status: Mapped[str | None]
+    last_run_at: Mapped[datetime | None]
+    last_run_duration_ms: Mapped[int | None]
+    last_run_incomplete: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
+    search_text: Mapped[str | None] = mapped_column(Computed(COMPANY_SEARCH_TEXT, persisted=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -172,6 +202,12 @@ class JobPosting(Base):
     __table_args__ = (
         UniqueConstraint("source", "external_id"),
         one_of("status", JobStatus),
+        Index(
+            "ix_job_postings_company_rejected",
+            "company_id",
+            text("verified_at DESC"),
+            postgresql_where=text("accepted IS false"),
+        ),
     )
 
     id: Mapped[int] = _pk()
@@ -253,13 +289,59 @@ class Job(Base):
         one_of("status", JobStatus),
         one_of("salary_period", SalaryPeriod),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        # Hai job y hệt (cùng dấu vân tay) không thể cùng đang mở ở một doanh nghiệp.
+        Index(
+            "ux_jobs_company_fingerprint_active",
+            "company_id",
+            "fingerprint",
+            unique=True,
+            postgresql_where=text("status = 'active' AND fingerprint IS NOT NULL"),
+        ),
+        # Danh sách việc làm: lọc trạng thái + từng kiểu sắp xếp (queries.SORTS), nguồn, tỉnh,
+        # tìm kiếm; BRIN cho biểu đồ theo ngày thấy.
+        Index(
+            "ix_jobs_status_first_seen_at", "status", text("first_seen_at DESC"), text("id DESC")
+        ),
+        Index(
+            "ix_jobs_status_posted_at", "status", text("posted_at DESC NULLS LAST"), text("id DESC")
+        ),
+        Index("ix_jobs_status_expires_at", "status", "expires_at", text("id DESC")),
+        Index(
+            "ix_jobs_status_salary",
+            "status",
+            text("coalesce(salary_max, salary_min) DESC NULLS LAST"),
+            text("id DESC"),
+        ),
+        Index("ix_jobs_status_source_kind", "status", text("split_part(canonical_source, ':', 1)")),
+        Index("ix_jobs_company_id_status", "company_id", "status", text("first_seen_at DESC")),
+        Index(
+            "ix_jobs_locations",
+            "locations",
+            postgresql_using="gin",
+            postgresql_ops={"locations": "jsonb_path_ops"},
+        ),
+        Index(
+            "ix_jobs_title_trgm",
+            "title",
+            postgresql_using="gin",
+            postgresql_ops={"title": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_jobs_company_name_trgm",
+            "company_name",
+            postgresql_using="gin",
+            postgresql_ops={"company_name": "gin_trgm_ops"},
+        ),
+        Index("ix_jobs_first_seen_at_brin", "first_seen_at", postgresql_using="brin"),
     )
 
     id: Mapped[int] = _pk()
     company_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="CASCADE"), index=True
+        BigInteger, ForeignKey("companies.id", ondelete="CASCADE")
     )
     cluster_key: Mapped[str]
+    # Dấu vân tay nội dung (pipeline/dedup.fingerprint): tiêu đề + nơi làm + JD đã chuẩn hoá.
+    fingerprint: Mapped[str | None]
     canonical_posting_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("job_postings.id", ondelete="SET NULL")
     )

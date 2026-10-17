@@ -2,13 +2,23 @@ import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle } from "lucide-react"
 import { useParams } from "react-router"
 
-import { Empty, ErrorState, ExternalLink, Loading, PageHeader, Section, StatusBadge, TextLink, type Tone } from "@/components/common"
+import {
+  Empty,
+  ErrorState,
+  ExternalLink,
+  Loading,
+  PagedList,
+  PageHeader,
+  Section,
+  StatusBadge,
+  TextLink,
+  type Tone,
+} from "@/components/common"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
 import { byCount, cap, companyName, dt, duration, failReason, hour, label, num, sourceLabel } from "@/lib/format"
-import type { RunDetail } from "@/lib/types"
+import type { Fetch, LogLine, RunDetail } from "@/lib/types"
 
 const LEVELS: Record<string, [Tone, string]> = {
   debug: ["muted", "Gỡ lỗi"],
@@ -129,11 +139,11 @@ export function RunPage() {
           )}
         </Section>
 
-        <Section title="Log" description={`${num(d.logs.length)} dòng`} bodyClassName="p-0">
-          {d.logs.length ? (
-            <ScrollArea className="h-[28rem]">
+        <Section title="Log" description={`${num(d.logs_total)} dòng`} bodyClassName="p-0">
+          <PagedList<LogLine> queryKey={["run-logs", r.run_id]} url={`/runs/${r.run_id}/logs`} empty="Không có log cho lượt chạy này.">
+            {(logs) => (
               <div className="divide-y">
-                {d.logs.map((l, i) => {
+                {logs.map((l, i) => {
                   const [tone, text] = LEVELS[l.level] ?? ["muted", cap(l.level)]
                   return (
                     <div key={i} className="grid grid-cols-[auto_6.5rem_1fr] items-start gap-3 px-5 py-2.5 text-meta">
@@ -147,46 +157,53 @@ export function RunPage() {
                   )
                 })}
               </div>
-            </ScrollArea>
-          ) : (
-            <Empty>Không có log (kiểm tra LOG_DB_LEVEL).</Empty>
-          )}
+            )}
+          </PagedList>
         </Section>
       </div>
 
-      <Section title="Request" description={`${num(d.fetches.length)} request trong lượt chạy`} className="mt-6" bodyClassName="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nguồn</TableHead>
-              <TableHead>URL</TableHead>
-              <TableHead className="text-right">HTTP</TableHead>
-              <TableHead>Kết quả</TableHead>
-              <TableHead className="text-right">Thời gian</TableHead>
-              <TableHead className="text-right">Số tin</TableHead>
-              <TableHead>Lỗi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {d.fetches.map((f, i) => (
-              <TableRow key={i}>
-                <TableCell className="text-meta">{sourceLabel(f.source)}</TableCell>
-                <TableCell className="max-w-72 truncate text-meta">
-                  <ExternalLink href={f.url}>{f.url}</ExternalLink>
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{f.http_status ?? "–"}</TableCell>
-                <TableCell>
-                  <StatusBadge value={f.outcome} />
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{duration(f.duration_ms)}</TableCell>
-                <TableCell className="text-right tabular-nums">{f.items ?? "–"}</TableCell>
-                <TableCell className="max-w-44 truncate text-meta text-muted-foreground" title={f.error ?? ""}>
-                  {f.error ? cap(f.error) : ""}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <Section
+        title="Request"
+        description={`${num(d.fetches_total)} request trong lượt chạy`}
+        className="mt-6"
+        bodyClassName="p-0"
+      >
+        <PagedList<Fetch> queryKey={["run-fetches", r.run_id]} url={`/runs/${r.run_id}/fetches`} empty="Không có request nào.">
+          {(fetches) => (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nguồn</TableHead>
+                  <TableHead>URL</TableHead>
+                  <TableHead className="text-right">HTTP</TableHead>
+                  <TableHead>Kết quả</TableHead>
+                  <TableHead className="text-right">Thời gian</TableHead>
+                  <TableHead className="text-right">Số tin</TableHead>
+                  <TableHead>Lỗi</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {fetches.map((f, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-meta">{sourceLabel(f.source)}</TableCell>
+                    <TableCell className="max-w-72 truncate text-meta">
+                      <ExternalLink href={f.url}>{f.url}</ExternalLink>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{f.http_status ?? "–"}</TableCell>
+                    <TableCell>
+                      <StatusBadge value={f.outcome} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{duration(f.duration_ms)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{f.items ?? "–"}</TableCell>
+                    <TableCell className="max-w-44 truncate text-meta text-muted-foreground" title={f.error ?? ""}>
+                      {f.error ? cap(f.error) : ""}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </PagedList>
       </Section>
     </>
   )

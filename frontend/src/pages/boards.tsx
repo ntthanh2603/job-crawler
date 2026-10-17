@@ -1,14 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertTriangle, RefreshCw } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
-import { ConfirmButton, Empty, ErrorState, Loading, PageHeader, Section, StatusBadge, TextLink } from "@/components/common"
+import {
+  ConfirmButton,
+  ErrorState,
+  Loading,
+  PagedList,
+  PageHeader,
+  Section,
+  StatCard,
+  StatGrid,
+  StatusBadge,
+  TextLink,
+} from "@/components/common"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
 import { ago, cap, dt, num, sourceLabel } from "@/lib/format"
-import type { Boards } from "@/lib/types"
+import type { BoardRun, Boards } from "@/lib/types"
 
 export function BoardsPage() {
   const client = useQueryClient()
@@ -44,24 +55,21 @@ export function BoardsPage() {
                 <p>{cap(d.queue.error)}</p>
               </AlertDescription>
             </Alert>
-          ) : d.queue.workers ? (
-            <Alert>
-              <RefreshCw />
-              <AlertTitle>
-                {d.queue.workers} worker index đang chạy · {d.queue.queued} trang đang chờ · {d.queue.active} trang đang index
-              </AlertTitle>
-            </Alert>
           ) : (
-            <Alert className="border-warning/30 bg-warning/8">
-              <AlertTriangle className="text-warning" />
-              <AlertTitle>Chưa có worker index nào chạy</AlertTitle>
-              <AlertDescription>
-                <p>
-                  Bật service indexer (đặt <code>INDEXER_REPLICAS=1</code> rồi chạy <code>docker compose up -d</code>) để các
-                  lượt index được thực hiện. Nên có proxy trước khi index đầy đủ.
-                </p>
-              </AlertDescription>
-            </Alert>
+            <StatGrid className="grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                label="Worker index"
+                value={num(d.queue.workers)}
+                status={d.queue.workers ? { tone: "good", text: "Đang chạy" } : { tone: "warn", text: "Đang dừng" }}
+              />
+              <StatCard label="Trang đang index" value={num(d.queue.active)} />
+              <StatCard label="Trang đang chờ" value={num(d.queue.queued)} />
+              <StatCard
+                label="Tin đang mở trên các trang"
+                value={num(d.boards.reduce((n, b) => n + b.active_postings, 0))}
+                hint={`${num(d.boards.reduce((n, b) => n + b.profiles_mapped, 0))} profile đã khớp doanh nghiệp`}
+              />
+            </StatGrid>
           )}
 
           <Section title="Các trang" bodyClassName="p-0">
@@ -118,7 +126,7 @@ export function BoardsPage() {
                     <TableCell className="text-right">
                       <ConfirmButton
                         title={`Index ${sourceLabel(b.source)} ngay?`}
-                        description="Đưa trang này vào hàng đợi index. Đây là việc dài, chạy ở worker index (worker --boards)."
+                        description="Đưa trang này vào hàng đợi index ngay, không chờ lịch định kỳ. Lượt index có thể kéo dài vài chục phút."
                         onConfirm={() => index.mutate(b.source)}
                         size="xs"
                       >
@@ -132,53 +140,53 @@ export function BoardsPage() {
           </Section>
 
           <Section title="Các lượt index gần đây" bodyClassName="p-0">
-            {d.runs.length ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Trang</TableHead>
-                    <TableHead>Kết quả</TableHead>
-                    <TableHead className="px-2 text-right">Thấy</TableHead>
-                    <TableHead className="px-2 text-right">Tải</TableHead>
-                    <TableHead className="px-2 text-right">Mới</TableHead>
-                    <TableHead className="px-2 text-right">Đổi</TableHead>
-                    <TableHead className="px-2 text-right">Lỗi</TableHead>
-                    <TableHead className="px-2 text-right">Gỡ</TableHead>
-                    <TableHead className="text-right" title="Profile nhà tuyển dụng mới / khớp được doanh nghiệp">
-                      Profile
-                    </TableHead>
-                    <TableHead>Ghi chú</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {d.runs.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>
-                        <div className="font-medium">{sourceLabel(r.source)}</div>
-                        <div className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge value={r.status} />
-                      </TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.urls_seen)}</TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.fetched)}</TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.new)}</TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.updated)}</TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.failed)}</TableCell>
-                      <TableCell className="px-2 text-right tabular-nums">{num(r.removed)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {r.profiles_new} / {r.profiles_matched}
-                      </TableCell>
-                      <TableCell className="max-w-40 truncate text-meta text-muted-foreground" title={r.error ?? ""}>
-                        {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
-                      </TableCell>
+            <PagedList<BoardRun> queryKey={["board-runs"]} url="/boards/runs" empty="Chưa có lượt index nào.">
+              {(runs) => (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Trang</TableHead>
+                      <TableHead>Kết quả</TableHead>
+                      <TableHead className="px-2 text-right">Thấy</TableHead>
+                      <TableHead className="px-2 text-right">Tải</TableHead>
+                      <TableHead className="px-2 text-right">Mới</TableHead>
+                      <TableHead className="px-2 text-right">Đổi</TableHead>
+                      <TableHead className="px-2 text-right">Lỗi</TableHead>
+                      <TableHead className="px-2 text-right">Gỡ</TableHead>
+                      <TableHead className="text-right" title="Profile nhà tuyển dụng mới / khớp được doanh nghiệp">
+                        Profile
+                      </TableHead>
+                      <TableHead>Ghi chú</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <Empty>Chưa có lượt index nào.</Empty>
-            )}
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell>
+                          <div className="font-medium">{sourceLabel(r.source)}</div>
+                          <div className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge value={r.status} />
+                        </TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.urls_seen)}</TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.fetched)}</TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.new)}</TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.updated)}</TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.failed)}</TableCell>
+                        <TableCell className="px-2 text-right tabular-nums">{num(r.removed)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {r.profiles_new} / {r.profiles_matched}
+                        </TableCell>
+                        <TableCell className="max-w-40 truncate text-meta text-muted-foreground" title={r.error ?? ""}>
+                          {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </PagedList>
           </Section>
         </div>
       )}

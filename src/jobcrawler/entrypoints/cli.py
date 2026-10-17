@@ -139,6 +139,21 @@ def db_reclean(
     typer.echo(f"đã quét {report.scanned} job · {verb} {report.changed}")
 
 
+@db_app.command("dedup")
+def db_dedup() -> None:
+    """Điền dấu vân tay cho job cũ và gộp các job đang mở trùng nội dung (job cũ nhất giữ lại)."""
+    from jobcrawler.services import maintenance
+
+    async def go() -> maintenance.DedupReport:
+        async with open_resources(db_logs=False) as res:
+            return await maintenance.dedupe_jobs(res.sessionmaker)
+
+    r = _run(go())
+    typer.echo(
+        f"đã quét {r.scanned} job · điền dấu vân tay {r.fingerprinted} · gộp {r.merged} job trùng"
+    )
+
+
 @db_app.command("revision")
 def db_revision(
     message: Annotated[str, typer.Option("-m", "--message")],

@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     # Bảo trì định kỳ (cron SAQ, `jobcrawler db maintain`): dọn dữ liệu cũ, lượt chạy treo,
     # huấn luyện từ điển nén.
     maintenance_cron: str = "17 * * * *"  # mỗi giờ
+    overview_cron: str = "*/5 * * * *"  # số liệu phân bố trang tổng quan
     source_fetch_retention_days: float = Field(default=30, gt=0)
     log_retention_days: float = Field(default=30, gt=0)
     failed_page_retention_days: float = Field(default=7, gt=0)

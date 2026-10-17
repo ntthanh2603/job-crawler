@@ -7,6 +7,14 @@ Hai tin cùng cụm khi thoả cả ba điều kiện:
 3. JD giống nhau (MinHash Jaccard ≥ 0.8 trên 3-gram từ) hoặc cùng `apply_url` (nguồn không ghi
    thì lấy URL tin: hai bản bóc khác nhau của cùng một trang luôn gộp).
 
+Cùng nguồn mà cả hai không ghi nơi làm (doanh nghiệp đăng lại tin cũ với mã mới, vd. MISA
+/tuyen-dung/5883 và /5920): gộp khi tiêu đề gần như y hệt, không nêu hai nơi khác nhau
+("[Hải Dương] …" / "[Hải Phòng] …"), và JD gần như trùng (≥ 0.95).
+
+`fingerprint` là dấu vân tay nội dung (tiêu đề + nơi làm + JD đã chuẩn hoá) — cột `jobs.fingerprint`
+có index duy nhất trong các job đang mở của một doanh nghiệp, nên hai job y hệt không thể cùng
+tồn tại; `store` dùng nó (và `same_existing`) để gắn tin mới vào job đã có thay vì tạo job mới.
+
 Bản chuẩn: ATS / trang careers của doanh nghiệp → trang tuyển dụng có JD đầy đủ nhất → tin mới
 nhất. Cụm giữ mọi URL nguồn.
 """
@@ -14,20 +22,26 @@ nhất. Cụm giữ mọi URL nguồn.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from datasketch import MinHash
 from rapidfuzz import fuzz
 
 from jobcrawler.net.urls import normalize_url
+from jobcrawler.pipeline import provinces as province_names
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.schemas import EmploymentType, ExtractionMethod, JobLevel, Location, WorkMode
 from jobcrawler.text import fold
 
 TITLE_THRESHOLD = 90.0
 JD_THRESHOLD = 0.8
+# Tin đăng lại (cùng nguồn, không rõ nơi làm): đòi gần như y hệt.
+REPOST_TITLE_THRESHOLD = 97.0
+REPOST_JD_THRESHOLD = 0.95
 SHINGLE = 3
 NUM_PERM = 128
 
@@ -76,6 +90,44 @@ def same_places(a: NormalizedJob, b: NormalizedJob) -> bool:
     return compatible_provinces(a.provinces, b.provinces)
 
 
+def title_places(title: str) -> frozenset[str]:
+    """Nơi làm nêu trong tiêu đề, ở mức tỉnh cũ ("[Hải Dương] Kinh doanh" → {"Hải Dương"})."""
+    return frozenset(province_names.find_units(title))
+
+
+def fingerprint(title: str, places: frozenset[str] | set[str], jd_text: str) -> str:
+    """Dấu vân tay nội dung một job: tiêu đề, nơi làm (tỉnh cũ, hoặc tỉnh) và JD sau khi bỏ dấu,
+    viết thường, gộp khoảng trắng. Hai tin y hệt (đăng lại với mã/URL khác) cho cùng giá trị."""
+    jd = hashlib.sha1(fold(jd_text).encode()).hexdigest()
+    key = "|".join([fold(title), ",".join(sorted(places)), jd])
+    return hashlib.sha1(key.encode()).hexdigest()[:32]
+
+
+def location_places(
+    title: str, locations: Sequence[tuple[str | None, str | None]]
+) -> frozenset[str]:
+    """Nơi làm để so trùng: tỉnh cũ từ địa chỉ + tiêu đề (bỏ tỉnh bị một quận/huyện cụ thể hơn
+    bao lấy); không có thì tỉnh/thành. `locations`: các cặp (tỉnh, địa chỉ gốc)."""
+    units = {u for _, address in locations if (u := province_names.unit_of(address))}
+    places = province_names.most_specific(units | title_places(title))
+    return places or frozenset(p for p, _ in locations if p)
+
+
+def job_fingerprint(job: NormalizedJob) -> str:
+    """Dấu vân tay của job đã gộp (`merge`), cùng cách tính với `stored_fingerprint`."""
+    pairs = [(loc.province, loc.address_raw) for loc in job.locations]
+    return fingerprint(job.title, location_places(job.title, pairs), job.jd_text)
+
+
+def stored_fingerprint(
+    title: str, locations: Sequence[dict[str, Any]], description: str, requirements: str | None
+) -> str:
+    """Dấu vân tay từ một dòng `jobs` (locations JSON, mô tả, yêu cầu)."""
+    pairs = [(loc.get("province"), loc.get("address_raw")) for loc in locations]
+    jd = "\n\n".join(p for p in (description, requirements) if p)
+    return fingerprint(title, location_places(title, pairs), jd)
+
+
 def _apply_key(job: NormalizedJob) -> str | None:
     """Nơi nộp hồ sơ; nguồn không ghi thì là chính trang tin (ứng tuyển trên trang đó)."""
     return normalize_url(job.apply_url or job.url)
@@ -106,12 +158,55 @@ def same_job(
         return True  # cùng một tin, bóc hai lần
     if title_similarity(a.title_normalized, b.title_normalized) < title_threshold:
         return False
+    if a.source == b.source and not a.places and not b.places:
+        return is_repost(a.title, b.title, jd_similarity(sigs(a), sigs(b)))
     if not same_places(a, b):
         return False
     apply_a, apply_b = _apply_key(a), _apply_key(b)
     if apply_a and apply_a == apply_b:
         return True
     return jd_similarity(sigs(a), sigs(b)) >= jd_threshold
+
+
+def is_repost(title_a: str, title_b: str, jd: float) -> bool:
+    """Hai tin cùng nguồn không ghi nơi làm là một tin đăng lại: tiêu đề gần như y hệt, không nêu
+    hai nơi khác nhau, JD gần như trùng."""
+    if title_places(title_a) != title_places(title_b):
+        return False
+    return title_similarity(fold(title_a), fold(title_b)) >= REPOST_TITLE_THRESHOLD and (
+        jd >= REPOST_JD_THRESHOLD
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingJob:
+    """Một job đã lưu, đủ trường để so với tin mới (xem `same_existing`)."""
+
+    id: int
+    cluster_key: str
+    title: str
+    title_normalized: str
+    source: str
+    places: frozenset[str]
+    provinces: frozenset[str]
+    jd_text: str
+
+
+def same_existing(
+    job: NormalizedJob, existing: ExistingJob, signature: MinHash, existing_signature: MinHash
+) -> bool:
+    """Tin mới là job đã lưu (đăng lại / đổi URL): cùng luật với `same_job`."""
+    if title_similarity(job.title_normalized, existing.title_normalized) < TITLE_THRESHOLD:
+        return False
+    jd = jd_similarity(signature, existing_signature)
+    if job.source == existing.source and not job.places and not existing.places:
+        return is_repost(job.title, existing.title, jd)
+    if job.source == existing.source:
+        if not job.places & existing.places:
+            return False
+    elif not compatible_provinces(job.provinces, set(existing.provinces)):
+        return False
+    return jd >= JD_THRESHOLD
 
 
 def canonical_rank(job: NormalizedJob) -> tuple[int, int, int, float]:

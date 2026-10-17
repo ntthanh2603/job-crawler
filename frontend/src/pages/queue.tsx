@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 
 import {
   Empty,
   ErrorState,
   Loading,
   PageHeader,
+  Pager,
   Section,
   StatCard,
   StatGrid,
@@ -12,7 +14,7 @@ import {
   TextLink,
 } from "@/components/common"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api } from "@/lib/api"
+import { api, qs } from "@/lib/api"
 import { ago, cap, num, sourceLabel } from "@/lib/format"
 import type { QueueJob, QueuePage as QueueData } from "@/lib/types"
 
@@ -34,11 +36,18 @@ function queueTitle(name: string) {
 }
 
 export function QueuePage() {
-  const query = useQuery({ queryKey: ["queue"], queryFn: () => api.get<QueueData>("/queue"), refetchInterval: 5_000 })
+  // Mỗi hàng đợi một trang riêng (API: `page` cho doanh nghiệp, `board_page` cho index).
+  const [pages, setPages] = useState({ page: 1, board_page: 1 })
+  const query = useQuery({
+    queryKey: ["queue", pages],
+    queryFn: () => api.get<QueueData>(`/queue${qs(pages)}`),
+    refetchInterval: 5_000,
+    placeholderData: (prev) => prev,
+  })
 
   return (
     <>
-      <PageHeader title="Hàng đợi" description="Hai hàng đợi SAQ trên Redis, tự cập nhật mỗi 5 giây." />
+      <PageHeader title="Hàng đợi" description="Việc đang chờ và đang chạy của doanh nghiệp và trang tuyển dụng, tự cập nhật mỗi 5 giây." />
       {query.isError && <ErrorState error={query.error} />}
       {query.isLoading && <Loading rows={8} />}
       <div className="space-y-6">
@@ -105,6 +114,15 @@ export function QueuePage() {
                     ))}
                   </TableBody>
                 </Table>
+                {q.pages > 1 && (
+                  <Pager
+                    page={q.page}
+                    pages={q.pages}
+                    total={q.total}
+                    size={25}
+                    onPage={(p) => setPages((cur) => ({ ...cur, [q.name.includes("board") ? "board_page" : "page"]: p }))}
+                  />
+                )}
               </div>
             ) : (
               <Empty>Không có việc nào đang chờ hoặc đang chạy.</Empty>

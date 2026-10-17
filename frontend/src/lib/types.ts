@@ -1,6 +1,7 @@
 // Kiểu dữ liệu khớp API FastAPI (src/jobcrawler/web/api.py).
 
-export type Page<T> = { items: T[]; total: number; page: number; pages: number }
+/** Một trang danh sách. `exact = false`: có hơn `total` dòng (server đếm tối đa 10.000). */
+export type Page<T> = { items: T[]; total: number; page: number; pages: number; size: number; exact: boolean }
 
 export type Location = { province: string | null; address_raw: string | null }
 
@@ -126,10 +127,11 @@ export type CompanyDetail = {
     match_signal: string | null
     indexed_at: string | null
   }[]
-  runs: Run[]
-  jobs: Job[]
+  // Số đếm cho các tab; danh sách lấy theo trang ở /companies/{id}/jobs|runs|rejected.
+  active_jobs: number
   inactive_jobs: number
-  rejected: Posting[]
+  runs_total: number
+  rejected_total: number
   failed_pages: FailedPageItem[]
 }
 
@@ -143,18 +145,22 @@ export type RunDetail = {
   run: Run
   company_name: string | null
   by_source: { source: string; total: number; outcomes: Record<string, number> }[]
-  fetches: {
-    source: string
-    url: string
-    http_status: number | null
-    outcome: string
-    duration_ms: number | null
-    items: number | null
-    error: string | null
-  }[]
-  logs: { ts: string; level: string; event: string; context: Record<string, unknown> }[]
+  fetches_total: number
+  logs_total: number
   failed_pages: FailedPageItem[]
 }
+
+export type Fetch = {
+  source: string
+  url: string
+  http_status: number | null
+  outcome: string
+  duration_ms: number | null
+  items: number | null
+  error: string | null
+}
+
+export type LogLine = { ts: string; level: string; event: string; context: Record<string, unknown> }
 
 export type FailedPage = FailedPageItem & { http_status: number | null; run_id: string | null; html: string }
 
@@ -230,9 +236,34 @@ export type Stats = {
   targets: { name: string; value: number | null; target: string; ok: boolean | null }[]
 }
 
+export type Pair = [string, number]
+
+/** Phân bố trên job đang mở / doanh nghiệp — tính sẵn bằng cron (services/overview.py). */
+export type Charts = {
+  generated_at: string
+  totals: {
+    active_jobs: number
+    companies: number
+    companies_with_jobs: number
+    new_jobs_7d: number
+    with_salary: number
+  }
+  jobs_by_day: { day: string; careers: number; boards: number }[]
+  jobs_by_source: Pair[]
+  jobs_by_province: Pair[]
+  jobs_by_level: Pair[]
+  jobs_by_employment: Pair[]
+  jobs_by_work_mode: Pair[]
+  salary_bands: Pair[]
+  kyc: Pair[]
+  top_companies: { id: number; name: string; active_jobs: number }[]
+}
+
 export type Overview = {
   stats: Stats
   chart: { hour: string; counts: Record<string, number>; total: number }[]
+  fetch_chart: { hour: string; ok: number; blocked: number; error: number }[]
+  charts: Charts
   recent_runs: (Run & { company_name: string })[]
 }
 
@@ -325,7 +356,7 @@ export type BoardRun = {
   error: string | null
 }
 
-export type Boards = { boards: BoardStats[]; runs: BoardRun[]; queue: QueueStats }
+export type Boards = { boards: BoardStats[]; queue: QueueStats }
 
 export type QueueJob = {
   key: string
@@ -341,4 +372,6 @@ export type QueueJob = {
   company_id: number | null
 }
 
-export type QueuePage = { queues: (QueueStats & { jobs: QueueJob[] })[] }
+export type QueuePage = {
+  queues: (QueueStats & { jobs: QueueJob[]; page: number; pages: number; total: number })[]
+}

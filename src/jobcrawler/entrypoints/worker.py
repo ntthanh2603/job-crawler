@@ -1,8 +1,9 @@
 """Cấu hình worker SAQ: functions, cron jobs, startup/shutdown dùng `open_resources`.
 
 Hai vai trò, mỗi vai một queue:
-- `companies` (`jobcrawler worker`): job `process_company` (≤ COMPANY_TIMEOUT_SECONDS) và cron
-  bảo trì; chạy nhiều replica, mỗi replica WORKER_CONCURRENCY doanh nghiệp.
+- `companies` (`jobcrawler worker`): job `process_company` (≤ COMPANY_TIMEOUT_SECONDS), cron
+  bảo trì và cron tính sẵn số liệu trang tổng quan; chạy nhiều replica, mỗi replica
+  WORKER_CONCURRENCY doanh nghiệp.
 - `boards` (`jobcrawler worker --boards`): job `index_board` (hàng giờ mỗi trang) và cron đưa các
   trang vào queue; tách riêng để lượt index không chiếm chỗ của doanh nghiệp.
 """
@@ -20,7 +21,7 @@ from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn
-from jobcrawler.services import boards, companies, maintenance
+from jobcrawler.services import boards, companies, maintenance, overview
 
 log = get_logger(__name__)
 
@@ -102,6 +103,12 @@ async def maintenance_cron(ctx: WorkerContext) -> dict[str, Any]:
     return report.as_dict()
 
 
+async def overview_cron(ctx: WorkerContext) -> dict[str, Any]:
+    """Cron: tính sẵn số liệu phân bố cho trang tổng quan (người xem chỉ đọc từ Redis)."""
+    charts = await overview.refresh_charts(ctx["resources"])
+    return charts["totals"]
+
+
 # Bảo trì có thể phải nén lại hàng chục nghìn dòng.
 MAINTENANCE_TIMEOUT = 3600
 CANCEL_GRACE_SECONDS = 10.0
@@ -111,7 +118,10 @@ def cron_jobs(settings: Settings, role: WorkerRole = "companies") -> list[CronJo
     # Cron SAQ có khoá duy nhất theo hàm: nhiều replica cũng chỉ một lần mỗi mốc.
     if role == "boards":
         return [CronJob(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
-    return [CronJob(maintenance_cron, cron=settings.maintenance_cron, timeout=MAINTENANCE_TIMEOUT)]
+    return [
+        CronJob(maintenance_cron, cron=settings.maintenance_cron, timeout=MAINTENANCE_TIMEOUT),
+        CronJob(overview_cron, cron=settings.overview_cron, timeout=300),
+    ]
 
 
 def queue_name(settings: Settings, role: WorkerRole = "companies") -> str:

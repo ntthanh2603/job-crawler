@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ExternalLinkIcon, Play } from "lucide-react"
+import { useState } from "react"
 import { Link, useParams } from "react-router"
 import { toast } from "sonner"
 
 import {
-  Empty,
   ErrorState,
   ExternalLink,
+  FilterSelect,
   JobTags,
   Loading,
   Meta,
+  PagedList,
   PageHeader,
   Section,
   StatusBadge,
@@ -20,8 +22,22 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { api } from "@/lib/api"
-import { ago, cap, companyName, date, displayName, dt, duration, failReason, pct, provinces, salary, sourceLabel } from "@/lib/format"
-import type { CompanyDetail, EnqueueResult } from "@/lib/types"
+import {
+  ago,
+  cap,
+  companyName,
+  date,
+  displayName,
+  dt,
+  duration,
+  failReason,
+  num,
+  pct,
+  provinces,
+  salary,
+  sourceLabel,
+} from "@/lib/format"
+import type { CompanyDetail, EnqueueResult, Job, Posting, Run } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -40,6 +56,72 @@ const ALIAS_KINDS: Record<string, string> = {
   short: "Tên ngắn",
   brand: "Thương hiệu",
   english: "Tên tiếng Anh",
+}
+
+/** Việc làm của doanh nghiệp theo trang, chuyển giữa đang mở / đã đóng. */
+function CompanyJobs({ id, active, inactive }: { id: number; active: number; inactive: number }) {
+  const [status, setStatus] = useState<"active" | "inactive">("active")
+  return (
+    <Section
+      bodyClassName="p-0"
+      title={status === "active" ? "Việc làm đang mở" : "Việc làm đã đóng"}
+      description={status === "active" ? `${num(active)} việc` : `${num(inactive)} việc đã hết hạn hoặc đã gỡ`}
+      actions={
+        <FilterSelect
+          label="Trạng thái"
+          value={status}
+          onChange={(v) => setStatus(v === "inactive" ? "inactive" : "active")}
+          options={[
+            ["active", "Đang mở"],
+            ["inactive", "Đã đóng"],
+          ]}
+          all={null}
+        />
+      }
+    >
+      <PagedList<Job>
+        key={status}
+        queryKey={["company-jobs", id, status]}
+        url={`/companies/${id}/jobs?status=${status}`}
+        empty={status === "active" ? "Chưa có việc làm đang mở." : "Không có việc làm đã đóng."}
+      >
+        {(jobs) => (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vị trí</TableHead>
+                <TableHead>Nơi làm</TableHead>
+                <TableHead>Lương</TableHead>
+                <TableHead>Hạn nộp</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {jobs.map((j) => (
+                <TableRow key={j.id}>
+                  <TableCell className="max-w-96 min-w-56 whitespace-normal">
+                    <TextLink to={`/jobs/${j.id}`} className="font-medium">
+                      {cap(j.title)}
+                    </TextLink>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {j.status !== "active" && <StatusBadge value={j.status} />}
+                      <JobTags job={j} />
+                      <span className="text-meta text-muted-foreground">
+                        {sourceLabel(j.canonical_source)}
+                        {j.source_urls.length > 1 && ` +${j.source_urls.length - 1}`}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-48 text-meta whitespace-normal">{provinces(j)}</TableCell>
+                  <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
+                  <TableCell className="text-meta whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </PagedList>
+    </Section>
+  )
 }
 
 export function CompanyPage() {
@@ -95,141 +177,105 @@ export function CompanyPage() {
           <TabsList>
             {(
               [
-                ["jobs", "Việc đang mở", d.jobs.length],
-                ["runs", "Lượt chạy", d.runs.length],
-                ["rejected", "Tin bị loại", d.rejected.length],
+                ["jobs", "Việc làm", d.active_jobs + d.inactive_jobs],
+                ["runs", "Lượt chạy", d.runs_total],
+                ["rejected", "Tin bị loại", d.rejected_total],
               ] as const
             ).map(([value, text, n]) => (
               <TabsTrigger key={value} value={value} className="px-3">
                 {text}
-                <span className="text-meta font-normal text-muted-foreground tabular-nums">{n}</span>
+                <span className="text-meta font-normal text-muted-foreground tabular-nums">{num(n)}</span>
               </TabsTrigger>
             ))}
           </TabsList>
 
           <TabsContent value="jobs">
-            <Section
-              bodyClassName="p-0"
-              title="Việc làm đang mở"
-              description={d.inactive_jobs ? `Ẩn ${d.inactive_jobs} việc đã hết hạn hoặc đã gỡ` : undefined}
-            >
-              {d.jobs.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Vị trí</TableHead>
-                      <TableHead>Nơi làm</TableHead>
-                      <TableHead>Lương</TableHead>
-                      <TableHead>Hạn nộp</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {d.jobs.map((j) => (
-                      <TableRow key={j.id}>
-                        <TableCell className="max-w-96 min-w-56 whitespace-normal">
-                          <TextLink to={`/jobs/${j.id}`} className="font-medium">
-                            {cap(j.title)}
-                          </TextLink>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <JobTags job={j} />
-                            <span className="text-meta text-muted-foreground">
-                              {sourceLabel(j.canonical_source)}
-                              {j.source_urls.length > 1 && ` +${j.source_urls.length - 1}`}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-48 text-meta whitespace-normal">{provinces(j)}</TableCell>
-                        <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
-                        <TableCell className="text-meta whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <Empty>Chưa có việc làm đang mở.</Empty>
-              )}
-            </Section>
+            <CompanyJobs id={c.id} active={d.active_jobs} inactive={d.inactive_jobs} />
           </TabsContent>
 
           <TabsContent value="runs">
-            <Section bodyClassName="p-0" title="Các lượt chạy" description="30 lượt gần nhất">
-              {d.runs.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Bắt đầu</TableHead>
-                      <TableHead>Kết quả</TableHead>
-                      <TableHead className="text-right">Nhận / thấy</TableHead>
-                      <TableHead>Nguồn chưa xong, lỗi</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {d.runs.map((r) => (
-                      <TableRow key={r.run_id}>
-                        <TableCell className="whitespace-nowrap tabular-nums">
-                          <TextLink to={`/runs/${r.run_id}`} className="text-brand">
-                            {dt(r.started_at)}
-                          </TextLink>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge value={r.status} />
-                          <div className="text-meta text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.jobs_accepted}/{r.jobs_found}
-                        </TableCell>
-                        <TableCell className="max-w-96 text-meta whitespace-normal [overflow-wrap:anywhere]">
-                          {r.incomplete_sources.length > 0 && r.incomplete_sources.map(sourceLabel).join(", ")}
-                          {r.error && <div className="mt-0.5 font-mono text-muted-foreground">{r.error.slice(0, 200)}</div>}
-                          {!r.incomplete_sources.length && !r.error && <span className="text-muted-foreground">Không có</span>}
-                        </TableCell>
+            <Section bodyClassName="p-0" title="Các lượt chạy" description="Mới nhất trước">
+              <PagedList<Run> queryKey={["company-runs", c.id]} url={`/companies/${c.id}/runs`} empty="Chưa chạy lần nào.">
+                {(runs) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Bắt đầu</TableHead>
+                        <TableHead>Kết quả</TableHead>
+                        <TableHead className="text-right">Nhận / thấy</TableHead>
+                        <TableHead>Nguồn chưa xong, lỗi</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <Empty>Chưa chạy lần nào.</Empty>
-              )}
+                    </TableHeader>
+                    <TableBody>
+                      {runs.map((r) => (
+                        <TableRow key={r.run_id}>
+                          <TableCell className="whitespace-nowrap tabular-nums">
+                            <TextLink to={`/runs/${r.run_id}`} className="text-brand">
+                              {dt(r.started_at)}
+                            </TextLink>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge value={r.status} />
+                            <div className="text-meta text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.jobs_accepted}/{r.jobs_found}
+                          </TableCell>
+                          <TableCell className="max-w-96 text-meta whitespace-normal [overflow-wrap:anywhere]">
+                            {r.incomplete_sources.length > 0 && r.incomplete_sources.map(sourceLabel).join(", ")}
+                            {r.error && <div className="mt-0.5 font-mono text-muted-foreground">{r.error.slice(0, 200)}</div>}
+                            {!r.incomplete_sources.length && !r.error && <span className="text-muted-foreground">Không có</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </PagedList>
             </Section>
           </TabsContent>
 
           <TabsContent value="rejected">
-            <Section bodyClassName="p-0" title="Tin bị loại" description="Kèm lý do xác minh">
-              {d.rejected.length ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tin</TableHead>
-                      <TableHead>Nguồn</TableHead>
-                      <TableHead>Lý do</TableHead>
-                      <TableHead>Thời điểm</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {d.rejected.map((p) => (
-                      <TableRow key={p.id}>
-                        <TableCell className="max-w-80 min-w-56 whitespace-normal">
-                          <ExternalLink href={p.url}>{cap(p.title || p.url)}</ExternalLink>
-                        </TableCell>
-                        <TableCell className="text-meta">{sourceLabel(p.source)}</TableCell>
-                        <TableCell className="max-w-96 text-meta whitespace-normal">
-                          {p.verification_reasons
-                            .filter((r) => !r.startsWith("SOURCE_"))
-                            .map((r) => (
-                              <div key={r}>
-                                <span className="font-mono text-caption text-muted-foreground">{r.split(":")[0]}</span>
-                                {r.includes(":") && <> · {cap(r.slice(r.indexOf(":") + 1).trim())}</>}
-                              </div>
-                            ))}
-                        </TableCell>
-                        <TableCell className="text-meta text-muted-foreground">{cap(ago(p.verified_at))}</TableCell>
+            <Section bodyClassName="p-0" title="Tin bị loại" description="Kèm lý do xác minh, mới nhất trước">
+              <PagedList<Posting>
+                queryKey={["company-rejected", c.id]}
+                url={`/companies/${c.id}/rejected`}
+                empty="Không có tin bị loại."
+              >
+                {(postings) => (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Tin</TableHead>
+                        <TableHead>Nguồn</TableHead>
+                        <TableHead>Lý do</TableHead>
+                        <TableHead>Thời điểm</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <Empty>Không có tin bị loại.</Empty>
-              )}
+                    </TableHeader>
+                    <TableBody>
+                      {postings.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="max-w-80 min-w-56 whitespace-normal">
+                            <ExternalLink href={p.url}>{cap(p.title || p.url)}</ExternalLink>
+                          </TableCell>
+                          <TableCell className="text-meta">{sourceLabel(p.source)}</TableCell>
+                          <TableCell className="max-w-96 text-meta whitespace-normal">
+                            {p.verification_reasons
+                              .filter((r) => !r.startsWith("SOURCE_"))
+                              .map((r) => (
+                                <div key={r}>
+                                  <span className="font-mono text-caption text-muted-foreground">{r.split(":")[0]}</span>
+                                  {r.includes(":") && <> · {cap(r.slice(r.indexOf(":") + 1).trim())}</>}
+                                </div>
+                              ))}
+                          </TableCell>
+                          <TableCell className="text-meta text-muted-foreground">{cap(ago(p.verified_at))}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </PagedList>
             </Section>
           </TabsContent>
         </Tabs>

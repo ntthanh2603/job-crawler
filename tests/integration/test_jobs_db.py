@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from typer.testing import CliRunner
 
 from jobcrawler.config import Settings, get_settings
@@ -215,6 +216,98 @@ async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: 
             )
         assert posting is not None
         assert (posting.accepted, posting.job_id, posting.status) == (False, None, "expired")
+
+
+async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
+    integration_settings: Settings,
+) -> None:
+    """Không có job trùng: tin đăng lại với mã mới ở lượt sau gắn vào job đã có; job trùng có từ
+    trước (dữ liệu trước 0006) được `dedupe_jobs` gộp; DB chặn hai job y hệt cùng đang mở."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME dedup {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+        first = normalized(raw_job(external_id=f"5883-{suffix}", locations=[]), board=False)
+        repost = normalized(
+            raw_job(
+                external_id=f"5920-{suffix}",
+                url=f"https://careers.acme.vn/jobs/5920-{suffix}",
+                locations=[],
+            ),
+            board=False,
+        )
+
+        async def save(jobs: list, *, complete: bool = False) -> store.SaveResult:
+            verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
+            async with res.sessionmaker.begin() as s:
+                return await store.save_company_jobs(
+                    s,
+                    company_id=company_id,
+                    company_name="ACME",
+                    jobs=jobs,
+                    verdicts=verdicts,
+                    clusters=dedup.cluster_jobs(jobs),
+                    now=NOW,
+                    complete=complete,
+                )
+
+        await save([first])
+        [job] = await company_jobs(res, company_id)
+        assert job.fingerprint
+        # Lượt sau chỉ còn bản đăng lại (mã mới), lượt partial: vẫn một job, cùng id.
+        await save([repost])
+        rows = await company_jobs(res, company_id)
+        assert [(r.id, r.status) for r in rows] == [(job.id, "active")]
+        async with res.sessionmaker() as s:
+            active = await s.scalar(select(Company.active_jobs).where(Company.id == company_id))
+        assert active == 1
+
+        # DB chặn job thứ hai y hệt đang mở.
+        async with res.sessionmaker() as s:
+            s.add(
+                Job(
+                    company_id=company_id,
+                    cluster_key=f"dup-{suffix}",
+                    fingerprint=job.fingerprint,
+                    title=job.title,
+                    title_normalized=job.title_normalized,
+                    company_name="ACME",
+                    description_md=job.description_md,
+                    canonical_source="careers",
+                    confidence=0.9,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                await s.commit()
+
+        # Dữ liệu cũ chưa có dấu vân tay: một bản sao → gộp vào job cũ nhất.
+        async with res.sessionmaker.begin() as s:
+            await s.execute(update(Job).where(Job.id == job.id).values(fingerprint=None))
+            s.add(
+                Job(
+                    company_id=company_id,
+                    cluster_key=f"old-{suffix}",
+                    title=job.title,
+                    title_normalized=job.title_normalized,
+                    company_name="ACME",
+                    description_md=job.description_md,
+                    requirements_md=job.requirements_md,
+                    locations=job.locations,
+                    canonical_source="careers",
+                    confidence=0.9,
+                    source_urls=["https://careers.acme.vn/jobs/old"],
+                )
+            )
+        report = await maintenance.dedupe_jobs(res.sessionmaker)
+        assert report.merged >= 1
+        statuses = {r.cluster_key: r.status for r in await company_jobs(res, company_id)}
+        assert statuses[job.cluster_key] == "active"
+        assert statuses[f"old-{suffix}"] == "removed"
+        [kept] = [r for r in await company_jobs(res, company_id) if r.id == job.id]
+        assert "https://careers.acme.vn/jobs/old" in kept.source_urls
 
 
 def test_cli_export(

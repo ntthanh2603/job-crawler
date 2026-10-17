@@ -369,6 +369,16 @@ async def _finish_run(
                 error=outcome.error,
             )
         )
+        # Tóm tắt lượt mới nhất trên dòng doanh nghiệp (chỉ khi chưa có lượt nào mới hơn).
+        await session.execute(
+            update(Company)
+            .where(Company.id == company_id, Company.last_run_id == run_id)
+            .values(
+                last_run_status=outcome.status.value,
+                last_run_duration_ms=duration_ms,
+                last_run_incomplete=outcome.incomplete_sources,
+            )
+        )
 
 
 def _display_name(company: Company) -> str:
@@ -396,6 +406,17 @@ async def process_company(
                     company_id=resolved.company.id,
                     started_at=started_at,
                     status=RunStatus.RUNNING.value,
+                )
+            )
+            await session.execute(
+                update(Company)
+                .where(Company.id == resolved.company.id)
+                .values(
+                    last_run_id=run_id,
+                    last_run_status=RunStatus.RUNNING.value,
+                    last_run_at=started_at,
+                    last_run_duration_ms=None,
+                    last_run_incomplete=[],
                 )
             )
         state = RunState(company=resolved.company, fresh=resolved.fresh, how=resolved.how)

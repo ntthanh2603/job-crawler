@@ -49,6 +49,7 @@ from jobcrawler.net.urls import (
     site_root,
 )
 from jobcrawler.pages import extract_links, parse
+from jobcrawler.pipeline import store
 from jobcrawler.pipeline.company_facts import (
     Kind,
     SiteFacts,
@@ -66,7 +67,7 @@ from jobcrawler.pipeline.company_facts import (
     valid_tax_code,
 )
 from jobcrawler.prompts import kyc_pick
-from jobcrawler.schemas import CompanyIn, KycCandidate, KycEvidence, KycRecord, KycStatus
+from jobcrawler.schemas import CompanyIn, JobStatus, KycCandidate, KycEvidence, KycRecord, KycStatus
 from jobcrawler.serp import SerpClient, SerpItem, SerpPanel, SerpResponse
 from jobcrawler.sources import ats
 from jobcrawler.sources.base import FetchRecord, SourceError, SourceLimits, SourceSession
@@ -1066,9 +1067,22 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
             update(model).where(model.company_id == src.id).values(company_id=dst.id)
         )
     taken = select(Job.cluster_key).where(Job.company_id == dst.id)
+    # Job đang mở của src y hệt một job đang mở của dst (cùng dấu vân tay) không chuyển sang —
+    # bị xoá cùng src — để dst không có job trùng (index ux_jobs_company_fingerprint_active).
+    same_content = select(Job.fingerprint).where(
+        Job.company_id == dst.id,
+        Job.status == JobStatus.ACTIVE.value,
+        Job.fingerprint.is_not(None),
+    )
     await session.execute(
         update(Job)
-        .where(Job.company_id == src.id, Job.cluster_key.not_in(taken))
+        .where(
+            Job.company_id == src.id,
+            Job.cluster_key.not_in(taken),
+            (Job.status != JobStatus.ACTIVE.value)
+            | Job.fingerprint.is_(None)
+            | Job.fingerprint.not_in(same_content),
+        )
         .values(company_id=dst.id)
     )
     domains = [dst.primary_domain, *(dst.other_domains or [])]
@@ -1078,6 +1092,7 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
     ]
     await session.execute(delete(Company).where(Company.id == src.id))
     session.expunge(src)
+    await store.refresh_active_jobs(session, dst.id)
     log.info("kyc.merged", src_id=src.id, dst_id=dst.id)
 
 

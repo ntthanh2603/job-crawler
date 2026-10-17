@@ -134,13 +134,16 @@ export function sourceLabel(value: string | null | undefined): string {
 const VOWEL = /[aeiouyàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]/i
 
 /**
- * Tên viết HOA toàn bộ ("CÔNG TY CỔ PHẦN ĐẦU TƯ ĐIỆN MÁY XANH") → viết hoa đầu mỗi từ để dễ đọc;
- * giữ nguyên từ viết tắt (không có nguyên âm) và tên đã viết thường/hoa lẫn.
+ * Tên dài viết HOA toàn bộ ("CÔNG TY CỔ PHẦN ĐẦU TƯ ĐIỆN MÁY XANH") → viết hoa đầu mỗi từ để dễ
+ * đọc; giữ nguyên tên ngắn (thương hiệu viết tắt), từ không có nguyên âm ("TNHH") và tên đã viết
+ * thường/hoa lẫn.
  */
 export function displayName(text: string | null | undefined): string {
   if (!text) return ""
   const letters = text.replace(/[^\p{L}]/gu, "")
-  if (letters.length < 4 || letters !== letters.toLocaleUpperCase("vi")) return cap(text)
+  const words = text.trim().split(/\s+/).length
+  // Thương hiệu viết tắt ("MISA", "VNPAY", "FPT Software") giữ nguyên; chỉ đổi tên dài viết hoa.
+  if (words < 3 || letters !== letters.toLocaleUpperCase("vi")) return cap(text)
   return text.replace(/\p{L}[\p{L}\p{M}'’]*/gu, (word) =>
     VOWEL.test(word) ? word.charAt(0) + word.slice(1).toLocaleLowerCase("vi") : word,
   )

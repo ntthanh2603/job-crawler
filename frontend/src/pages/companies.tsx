@@ -367,7 +367,7 @@ export function CompaniesPage() {
                 </Empty>
               ))}
             {query.data && (
-              <Pager page={query.data.page} pages={query.data.pages} total={query.data.total} onPage={(p) => update({ page: p })} />
+              <Pager {...query.data} onPage={(p) => update({ page: p })} />
             )}
           </Section>
         </div>
