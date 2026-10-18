@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.kv import MemoryKV
@@ -13,6 +15,7 @@ from jobcrawler.sources.base import KnownJobs, SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,
     Page,
+    _stop,  # pyright: ignore[reportPrivateUsage]
     clean_card_text,
     jd_signals,
     job_links,
@@ -416,6 +419,30 @@ def test_pick_title_from_card_text_and_url_slug() -> None:
     assert slug_hint("https://a.vn/jobs/58434444/") is None
     assert slug_hint("https://a.vn/viec-lam/ke-toan-tong-hop-123.html") == "ke toan tong hop"
     assert clean_card_text("HOT – Kế toán | Cạnh tranh") == "Kế toán"
+
+
+@pytest.mark.parametrize(
+    ("segment", "stop"),
+    [
+        ("privacy-policy", True),
+        ("chinh-sach-bao-mat", True),
+        ("cookie-policy", True),
+        ("terms-of-use", True),
+        ("tim-kiem-theo-hash-tag", True),
+        ("search", True),
+        ("saved-jobs", True),
+        # Tên vị trí có chữ trùng từ khoá của trang chính sách / tìm kiếm.
+        ("chuyen-vien-bao-mat-thong-tin-12", False),
+        ("chuyen-vien-bao-mat-thong-tin", False),
+        ("ky-su-bao-mat", False),
+        ("chuyen-vien-chinh-sach-tin-dung-45", False),
+        ("search-engine-optimization-specialist", False),
+        ("ky-su-loc-hoa-dau", False),
+        ("loc-hoa-dau-nghi-son-ky-su-van-hanh", False),
+    ],
+)
+def test_stop_segments(segment: str, stop: bool) -> None:
+    assert _stop(segment) is stop
 
 
 def test_policy_pages_and_locale_root_are_not_jobs() -> None:

@@ -142,22 +142,32 @@ STOP_SEGMENTS = frozenset(
         "cdn-cgi",
     }
 )
-# Trang tìm kiếm / lọc theo từ khoá: /tuyen-dung/tim-kiem-theo-hash-tag?tukhoa=...
-_STOP_PREFIXES = ("tim-kiem", "search", "hash-tag", "hashtag", "filter", "loc-")
-# Trang chính sách, điều khoản (privacy-policy, chinh-sach-bao-mat...).
-_STOP_WORDS = (
+# Đoạn đường dẫn bắt đầu bằng các cụm này không phải tin: trang tìm kiếm / lọc
+# (/tuyen-dung/tim-kiem-theo-hash-tag), chính sách, điều khoản (privacy-policy,
+# chinh-sach-bao-mat), tin đã lưu. So cả cụm ở đầu đoạn, không so chuỗi con: "chuyen-vien-bao-
+# mat-thong-tin", "loc-hoa-dau", "search-engine-optimization-specialist" là tên vị trí.
+_STOP_HEADS = (
+    "tim-kiem",
+    "search-result",
+    "hash-tag",
+    "hashtag",
+    "filter",
+    "loc-theo",
     "privacy",
     "policy",
     "cookie",
     "terms",
     "dieu-khoan",
     "chinh-sach",
-    "bao-mat",
     "saved-jobs",
     "job-alert",
     "favorite",
     "wishlist",
 )
+# ... hoặc kết thúc bằng: cookie-policy, terms-of-use, data-privacy.
+_STOP_TAILS = ("privacy", "policy", "terms", "terms-of-use", "cookies")
+# Đoạn có mã số (tin "-12", "/744000153509469/"): là tin, không phải trang chính sách.
+_HAS_ID = re.compile(r"(?:^|-)\d{2,}(?:-|$)")
 # Trang mục lục việc làm (/en/jobs/, /careers/tuyen-dung/): đi tiếp như trang danh sách.
 _INDEX_SEGMENTS = frozenset(
     {
@@ -291,11 +301,13 @@ def _segments(url: str) -> list[str]:
 
 
 def _stop(segment: str) -> bool:
-    return (
-        segment in STOP_SEGMENTS
-        or segment.startswith(_STOP_PREFIXES)
-        or any(w in segment for w in _STOP_WORDS)
-    )
+    if segment in STOP_SEGMENTS:
+        return True
+    if _HAS_ID.search(segment):
+        return False
+    heads = any(segment == h or segment.startswith(h + "-") for h in _STOP_HEADS)
+    tails = any(segment == t or segment.endswith("-" + t) for t in _STOP_TAILS)
+    return heads or tails
 
 
 def _content_segments(segs: list[str]) -> list[str]:
