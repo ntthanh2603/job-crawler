@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -8,6 +9,7 @@ import pytest
 
 from jobcrawler.fakes import FakeRenderer, FakeTransport, response
 from jobcrawler.net.http import (
+    CapturedJson,
     HttpClient,
     HttpConfig,
     decode_body,
@@ -290,6 +292,17 @@ async def test_proxy_is_used_when_configured(clock: FakeClock) -> None:
     result = await rig.client.fetch(url)
     assert {c.proxy for c in rig.transport.calls} == {"http://u:p@1.1.1.1:8080"}
     assert result.proxy_id == rig.pool.proxies[0].id
+
+
+async def test_render_returns_captured_json(clock: FakeClock) -> None:
+    url = f"{SITE}/spa"
+    api = CapturedJson(url=f"{SITE}/api/jobs", method="GET", status=200, body=b'{"jobs": []}')
+    raw = response(url, "<div id='app'></div>")
+    renderer = FakeRenderer({url: dataclasses.replace(raw, captured=(api,))})
+    rig = make(clock, renderer=renderer)
+    result = await rig.client.render(url, capture_json=True)
+    assert result.ok
+    assert result.captured == (api,)
 
 
 async def test_render_ok_and_blocked(clock: FakeClock) -> None:

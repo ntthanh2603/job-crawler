@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from jobcrawler.net.http import FetchResult, RawResponse, TransportError, WaitUntil, with_params
+from jobcrawler.net.http import (
+    CapturedJson,
+    FetchResult,
+    RawResponse,
+    TransportError,
+    WaitUntil,
+    with_params,
+)
 from jobcrawler.net.proxy_pool import Proxy
 from jobcrawler.schemas import FetchOutcome
 
@@ -99,7 +106,13 @@ class FakeRenderer:
         self.calls: list[tuple[str, Proxy | None]] = []
 
     async def render(
-        self, url: str, *, proxy: Proxy | None, timeout: float, wait_until: WaitUntil
+        self,
+        url: str,
+        *,
+        proxy: Proxy | None,
+        timeout: float,
+        wait_until: WaitUntil,
+        capture_json: bool = False,
     ) -> RawResponse:
         self.calls.append((url, proxy))
         reply = self.routes.get(url) or response(url, "not found", status=404)
@@ -169,6 +182,18 @@ class FakeFetcher:
         path = Path(path)
         self.rendered[url] = fetch_result(url, path.read_bytes(), **_file_kwargs(path, kwargs))
 
+    def add_rendered(
+        self,
+        url: str,
+        body: str | bytes = b"",
+        *,
+        captured: Sequence[CapturedJson] = (),
+        **kwargs: Any,
+    ) -> None:
+        """DOM sau khi chạy JavaScript, kèm phản hồi JSON trang gọi (khi `capture_json`)."""
+        result = fetch_result(url, body, **kwargs)
+        self.rendered[url] = replace(result, captured=tuple(captured))
+
     def add_route(self, url: str, handler: Callable[[dict[str, Any]], FetchResult]) -> None:
         """`handler(kwargs của fetch)` → kết quả."""
         self.routes[url] = handler
@@ -201,6 +226,7 @@ class FakeFetcher:
             error=found.error,
             source=kwargs.get("source"),
             rendered=kind == "render",
+            captured=found.captured if kwargs.get("capture_json") else (),
         )
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:

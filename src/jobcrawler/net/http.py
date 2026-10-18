@@ -46,11 +46,23 @@ _HEADER_CHARSET = re.compile(r"charset=([^\s;]+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
+class CapturedJson:
+    """Phản hồi JSON (XHR/fetch) trang gọi khi mở bằng trình duyệt: dữ liệu của trang SPA."""
+
+    url: str
+    method: str
+    status: int
+    body: bytes
+    request_json: Any = None  # body JSON của request (API tìm kiếm dạng POST)
+
+
+@dataclass(frozen=True, slots=True)
 class RawResponse:
     status: int
     url: str  # URL cuối cùng sau redirect
     headers: Mapping[str, str]  # khoá viết thường
     content: bytes
+    captured: tuple[CapturedJson, ...] = ()
 
 
 class TransportError(Exception):
@@ -83,7 +95,13 @@ class Transport(Protocol):
 
 class Renderer(Protocol):
     async def render(
-        self, url: str, *, proxy: Proxy | None, timeout: float, wait_until: WaitUntil
+        self,
+        url: str,
+        *,
+        proxy: Proxy | None,
+        timeout: float,
+        wait_until: WaitUntil,
+        capture_json: bool = False,
     ) -> RawResponse: ...
 
 
@@ -176,6 +194,7 @@ class FetchResult:
     from_cache: bool = False
     rendered: bool = False
     fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    captured: tuple[CapturedJson, ...] = ()  # JSON bắt được khi render (`capture_json`)
 
     @property
     def ok(self) -> bool:
@@ -217,6 +236,7 @@ class Fetcher(Protocol):
         check_robots: bool = True,
         timeout: float | None = None,
         wait_until: WaitUntil = "domcontentloaded",
+        capture_json: bool = False,
     ) -> FetchResult: ...
 
 
@@ -614,8 +634,11 @@ class HttpClient:
         check_robots: bool = True,
         timeout: float | None = None,
         wait_until: WaitUntil = "domcontentloaded",
+        capture_json: bool = False,
     ) -> FetchResult:
-        """Mở trang bằng Chromium (chỉ khi HTTP không đủ). Không retry: tốn tài nguyên."""
+        """Mở trang bằng Chromium (chỉ khi HTTP không đủ). Không retry: tốn tài nguyên.
+
+        `capture_json`: giữ các phản hồi JSON trang gọi (`FetchResult.captured`)."""
         host = host_of(url)
         started = time.monotonic()
 
@@ -649,7 +672,11 @@ class HttpClient:
         )
         try:
             raw = await self._renderer.render(
-                url, proxy=proxy, timeout=timeout or self.config.timeout * 2, wait_until=wait_until
+                url,
+                proxy=proxy,
+                timeout=timeout or self.config.timeout * 2,
+                wait_until=wait_until,
+                capture_json=capture_json,
             )
         except TransportError as exc:
             if proxy is not None and exc.proxy_fault:
@@ -666,6 +693,7 @@ class HttpClient:
             "content": raw.content,
             "proxy_id": proxy_id,
             "attempts": 1,
+            "captured": raw.captured,
         }
         reason = detect_block(
             raw.status,

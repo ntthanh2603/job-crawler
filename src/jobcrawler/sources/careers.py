@@ -15,13 +15,14 @@ Một `CareersSource` bắt đầu từ một trang danh sách (do `pipeline/dis
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlsplit
 
 from jobcrawler.logging import get_logger
-from jobcrawler.net.http import FetchResult, WaitUntil
+from jobcrawler.net.http import CapturedJson, FetchResult, WaitUntil
 from jobcrawler.net.urls import host_of, normalize_url, path_segments, same_site
 from jobcrawler.pages import (
     PAGE_PARAMS,
@@ -456,6 +457,7 @@ class Page:
     url: str  # URL cuối (sau redirect), đã chuẩn hoá
     html: str
     rendered: bool = False
+    captured: tuple[CapturedJson, ...] = ()  # JSON trang gọi khi mở bằng trình duyệt
 
 
 def _render_needed(result: FetchResult, html: str) -> bool:
@@ -464,7 +466,12 @@ def _render_needed(result: FetchResult, html: str) -> bool:
 
 
 def _page(result: FetchResult, rendered: bool) -> Page:
-    return Page(normalize_url(result.final_url) or result.final_url, result.text, rendered)
+    return Page(
+        normalize_url(result.final_url) or result.final_url,
+        result.text,
+        rendered,
+        result.captured,
+    )
 
 
 async def fetch_page(
@@ -475,17 +482,19 @@ async def fetch_page(
     render: bool = False,
     auto_render: bool = True,
     wait_until: WaitUntil = "domcontentloaded",
+    capture_json: bool = False,
 ) -> Page | None:
     """Một trang HTML. `render=True` thì mở bằng trình duyệt; HTML là khung SPA thì cũng mở
     bằng trình duyệt (trừ khi `auto_render=False`) và chờ mạng yên vì nội dung nạp bằng XHR.
 
-    `required`: lỗi thì dừng nguồn (`SourceError`) thay vì trả None.
+    `required`: lỗi thì dừng nguồn (`SourceError`) thay vì trả None. `capture_json`: khi mở bằng
+    trình duyệt, giữ các phản hồi JSON trang gọi (danh sách tin của trang SPA).
     """
     if render:
         if not session.can_render:
             session.truncate("render_budget")
             return None
-        result = await session.render(url, wait_until=wait_until)
+        result = await session.render(url, wait_until=wait_until, capture_json=capture_json)
         if not result.ok:
             if transient_failure(result):
                 session.truncate("page_error")
@@ -500,7 +509,7 @@ async def fetch_page(
         if not session.can_render:
             session.truncate("render_budget")
             return _page(result, False)
-        rendered = await session.render(url, wait_until="networkidle")
+        rendered = await session.render(url, wait_until="networkidle", capture_json=capture_json)
         if rendered.ok:
             return _page(rendered, True)
     return _page(result, False)
@@ -522,11 +531,26 @@ class ListingScan:
 
 
 def json_docs(page: Page) -> list[json_jobs.JsonDoc]:
-    """JSON của trang: nhúng trong HTML (`__NEXT_DATA__`...)."""
-    return [
+    """JSON của trang: nhúng trong HTML (`__NEXT_DATA__`...) và phản hồi API trang gọi khi mở
+    bằng trình duyệt."""
+    docs = [
         json_jobs.JsonDoc(url=page.url, data=data, embedded=True)
         for data in json_jobs.embedded_json(page.html)
     ]
+    for captured in page.captured:
+        try:
+            data = json.loads(captured.body)
+        except ValueError:
+            continue
+        docs.append(
+            json_jobs.JsonDoc(
+                url=captured.url,
+                data=data,
+                method=captured.method,
+                request_json=captured.request_json,
+            )
+        )
+    return docs
 
 
 def scan_listing(page: Page) -> ListingScan:
@@ -562,13 +586,15 @@ async def scan_with_render(
 ) -> ListingScan | None:
     """Đọc trang danh sách; HTTP không thấy tin nào thì mở lại bằng trình duyệt (danh sách do
     JavaScript nạp sau). `render=False`: chỉ dùng HTTP."""
-    page = await fetch_page(session, url, required=required, auto_render=render)
+    page = await fetch_page(session, url, required=required, auto_render=render, capture_json=True)
     if page is None:
         return None
     scan = scan_listing(page)
     if render and scan.empty and not page.rendered:
         # Danh sách nạp bằng XHR sau khi trang tải: chờ mạng yên.
-        rendered = await fetch_page(session, url, render=True, wait_until="networkidle")
+        rendered = await fetch_page(
+            session, url, render=True, wait_until="networkidle", capture_json=True
+        )
         if rendered is not None:
             # DOM đã chạy JavaScript chứa ít nhất những gì HTML gốc có.
             return scan_listing(rendered)

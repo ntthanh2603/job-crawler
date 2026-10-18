@@ -8,6 +8,7 @@ import pytest
 
 from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
+from jobcrawler.net.http import CapturedJson
 from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pages import Link
 from jobcrawler.schemas import ExtractionMethod, RawJob
@@ -431,6 +432,48 @@ async def test_category_pages_are_followed_to_their_jobs() -> None:
     opened = {u for kind, u, _ in fetcher.calls if kind == "fetch"}
     assert job in opened
     assert f"{TGDD}/tuyen-dung/quan-ly-sieu-thi-bach-hoa-xanh-646" in opened
+
+
+def captured(name: str) -> CapturedJson:
+    """Phản hồi API bắt được khi mở trang bằng trình duyệt (tests/fixtures/careers/json/)."""
+    data = json.loads((FIXTURES / "json" / name).read_text(encoding="utf-8"))
+    return CapturedJson(
+        url=data["url"],
+        method=data["method"],
+        status=200,
+        body=json.dumps(data["body"], ensure_ascii=False).encode(),
+        request_json=data["request_json"],
+    )
+
+
+async def test_spa_jobs_from_captured_api_responses() -> None:
+    """Ahamove: HTML là khung SPA, trình duyệt gọi API tin tuyển dụng; tin lấy từ JSON."""
+    url = "https://careers.ahamove.com/jobs"
+    shell = (
+        '<html><body><div id="root"></div><script src="/assets/index.js"></script></body></html>'
+    )
+    fetcher = FakeFetcher()
+    fetcher.add(url, shell)
+    links = "".join(
+        f'<a href="/jobs/{slug}">x</a>'
+        for slug in ("ctv-kinh-doanh-3", "senior-accounts-receivable-executive")
+    )
+    fetcher.add_rendered(
+        url,
+        f"<html><body><main><h1>Việc làm</h1>{links}</main></body></html>",
+        captured=[captured("ahamove_job_fields.json"), captured("ahamove_jobs.json")],
+    )
+    s = session(fetcher)
+    jobs = await run(CareersSource(url), s)
+    by_title = {j.title: j for j in jobs}
+    assert len(by_title) == 7
+    assert by_title["CTV Kinh Doanh"].url == f"{url}/ctv-kinh-doanh-3"
+    assert all(len(j.description or "") >= 100 for j in jobs)
+    # Đã có đủ mô tả trong JSON: không mở trang chi tiết.
+    detail = [u for kind, u, _ in fetcher.calls if u.startswith(f"{url}/")]
+    assert detail == []
+    render = [kw for kind, _, kw in fetcher.calls if kind == "render"]
+    assert render[0]["capture_json"] is True
 
 
 async def test_jobs_embedded_in_next_data() -> None:

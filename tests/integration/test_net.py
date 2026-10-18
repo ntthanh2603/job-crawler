@@ -297,6 +297,56 @@ def test_cli_proxies_check_without_file(
     assert "Không có proxy" in result.output
 
 
+SPA = b"""<html><body><ul id="jobs"></ul><script>
+fetch('/api/jobs?page=1&pageSize=2').then(r => r.json()).then(data => {
+  for (const job of data.items) {
+    const li = document.createElement('li'); li.textContent = job.title;
+    document.getElementById('jobs').appendChild(li);
+  }
+});
+fetch('/api/hello.txt');
+</script></body></html>"""
+
+
+async def test_browser_captures_json_responses() -> None:
+    from playwright.async_api import Error as PlaywrightError
+
+    from jobcrawler.net.browser import BrowserManager
+
+    api = json.dumps(
+        {"total": 2, "items": [{"title": "K\u1ebf to\u00e1n"}, {"title": "Ki\u1ec3m to\u00e1n"}]}
+    ).encode()
+    routes: dict[str, Any] = {
+        "/spa": (200, {"Content-Type": "text/html; charset=utf-8"}, SPA),
+        "/api/jobs?page=1&pageSize=2": (200, {"Content-Type": "application/json"}, api),
+        "/api/hello.txt": (200, {"Content-Type": "text/html"}, b"<p>hi</p>"),
+    }
+    browser = BrowserManager(max_pages=2)
+    with serve_site(routes) as spa:
+        try:
+            try:
+                await browser.get()
+            except PlaywrightError as exc:
+                pytest.skip(f"chưa cài Chromium cho Playwright: {str(exc).splitlines()[0]}")
+            raw = await browser.render(
+                f"{spa.base}/spa",
+                proxy=None,
+                timeout=10,
+                wait_until="networkidle",
+                capture_json=True,
+            )
+            plain = await browser.render(
+                f"{spa.base}/spa", proxy=None, timeout=10, wait_until="networkidle"
+            )
+        finally:
+            await browser.close()
+    assert "Kiểm toán" in raw.content.decode()
+    [jobs] = raw.captured  # trang HTML qua fetch() không tính
+    assert jobs.url == f"{spa.base}/api/jobs?page=1&pageSize=2"
+    assert (jobs.method, jobs.status, jobs.body) == ("GET", 200, api)
+    assert plain.captured == ()
+
+
 async def test_browser_render_blocks_images(site: Site) -> None:
     from playwright.async_api import Error as PlaywrightError
 
