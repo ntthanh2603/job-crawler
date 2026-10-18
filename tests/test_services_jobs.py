@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,9 @@ from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.http import FetchResult
 from jobcrawler.net.kv import MemoryKV
-from jobcrawler.schemas import ExtractionMethod
+from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.services.jobs import website_jobs
+from jobcrawler.sources.base import Source, SourceSession
 
 FIXTURES = Path(__file__).parent / "fixtures" / "careers"
 JOB = "https://careers.base.vn/job/hn-business-development-executive-junior-b2b-sales-1yoe-29675"
@@ -93,3 +95,51 @@ async def test_discover_only_and_deadline() -> None:
     assert partial.incomplete_sources == ["discovery:base.vn"]
     assert [r.name for r in partial.collected.reports] == ["careers:careers.base.vn"]
     assert [j.url for j in partial.jobs] == [JOB]
+
+
+class InstantBoard(Source):
+    kind = "board"
+
+    def __init__(self) -> None:
+        super().__init__("7", "https://board.test/cong-ty/7")
+        self.started: float | None = None
+
+    async def jobs(self, session: SourceSession) -> AsyncIterator[RawJob]:
+        self.started = time.monotonic()
+        yield RawJob(
+            source="fakeboard",
+            external_id="1",
+            url="https://board.test/viec-lam/ke-toan-1.html",
+            title="Kế toán",
+            method=ExtractionMethod.JSONLD,
+        )
+
+
+async def test_board_sources_are_collected_while_discovery_runs() -> None:
+    board = InstantBoard()
+
+    async def boards() -> list[Source]:
+        return [board]
+
+    slow = base_fetcher()
+    slow.delay = 0.2  # mỗi request của bước tìm nguồn trên website mất 0,2 giây
+    llm = LLMClient(FakeChatClient(["{}"]), model=None)
+    started = time.monotonic()
+    found = await website_jobs(
+        "base.vn",
+        fetcher=slow,
+        llm=llm,
+        kv=MemoryKV(),
+        deadline=started + 30,
+        board_sources=boards,
+    )
+    assert board.started is not None
+    assert board.started - started < 0.2  # không chờ bước tìm nguồn
+    assert sorted(r.name for r in found.collected.reports) == [
+        "board:7",
+        "careers:careers.base.vn",
+    ]
+    assert sorted(j.url for j in found.jobs) == sorted(
+        [JOB, "https://board.test/viec-lam/ke-toan-1.html"]
+    )
+    assert found.incomplete_sources == []

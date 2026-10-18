@@ -40,7 +40,7 @@ from jobcrawler.serp import SerpClient
 from jobcrawler.services import boards as board_service
 from jobcrawler.services import jobs as website_jobs
 from jobcrawler.sources import boards
-from jobcrawler.sources.base import FetchRecord, failed_page_rows
+from jobcrawler.sources.base import FetchRecord, Source, failed_page_rows
 
 log = get_logger(__name__)
 
@@ -286,33 +286,46 @@ async def _run_pipeline(
     # Website người dùng đưa (có thể là URL bảng ATS) luôn được thu; không có thì chỉ dùng domain
     # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào).
     website = company_in.website or step.website
+
     # Profile trên các trang tuyển dụng đã map khi index; trang nào chưa có thì tìm bằng SERP
     # `site:`. KYC mơ hồ thì chỉ dùng profile khớp mạnh (cùng MST hoặc cùng website); không tìm
     # thấy website thì thêm profile trùng hẳn tên (đủ riêng), vì tên là tất cả những gì có.
-    await board_service.lookup_profiles(
-        res,
-        state.company,
-        timeout=min(res.settings.board_serp_lookup_seconds, max(0.0, deadline - time.monotonic())),
-        records=records,
-    )
-    board = await board_service.board_sources(
-        res,
-        state.company.id,
-        policy=profile_policy(
-            step.status, name_profiles=res.settings.board_name_profiles_without_kyc
-        ),
-        names=_names(state.company),
-    )
-    if not website and not board:
-        log.info("company.no_website", kyc_status=step.status.value if step.status else None)
-        return PipelineOutcome(
-            status=RunStatus.PARTIAL if incomplete else ok,
-            incomplete_sources=incomplete,
-            kyc_status=step.status,
+    async def board_list() -> list[Source]:
+        await board_service.lookup_profiles(
+            res,
+            state.company,
+            timeout=min(
+                res.settings.board_serp_lookup_seconds, max(0.0, deadline - time.monotonic())
+            ),
+            records=records,
         )
-    found = await website_jobs.jobs_for_website(
-        res, website, deadline=deadline, records=records, extra_sources=board
-    )
+        return await board_service.board_sources(
+            res,
+            state.company.id,
+            policy=profile_policy(
+                step.status, name_profiles=res.settings.board_name_profiles_without_kyc
+            ),
+            names=_names(state.company),
+        )
+
+    if website:
+        # Profile trên trang tuyển dụng được thu thập ngay, song song với bước tìm nguồn trên
+        # website (không phải chờ discovery).
+        found = await website_jobs.jobs_for_website(
+            res, website, deadline=deadline, records=records, board_sources=board_list
+        )
+    else:
+        board = await board_list()
+        if not board:
+            log.info("company.no_website", kyc_status=step.status.value if step.status else None)
+            return PipelineOutcome(
+                status=RunStatus.PARTIAL if incomplete else ok,
+                incomplete_sources=incomplete,
+                kyc_status=step.status,
+            )
+        found = await website_jobs.jobs_for_website(
+            res, None, deadline=deadline, records=records, extra_sources=board
+        )
     incomplete += found.incomplete_sources
     # Nguồn lỗi/bị chặn (không phải hết giờ) cũng khiến lượt chạy không đủ để coi job cũ đã gỡ.
     failed = [r.name for r in found.collected.reports if r.outcome is not FetchOutcome.OK]
