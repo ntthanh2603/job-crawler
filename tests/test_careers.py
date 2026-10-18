@@ -11,7 +11,7 @@ from jobcrawler.llm import LLMClient
 from jobcrawler.net.http import CapturedJson
 from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pages import Link
-from jobcrawler.schemas import ExtractionMethod, RawJob
+from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.sources.base import KnownJobs, SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,
@@ -476,14 +476,97 @@ async def test_spa_jobs_from_captured_api_responses() -> None:
     assert render[0]["capture_json"] is True
 
 
+def api_page(page: int, *, size: int = 2, total: int = 5) -> dict[str, Any]:
+    first = (page - 1) * size
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": n,
+                "title": f"Vị trí số {n}",
+                "location": "Hà Nội",
+                "description": "Mô tả công việc chi tiết. " * 10,
+            }
+            for n in range(first, min(first + size, total))
+        ],
+    }
+
+
+def spa_site(api: str, pages: dict[int, Any]) -> FakeFetcher:
+    """Trang careers SPA: khung HTML, khi render gọi `api` trang 1; các trang sau qua HTTP."""
+    listing = "https://hr.a.vn/viec-lam"
+    fetcher = FakeFetcher()
+    fetcher.add(listing, '<html><body><div id="app"></div></body></html>')
+    first = CapturedJson(
+        url=f"{api}?pageSize=2&page=1",
+        method="GET",
+        status=200,
+        body=json.dumps(pages[1]).encode(),
+    )
+    fetcher.add_rendered(
+        listing, "<html><body><div id='app'>…</div></body></html>", captured=[first]
+    )
+    for page, body in pages.items():
+        if page > 1:
+            fetcher.add(
+                f"{api}?pageSize=2&page={page}", json.dumps(body), content_type="application/json"
+            )
+    return fetcher
+
+
+async def test_spa_api_is_read_page_by_page() -> None:
+    api = "https://api.hr.a.vn/jobs"
+    fetcher = spa_site(api, {1: api_page(1), 2: api_page(2), 3: api_page(3)})
+    s = session(fetcher)
+    jobs = await run(CareersSource("https://hr.a.vn/viec-lam"), s)
+    assert [j.title for j in jobs] == [f"Vị trí số {n}" for n in range(5)]
+    assert s.truncated == []
+    api_calls = [u for kind, u, _ in fetcher.calls if u.startswith(api)]
+    assert api_calls == [f"{api}?pageSize=2&page=2", f"{api}?pageSize=2&page=3"]  # đủ total: dừng
+
+
+async def test_spa_api_stops_on_repeat_cap_or_block() -> None:
+    api = "https://api.hr.a.vn/jobs"
+    # API bỏ qua tham số trang (trả lại trang 1): dừng ngay, không đọc tới giới hạn.
+    repeat = spa_site(api, {1: api_page(1), 2: api_page(1), 3: api_page(1)})
+    jobs = await run(CareersSource("https://hr.a.vn/viec-lam"), session(repeat))
+    assert len(jobs) == 2
+    assert [u for _, u, _ in repeat.calls if u.startswith(api)] == [f"{api}?pageSize=2&page=2"]
+
+    # Chạm giới hạn trang API: nguồn chưa xong.
+    many = spa_site(api, {n: api_page(n, total=20) for n in range(1, 11)})
+    capped = session(many, max_api_pages=3)
+    jobs = await run(CareersSource("https://hr.a.vn/viec-lam"), capped)
+    assert len(jobs) == 6
+    assert capped.truncated == ["api_pages"]
+
+    # API trang 2 bị chặn: giữ tin trang 1, nguồn vẫn chạy tiếp.
+    blocked = spa_site(api, {1: api_page(1)})
+    blocked.add(f"{api}?pageSize=2&page=2", "captcha", status=403, outcome=FetchOutcome.BLOCKED)
+    s = session(blocked)
+    jobs = await run(CareersSource("https://hr.a.vn/viec-lam"), s)
+    assert len(jobs) == 2
+    assert s.truncated == ["api_pages"]
+
+
 async def test_jobs_embedded_in_next_data() -> None:
     """VNG: danh sách tin chỉ có trong `__NEXT_DATA__` (HTML không có link tin)."""
     url = "https://career.vng.com.vn/vi/tim-kiem-viec-lam"
     fetcher = FakeFetcher()
     fetcher.add(url, html("json/vng_search.html"))
+    # Trang 2 (`?page=2` trên chính trang, Next.js trả JSON trang 2); trang 3 trả lại trang 2:
+    # dừng.
+    page2 = (
+        html("json/vng_search.html")
+        .replace('"job_id":', '"job_id":1')
+        .replace("Technical Support Engineer", "Kỹ sư hỗ trợ kỹ thuật")
+    )
+    fetcher.add(f"{url}?page=2", page2)
+    fetcher.add(f"{url}?page=3", page2)
     jobs = await run(CareersSource(url), session(fetcher, max_rendered_pages=0))
-    assert len(jobs) >= 10
+    assert len(jobs) == 20
     assert jobs[0].title == "Technical Support Engineer, GreenNode"
+    assert jobs[10].title == "Kỹ sư hỗ trợ kỹ thuật, GreenNode"
     assert all(len(j.description or "") >= 100 for j in jobs)
 
 

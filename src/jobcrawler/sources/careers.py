@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlsplit
 
 from jobcrawler.logging import get_logger
@@ -43,6 +43,7 @@ from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources import json_jobs, jsonld
 from jobcrawler.sources.base import (
     Source,
+    SourceError,
     SourceSession,
     gather_all,
     text_or_none,
@@ -521,9 +522,11 @@ class ListingScan:
 
     page: Page
     links: list[Link]
-    jobs: list[RawJob]  # JobPosting JSON-LD đủ nội dung
+    jobs: list[RawJob]  # JobPosting JSON-LD / tin trong JSON của trang, đủ nội dung
     job_links: list[JobLink]
     next_pages: list[str]
+    # API danh sách tin (hoặc trang có JSON nhúng) còn trang sau: (cách phân trang, số tin đã đọc).
+    apis: list[tuple[json_jobs.Pager, int]] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -568,7 +571,11 @@ def scan_listing(page: Page) -> ListingScan:
     # Trang dựng bằng JavaScript: tin nằm trong dữ liệu JSON của trang.
     texts = {link.url: link.text for link in links}
     ids = {job.external_id for job in jobs}
+    apis: list[tuple[json_jobs.Pager, int]] = []
     for doc in json_docs(page):
+        arrays = json_jobs.job_arrays(doc)
+        if arrays and (pager := json_jobs.pager_for(doc, arrays[0])) is not None:
+            apis.append((pager, len(arrays[0].items)))
         extracted = json_jobs.extract(doc, page_url=page.url, links=texts)
         for job in extracted.jobs:
             if job.external_id not in ids:
@@ -578,7 +585,7 @@ def scan_listing(page: Page) -> ListingScan:
             if url not in known and url != page.url:
                 known.add(url)
                 found.append(JobLink(url=url, title=title))
-    return ListingScan(page, links, jobs, found, listing_links(links, page.url))
+    return ListingScan(page, links, jobs, found, listing_links(links, page.url), apis)
 
 
 async def scan_with_render(
@@ -708,6 +715,83 @@ class CareersSource(Source):
 
     def __init__(self, url: str) -> None:
         super().__init__(host_of(url), url)
+
+    # --- API danh sách tin (trang SPA) ---
+
+    async def _api_page(
+        self, session: SourceSession, pager: json_jobs.Pager, step: int
+    ) -> list[json_jobs.JsonDoc] | None:
+        """JSON của trang thứ `step` sau trang đầu (None: lỗi, dừng đọc API này)."""
+        url, body = pager.request(step)
+        try:
+            if pager.embedded:
+                result = await session.fetch(url)
+            else:
+                # Chỉ header tối thiểu, không cookie/token: API công khai của trang careers.
+                result = await session.fetch(
+                    url,
+                    method=pager.method,
+                    json=body if pager.method != "GET" else None,
+                    headers={"Accept": "application/json, text/plain, */*"},
+                    use_cache=False,
+                )
+        except SourceError:
+            return None  # bị chặn: giữ những gì đã đọc, không dừng cả nguồn
+        if not result.ok:
+            return None
+        if pager.embedded:
+            return [
+                json_jobs.JsonDoc(url=url, data=data, embedded=True)
+                for data in json_jobs.embedded_json(result.text)
+            ]
+        try:
+            data = result.json()
+        except ValueError:
+            return None
+        return [json_jobs.JsonDoc(url=url, data=data, method=pager.method, request_json=body)]
+
+    async def _api_jobs(
+        self,
+        session: SourceSession,
+        pager: json_jobs.Pager,
+        first: int,
+        page: Page,
+        links: dict[str, str],
+        seen: set[str],
+    ) -> AsyncIterator[RawJob | JobLink]:
+        """Đọc các trang sau của API danh sách tin: tin có mô tả, hoặc link trang tin. `seen`: mã
+        tin / URL đã có — trang không có gì mới (API bỏ qua tham số trang) thì dừng."""
+        read = first
+        for step in range(1, session.limits.max_api_pages):
+            if pager.done(read):
+                return
+            docs = await self._api_page(session, pager, step)
+            if docs is None:
+                session.truncate("api_pages")
+                return
+            fresh = 0
+            for doc in docs:
+                arrays = json_jobs.job_arrays(doc)
+                if not arrays:
+                    continue
+                read += len(arrays[0].items)
+                pager = json_jobs.with_doc(pager, doc)
+                extracted = json_jobs.extract(doc, page_url=page.url, links=links)
+                for job in extracted.jobs:
+                    if job.external_id not in seen:
+                        seen.add(job.external_id)
+                        fresh += 1
+                        yield job
+                for url, title in extracted.links:
+                    if url not in seen:
+                        seen.add(url)
+                        fresh += 1
+                        yield JobLink(url=url, title=title)
+            log.debug("careers.api_page", url=pager.url, step=step, fresh=fresh, read=read)
+            if fresh == 0:
+                return  # trang rỗng / API bỏ qua tham số trang
+        if not pager.done(read):
+            session.truncate("api_pages")
 
     # --- danh sách bằng LLM ---
 
@@ -909,6 +993,19 @@ class CareersSource(Source):
             log.debug("careers.listing", url=scan.page.url, jobs=len(scan.jobs), links=len(pending))
         if any(u not in visited for u in queue):
             session.truncate("listing_pages")
+
+        # API danh sách tin của trang SPA: các trang sau.
+        seen = {*yielded, *pending}
+        for scan in scans:
+            texts = {link.url: link.text for link in scan.links}
+            for pager, first in scan.apis:
+                async for item in self._api_jobs(session, pager, first, scan.page, texts, seen):
+                    if isinstance(item, JobLink):
+                        add_links([item])
+                    elif item.external_id not in yielded:
+                        yielded.add(item.external_id)
+                        done_urls.add(item.url)
+                        yield item
 
         if scans and not pending and not yielded and session.llm.enabled:
             for scan in _llm_listing_candidates(scans):

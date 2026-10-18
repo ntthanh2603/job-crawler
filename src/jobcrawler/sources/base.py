@@ -89,6 +89,7 @@ class SourceLimits:
     # Trang danh mục / theo tỉnh mở như trang chi tiết rồi hoá ra là danh sách con: không tính
     # vào `max_detail_pages`, tối đa chừng này trang.
     max_sub_listings: int = 60
+    max_api_pages: int = 20  # trang của API danh sách tin (trang careers SPA), kể cả trang đầu
     detail_concurrency: int = 4
     ats_rate: float = 2.0  # request/giây tới API công khai của ATS
     max_failed_pages: int = 5  # trang parse lỗi lưu HTML, mỗi nguồn
@@ -101,6 +102,7 @@ class SourceLimits:
             max_listing_pages=s.source_max_listing_pages,
             max_rendered_pages=s.source_max_rendered_pages,
             max_sub_listings=s.source_max_sub_listings,
+            max_api_pages=s.source_max_api_pages,
             ats_rate=s.ats_rate_per_second,
             max_failed_pages=s.failed_pages_per_run,
         )
