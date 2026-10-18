@@ -100,6 +100,12 @@ _GENERIC_WORDS = frozenset(
 )  # fmt: skip
 
 
+def branch_of(name: str) -> str | None:
+    """Phần chi nhánh của tên ("… - Chi nhánh Bắc Ninh" → "chi nhanh bac ninh"); None: không có."""
+    m = _BRANCH.search(fold(_PARENS.sub(" ", name)))
+    return m.group(0).strip() if m else None
+
+
 def distinctive_key(key: str, *, min_chars: int = 6) -> bool:
     """Khoá tên đủ riêng để khớp tên thôi cũng tin được: đủ dài và có ít nhất một từ không phải
     từ chung của tên ngành nghề ("thuong mai dich vu" không đủ, "kiotviet" đủ)."""

@@ -31,7 +31,7 @@ from jobcrawler.pipeline.company_facts import names_match
 from jobcrawler.pipeline.kyc import trigram_compatible
 from jobcrawler.prompts import profile_match
 from jobcrawler.schemas import KycStatus
-from jobcrawler.text import company_match_key
+from jobcrawler.text import branch_of, company_match_key
 
 log = get_logger(__name__)
 
@@ -86,6 +86,11 @@ def decide(profile: SourceProfile, candidates: list[tuple[Company, str, float]])
         if domain and domains and company.kyc_status == KycStatus.VERIFIED.value:
             continue  # website khác domain đã xác minh của doanh nghiệp
         if not trigram_compatible(name_norm, alias_norm):
+            continue
+        # Hai chi nhánh khác nhau của cùng doanh nghiệp (đầu vào là một chi nhánh cụ thể).
+        branches = {b for n in _company_names(company) if (b := branch_of(n))}
+        branch = branch_of(profile.name_on_source)
+        if branch and branches and branch not in branches:
             continue
         plausible[company.id] = company
         if (

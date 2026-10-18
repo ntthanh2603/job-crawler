@@ -399,6 +399,17 @@ def test_decide_maps_profile_name_variants() -> None:
     d = decide(profile, [(mb, company_match_key(mb.input_name), 1.0)])
     assert d is not None
     assert (d.company_id, d.evidence["signal"]) == (5, "name")
+    # Đầu vào là một chi nhánh: profile của chi nhánh khác không khớp; profile chung thì khớp.
+    hcm = _company(7, "Ngân hàng KEB Hana - Chi nhánh Thành phố Hồ Chí Minh")
+    for name, expected in [
+        ("Ngân Hàng Keb Hana - Chi Nhánh Hà Nội", None),
+        ("Ngân Hàng Keb Hana - Chi nhánh Thành phố Hồ Chí Minh", 7),
+    ]:
+        branch = _profile(name)
+        branch.name_norm = company_match_key(name)
+        d = decide(branch, [(hcm, company_match_key(hcm.input_name), 1.0)])
+        assert d is not None
+        assert d.company_id == expected, name
     # "FPT Software" không phải "FPT".
     fpt = _company(6, "FPT")
     other = _profile("FPT Software")
