@@ -9,7 +9,8 @@ Mỗi lượt:
    `content_hash`) thì không tính là cập nhật.
 3. Upsert tin + profile nhà tuyển dụng theo lô (tiến độ không mất khi bị dừng giữa chừng).
 4. Danh sách đọc đủ thì tin không còn thấy bị cộng `missed_runs`; vắng 2 lượt liên tiếp → `removed`.
-5. Đánh dấu `indexed_at` cho profile đã được làm mới, rồi map profile mới ↔ doanh nghiệp.
+5. Danh sách đọc đủ thì đánh dấu `indexed_at` cho profile có đủ tin trong index (không còn
+   tin mới / tin đã gỡ chưa tải lại của profile đó), rồi map profile mới ↔ doanh nghiệp.
 
 Một trang chỉ được index bởi một process tại một thời điểm (pg advisory lock).
 """
@@ -19,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -90,6 +92,7 @@ class IndexStats:
     removed: int = 0
     profiles_new: int = 0
     profiles_matched: int = 0
+    profiles_fresh: int = 0  # profile được đánh dấu index đủ tin
     duration_ms: int = 0
     error: str | None = None
     skipped: str | None = None  # không chạy (đang chạy ở process khác)
@@ -105,6 +108,7 @@ class _Existing:
     etag: str | None
     http_last_modified: str | None
     content_hash: str | None
+    source_profile_id: UUID | None = None
 
 
 @dataclass(slots=True)
@@ -118,6 +122,21 @@ class _Outcome:
 
 def content_hash(parsed: BoardJob) -> str:
     return hashlib.sha256(parsed.job.model_dump_json().encode()).hexdigest()[:32]
+
+
+def blocked_profiles(unfetched: Iterable[_Existing | None]) -> set[UUID] | None:
+    """Profile chưa đủ tin trong index sau lượt này, theo các tin trong danh sách chưa tải được.
+
+    Tin mới (chưa có dòng) hoặc chưa gắn profile thì không biết thuộc profile nào: None — không
+    profile nào được coi là đủ. Tin đã gỡ nay thấy lại thì chặn profile của nó. Tin đã có trong
+    index (nội dung cũ) không làm profile thiếu tin."""
+    blocked: set[UUID] = set()
+    for row in unfetched:
+        if row is None or row.source_profile_id is None:
+            return None
+        if row.status == JobStatus.REMOVED.value:
+            blocked.add(row.source_profile_id)
+    return blocked
 
 
 def plan_fetches(
@@ -206,6 +225,7 @@ class BoardIndexer:
                     stats={
                         "to_fetch": st.to_fetch,
                         "truncated": st.truncated,
+                        "profiles_fresh": st.profiles_fresh,
                         "listing_errors": st.listing_errors[:20],
                         "duration_ms": st.duration_ms,
                     },
@@ -224,6 +244,7 @@ class BoardIndexer:
                     JobPosting.etag,
                     JobPosting.http_last_modified,
                     JobPosting.content_hash,
+                    JobPosting.source_profile_id,
                 ).where(JobPosting.source == self.adapter.name)
             )
             return {r[0]: _Existing(*r[1:]) for r in rows}
@@ -381,21 +402,14 @@ class BoardIndexer:
                 1 for (status,) in result if status == JobStatus.REMOVED.value
             )
 
-    async def _mark_indexed(self, started_at: datetime, *, all_profiles: bool) -> None:
+    async def _mark_indexed(self, started_at: datetime, *, blocked: set[UUID]) -> None:
+        """Profile có đủ tin trong index (trừ `blocked`): `process_company` đọc tin từ index."""
         async with self.sessionmaker.begin() as s:
             stmt = update(SourceProfile).where(SourceProfile.source == self.adapter.name)
-            if not all_profiles:
-                fresh = (
-                    select(JobPosting.source_profile_id)
-                    .where(
-                        JobPosting.source == self.adapter.name,
-                        JobPosting.last_seen_at >= started_at,
-                        JobPosting.fetched_at.is_not(None),
-                    )
-                    .distinct()
-                )
-                stmt = stmt.where(SourceProfile.id.in_(fresh))
-            await s.execute(stmt.values(indexed_at=started_at))
+            if blocked:
+                stmt = stmt.where(SourceProfile.id.not_in(blocked))
+            result = await s.execute(stmt.values(indexed_at=started_at).returning(SourceProfile.id))
+            self.stats.profiles_fresh = len(result.all())
 
     async def _enrich_profile(self, profile: SourceProfile) -> None:
         """Đọc trang profile (website, MST, địa chỉ) để map chắc hơn; có giới hạn mỗi lượt."""
@@ -488,6 +502,7 @@ class BoardIndexer:
             removed=st.removed,
             profiles_new=st.profiles_new,
             profiles_matched=st.profiles_matched,
+            profiles_fresh=st.profiles_fresh,
             duration_ms=st.duration_ms,
             error=st.error,
         )
@@ -519,7 +534,10 @@ class BoardIndexer:
             entries, existing, now=started_at, refresh_days=opts.refresh_days, full=opts.full
         )
         st.to_fetch = len(plan)
+        # Tin trong danh sách chưa tải được ở lượt này (cắt bớt, hết giờ, bị chặn, lỗi).
+        unfetched: list[_Existing | None] = []
         if opts.max_jobs is not None and len(plan) > opts.max_jobs:
+            unfetched += [row for _, row in plan[opts.max_jobs :]]
             plan, st.truncated = plan[: opts.max_jobs], True
 
         pending: list[_Outcome] = []
@@ -527,15 +545,18 @@ class BoardIndexer:
         for i in range(0, len(plan), opts.concurrency):
             if self._out_of_time(started):
                 st.truncated = True
+                unfetched += [row for _, row in plan[i:]]
                 break
             batch = plan[i : i + opts.concurrency]
             try:
                 outcomes = await asyncio.gather(*(self._fetch(e, row) for e, row in batch))
             except SourceError as exc:  # bị chặn: dừng nguồn trong lượt này
                 st.error, blocked, st.truncated = str(exc), True, True
+                unfetched += [row for _, row in plan[i:]]
                 break
             st.fetched += len(outcomes)
             st.failed += sum(1 for o in outcomes if o.kind == "failed")
+            unfetched += [o.existing for o in outcomes if o.kind == "failed"]
             pending.extend(outcomes)
             if len(pending) >= opts.flush_every:
                 await self._flush(pending, datetime.now(UTC))
@@ -554,7 +575,10 @@ class BoardIndexer:
             )
         if st.complete:
             await self._mark_missing(started_at)
-        await self._mark_indexed(started_at, all_profiles=st.complete and not st.truncated)
+            # Danh sách đủ: profile nào không còn tin chưa tải thì index của nó đủ tin. Danh sách
+            # thiếu (lỗi, hay trang chỉ cho xem tin mới nhất) thì không profile nào chắc đủ.
+            if (stuck := blocked_profiles(unfetched)) is not None:
+                await self._mark_indexed(started_at, blocked=stuck)
         if opts.map_profiles and not self._out_of_time(started):
             async with self.sessionmaker.begin() as s:
                 st.profiles_matched = await map_profiles(

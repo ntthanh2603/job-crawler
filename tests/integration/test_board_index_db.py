@@ -163,6 +163,47 @@ async def test_incremental_index_and_profile_mapping(integration_settings: Setti
         assert result.new == 0
 
 
+async def profile_rows(res: Resources) -> dict[str, SourceProfile]:
+    async with res.sessionmaker() as s:
+        rows = await s.scalars(select(SourceProfile).where(SourceProfile.source == FakeBoard.name))
+        return {p.external_id: p for p in rows}
+
+
+async def test_profiles_are_fresh_only_when_all_their_jobs_are_indexed(
+    integration_settings: Settings,
+) -> None:
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        await reset(res)
+        # Lượt bị cắt (chỉ tải 1 trong 3 tin mới): tin chưa tải chưa biết thuộc profile nào, nên
+        # không profile nào được coi là đủ tin — process_company sẽ đọc trang profile.
+        first = await indexer(res, fake_site(JOBS), max_jobs=1).run()
+        assert first.truncated
+        assert first.profiles_fresh == 0
+        assert all(p.indexed_at is None for p in (await profile_rows(res)).values())
+
+        second = await indexer(res, fake_site(JOBS)).run()
+        assert second.profiles_fresh == 2
+        before = await profile_rows(res)
+        assert all(p.indexed_at is not None for p in before.values())
+
+        # Tin 13 (profile 8) đã gỡ, nay có lại trong danh sách nhưng tải lỗi: chỉ profile 8 thiếu.
+        async with res.sessionmaker.begin() as s:
+            await s.execute(
+                update(JobPosting)
+                .where(JobPosting.source == FakeBoard.name, JobPosting.external_id == "13")
+                .values(status=JobStatus.REMOVED.value)
+            )
+        site = fake_site(JOBS)
+        site.add(f"{HOME}viec-lam/bao-ve-13.html", "lỗi", status=503)
+        third = await indexer(res, site).run()
+        assert third.failed == 1
+        after = await profile_rows(res)
+        assert after["7"].indexed_at is not None
+        assert before["7"].indexed_at is not None
+        assert after["7"].indexed_at > before["7"].indexed_at
+        assert after["8"].indexed_at == before["8"].indexed_at
+
+
 async def test_refetch_without_profile_link_keeps_job_on_profile(
     integration_settings: Settings,
 ) -> None:

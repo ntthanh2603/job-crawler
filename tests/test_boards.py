@@ -11,7 +11,7 @@ import pytest
 from jobcrawler.db.models import Company, SourceProfile
 from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
-from jobcrawler.pipeline.board_index import _Existing, plan_fetches
+from jobcrawler.pipeline.board_index import _Existing, blocked_profiles, plan_fetches
 from jobcrawler.pipeline.profiles import decide
 from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.sources.base import SourceError, SourceLimits, SourceSession
@@ -270,6 +270,28 @@ def test_parse_job_with_profile() -> None:
     assert parsed.profile.info == {"logo": f"{HOME}logo.png"}
     assert FakeBoard().parse_job("<html>không có JSON-LD</html>", url) is None
     assert FakeBoard().parse_job(job_page("a", "b", "cong-ty/c-1"), f"{HOME}khac") is None
+
+
+def test_blocked_profiles() -> None:
+    def row(profile: int | None, status: str = "active") -> _Existing:
+        return _Existing(
+            id=UUID(int=99),
+            lastmod=None,
+            fetched_at=None,
+            status=status,
+            etag=None,
+            http_last_modified=None,
+            content_hash=None,
+            source_profile_id=UUID(int=profile) if profile is not None else None,
+        )
+
+    assert blocked_profiles([]) == set()
+    # Tin đã có trong index (nội dung cũ): profile vẫn đủ tin.
+    assert blocked_profiles([row(1), row(2)]) == set()
+    assert blocked_profiles([row(1, "removed"), row(2)]) == {UUID(int=1)}
+    # Tin mới / chưa gắn profile: không biết của profile nào.
+    assert blocked_profiles([row(1, "removed"), None]) is None
+    assert blocked_profiles([row(None)]) is None
 
 
 def test_plan_fetches_order() -> None:
