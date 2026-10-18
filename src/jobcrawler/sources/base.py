@@ -112,6 +112,8 @@ class SourceSession:
     records: list[FetchRecord] = field(default_factory=list)
     rendered_pages: int = 0
     failed_pages: int = 0
+    # Lý do nguồn dừng trước khi lấy hết tin (chạm giới hạn, trang lỗi tạm thời).
+    truncated: list[str] = field(default_factory=list)
 
     def _record(self, result: FetchResult) -> FetchResult:
         self.records.append(FetchRecord.from_result(self.name, result))
@@ -137,6 +139,13 @@ class SourceSession:
     async def render(self, url: str, **kwargs: Any) -> FetchResult:
         self.rendered_pages += 1
         return self._record(await self.fetcher.render(url, source=self.name, **kwargs))
+
+    def truncate(self, reason: str) -> None:
+        """Nguồn không lấy hết tin trong lượt này (chạm giới hạn trang, trang lỗi tạm thời): lượt
+        chạy không đủ để coi tin vắng mặt là đã gỡ."""
+        if reason not in self.truncated:
+            self.truncated.append(reason)
+            log.info("source.truncated", source=self.name, reason=reason)
 
     def fail_page(self, result: FetchResult, reason: str) -> None:
         """Trang tải được nhưng không bóc được: giữ HTML để lưu vào `failed_pages` (tối đa
@@ -179,6 +188,14 @@ class Source(ABC):
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} {self.name} {self.url}>"
+
+
+def transient_failure(result: FetchResult) -> bool:
+    """Lỗi có thể hết ở lượt sau (timeout, 5xx, 429, mất kết nối) — khác 404/410 (tin đã gỡ) và
+    robots cấm."""
+    if result.ok or result.outcome is FetchOutcome.ROBOTS_DISALLOWED:
+        return False
+    return result.status is None or result.status >= 500 or result.status == 429
 
 
 def failed_page_rows(

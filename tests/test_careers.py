@@ -317,6 +317,36 @@ async def test_detail_page_limit() -> None:
     assert len(fetcher.calls) == 5
 
 
+async def test_capped_or_failed_pages_mark_source_truncated() -> None:
+    listing = "https://a.vn/tuyen-dung"
+    fetcher = FakeFetcher()
+    fetcher.add(
+        listing,
+        "".join(f'<a href="/tuyen-dung/vi-tri-so-{i}">Vị trí số {i}</a>' for i in range(6)),
+    )
+    for i in range(6):
+        fetcher.add(f"https://a.vn/tuyen-dung/vi-tri-so-{i}", JD.format(title=f"Vị trí số {i}"))
+    capped = session(fetcher, max_detail_pages=4)
+    await run(CareersSource(listing), capped)
+    assert capped.truncated == ["detail_pages"]
+
+    whole = session(fetcher)
+    assert len(await run(CareersSource(listing), whole)) == 6
+    assert whole.truncated == []
+
+    # Trang chi tiết lỗi tạm (5xx) → chưa xong; 404 (tin đã gỡ) thì không.
+    flaky = FakeFetcher()
+    flaky.add(
+        listing,
+        '<a href="/tuyen-dung/vi-tri-so-1">Vị trí số 1</a>'
+        '<a href="/tuyen-dung/vi-tri-so-2">Vị trí số 2</a>',
+    )
+    flaky.add("https://a.vn/tuyen-dung/vi-tri-so-1", "lỗi", status=503)
+    s503 = session(flaky)
+    assert await run(CareersSource(listing), s503) == []
+    assert s503.truncated == ["page_error"]
+
+
 def test_pick_title_prefers_heading_matching_listing_text() -> None:
     banner = "TMA tự hào là nơi làm việc tin cậy của"
     assert pick_title("System Test Engineer", [banner, "System Test Engineer (HCM)"], None) == (

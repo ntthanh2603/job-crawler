@@ -37,7 +37,13 @@ from jobcrawler.pages import (
 from jobcrawler.prompts import job_detail, job_listing
 from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources import jsonld
-from jobcrawler.sources.base import Source, SourceSession, gather_all, text_or_none
+from jobcrawler.sources.base import (
+    Source,
+    SourceSession,
+    gather_all,
+    text_or_none,
+    transient_failure,
+)
 from jobcrawler.text import strip_accents
 
 log = get_logger(__name__)
@@ -458,13 +464,23 @@ async def fetch_page(
     """
     if render:
         if not session.can_render:
+            session.truncate("render_budget")
             return None
         result = await session.render(url, wait_until=wait_until)
-        return _page(result, True) if result.ok else None
+        if not result.ok:
+            if transient_failure(result):
+                session.truncate("page_error")
+            return None
+        return _page(result, True)
     result = await (session.fetch_ok(url) if required else session.fetch(url))
     if not result.ok:
+        if transient_failure(result):
+            session.truncate("page_error")
         return None
-    if auto_render and _render_needed(result, result.text) and session.can_render:
+    if auto_render and _render_needed(result, result.text):
+        if not session.can_render:
+            session.truncate("render_budget")
+            return _page(result, False)
         rendered = await session.render(url, wait_until="networkidle")
         if rendered.ok:
             return _page(rendered, True)
@@ -823,6 +839,8 @@ class CareersSource(Source):
             add_links(scan.job_links)
             queue.extend(u for u in scan.next_pages if u not in visited)
             log.debug("careers.listing", url=scan.page.url, jobs=len(scan.jobs), links=len(pending))
+        if any(u not in visited for u in queue):
+            session.truncate("listing_pages")
 
         if scans and not pending and not yielded and session.llm.enabled:
             for scan in _llm_listing_candidates(scans):
@@ -855,3 +873,5 @@ class CareersSource(Source):
                 if job is not None and job.external_id not in yielded:
                     yielded.add(job.external_id)
                     yield job
+        if any(url not in done_urls for url in pending):
+            session.truncate("detail_pages")

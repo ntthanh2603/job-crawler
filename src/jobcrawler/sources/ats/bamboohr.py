@@ -23,6 +23,7 @@ from jobcrawler.sources.base import (
     join_nonempty,
     parse_datetime,
     text_or_none,
+    transient_failure,
     vietnam_first,
 )
 
@@ -101,6 +102,8 @@ class BambooHRSource(Source):
         job_id = str(item["id"])
         result = await session.fetch(f"{self.base}/{job_id}/detail", rate=session.limits.ats_rate)
         if not result.ok:
+            if transient_failure(result):
+                session.truncate("detail_error")
             return None
         try:
             job = parse_detail(result.json(), sub=self.key, job_id=job_id)
@@ -119,7 +122,10 @@ class BambooHRSource(Source):
         except ValueError as exc:
             raise SourceError(FetchOutcome.ERROR, f"không phải JSON: {result.url}") from exc
         session.count(result, len(items))
-        items = vietnam_first(items, _location)[: session.limits.max_detail_pages]
+        items = vietnam_first(items, _location)
+        if len(items) > session.limits.max_detail_pages:
+            session.truncate("detail_pages")
+            items = items[: session.limits.max_detail_pages]
         step = session.limits.detail_concurrency
         for i in range(0, len(items), step):
             for job in await gather_all(self._detail(session, x) for x in items[i : i + step]):

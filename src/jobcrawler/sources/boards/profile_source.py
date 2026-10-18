@@ -11,7 +11,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from jobcrawler.logging import get_logger
 from jobcrawler.schemas import RawJob
-from jobcrawler.sources.base import Source, SourceError, SourceSession, gather_all
+from jobcrawler.sources.base import (
+    Source,
+    SourceError,
+    SourceSession,
+    gather_all,
+    transient_failure,
+)
 from jobcrawler.sources.boards.base import BoardAdapter
 
 log = get_logger(__name__)
@@ -43,6 +49,8 @@ class BoardProfileSource(Source):
     async def _detail(self, session: SourceSession, url: str) -> RawJob | None:
         result = await session.fetch(url, rate=self.adapter.rate)
         if not result.ok:
+            if transient_failure(result):
+                session.truncate("detail_error")
             return None
         parsed = self.adapter.parse_job(result.text, url)
         if parsed is None:
@@ -56,7 +64,9 @@ class BoardProfileSource(Source):
         page = await session.fetch_ok(jobs_url, rate=self.adapter.rate)
         urls = self.adapter.profile_job_urls(page.text, page.final_url)
         session.count(jobs_url, len(urls))
-        urls = urls[: session.limits.max_detail_pages]
+        if len(urls) > session.limits.max_detail_pages:
+            session.truncate("detail_pages")
+            urls = urls[: session.limits.max_detail_pages]
         step = session.limits.detail_concurrency
         for i in range(0, len(urls), step):
             for job in await gather_all(self._detail(session, u) for u in urls[i : i + step]):

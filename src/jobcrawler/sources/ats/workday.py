@@ -23,6 +23,7 @@ from jobcrawler.sources.base import (
     mentions_vietnam,
     parse_datetime,
     text_or_none,
+    transient_failure,
     vietnam_first,
 )
 
@@ -173,6 +174,8 @@ class WorkdaySource(Source):
         ):
             page = await self._page(session, len(postings), facets)
             postings.extend(parse_listing(page))
+        if len(page.get("jobPostings") or []) == PAGE_SIZE and len(postings) < total:
+            session.truncate("listing_pages")
         return vietnam_first(postings, lambda p: p.get("locationsText"))
 
     async def _detail(self, session: SourceSession, posting: dict[str, Any]) -> RawJob:
@@ -181,6 +184,8 @@ class WorkdaySource(Source):
             headers=JSON_HEADERS,
             rate=session.limits.ats_rate,
         )
+        if transient_failure(result):
+            session.truncate("detail_error")
         if result.ok:
             try:
                 job = parse_detail(result.json(), ref=self.ref, listing=posting)
@@ -200,6 +205,8 @@ class WorkdaySource(Source):
             batch = detailed[i : i + step]
             for job in await gather_all(self._detail(session, p) for p in batch):
                 yield job
+        if len(postings) > limit:
+            session.truncate("detail_pages")
         for posting in postings[limit:]:
             yield listing_only(posting, ref=self.ref)
 

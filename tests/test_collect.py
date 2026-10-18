@@ -101,6 +101,9 @@ async def test_collect_respects_max_jobs_and_empty_sources() -> None:
     )
     assert len(result.jobs) == 3
     assert result.reports[0].outcome is FetchOutcome.OK
+    # Chạm giới hạn: nguồn chưa xong, lượt chạy không được đóng tin vắng mặt.
+    assert result.reports[0].truncated == ["max_jobs"]
+    assert result.incomplete_sources == ["fake:big"]
 
     empty = await collect([], fetcher=fetcher, llm=llm, deadline=time.monotonic() + 5)
     assert empty.jobs == []
@@ -123,3 +126,28 @@ async def test_collect_cancelled_from_outside_cancels_sources() -> None:
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert all(t.done() for t in asyncio.all_tasks() if t is not asyncio.current_task())
+
+
+class Capped(Source):
+    kind = "fake"
+
+    async def jobs(self, session: SourceSession) -> AsyncIterator[RawJob]:
+        yield job(self.key, 0)
+        session.truncate("detail_pages")
+        session.truncate("detail_pages")  # ghi một lần
+
+
+async def test_truncated_source_is_reported_incomplete() -> None:
+    result = await collect(
+        [Capped("capped", "https://capped.vn/"), Scripted("ok")],
+        fetcher=FakeFetcher(),
+        llm=LLMClient(FakeChatClient(["{}"]), model=None),
+        deadline=time.monotonic() + 5,
+    )
+    by_name = {r.name: r for r in result.reports}
+    assert by_name["fake:capped"].outcome is FetchOutcome.OK
+    assert by_name["fake:capped"].truncated == ["detail_pages"]
+    assert not by_name["fake:capped"].incomplete
+    assert by_name["fake:ok"].truncated == []
+    assert result.incomplete_sources == ["fake:capped"]
+    assert len(result.jobs) == 3

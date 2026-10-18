@@ -1,7 +1,8 @@
 """Thu thập song song mọi nguồn của một doanh nghiệp, dừng ở deadline.
 
 Mỗi nguồn chạy trong một task; `asyncio.wait(timeout=còn lại tới deadline)`, nguồn chưa xong
-bị huỷ và ghi vào `incomplete_sources`. Tin đã yield trước khi huỷ vẫn được giữ.
+bị huỷ và ghi vào `incomplete_sources`. Tin đã yield trước khi huỷ vẫn được giữ. Nguồn dừng
+sớm vì chạm giới hạn (`SourceSession.truncate`) cũng tính là chưa xong.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ class SourceReport:
     error: str | None = None
     duration_ms: int = 0
     incomplete: bool = False  # bị huỷ ở deadline
+    truncated: list[str] = field(default_factory=list)  # dừng sớm: chạm giới hạn, trang lỗi
 
 
 @dataclass(slots=True)
@@ -47,7 +49,7 @@ class CollectResult:
 
     @property
     def incomplete_sources(self) -> list[str]:
-        return [r.name for r in self.reports if r.incomplete]
+        return [r.name for r in self.reports if r.incomplete or r.truncated]
 
 
 async def _run_source(
@@ -68,6 +70,7 @@ async def _run_source(
                 sink.append(job)
                 report.jobs += 1
                 if report.jobs >= session.limits.max_jobs:
+                    session.truncate("max_jobs")
                     break
         except SourceError as exc:
             report.outcome, report.error = exc.outcome, str(exc)
@@ -83,6 +86,7 @@ async def _run_source(
             log.exception("source.error", url=source.url)
         finally:
             report.duration_ms = int((clock() - started) * 1000)
+            report.truncated = list(session.truncated)
             done = log.info if report.outcome is FetchOutcome.OK else log.warning
             done(
                 "source.done",
@@ -91,6 +95,7 @@ async def _run_source(
                 jobs=report.jobs,
                 duration_ms=report.duration_ms,
                 error=report.error,
+                truncated=report.truncated or None,
             )
 
 

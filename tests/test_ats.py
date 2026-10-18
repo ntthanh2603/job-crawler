@@ -370,7 +370,8 @@ async def test_workday_applies_vietnam_facet_and_fetches_details() -> None:
     source = workday.WorkdaySource(ref)
     # 724 tin > sức chứa 2 trang × 20 → lọc theo facet Việt Nam (8 tin). Tin ở Việt Nam được
     # lấy chi tiết trước; "2 Locations" xếp cuối và vượt giới hạn 7 trang chi tiết.
-    jobs = await collect(source, session(fetcher, max_listing_pages=2, max_detail_pages=7))
+    s = session(fetcher, max_listing_pages=2, max_detail_pages=7)
+    jobs = await collect(source, s)
     assert [b["appliedFacets"] for b in bodies] == [
         {},
         {"locations": ["1e4a4eb3adf101bf12a99b76bf812fcf"]},
@@ -389,6 +390,8 @@ async def test_workday_applies_vietnam_facet_and_fetches_details() -> None:
     )
     detail_calls = [url for _, url, _ in fetcher.calls if "/job/" in url]
     assert len(detail_calls) == 7
+    # Tin cuối không được lấy chi tiết: nguồn chưa xong.
+    assert s.truncated == ["detail_pages"]
 
 
 async def test_bamboohr_source_and_missing_company() -> None:
@@ -398,8 +401,13 @@ async def test_bamboohr_source_and_missing_company() -> None:
         "https://seek.bamboohr.com/careers/15/detail", FIXTURES / "bamboohr/seek_detail_15.json"
     )
     source = bamboohr.BambooHRSource(ref_of("https://seek.bamboohr.com/careers"))
-    jobs = await collect(source, session(fetcher))
+    s = session(fetcher)
+    jobs = await collect(source, s)
     assert [j.external_id for j in jobs] == ["seek:15"]  # chi tiết 19, 20 lỗi → bỏ
+    assert s.truncated == []  # 404: tin đã gỡ, không phải lỗi tạm
+    capped = session(fetcher, max_detail_pages=1)
+    await collect(source, capped)
+    assert capped.truncated == ["detail_pages"]
 
     gone = FakeFetcher()
     gone.add(
