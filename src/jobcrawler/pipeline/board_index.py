@@ -306,9 +306,16 @@ class BoardIndexer:
                 stmt = pg_insert(JobPosting).values(
                     source=self.adapter.name, external_id=o.entry.external_id, **values
                 )
+                # Lần tải này không thấy link profile (trang đổi bố cục, link bị ẩn): giữ liên kết
+                # cũ, không thì tin rời khỏi doanh nghiệp đã map.
+                set_ = values | {
+                    "source_profile_id": func.coalesce(
+                        stmt.excluded.source_profile_id, JobPosting.source_profile_id
+                    )
+                }
                 await s.execute(
                     stmt.on_conflict_do_update(
-                        index_elements=[JobPosting.source, JobPosting.external_id], set_=values
+                        index_elements=[JobPosting.source, JobPosting.external_id], set_=set_
                     )
                 )
             for o in outcomes:

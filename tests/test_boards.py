@@ -41,7 +41,7 @@ def test_parse_sitemap_and_gzip() -> None:
     )
     assert items[1][1] is None
     assert sitemap_body(gzip.compress(body.encode())) == body
-    assert sitemap_body(b"\x1f\x8bhong") == ""
+    assert sitemap_body(b"\x1f\x8bhong") is None  # file nén hỏng ≠ sitemap rỗng
     # CDATA và &amp;
     cdata = "<urlset><url><loc><![CDATA[https://b.vn/j?id=1&amp;x=2]]></loc></url></urlset>"
     assert parse_sitemap(cdata)[1] == [("https://b.vn/j?id=1&x=2", None)]
@@ -78,6 +78,13 @@ async def test_sitemap_board_listing_errors() -> None:
     state = ListingState()
     assert [e async for e in board.entries(session(fetcher), state)] == []
     assert not state.complete  # sitemap con lỗi → danh sách chưa đủ
+    # Sitemap con nén hỏng: cũng là lỗi, không phải sitemap rỗng.
+    broken = FakeFetcher()
+    broken.add(f"{HOME}sitemap.xml", sitemap_index("sitemap-jobs-1.xml"))
+    broken.add(f"{HOME}sitemap-jobs-1.xml", b"\x1f\x8bhong")
+    state = ListingState()
+    assert [e async for e in board.entries(session(broken), state)] == []
+    assert not state.complete
     blocked = FakeFetcher()
     blocked.add(f"{HOME}sitemap.xml", status=403, outcome=FetchOutcome.BLOCKED)
     with pytest.raises(SourceError) as exc:

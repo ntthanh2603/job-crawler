@@ -29,7 +29,7 @@ from jobcrawler.services.companies import process_company
 from jobcrawler.sources import boards
 from jobcrawler.text import normalize_company_name
 
-from ..boards_fake import HOME, FakeBoard, fake_site
+from ..boards_fake import HOME, FakeBoard, fake_site, job_page
 
 pytestmark = pytest.mark.integration
 
@@ -161,6 +161,25 @@ async def test_incremental_index_and_profile_mapping(integration_settings: Setti
         assert rows["12"].status == "removed"
         assert rows["13"].status == "active"  # có lại trong sitemap → tải lại
         assert result.new == 0
+
+
+async def test_refetch_without_profile_link_keeps_job_on_profile(
+    integration_settings: Settings,
+) -> None:
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        await reset(res)
+        await indexer(res, fake_site(JOBS)).run()
+        linked = (await postings(res))["11"].source_profile_id
+        assert linked is not None
+        # Trang tin đổi bố cục: không còn link nào tới profile nhà tuyển dụng.
+        site = fake_site(JOBS, lastmod={"viec-lam/ke-toan-11.html": "2099-01-01"})
+        page = job_page("Kế toán trưởng", ACME, "cong-ty/acme-7").replace("cong-ty/acme-7", "x")
+        site.add(f"{HOME}viec-lam/ke-toan-11.html", page)
+        stats = await indexer(res, site).run()
+        assert stats.updated == 1
+        row = (await postings(res))["11"]
+        assert row.raw["title"] == "Kế toán trưởng"
+        assert row.source_profile_id == linked
 
 
 async def test_blocked_detail_stops_run_and_lock(integration_settings: Settings) -> None:

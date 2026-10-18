@@ -117,13 +117,14 @@ def is_social_host(host: str) -> bool:
     return bool(_SOCIAL.search(host))
 
 
-def sitemap_body(content: bytes) -> str:
-    """Nội dung sitemap (giải nén `.xml.gz` nếu cần)."""
+def sitemap_body(content: bytes) -> str | None:
+    """Nội dung sitemap (giải nén `.xml.gz` nếu cần). None: file nén hỏng — sitemap lỗi chứ
+    không phải sitemap rỗng (không thì danh sách thiếu mà vẫn được coi là đọc đủ)."""
     if content[:2] == b"\x1f\x8b":
         try:
             content = gzip.decompress(content)
         except (OSError, EOFError):
-            return ""
+            return None
     return content.decode("utf-8", errors="replace")
 
 
