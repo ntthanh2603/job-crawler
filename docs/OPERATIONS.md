@@ -37,6 +37,58 @@ dần (1.000 tin mới / đổi mỗi 5 giờ), nên các trang lớn (TopCV ~45
 
 **Tắt hẳn:** `INDEXER_REPLICAS=0` rồi `docker compose up -d`.
 
+## Thu thập đủ việc của một doanh nghiệp
+
+Một lượt `process_company` có `COMPANY_DEADLINE_SECONDS` (165 giây), nên doanh nghiệp lớn không
+xong trong một lượt. Hệ thống đi tiếp qua nhiều lượt thay vì bỏ dở:
+
+- **Lượt bị cắt là `partial`, không đóng việc cũ.** Nguồn chạm giới hạn (trang chi tiết, trang
+  danh sách, trang API, trình duyệt, `SOURCE_MAX_JOBS`), trang lỗi tạm (timeout, 5xx), tìm nguồn
+  lỗi, hay còn tin chờ LLM chấm (`verify`) đều ghi vào `incomplete_sources`; chỉ lượt đủ nguồn mới
+  đánh `removed` các việc không còn thấy.
+- **Tự chạy tiếp.** Lượt `partial` tự xếp lượt sau (`COMPANY_MAX_CONTINUATIONS`, mặc định 2, cách
+  `COMPANY_CONTINUATION_DELAY_SECONDS` = 60 giây). Lượt sau dùng lại chi tiết tin website/ATS đã
+  tải trong `JOB_REUSE_DAYS` (3 ngày) và cache HTTP (1 giờ) nên đi tiếp tới tin chưa tải; giới
+  hạn `SOURCE_MAX_DETAIL_PAGES` chỉ tính trang tải thật. Dữ liệu trước khi có cơ chế này chưa có
+  `fetched_at` nên được tải lại một lần.
+- **Tin LLM chưa kịp chấm** được hoãn (`DEFERRED`), không bị loại: việc cũ giữ nguyên, lượt sau
+  chấm tiếp (câu trả lời có cache). Không cấu hình LLM thì tin nghi ngờ vẫn bị loại như trước.
+- **Trang tuyển dụng song song với website.** Profile trên trang tuyển dụng được thu thập ngay
+  khi lượt chạy bắt đầu, không chờ bước tìm nguồn trên website.
+- **Trang careers dựng bằng JavaScript (SPA).** Khi mở bằng trình duyệt, hệ thống giữ các phản
+  hồi JSON trang gọi (tối đa 30 phản hồi, 2 MB mỗi cái) và đọc tin từ đó cùng JSON nhúng
+  (`__NEXT_DATA__`), rồi đọc tiếp các trang sau của API (`SOURCE_MAX_API_PAGES`, mặc định 20) chỉ
+  với header `Accept`, không cookie. Trang danh mục / theo tỉnh dẫn tới tin (vd. Thế Giới Di Động)
+  được đi tiếp, không tính vào giới hạn trang chi tiết (tối đa `SOURCE_MAX_SUB_LISTINGS` = 60).
+
+### Trang tuyển dụng
+
+- **Index chưa đủ thì đọc trực tiếp trang profile.** Profile chỉ được coi là "index còn mới" khi
+  lượt index đọc đủ danh sách và không còn tin chưa tải của profile đó. Với giới hạn
+  `BOARD_MAX_JOBS_PER_RUN=1000` hiện tại (chưa có proxy) phần lớn profile của TopCV, JobsGO,
+  CareerViet, VietnamWorks chưa đủ, nên `process_company` đọc danh sách tin trên trang profile
+  (đủ các trang), dùng lại tin đã index và chỉ tải tin còn thiếu.
+- **Sau mỗi lượt index**, doanh nghiệp có profile vừa có tin mới (hoặc vừa map) được xếp chạy lại
+  nếu lượt gần nhất cũ hơn `BOARD_RERUN_MIN_HOURS` (6 giờ). Tắt: `BOARD_RERUN_COMPANIES=false`.
+- **Khớp tên profile** dùng khoá riêng (`company_match_key`: mở rộng "TMCP", bỏ phần trong ngoặc,
+  phần chi nhánh, đuôi "Việt Nam"/"Group"). Sau khi cập nhật mã nguồn, chạy một lần để tính lại
+  khoá cho dữ liệu cũ và map lại profile chưa map (có thể gọi LLM nhiều ở lần đầu):
+
+  ```bash
+  uv run jobcrawler index-boards --rematch
+  ```
+- **Doanh nghiệp KYC không tìm thấy website** vẫn dùng profile có tên trùng hẳn tên doanh nghiệp
+  (đủ riêng, khớp bằng rule); doanh nghiệp KYC mơ hồ chỉ dùng profile khớp MST/website. Tắt:
+  `BOARD_NAME_PROFILES_WITHOUT_KYC=false`.
+
+### Giới hạn còn lại
+
+- **TopCV** chặn bằng Cloudflare khi đi thẳng (mỗi lượt index chỉ tải được ~20 tin), **CareerLink**
+  hiện CAPTCHA sau vài chục request: cần proxy (mục trên) mới index đủ. Đọc trực tiếp trang
+  profile vẫn chạy được ở mức vài request mỗi doanh nghiệp.
+- **API careers toàn cầu** (vd. Shopee trả tin mọi quốc gia, xếp Việt Nam trước): mỗi nguồn dừng ở
+  `SOURCE_MAX_JOBS` (500), nơi làm đọc từ danh mục mã của trang nếu có.
+
 ## Chịu dữ liệu lớn
 
 Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng triệu việc làm.
