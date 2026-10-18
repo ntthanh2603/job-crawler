@@ -21,6 +21,7 @@ from jobcrawler.db.models import (
 from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.llm import LLMClient
 from jobcrawler.net.http import FetchResult
+from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn, FetchOutcome, JobStatus, KycStatus, RunStatus
@@ -61,14 +62,8 @@ async def reset(res: Resources) -> UUID:
         )
         s.add(company)
         await s.flush()
-        s.add(
-            CompanyAlias(
-                company_id=company.id,
-                alias=ACME,
-                alias_norm=normalize_company_name(ACME),
-                kind="input",
-            )
-        )
+        # Như khi nạp danh sách: tên chuẩn hoá + khoá map profile.
+        s.add_all(CompanyAlias(**row) for row in kyc.alias_rows(company.id, ACME, "input"))
         return company.id
 
 
@@ -202,6 +197,55 @@ async def test_profiles_are_fresh_only_when_all_their_jobs_are_indexed(
         assert before["7"].indexed_at is not None
         assert after["7"].indexed_at > before["7"].indexed_at
         assert after["8"].indexed_at == before["8"].indexed_at
+
+
+async def test_rematch_maps_profiles_with_name_variants(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dữ liệu trước khi có khoá map: alias chỉ có tên chuẩn hoá, profile lưu tên chuẩn hoá cũ.
+    `rematch_profiles` thêm alias khoá map, tính lại khoá profile rồi map lại."""
+    mb = "Ngân hàng TMCP Quân Đội Rematch"
+    monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        await reset(res)
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(Company).where(Company.input_name == mb))
+            company = Company(input_name=mb, legal_name=mb, kyc_status=KycStatus.VERIFIED.value)
+            s.add(company)
+            await s.flush()
+            s.add(
+                CompanyAlias(
+                    company_id=company.id,
+                    alias=mb,
+                    alias_norm=normalize_company_name(mb),
+                    kind="input",
+                )
+            )
+            name = "Ngân Hàng Thương Mại Cổ Phần Quân Đội Rematch (MB Bank)"
+            s.add(
+                SourceProfile(
+                    source=FakeBoard.name,
+                    external_id="900",
+                    url=f"{HOME}cong-ty/mb-900",
+                    name_on_source=name,
+                    name_norm=normalize_company_name(name),
+                    info={},
+                    matched_at=datetime.now(UTC),
+                )
+            )
+            company_id = company.id
+        report = await board_service.rematch_profiles(res, [FakeBoard.name])
+        assert report.renamed >= 1
+        assert report.aliases >= 1
+        async with res.sessionmaker() as s:
+            profile = await s.scalar(
+                select(SourceProfile).where(
+                    SourceProfile.source == FakeBoard.name, SourceProfile.external_id == "900"
+                )
+            )
+        assert profile is not None
+        assert profile.company_id == company_id
+        assert (profile.match_evidence or {})["signal"] == "name"
 
 
 async def test_refetch_without_profile_link_keeps_job_on_profile(

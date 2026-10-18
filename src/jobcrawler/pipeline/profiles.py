@@ -31,6 +31,7 @@ from jobcrawler.pipeline.company_facts import names_match
 from jobcrawler.pipeline.kyc import trigram_compatible
 from jobcrawler.prompts import profile_match
 from jobcrawler.schemas import KycStatus
+from jobcrawler.text import company_match_key
 
 log = get_logger(__name__)
 
@@ -87,8 +88,11 @@ def decide(profile: SourceProfile, candidates: list[tuple[Company, str, float]])
         if not trigram_compatible(name_norm, alias_norm):
             continue
         plausible[company.id] = company
-        if name_norm == alias_norm or any(
-            names_match(profile.name_on_source, n) for n in _company_names(company)
+        if (
+            name_norm == alias_norm
+            or any(names_match(profile.name_on_source, n) for n in _company_names(company))
+            or company_match_key(profile.name_on_source)
+            in {company_match_key(n) for n in _company_names(company)}
         ):
             by_name[company.id] = company
     if len(strong) == 1:

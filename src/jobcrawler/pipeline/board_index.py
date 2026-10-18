@@ -50,7 +50,7 @@ from jobcrawler.sources.boards.base import (
     ListingState,
     ProfileRef,
 )
-from jobcrawler.text import normalize_company_name
+from jobcrawler.text import company_match_key
 
 log = get_logger(__name__)
 
@@ -267,7 +267,7 @@ class BoardIndexer:
                 external_id=p.external_id,
                 url=p.url,
                 name_on_source=p.name,
-                name_norm=normalize_company_name(p.name),
+                name_norm=company_match_key(p.name),
                 website=p.website,
                 tax_code=p.tax_code,
                 info=p.info,

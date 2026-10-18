@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, Job, JobPosting, JobReview
 from jobcrawler.net.urls import normalize_url
+from jobcrawler.pipeline.kyc import MATCH_ALIAS
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyIn, JobStatus
 from jobcrawler.services import batch
@@ -251,7 +252,10 @@ async def find_company_id(session: AsyncSession, company: CompanyIn) -> UUID | N
             return found
     return await session.scalar(
         select(CompanyAlias.company_id)
-        .where(CompanyAlias.alias_norm == normalize_company_name(company.name))
+        .where(
+            CompanyAlias.alias_norm == normalize_company_name(company.name),
+            CompanyAlias.kind.is_distinct_from(MATCH_ALIAS),
+        )
         .order_by(CompanyAlias.company_id)
         .limit(1)
     )

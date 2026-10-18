@@ -69,6 +69,64 @@ def fold(text: str) -> str:
     return " ".join(_tokens(text))
 
 
+# Khoá map profile trên trang tuyển dụng (`company_match_key`).
+_PARENS = re.compile(r"\([^)]*\)|\[[^\]]*\]")
+# "Ngân hàng TMCP Quân Đội - Chi nhánh Bắc Ninh": tin của chi nhánh là tin của doanh nghiệp.
+_BRANCH = re.compile(r" (chi nhanh|van phong dai dien|branch office|branch) .*$")
+_ABBREVIATIONS = {
+    "tmcp": "thuong mai co phan",
+    "nhtmcp": "ngan hang thuong mai co phan",
+}
+# Đuôi chung chung: "Shopee Việt Nam", "Viettel Group".
+_GENERIC_TAILS: tuple[tuple[str, ...], ...] = (
+    ("viet", "nam"),
+    ("vietnam",),
+    ("vn",),
+    ("group",),
+    ("holdings",),
+    ("holding",),
+)
+# Từ của tên ngành nghề: phần còn lại chỉ gồm các từ này thì giữ đuôi ("Hàng không Việt Nam").
+_GENERIC_WORDS = frozenset(
+    {
+        "ngan", "hang", "thuong", "mai", "dich", "vu", "xay", "dung", "san", "xuat", "dau",
+        "tu", "cong", "nghe", "phat", "trien", "khong", "bao", "hiem", "tai", "chinh", "bat",
+        "dong", "van", "du", "lich", "giao", "duc", "thuc", "pham", "duoc", "y", "te", "truyen",
+        "thong", "quoc", "ky", "thuat", "thiet", "bi", "vat", "nhap", "khau", "kinh", "doanh",
+        "dien", "may", "moi", "truong", "nong", "nghiep", "the", "and", "of", "bank",
+        "software", "technology", "technologies", "tech", "solutions", "services", "trading",
+        "investment", "insurance", "logistics", "airlines", "national",
+    }
+)  # fmt: skip
+
+
+def company_match_key(name: str) -> str:
+    """Khoá CHỈ dùng để map profile trên trang tuyển dụng ↔ doanh nghiệp
+    (`source_profiles.name_norm`, alias `kind="match"`); KYC và gộp doanh nghiệp vẫn dùng
+    `normalize_company_name`.
+
+    Như `normalize_company_name` nhưng bỏ phần trong ngoặc và phần chi nhánh, mở rộng "TMCP"
+    trước khi bỏ loại hình pháp lý, bỏ đuôi chung chung ("Việt Nam", "Group") khi phần còn lại
+    vẫn có từ riêng: "Ngân hàng TMCP Quân Đội" và "Ngân Hàng Thương Mại Cổ Phần Quân Đội (MB
+    Bank)" cùng khoá, "Shopee Việt Nam" ~ "Shopee"; "FPT" và "FPT Software" vẫn khác khoá."""
+    folded = _BRANCH.sub("", fold(_PARENS.sub(" ", name)))
+    expanded = " ".join(_ABBREVIATIONS.get(t, t) for t in folded.split())
+    words = normalize_company_name(expanded).split()
+    trimmed = True
+    while trimmed:
+        trimmed = False
+        for tail in _GENERIC_TAILS:
+            rest = words[: -len(tail)]
+            if (
+                len(words) > len(tail)
+                and tuple(words[-len(tail) :]) == tail
+                and any(len(w) >= 3 and w not in _GENERIC_WORDS for w in rest)
+            ):
+                words, trimmed = rest, True
+                break
+    return " ".join(words) or normalize_company_name(name)
+
+
 def normalize_company_name(name: str) -> str:
     """Tên dùng để so khớp (`company_aliases.alias_norm`).
 

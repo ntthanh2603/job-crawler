@@ -8,14 +8,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from jobcrawler.config import Settings
-from jobcrawler.db.models import Company, JobPosting, SourceProfile
+from jobcrawler.db.models import Company, CompanyAlias, JobPosting, SourceProfile
 from jobcrawler.logging import get_logger
 from jobcrawler.net.kv import RedisKV
 from jobcrawler.net.urls import host_of, registrable_domain
+from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions, IndexStats
 from jobcrawler.pipeline.profiles import decide, map_profiles
 from jobcrawler.resources import Resources
@@ -25,7 +26,7 @@ from jobcrawler.sources import boards
 from jobcrawler.sources.base import FetchRecord, Source, SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.boards.base import BoardAdapter
 from jobcrawler.sources.boards.profile_source import BoardProfileSource
-from jobcrawler.text import normalize_company_name
+from jobcrawler.text import company_match_key
 
 log = get_logger(__name__)
 
@@ -233,13 +234,13 @@ async def _adopt_profile(
         external_id=ref.external_id,
         url=ref.url,
         name_on_source=ref.name,
-        name_norm=normalize_company_name(ref.name),
+        name_norm=company_match_key(ref.name),
         website=ref.website,
         tax_code=ref.tax_code,
         info=ref.info,
     )
     names = [n for n in (company.legal_name, company.brand_name, company.input_name) if n]
-    decision = decide(candidate, [(company, normalize_company_name(n), 1.0) for n in names])
+    decision = decide(candidate, [(company, company_match_key(n), 1.0) for n in names])
     if decision is None or decision.company_id is None:
         log.info("boards.serp_profile_rejected", url=url, profile=ref.name)
         return False
@@ -280,6 +281,68 @@ class MapReport:
     matched: int
     profiles: int
     mapped_total: int
+
+
+@dataclass(slots=True)
+class RematchReport:
+    renamed: int  # profile có khoá tên mới
+    aliases: int  # alias khoá map mới của doanh nghiệp
+    mapped: MapReport
+
+
+_REMATCH_CHUNK = 1000
+
+
+async def rematch_profiles(res: Resources, names: list[str] | None = None) -> RematchReport:
+    """Sau khi đổi cách so tên (`company_match_key`): tính lại khoá tên của profile, thêm alias
+    khoá map cho mọi doanh nghiệp, cho profile chưa map được thử lại, rồi map lại."""
+    sources = [a.name for a in selected_boards(res.settings, names)]
+    async with res.sessionmaker.begin() as session:
+        rows = (
+            await session.execute(
+                select(
+                    SourceProfile.id, SourceProfile.name_on_source, SourceProfile.name_norm
+                ).where(SourceProfile.source.in_(sources))
+            )
+        ).all()
+        renamed = [
+            {"id": pid, "name_norm": key}
+            for pid, name, norm in rows
+            if (key := company_match_key(name)) != norm
+        ]
+        for i in range(0, len(renamed), _REMATCH_CHUNK):
+            await session.execute(update(SourceProfile), renamed[i : i + _REMATCH_CHUNK])
+        await session.execute(
+            update(SourceProfile)
+            .where(SourceProfile.source.in_(sources), SourceProfile.company_id.is_(None))
+            .values(matched_at=None)
+        )
+        aliases = (
+            await session.execute(
+                select(CompanyAlias.company_id, CompanyAlias.alias, CompanyAlias.kind).where(
+                    CompanyAlias.kind.is_distinct_from(kyc.MATCH_ALIAS)
+                )
+            )
+        ).all()
+        match_rows = [
+            row
+            for company_id, alias, kind in aliases
+            for row in kyc.alias_rows(company_id, alias, kind or "other")
+            if row["kind"] == kyc.MATCH_ALIAS
+        ]
+        added = 0
+        for i in range(0, len(match_rows), _REMATCH_CHUNK):
+            result = await session.execute(
+                pg_insert(CompanyAlias)
+                .values(match_rows[i : i + _REMATCH_CHUNK])
+                .on_conflict_do_nothing(index_elements=["company_id", "alias_norm"])
+                .returning(CompanyAlias.id)
+            )
+            added += len(result.all())
+    log.info("boards.rematch", renamed=len(renamed), aliases=added)
+    return RematchReport(
+        renamed=len(renamed), aliases=added, mapped=await map_all_profiles(res, names)
+    )
 
 
 async def map_all_profiles(res: Resources, names: list[str] | None = None) -> MapReport:

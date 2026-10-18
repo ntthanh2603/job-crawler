@@ -20,6 +20,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -73,7 +74,7 @@ from jobcrawler.serp import SerpClient, SerpItem, SerpPanel, SerpResponse
 from jobcrawler.sources import ats
 from jobcrawler.sources.base import FetchRecord, SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.careers import Page, fetch_page
-from jobcrawler.text import fold, normalize_company_name
+from jobcrawler.text import company_match_key, fold, normalize_company_name
 
 log = get_logger(__name__)
 
@@ -918,13 +919,32 @@ async def _lock(session: AsyncSession, key: str) -> None:
     await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
 
 
-async def _add_alias(session: AsyncSession, company_id: UUID, alias: str, kind: str) -> None:
+MATCH_ALIAS = "match"
+
+
+def alias_rows(company_id: UUID, alias: str, kind: str) -> list[dict[str, Any]]:
+    """Dòng `company_aliases` cho một tên: tên chuẩn hoá, và khoá map profile trên trang tuyển
+    dụng (`kind="match"`) nếu khác — để SQL trigram khi map tìm được "Shopee Việt Nam" từ
+    "Shopee". Alias `match` không dùng khi tra cache KYC / nạp danh sách."""
     norm = normalize_company_name(alias)
     if len(norm) < 2:
+        return []
+    rows = [{"company_id": company_id, "alias": alias, "alias_norm": norm, "kind": kind}]
+    key = company_match_key(alias)
+    if len(key) >= 2 and key != norm:
+        rows.append(
+            {"company_id": company_id, "alias": alias, "alias_norm": key, "kind": MATCH_ALIAS}
+        )
+    return rows
+
+
+async def _add_alias(session: AsyncSession, company_id: UUID, alias: str, kind: str) -> None:
+    rows = alias_rows(company_id, alias, kind)
+    if not rows:
         return
     await session.execute(
         pg_insert(CompanyAlias)
-        .values(company_id=company_id, alias=alias, alias_norm=norm, kind=kind)
+        .values(rows)
         .on_conflict_do_nothing(index_elements=["company_id", "alias_norm"])
     )
 
@@ -951,7 +971,10 @@ async def find_company(
         await session.scalars(
             select(Company)
             .join(CompanyAlias, CompanyAlias.company_id == Company.id)
-            .where(CompanyAlias.alias_norm == alias_norm)
+            .where(
+                CompanyAlias.alias_norm == alias_norm,
+                CompanyAlias.kind.is_distinct_from(MATCH_ALIAS),
+            )
             .order_by(
                 (Company.kyc_status == KycStatus.VERIFIED.value).desc().nulls_last(), Company.id
             )
@@ -971,6 +994,7 @@ async def find_company(
         .join(CompanyAlias, CompanyAlias.company_id == Company.id)
         .where(
             CompanyAlias.alias_norm.op("%")(alias_norm),
+            CompanyAlias.kind.is_distinct_from(MATCH_ALIAS),
             Company.kyc_status == KycStatus.VERIFIED.value,
         )
         .order_by(similarity.desc(), Company.id)

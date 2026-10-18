@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.text import normalize_company_name, strip_accents
+from jobcrawler.text import company_match_key, normalize_company_name, strip_accents
 
 
 def test_strip_accents() -> None:
@@ -37,3 +37,41 @@ def test_normalize_company_name(name: str, expected: str) -> None:
 def test_variants_share_alias_norm() -> None:
     variants = ["Công ty Cổ phần Tiki", "TIKI JSC", "tiki corporation", "Tiki"]
     assert {normalize_company_name(v) for v in variants} == {"tiki"}
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        # TMCP viết tắt / viết đủ, tên thương hiệu trong ngoặc.
+        ("Ngân hàng TMCP Quân Đội", "Ngân Hàng Thương Mại Cổ Phần Quân Đội (MB Bank)"),
+        # Profile của chi nhánh.
+        ("Ngân hàng TMCP Quân Đội", "Ngân hàng TMCP Quân Đội - Chi nhánh Bắc Ninh"),
+        # Đuôi chung chung.
+        ("Shopee", "Shopee Việt Nam"),
+        ("Viettel", "Viettel Group"),
+        ("Công ty TNHH Yakult Việt Nam", "Yakult"),
+    ],
+)
+def test_company_match_key_joins_name_variants(a: str, b: str) -> None:
+    assert company_match_key(a) == company_match_key(b)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("FPT", "FPT Software"),
+        ("Samsung Electronics Việt Nam", "Samsung Electronics Việt Nam Thái Nguyên"),
+        ("Hàng không Việt Nam", "Hàng không Vietjet"),
+        ("Công ty Xây dựng số 1", "Công ty Xây dựng số 2"),
+    ],
+)
+def test_company_match_key_keeps_different_companies_apart(a: str, b: str) -> None:
+    assert company_match_key(a) != company_match_key(b)
+
+
+def test_company_match_key_keeps_generic_names() -> None:
+    # Phần còn lại toàn từ chung ngành: giữ đuôi "Việt Nam".
+    assert company_match_key("Tổng công ty Hàng không Việt Nam") == "hang khong viet nam"
+    assert company_match_key("Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)") == (
+        "ngan hang thuong mai ngoai thuong"
+    )

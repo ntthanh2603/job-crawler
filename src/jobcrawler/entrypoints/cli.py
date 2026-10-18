@@ -565,6 +565,13 @@ def index_boards(
     map_only: Annotated[
         bool, typer.Option("--map-only", help="Chỉ map lại profile ↔ doanh nghiệp.")
     ] = False,
+    rematch: Annotated[
+        bool,
+        typer.Option(
+            "--rematch",
+            help="Tính lại khoá tên profile + alias khớp, thử lại mọi profile chưa map rồi map.",
+        ),
+    ] = False,
     list_boards: Annotated[bool, typer.Option("--list", help="Liệt kê các trang.")] = False,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -582,6 +589,20 @@ def index_boards(
     except board_service.UnknownBoardError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
+
+    if rematch:
+
+        async def go_rematch() -> board_service.RematchReport:
+            async with open_resources() as res:
+                return await board_service.rematch_profiles(res, source)
+
+        again = _run(go_rematch())
+        typer.echo(
+            f"khoá tên mới {again.renamed} profile · alias khớp mới {again.aliases}"
+            f" · map được {again.mapped.matched} profile mới"
+            f" · tổng {again.mapped.mapped_total}/{again.mapped.profiles} profile đã map"
+        )
+        return
 
     if map_only:
 

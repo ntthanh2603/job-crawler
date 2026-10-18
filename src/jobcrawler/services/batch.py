@@ -194,7 +194,10 @@ async def _import_chunk(
     for company, norm in await session.execute(
         select(Company, CompanyAlias.alias_norm)
         .join(CompanyAlias, CompanyAlias.company_id == Company.id)
-        .where(CompanyAlias.alias_norm.in_(norms))
+        .where(
+            CompanyAlias.alias_norm.in_(norms),
+            CompanyAlias.kind.is_distinct_from(kyc.MATCH_ALIAS),
+        )
     ):
         by_name.setdefault(norm, []).append(company)
 
@@ -229,7 +232,7 @@ async def _import_chunk(
             result.unchanged += not changed
         await session.execute(
             pg_insert(CompanyAlias)
-            .values(company_id=company.id, alias=row.name, alias_norm=norm, kind="input")
+            .values(kyc.alias_rows(company.id, row.name, "input"))
             .on_conflict_do_nothing(index_elements=["company_id", "alias_norm"])
         )
         if company.id not in result.company_ids:

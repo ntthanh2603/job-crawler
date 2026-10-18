@@ -22,7 +22,7 @@ from jobcrawler.sources.boards.base import (
     sitemap_body,
 )
 from jobcrawler.sources.boards.profile_source import BoardProfileSource
-from jobcrawler.text import normalize_company_name
+from jobcrawler.text import company_match_key, normalize_company_name
 
 from .boards_fake import HOME, FakeBoard, fake_site, job_page, sitemap_index, urlset
 
@@ -361,6 +361,22 @@ def _company(
         tax_code=tax,
         kyc_status=kyc,
     )
+
+
+def test_decide_maps_profile_name_variants() -> None:
+    mb = _company(5, "Ngân hàng TMCP Quân Đội")
+    profile = _profile("Ngân Hàng Thương Mại Cổ Phần Quân Đội (MB Bank)")
+    profile.name_norm = company_match_key(profile.name_on_source)
+    d = decide(profile, [(mb, company_match_key(mb.input_name), 1.0)])
+    assert d is not None
+    assert (d.company_id, d.evidence["signal"]) == (5, "name")
+    # "FPT Software" không phải "FPT".
+    fpt = _company(6, "FPT")
+    other = _profile("FPT Software")
+    other.name_norm = company_match_key(other.name_on_source)
+    d = decide(other, [(fpt, company_match_key(fpt.input_name), 0.6)])
+    assert d is not None
+    assert d.company_id is None
 
 
 def test_decide_profile_match_rules() -> None:
