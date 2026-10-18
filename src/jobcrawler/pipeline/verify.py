@@ -30,7 +30,13 @@ from jobcrawler.logging import get_logger
 from jobcrawler.net.kv import KeyValueStore
 from jobcrawler.net.urls import host_of, path_segments, registrable_domain
 from jobcrawler.pipeline import provinces
-from jobcrawler.pipeline.dedup import Signatures, connected_groups, jd_similarity, title_similarity
+from jobcrawler.pipeline.dedup import (
+    Signatures,
+    connected_groups,
+    is_repost,
+    jd_similarity,
+    title_similarity,
+)
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.prompts import job_verify
 from jobcrawler.schemas import ExtractionMethod
@@ -249,7 +255,7 @@ _SCAM_STRONG = re.compile(
     r"|chuyen khoan)"
     r"|dat coc (dong phuc|ho so|tien|truoc)"
     r"|viec nhe luong cao"
-    r"|(cong tac vien|ctv) online|kiem tien online|viec lam online tai nha|nhap lieu tai nha"
+    r"|kiem tien online"
 )
 _SCAM_WEAK = re.compile(
     r"(khong can|khong yeu cau) (kinh nghiem|bang cap).{0,60}(thu nhap|luong) "
@@ -258,6 +264,8 @@ _SCAM_WEAK = re.compile(
     r"|\d+ ?(k|trieu|tr) ?(moi )?ngay\b.{0,40}\b(ctv|cong tac vien)\b"
     r"|(nop|dong) tien (ho so|dao tao|dong phuc|dang ky|giu cho|tuyen dung|xu ly ho so"
     r"|kham suc khoe|the nhan vien)"
+    # Cộng tác viên làm online có thật (Ahamove "CTV Kinh Doanh"): để LLM xem, không loại ngay.
+    r"|(cong tac vien|ctv) online|viec lam online tai nha|nhap lieu tai nha"
 )
 # So trên chữ còn dấu (NFC, viết thường).
 _DA_CAP = re.compile(r"(?<!\w)đa cấp(?!\w)")
@@ -527,10 +535,14 @@ def mark_reposts(
 
     def linked(a: int, b: int) -> bool:
         x, y = jobs[idx[a]], jobs[idx[b]]
+        if x.source != y.source or x.places != y.places:  # "[Hải Dương]" ≠ "[Hải Phòng]"
+            return False
+        if not x.places:
+            # Không biết nơi làm: tiêu đề chuẩn hoá đã bỏ phần trong ngoặc ("[VII.2026_Ba Đình] CV
+            # khách hàng" của từng chi nhánh Vietcombank) nên so tiêu đề gốc, đòi gần như y hệt.
+            return is_repost(x.title, y.title, jd_similarity(sigs(x), sigs(y)))
         return (
-            x.source == y.source
-            and x.places == y.places  # giữ tên tỉnh cũ: "[Hải Dương]" ≠ "[Hải Phòng]"
-            and title_similarity(x.title_normalized, y.title_normalized) >= 90
+            title_similarity(x.title_normalized, y.title_normalized) >= 90
             and jd_similarity(sigs(x), sigs(y)) >= SPAM_JD_THRESHOLD
         )
 

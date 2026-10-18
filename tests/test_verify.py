@@ -151,6 +151,10 @@ def test_ordinary_duties_are_not_agency_or_scam(sentence: str) -> None:
         ("Our client is a leading bank in Singapore.", "có thể là tin tuyển hộ: our client is a"),
         ("Có kinh nghiệm headhunt là lợi thế.", "có thể là tin tuyển hộ: headhunt"),
         ("Ứng viên đóng tiền đồng phục khi nhận việc.", "dấu hiệu lừa đảo: dong tien dong phuc"),
+        (
+            "Cộng tác viên kinh doanh, việc làm online tại nhà.",
+            "dấu hiệu lừa đảo: viec lam online tai nha",
+        ),
     ],
 )
 def test_ambiguous_agency_or_scam_wording_goes_to_llm(sentence: str, concern: str) -> None:
@@ -158,6 +162,29 @@ def test_ambiguous_agency_or_scam_wording_goes_to_llm(sentence: str, concern: st
     assert v.accepted, v.reasons
     assert v.concerns == [concern]
     assert v.confidence < 0.8
+
+
+async def test_same_role_at_branches_without_known_place_is_not_a_repost() -> None:
+    """Vietcombank đăng cùng vị trí cho từng chi nhánh; tên chi nhánh không phải tỉnh/thành."""
+    jobs = [
+        normalized(
+            raw_job(
+                external_id=f"b{i}",
+                url=f"https://tuyendung.acme.vn/job/{i}",
+                title=f"[VII.2026_{branch}] CV khách hàng (kinh nghiệm)",
+                locations=[],
+            )
+        )
+        for i, branch in enumerate(["Ba Đình", "Sài Thành"])
+    ]
+    assert jobs[0].places == jobs[1].places == frozenset()
+    verdicts = await verify_jobs(jobs, ACME, no_llm(), now=NOW, until=0)
+    assert [v.code for v in verdicts] == [None, None]
+    # Đăng lại y hệt (cùng tiêu đề, cùng JD) thì vẫn là tin đăng lại.
+    again = normalized(raw_job(external_id="b9", url="https://tuyendung.acme.vn/job/9",
+                               title=jobs[0].title, locations=[], posted_at=NOW))  # fmt: skip
+    verdicts = await verify_jobs([jobs[0], again], ACME, no_llm(), now=NOW, until=0)
+    assert [v.code for v in verdicts] == [verify.SPAM_REPOST, None]
 
 
 def test_multi_position_title_with_role_and_full_jd_is_kept() -> None:
