@@ -268,3 +268,21 @@ async def test_timeout_keeps_unconfirmed_careers_page() -> None:
     assert result.error == "timeout"
     assert result.careers_pages == ["https://acme.vn/tuyen-dung"]
     assert result.method == "unconfirmed"
+
+
+async def test_unresponsive_bare_domain_falls_back_to_www_quickly() -> None:
+    """hoaphat.com.vn không phản hồi, www.hoaphat.com.vn thì có: dùng www ngay."""
+
+    class SlowApex(FakeFetcher):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            if url.startswith("https://acme.vn/"):
+                await asyncio.sleep(30)  # không phản hồi
+            return await super().fetch(url, **kwargs)
+
+    fetcher = SlowApex()
+    fetcher.add("https://www.acme.vn/", '<a href="/tuyen-dung">Tuyển dụng</a>')
+    fetcher.add("https://www.acme.vn/tuyen-dung", LISTING)
+    result = await asyncio.wait_for(
+        discover(session(fetcher), MemoryKV(), "acme.vn", timeout=5), timeout=10
+    )
+    assert result.careers_pages == ["https://www.acme.vn/tuyen-dung"]

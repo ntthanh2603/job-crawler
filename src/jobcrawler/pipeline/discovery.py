@@ -257,7 +257,13 @@ class _Discovery:
         return any(p.rstrip("/") == key for p in self.result.careers_pages)
 
     async def homepage(self) -> Page | None:
-        for url in (f"https://{self.domain}/", f"https://www.{self.domain}/"):
+        """Trang chủ: thử nhanh (không thử lại) cả domain trần lẫn `www.` cùng lúc rồi đọc bản mở
+        được trước — domain trần không phản hồi (hoaphat.com.vn) không ăn hết giờ tìm nguồn."""
+        urls = [f"https://{self.domain}/"]
+        if not self.domain.startswith("www."):
+            urls.append(f"https://www.{self.domain}/")
+        ordered = await self._first_ok(urls)
+        for url in ordered:
             page = await fetch_page(self.s, url)
             if page is not None:
                 self.result.homepage = page.url
@@ -266,6 +272,26 @@ class _Discovery:
                 return page
             self.step(f"{url} → không mở được")
         return None
+
+    async def _first_ok(self, urls: list[str]) -> list[str]:
+        """`urls` xếp lại: bản mở được nhanh nhất lên trước (không chờ bản còn treo)."""
+        tasks = [
+            asyncio.ensure_future(self.s.fetch(url, timeout=GUESS_TIMEOUT, retries=0))
+            for url in urls
+        ]
+        try:
+            for done in asyncio.as_completed(tasks):
+                try:
+                    result = await done
+                except SourceError:
+                    continue  # bị chặn: lần đọc trang chủ sau sẽ báo lỗi
+                if result.ok and result.url in urls:
+                    return [result.url, *(u for u in urls if u != result.url)]
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        return urls
 
     async def choose(self, candidates: list[Candidate]) -> list[Candidate]:
         """LLM chọn trong danh sách khi có nhiều ứng viên; không có LLM thì theo điểm."""
