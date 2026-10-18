@@ -570,6 +570,31 @@ async def test_jobs_embedded_in_next_data() -> None:
     assert all(len(j.description or "") >= 100 for j in jobs)
 
 
+async def test_thin_detail_page_is_rendered() -> None:
+    """Tiki: HTML trang tin chỉ có tiêu đề + hạn nộp, mô tả do JavaScript nạp."""
+    listing = "https://tuyendung.tiki.vn/"
+    job = "https://tuyendung.tiki.vn/job_detail?request_id=TIKI_Business_01102026_410"
+    fetcher = FakeFetcher()
+    fetcher.add(
+        listing,
+        "<main><h1>Tuyển dụng</h1>"
+        + "<p>Gia nhập Tiki. </p>" * 20
+        + f'<a href="{job}">Key Account Sales</a></main>',
+    )
+    thin = (
+        "<main><h1>Key Account Sales</h1><p>Business</p><p>Hồ Chí Minh</p><p>Full-time</p>"
+        "<h6>Application Deadline: 07/10/2026 - 31/10/2026</h6>"
+        + "<p>Ứng tuyển ngay để trở thành một phần của đội ngũ.</p>" * 4
+        + "</main>"
+    )
+    fetcher.add(job, thin)
+    fetcher.add_rendered(job, JD.format(title="Key Account Sales"))
+    jobs = await run(CareersSource(listing), session(fetcher))
+    assert [j.title for j in jobs] == ["Key Account Sales"]
+    assert "Phát triển tính năng mới" in (jobs[0].description or "")
+    assert ("render", job) in [(kind, u) for kind, u, _ in fetcher.calls]
+
+
 def test_pick_title_prefers_heading_matching_listing_text() -> None:
     banner = "TMA tự hào là nơi làm việc tin cậy của"
     assert pick_title("System Test Engineer", [banner, "System Test Engineer (HCM)"], None) == (

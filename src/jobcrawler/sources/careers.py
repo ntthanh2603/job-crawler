@@ -232,6 +232,9 @@ _SUB_LISTING_LINKS = 3
 # Trang không có mã tin trong URL mà dẫn tới từ ngần này tin có mã: trang danh mục / theo tỉnh
 # (vieclam.thegioididong.com/tuyen-dung/ban-hang-thu-ngan... → /tuyen-dung/nhan-vien-...-45).
 _HUB_ID_LINKS = 3
+# Trang tin mà nội dung chính ngắn hơn mức này (ký tự markdown): mô tả do JavaScript nạp sau
+# (Tiki: HTML chỉ có tiêu đề + hạn nộp), mở lại bằng trình duyệt.
+_THIN_DETAIL = 400
 
 # Nhóm từ khoá của một bản mô tả công việc (đã bỏ dấu). Đếm số nhóm xuất hiện.
 _JD_SIGNALS: tuple[tuple[str, ...], ...] = (
@@ -874,10 +877,32 @@ class CareersSource(Source):
         page = await fetch_page(session, link.url)
         if page is None:
             return None, [], False
+        return await self._detail_page(session, link, page)
+
+    async def _rendered_detail(
+        self, session: SourceSession, link: JobLink, page: Page
+    ) -> tuple[RawJob | None, list[JobLink], bool] | None:
+        """Trang tin quá mỏng qua HTTP: mở lại bằng trình duyệt (None: không mở được)."""
+        if page.rendered or not session.can_render:
+            return None
+        rendered = await fetch_page(
+            session, link.url, render=True, wait_until="networkidle", capture_json=True
+        )
+        if rendered is None:
+            return None
+        return await self._detail_page(session, link, rendered)
+
+    async def _detail_page(
+        self, session: SourceSession, link: JobLink, page: Page
+    ) -> tuple[RawJob | None, list[JobLink], bool]:
         if postings := jsonld.raw_jobs(page.html, page.url):
             job = postings[0]
             if not same_site(job.url, page.url):
                 job = job.model_copy(update={"url": page.url})
+            if len(job.description or "") < _MIN_DESCRIPTION and (
+                again := await self._rendered_detail(session, link, page)
+            ):
+                return again
             return job, [], False
         sub = scan_listing(page)
         if hub_page(page.url, sub.job_links):
@@ -888,6 +913,10 @@ class CareersSource(Source):
         if node is None:
             return None, [], False
         markdown = html_to_markdown(node.html or "")
+        if len(markdown) < _THIN_DETAIL and (
+            again := await self._rendered_detail(session, link, page)
+        ):
+            return again
         signals = jd_signals(markdown)
         more: list[JobLink] = []
         if signals < _CLEAR_JD and len(sub.job_links) >= _SUB_LISTING_LINKS:
