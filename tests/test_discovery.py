@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
 from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
+from jobcrawler.net.http import FetchResult
 from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pipeline.discovery import (
     brand_careers_site,
@@ -230,3 +232,39 @@ async def test_spa_soft_404_paths_are_skipped() -> None:
     assert any("giống trang chủ" in step for step in result.steps)
     rendered = [url for kind, url, _ in fetcher.calls if kind == "render"]
     assert rendered == ["https://shop.vn/"]  # chỉ trang chủ
+
+
+async def test_subdomain_is_probed_before_common_paths() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add("https://acme.vn/", "<html><body>Trang chủ</body></html>")
+    fetcher.add("https://tuyendung.acme.vn/", LISTING)
+    fetcher.add("https://acme.vn/jobs", LISTING)
+    result = await discover(session(fetcher), MemoryKV(), "acme.vn")
+    assert result.method == "subdomain"
+    assert result.careers_pages == ["https://tuyendung.acme.vn/"]
+    opened = [url for _, url, _ in fetcher.calls]
+    assert "https://acme.vn/jobs" not in opened
+
+
+async def test_timeout_keeps_unconfirmed_careers_page() -> None:
+    """Hết giờ trước khi xác nhận được trang nào: vẫn thử trang careers rõ nhất đã thấy."""
+
+    class SlowSitemap(FakeFetcher):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            if "sitemap" in url:
+                await asyncio.sleep(30)
+            return await super().fetch(url, **kwargs)
+
+    fetcher = SlowSitemap()
+    fetcher.add("https://acme.vn/", '<a href="/tuyen-dung">Tuyển dụng</a>')
+    # Trang giới thiệu tuyển dụng, chưa thấy link tin nào.
+    fetcher.add(
+        "https://acme.vn/tuyen-dung",
+        "<html><body><h1>Tuyển dụng</h1><p>"
+        + "Gia nhập đội ngũ ACME. " * 20
+        + "</p></body></html>",
+    )
+    result = await discover(session(fetcher), MemoryKV(), "acme.vn", timeout=0.5)
+    assert result.error == "timeout"
+    assert result.careers_pages == ["https://acme.vn/tuyen-dung"]
+    assert result.method == "unconfirmed"

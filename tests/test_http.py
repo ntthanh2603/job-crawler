@@ -208,6 +208,15 @@ async def test_timeouts_retry_then_report_timeout(clock: FakeClock) -> None:
     assert not (await rig.client.fetch(url, use_cache=False)).ok
 
 
+async def test_retries_can_be_turned_off_per_request(clock: FakeClock) -> None:
+    url = f"{SITE}/a"
+    rig = make(clock, {url: TErr("timeout", "operation timed out")})
+    result = await rig.client.fetch(url, retries=0)  # URL đoán: không thử lại
+    assert result.outcome is FetchOutcome.TIMEOUT
+    assert result.attempts == 1
+    assert rig.backoffs == []
+
+
 async def test_block_page_stops_immediately_and_cools_proxy(clock: FakeClock) -> None:
     url = f"{SITE}/a"
     rig = make(

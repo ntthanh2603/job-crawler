@@ -52,6 +52,8 @@ MAX_EVALUATE = 3  # số trang ứng viên mở để xác nhận ở mỗi bư�
 MAX_CAREERS_PAGES = 2
 MAX_SITEMAPS = 3
 MAX_LLM_CANDIDATES = 20
+# URL đoán (đường dẫn phổ biến, subdomain): đa số không tồn tại, không thử lại, chờ ngắn.
+GUESS_TIMEOUT = 8.0
 
 COMMON_PATHS = (
     "/careers",
@@ -373,7 +375,7 @@ class _Discovery:
         home_print = _fingerprint(home.text) if home.ok else None
         for path in COMMON_PATHS:
             candidate = Candidate(f"{root}{path}", "", 2)
-            result = await self.s.fetch(candidate.url)
+            result = await self.s.fetch(candidate.url, timeout=GUESS_TIMEOUT, retries=0)
             # Đường dẫn không tồn tại thường bị chuyển về trang chủ, hoặc (SPA) trả nguyên khung
             # HTML của trang chủ với mã 200: soft 404, bỏ qua.
             if not result.ok or not path_segments(result.final_url):
@@ -388,7 +390,12 @@ class _Discovery:
     async def probe_subdomains(self) -> bool:
         base = registrable_domain(host_of(self.site))
         for sub in SUBDOMAINS:
-            if await self.evaluate(Candidate(f"https://{sub}.{base}/", "", 2), hop=1):
+            url = f"https://{sub}.{base}/"
+            # Subdomain không tồn tại (lỗi DNS/kết nối): bỏ qua ngay, không thử lại.
+            probe = await self.s.fetch(url, timeout=GUESS_TIMEOUT, retries=0)
+            if probe.status is None:
+                continue
+            if await self.evaluate(Candidate(url, "", 2), hop=1):
                 return True
         return False
 
@@ -432,11 +439,13 @@ class _Discovery:
                 if await self.evaluate(candidate, hop=1):
                     r.method = "sitemap"
                     return r
-        if await self.probe_common_paths():
-            r.method = "common_path"
-            return r
+        # Subdomain trước: tuyendung.<domain> là chỗ hay gặp nhất mà chỉ mất vài request, còn
+        # dò 10 đường dẫn trên site lớn chậm (Viettel hết giờ trước khi tới subdomain).
         if await self.probe_subdomains():
             r.method = "subdomain"
+            return r
+        if await self.probe_common_paths():
+            r.method = "common_path"
             return r
         # Không xác nhận được trang nào: giữ trang có dấu hiệu careers rõ nhất để thử bằng LLM.
         if self.unconfirmed and not r.ats:
@@ -477,6 +486,10 @@ async def discover(
     except TimeoutError:
         result = run.result
         result.error = TIMEOUT
+        # Hết giờ trước khi xác nhận được trang nào: thử trang có dấu hiệu careers rõ nhất.
+        if not result.found and run.unconfirmed:
+            result.careers_pages.append(run.unconfirmed[0])
+            result.method = result.method or "unconfirmed"
     # Input là URL bảng ATS thì không cần cache (không gọi mạng).
     cacheable = result.error is None or (result.found and result.error != TIMEOUT)
     if cacheable and result.method != "input_ats":

@@ -205,6 +205,7 @@ class Fetcher(Protocol):
         check_robots: bool = True,
         timeout: float | None = None,
         allow_redirects: bool = True,
+        retries: int | None = None,
     ) -> FetchResult: ...
 
     async def render(
@@ -443,7 +444,9 @@ class HttpClient:
         check_robots: bool = True,
         timeout: float | None = None,
         allow_redirects: bool = True,
+        retries: int | None = None,
     ) -> FetchResult:
+        """`retries`: số lần thử lại khi lỗi tạm (mặc định HTTP_MAX_RETRIES); 0 cho URL đoán."""
         url = with_params(url, params)
         host = host_of(url)
         method = method.upper()
@@ -469,6 +472,7 @@ class HttpClient:
             rate=self._rate_for(host, rate, robots),
             timeout=timeout or self.config.timeout,
             allow_redirects=allow_redirects,
+            retries=self.config.max_retries if retries is None else retries,
         )
         if cacheable and result.ok and result.status is not None and result.status < 300:
             await self._cache.set(result)
@@ -487,10 +491,11 @@ class HttpClient:
         rate: float,
         timeout: float,
         allow_redirects: bool,
+        retries: int,
     ) -> FetchResult:
         started = time.monotonic()
         last: FetchResult | None = None
-        max_attempts = self.config.max_retries + 1
+        max_attempts = max(0, retries) + 1
 
         def result(**kw: Any) -> FetchResult:
             kw.setdefault("final_url", url)
