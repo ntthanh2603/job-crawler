@@ -39,7 +39,7 @@ from jobcrawler.pages import (
 )
 from jobcrawler.prompts import job_detail, job_listing
 from jobcrawler.schemas import ExtractionMethod, RawJob
-from jobcrawler.sources import jsonld
+from jobcrawler.sources import json_jobs, jsonld
 from jobcrawler.sources.base import (
     Source,
     SourceSession,
@@ -521,6 +521,14 @@ class ListingScan:
         return not self.jobs and not self.job_links
 
 
+def json_docs(page: Page) -> list[json_jobs.JsonDoc]:
+    """JSON của trang: nhúng trong HTML (`__NEXT_DATA__`...)."""
+    return [
+        json_jobs.JsonDoc(url=page.url, data=data, embedded=True)
+        for data in json_jobs.embedded_json(page.html)
+    ]
+
+
 def scan_listing(page: Page) -> ListingScan:
     links = extract_links(parse(page.html), page.url)
     jobs: list[RawJob] = []
@@ -533,6 +541,19 @@ def scan_listing(page: Page) -> ListingScan:
             # JSON-LD của trang danh sách chỉ có tiêu đề: cần trang chi tiết.
             found.append(JobLink(url=job.url, title=job.title))
             known.add(job.url)
+    # Trang dựng bằng JavaScript: tin nằm trong dữ liệu JSON của trang.
+    texts = {link.url: link.text for link in links}
+    ids = {job.external_id for job in jobs}
+    for doc in json_docs(page):
+        extracted = json_jobs.extract(doc, page_url=page.url, links=texts)
+        for job in extracted.jobs:
+            if job.external_id not in ids:
+                ids.add(job.external_id)
+                jobs.append(job)
+        for url, title in extracted.links:
+            if url not in known and url != page.url:
+                known.add(url)
+                found.append(JobLink(url=url, title=title))
     return ListingScan(page, links, jobs, found, listing_links(links, page.url))
 
 

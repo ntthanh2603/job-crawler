@@ -1,0 +1,226 @@
+{
+ "url": "https://api-ats.ahamove.com/api/v1/public/jobs?page=1&pageSize=10",
+ "method": "GET",
+ "request_json": null,
+ "body": {
+  "items": [
+   {
+    "title": "CTV Kinh Doanh",
+    "code": "JOB-000041",
+    "departmentId": "6a204203fd6930a850efdece",
+    "employmentType": "CTV",
+    "jobField": "BD",
+    "location": "Thành phố Hồ Chí Minh, Đồng Nai",
+    "locations": [
+     "Thành phố Hồ Chí Minh",
+     "Đồng Nai"
+    ],
+    "descriptionHtml": "<p><strong>1. Tiếp nhận và chuyển đổi khách hàng tiềm năng:</strong> Tiếp nhận danh sách khách hàng từ công ty, tư vấn và chuyển đổi khách hàng sử dụng dịch vụ Ahamove.</p><p><strong>2. Chăm sóc và phát triển khách hàng hiện hữu:</strong> Thực hiện gọi điện định kỳ, thu thập phản hồi của khách hàng, tư vấn các dịch vụ mới, bán chéo dịch vụ và tái kích hoạt khách hàng nhằm gia tăng tần suất sử dụng.</p><p><strong>3. Thu thập khách hàng ngoài thị trường:</strong> Khảo sát, tìm kiếm và thu thập thông tin khách hàng tiềm năng tại các khu vực hoặc nhóm khách hàng được phân công.</p><p><strong>4. Hỗ trợ vận hành khách hàng:</strong> Hỗ trợ khách hàng trong quá trình đặt đơn, điều phối và xử lý các vấn đề phát sinh nhằm đảm bảo trải nghiệm sử dụng dịch vụ.</p>",
+    "priority": "NORMAL",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "ctv-kinh-doanh-3",
+    "requirementsHtml": "<ul><li><p>Sinh viên năm cuối hoặc đã tốt nghiệp Cao đẳng/Đại học ngành Kinh tế, Quản trị Kinh doanh, Truyền thông, Marketing.</p></li><li><p>Ưu tiên có kinh nghiệm sales, telesales hoặc làm việc trong lĩnh vực Logistics, F&amp;B, FMCG.</p></li><li><p>Giao tiếp tự tin, giọng nói rõ ràng, dễ nghe.</p></li><li><p>Biết lắng nghe, tư vấn, thuyết phục và xử lý tình huống tốt.</p></li><li><p>Chủ động, nhanh nhạy, học hỏi nhanh; lấy khách hàng làm trọng tâm và hướng đến kết quả.</p></li><li><p>Tự tin, năng động và kiên trì dưới áp lực.</p></li></ul><p></p>",
+    "benefitsHtml": "<ul><li><p>Lương cứng <strong>25.000đ/giờ</strong>.</p></li><li><p>Thưởng thêm <strong>500.000 – 1.000.000đ/tháng</strong> khi hoàn thành tốt các buổi khảo sát thực địa (field) hàng tuần.</p></li><li><p>Địa điểm làm việc: làm online tại nhà hoặc văn phòng Ahamove tại Hồ Chí Minh/Đồng Nai.</p></li><li><p>Thời gian làm việc: part-time linh hoạt tối thiểu <strong>28–30 giờ/tuần</strong>, chia ca 6 giờ/ngày × 5–6 ngày/tuần.</p></li><li><p>Đào tạo và quản lý báo cáo online.</p></li></ul><p></p>",
+    "createdAt": "2026-10-16T06:19:08.687Z",
+    "updatedAt": "2026-10-16T06:48:16.351Z",
+    "departmentName": "Business Development",
+    "_id": "ctv-kinh-doanh-3",
+    "employmentTypeName": "CTV",
+    "jobFieldName": "Business Development"
+   },
+   {
+    "title": "(Senior) Accounts Receivable Executive",
+    "code": "JOB-000038",
+    "departmentId": "6a282a0bb9a9803af49bbf87",
+    "employmentType": "FULL_TIME",
+    "jobField": "SERVICE_CENTER",
+    "location": "Thành phố Hồ Chí Minh",
+    "locations": [
+     "Thành phố Hồ Chí Minh"
+    ],
+    "descriptionHtml": "<ul><li><p>Xét duyệt hợp đồng và thông tin khách hàng; theo dõi/lập báo cáo định kỳ và phối hợp phòng ban đôn đốc thu hồi công nợ;</p></li><li><p>Quản lý quy trình lập hóa đơn điện tử; đối soát và hạch toán đồng bộ dữ liệu giữa hóa đơn, doanh thu và thanh toán;</p></li><li><p>Hạch toán, và lập báo cáo các nghiệp vụ liên quan đến tài xế;</p></li><li><p>Đối soát dòng tiền vào/ra giữa hệ thống vận hành, cổng thanh toán/ví điện tử, sổ phụ ngân hàng và phần mềm kếtoán đúng kỳ;</p></li><li><p>Kiểm tra tính hợp lệ của chứng từ, hạch toán các nghiệp vụ phát sinh đảm bảo chuẩn mực kế toán và quy định pháp luật;</p></li><li><p>Lập các báo cáo theo yêu cầu và phối hợp liên phòng ban xử lý phát sinh;</p></li><li><p>Thực hiện các công việc khác theo phân công của cấp quản lý.</p></li></ul><p></p>",
+    "priority": "HOT",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "senior-accounts-receivable-executive",
+    "requirementsHtml": "<p><strong>Yêu cầu</strong></p><ul><li><p>Tốt nghiệp Đại học chuyên ngành Kế toán – Tài Chính;</p></li><li><p>Tối thiểu 1-2 năm kinh nghiệm Kế toán công nợ phải thu;</p></li><li><p>Thành thạo MS Office;</p></li><li><p>Nắm được quy trình xử lý, đối chiếu công nợ &amp; hóa đơn điện tử.</p></li></ul><p><strong>Kỹ năng</strong></p><ul><li><p>Quản lý thời gian, chịu được áp lực khối lượng giao dịch lớn; cẩn thận, trung thực, tinh thần trách nhiệm &amp; họchỏi cao;</p></li><li><p>Giao tiếp tốt, làm việc nhóm và độc lập;</p></li><li><p>Chủ động xử lý tình huống phát sinh, báo cáo kịp thời.</p></li></ul><p><strong>Ưu tiên</strong></p><ul><li><p>Sử dụng phần mềm kế toán Misa, Ứng dụng AI (Claude, Gemini, …) trong xử lý dữ liệu, phân tích báo cáo;</p></li><li><p>Kinh nghiệm ngành vận tải/ TMĐT và xử lý khối lượng giao dịch lớn;</p></li><li><p>Có tư duy chủ động đề xuất cải tiến quy trình.​</p></li></ul><p></p>",
+    "benefitsHtml": "<ul><li><p>Bảo hiểm xã hội, Khám sức khỏe định kỳ, Bảo hiểm tai nạn, Bảo hiểm sức khỏe;</p></li><li><p>Du lịch, YEP, Hoạt động Aha Hour, Quà tặng dịp đặc biệt, Câu lạc bộ Aha (Cầu lông, Bóng đá);</p></li><li><p>Lương tháng 13, Thưởng hiệu quả công việc năm, Nghỉ phép.</p></li></ul><p></p>",
+    "createdAt": "2026-09-25T06:09:07.042Z",
+    "updatedAt": "2026-10-13T08:29:02.344Z",
+    "departmentName": "Finance & Accounting",
+    "_id": "senior-accounts-receivable-executive",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Service Center"
+   },
+   {
+    "title": "Operations Excellence Specialist (Warehouse)",
+    "code": "JOB-000033",
+    "departmentId": "6a282a2fb9a9803af49bbfd0",
+    "employmentType": "FULL_TIME",
+    "jobField": "OP",
+    "location": "Thành phố Hồ Chí Minh",
+    "locations": [
+     "Thành phố Hồ Chí Minh"
+    ],
+    "descriptionHtml": "<p><span style=\"color: rgb(0, 0, 0);\"><strong>1. Process &amp; Productivity Improvement</strong></span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Analyze operational processes and identify bottlenecks and waste.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Lead improvement projects, standardize processes, and develop/issue SOPs.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\"><strong>2. Automation &amp; Optimization</strong></span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Build, operate, and improve automation tools/scripts to automate manual tasks, reduce workload and errors, and improve processing speed.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\"><strong>3. Research &amp; Improvement Proposals</strong></span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Research and benchmark best practices.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Propose the application of new technologies and operational solutions.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Develop operational plans for actual campaigns.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\"><strong>4. Data Analysis &amp; Reporting</strong></span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Extract, compile, and analyze operational data.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Prepare periodic (weekly/monthly/quarterly) and ad-hoc reports.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Build dashboards to measure productivity, cost/order, and SLA.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Support other departments in decision-making.</span></p>",
+    "priority": "NORMAL",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "operations-excellence-specialist-warehouse",
+    "requirementsHtml": "<p><span style=\"color: rgb(0, 0, 0);\">- Bachelor's degree in Information Technology, Economics, Transportation, Logistics, Industrial Management, or a related field.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- At least 2 years of experience in Operations Excellence / Continuous Improvement or Business Analyst / Data Analyst roles; experience in operations/logistics is preferred.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Strong skills in process improvement, process standardization, SOP development, and improvement project management.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Proficiency in SQL and data analysis, as well as advanced Excel/Google Sheets skills (Pivot Tables, advanced functions, data modeling). Knowledge of at least one programming language, with a strong preference for Python; JavaScript is a plus.</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Strong reporting and data visualization (dashboard) skills.</span></p>",
+    "benefitsHtml": "<p><span style=\"color: rgb(0, 0, 0);\">- Compensation: Negotiable</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Social insurance, annual health check-up, accident insurance, and health insurance</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- Company trips, Year-End Party, Aha Hour activities, special occasion gifts, and Aha Clubs (Badminton, Football)</span></p><p style=\"text-align: justify;\"><span style=\"color: rgb(0, 0, 0);\">- 13th-month salary, annual performance bonus, annual leave,...</span></p>",
+    "createdAt": "2026-09-16T09:07:23.912Z",
+    "updatedAt": "2026-10-01T08:33:03.224Z",
+    "departmentName": "Central Operations",
+    "_id": "operations-excellence-specialist-warehouse",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Operations"
+   },
+   {
+    "title": "Key Account Management (Market Place)",
+    "code": "JOB-000032",
+    "departmentId": "6a204203fd6930a850efdece",
+    "employmentType": "FULL_TIME",
+    "jobField": "BD",
+    "location": "Thành phố Hồ Chí Minh",
+    "locations": [
+     "Thành phố Hồ Chí Minh"
+    ],
+    "descriptionHtml": "<ul><li><p>Managed and own assigned marketplace accounts (Shopee, Lazada, Tiktokshop,..), building strong relationships across their operations and commercial teams.</p></li><li><p>Own account GSV and order-volume targets; develop account plans and forecasts.</p></li><li><p>Monitor daily Forecast and BAU KPIs, as well as FC and KPIs for campaigns and Big Events (9.9, 11.11, 12.12…).</p></li><li><p>Ensure delivery performance against SLA and drive corrective action when targets are missed.</p></li><li><p>Resolve operational incidents end-to-end, coordinating with internal teams (Ops, Product, Tech, Finance) to keep service running smoothly.</p></li><li><p>Negotiate and renew commercial terms (pricing, take rate, service scope).</p></li><li><p>Identify upsell and cross-sell opportunities to grow account revenue.</p></li><li><p>Prepare and deliver weekly performance report</p></li></ul><p></p>",
+    "priority": "NORMAL",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "key-account-management-market-place",
+    "requirementsHtml": "<ul><li><p>Bachelor's degree in Business, Economics, Logistics, or a related field.</p></li><li><p>1-2 years of experience in Key Account Management, B2B account management, or partner-facing roles.</p></li><li><p>Experience in e-commerce, last-mile delivery, logistics, or 3PL is a strong advantage.</p></li><li><p>Strong analytical skills; proficient in Google Sheets/Excel for tracking and reporting account performance.</p></li><li><p>Excellent negotiation, communication, and stakeholder management skills.</p></li><li><p>Ability to work under pressure and manage multiple accounts during peak campaigns.</p></li><li><p>Proactive, data-driven, and solution-oriented mindset.</p></li><li><p>Willing to do field work — on-site partner and market visits at least once per week.</p></li></ul><p><strong>Preferred</strong></p><ul><li><p>Prior experience managing e-commerce platform or enterprise accounts.</p></li><li><p>Familiarity with logistics operations metrics (SLA, success rate, cost per order).</p></li></ul><p></p>",
+    "benefitsHtml": "<p><strong>Physical Wellbeing Benefit</strong></p><ul><li><p>General Insurance, Medical check-up, Accident Insurance, Healthcare Insurance</p></li></ul><p><strong>Emotional Wellbeing Benefit</strong></p><ul><li><p>Company Trip, Year End Party, Aha Hour Activities, Special Day Gifts, Aha Club (Badminton, Soccer)</p></li></ul><p><strong>Financial Wellbeing Benefit</strong></p><ul><li><p>Grab/Be For Work (Tech/Lead Level), Workplace Relocation, 13th Month Salary, PP Appreciate, Annual Leave Remain</p></li></ul><p></p>",
+    "createdAt": "2026-09-16T07:09:36.466Z",
+    "updatedAt": "2026-10-01T09:20:44.389Z",
+    "departmentName": "Business Development",
+    "_id": "key-account-management-market-place",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Business Development"
+   },
+   {
+    "title": "Business Analyst Specialist (Commercial)",
+    "code": "JOB-000028",
+    "departmentId": "6a204203fd6930a850efdece",
+    "employmentType": "FULL_TIME",
+    "jobField": "BD",
+    "location": "Thành phố Hồ Chí Minh",
+    "locations": [
+     "Thành phố Hồ Chí Minh"
+    ],
+    "descriptionHtml": "<p>This is an ownership-first role focused on managing Ahamove’s Promotion and Subscription portfolio within budget to balance growth and cost via Test-and-Learn mechanics. Alongside your portfolio, you serve as the dedicated analytical partner for regional sales leads and provide data/execution support for Loyalty &amp; Partnership programs owned by the business team. Across all areas, you drive workflow automation and provide key analytical and tracking support for business projects end-to-end. </p><p><strong>1. Promotion Planning &amp; Execution (30%) </strong></p><ul><li><p>Run and maintain the existing promotion portfolio: monitor performance, analyze results, and optimize mechanics, discount levels, and targeting through test-and-learn. </p></li><li><p>Plan and execute campaigns within the approved budget — mechanic, segment, channel, timing. </p></li></ul><p><strong>2. Performance Analytics &amp; Region Support (20%) </strong></p><ul><li><p>Monitor regional performance, flag deviations early, and report to region leads and management. </p></li><li><p>Support sales owners and internal stakeholders with ad-hoc analyses, data cards, and deep-dives. </p></li><li><p>Interpret large datasets to identify trends, bottlenecks, and growth opportunities, and turn them into recommendations stakeholders can act on.</p></li></ul><p><strong>3. Subscription Ownership (15%) </strong></p><ul><li><p>Own the existing packages: track take-up, renewal, and churn, and optimize pricing, packaging, and targeting within budget. </p></li><li><p>Benchmark against competitors and market movement, and bring feature requests to Product with the demand evidence behind them.</p></li></ul><p><strong>4. Loyalty &amp; Partnership Support (15%) </strong></p><ul><li><p>Execute and track the loyalty programs owned by the business team — referral, challenge, and ranking benefits — including setup, configuration, and abuse controls. </p></li><li><p>Analyze program performance, including the impact of ranking benefits on retention and order frequency, and recommend adjustments to the program owners. </p></li><li><p>Set up promotions and subscriptions requested by the Partnership team, and agree how each will be measured. </p></li></ul><p><strong>5. Automation, Bot Building &amp; Maintenance (10%) </strong></p><ul><li><p>Build flows and bots for recurring work, and keep the existing ones running reliably. </p></li><li><p>Maintain self-serve dashboards so stakeholders can answer routine questions without you. </p></li></ul><p><strong>6. Project Ownership (10%) </strong></p><ul><li><p>Own a few additional projects end-to-end, such as Route Optimization, working with Product and Operations. </p></li><li><p>Provide reporting, tracking, and user analysis for business projects, including support for treatment flows.</p></li></ul><p></p>",
+    "priority": "NORMAL",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "business-analyst-specialist-commercial",
+    "requirementsHtml": "<p><strong>Experience:</strong> 2-4 years as a Business Analyst, Data Analyst, or Growth Analyst, preferably in Logistics, E-commerce, Ride-hailing, or Tech platforms. Direct ownership of promotion, voucher, subscription, or loyalty programs is a strong plus. </p><p><strong>Education: </strong>Bachelor's degree in Economics, Statistics, Business, Data Science, IT, or related. </p><p><strong>Technical: </strong></p><ul><li><p>Advanced SQL — complex joins, CTEs, window functions; clean, efficient queries. </p></li><li><p>Cloud data warehouse (BigQuery preferred), advanced Excel / Sheets, and one BI tool (Power BI, Looker Studio, Metabase). </p></li><li><p>Automation: Python, low-code tools (Make, n8n, Windmill), or bot/API integration. </p></li><li><p>Marketing automation platforms (CleverTap, Insider) for treatment flows — a plus. </p></li></ul><p><strong>Mindset: </strong></p><ul><li><p>Analytical and candid, including about your own programs when they underperform. </p></li><li><p>Persuasive and self-directed: you bring stakeholders to a decision, and you find the work worth doing before being asked. </p></li><li><p>Product sense: start from the real need, then check the solution fits how people actually work. </p></li><li><p>Reliable on internal requests — accurate and on time — and willing to reframe a request when the real question is different. </p></li></ul><p><strong>Domain: </strong>Promotion economics (ROI, incrementality, cannibalization), subscription and loyalty mechanics, cohort retention, churn, LTV, and core business KPIs. Logistics knowledge will be onboarded.</p><p></p>",
+    "benefitsHtml": "<ul><li><p>Physical Wellbeing Benefit: General Insurance, Medical check-up, Accident Insurance, Healthcare Insurance.</p></li><li><p>Emotional Wellbeing Benefit: Company Trip, Year End Party, Aha Hour Activities, Special Day Gifts, Aha Club (Badminton, Soccer).</p></li><li><p>Financial Wellbeing Benefit: Grab/Be For Work (Tech/Lead Level), Workplace Relocation, 13th Month Salary, PP Appreciate, Annual Leave Remain.</p></li></ul><p></p>",
+    "createdAt": "2026-09-08T05:02:16.657Z",
+    "updatedAt": "2026-09-08T05:02:16.657Z",
+    "departmentName": "Business Development",
+    "_id": "business-analyst-specialist-commercial",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Business Development"
+   },
+   {
+    "title": "Business Development Executive (Enterprise)",
+    "code": "JOB-000012",
+    "departmentId": "6a204203fd6930a850efdece",
+    "employmentType": "FULL_TIME",
+    "jobField": "BD",
+    "location": "Thành phố Hồ Chí Minh, Thành phố Hà Nội",
+    "locations": [
+     "Thành phố Hồ Chí Minh",
+     "Thành phố Hà Nội"
+    ],
+    "descriptionHtml": "<ul><li><p>Proactively identify and approach potential B2B clients, with a focus on businesses requiring truck transportation services (heavy cargo, oversized goods, inter-provincial and intra-city delivery).</p></li><li><p>Plan and execute outreach activities including company visits, product presentations, and consultative selling of Ahamove's truck transportation solutions tailored to each client's needs.</p></li><li><p>Build and maintain a healthy new client pipeline, ensuring monthly/quarterly new client acquisition targets are met.</p></li><li><p>Collaborate with the Operations team to ensure smooth onboarding for new clients.</p></li><li><p>Manage the full assigned client portfolio with full ownership of revenue growth and order volume targets.</p></li><li><p>Conduct regular business reviews with clients; analyze usage data to identify upsell and cross-sell opportunities.</p></li><li><p>Design and implement customized volume stimulation programs, promotions, or incentive schemes tailored to specific client segments to drive daily order growth.</p></li><li><p>Maintain a high client retention rate by proactively addressing complaints and resolving issues in a timely manner.</p></li><li><p>Monitor client satisfaction levels and escalate to relevant departments when needed.</p></li></ul><p></p>",
+    "priority": "NORMAL",
+    "applicationDeadline": "2026-09-30T00:00:00.000Z",
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "business-development-executive-enterprise",
+    "requirementsHtml": "<p><strong>Education &amp; Experience</strong></p><ul><li><p>College or Bachelor's degree in Economics, Business Administration, Communications, Marketing, or related fields.</p></li><li><p>Minimum 1-2 years of B2B sales experience; candidates with a background in Logistics, Transportation, E-commerce, FMCG, or F&amp;B are preferred.</p></li><li><p>Prior experience managing Key Accounts or Enterprise Clients is a strong advantage.</p></li><li><p>Knowledge of the Trucking / Freight industry is a significant plus.</p></li></ul><p><strong>Skills &amp; Competencies</strong></p><ul><li><p>Strong communication, persuasion, and negotiation skills; confident in approaching and building relationships with enterprise clients.</p></li><li><p>Results-driven and proactive, with the ability to manage multiple accounts simultaneously.</p></li><li><p>Comfortable using AI tools (e.g. ChatGPT, Gemini, Claude) to support daily sales tasks such as drafting client communications, preparing proposals, summarizing meeting notes, and researching market insights. As a tech-driven company, Ahamove encourages a mindset of leveraging technology to work smarter and faster.</p></li></ul><p></p>",
+    "benefitsHtml": "<p><strong>Physical Wellbeing Benefit</strong></p><ul><li><p>General Insurance, Medical check-up, Accident Insurance, Healthcare Insurance</p></li></ul><p><strong>Emotional Wellbeing Benefit</strong></p><ul><li><p>Company Trip, Year End Party, Aha Hour Activities, Special Day Gifts, Aha Club (Badminton, Soccer)</p></li></ul><p><strong>Financial Wellbeing Benefit</strong></p><ul><li><p>Grab/Be For Work (Tech/Lead Level), Workplace Relocation, 13th Month Salary, PP Appreciate, Annual Leave Remain</p></li></ul><p></p>",
+    "createdAt": "2026-08-13T07:27:24.185Z",
+    "updatedAt": "2026-09-07T03:24:52.678Z",
+    "departmentName": "Business Development",
+    "_id": "business-development-executive-enterprise",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Business Development"
+   },
+   {
+    "title": "Chuyên Viên Phát Triển Nguồn Đối Tác Tài Xế (Truck)",
+    "code": "job-180",
+    "employmentType": "FULL_TIME",
+    "location": "Thành phố Hà Nội",
+    "locations": [
+     "Thành phố Hà Nội"
+    ],
+    "descriptionHtml": "<p><strong>1. Tuyển dụng &amp; phát triển mạng lưới Đối tác tài xế xe tải</strong></p><ul><li><p>Chịu trách nhiệm kết nối Đối tác tài xế xe tải với Ahamove theo chỉ tiêu được giao (số lượng, khu vực, phân khúc):</p><ul><li><p>Trực tiếp quản lý các nguồn tuyển dụng và làm việc ngoài thị trường để kết nối các Đối tác tài xế;</p></li><li><p>Tiếp cận, tư vấn, hỗ trợ và thuyết phục các Đối tác tài xế đăng ký hợp tác cùng Ahamove;</p></li></ul></li><li><p>Đóng góp xây dựng và hỗ trợ thực hiện các chương trình, sự kiện tuyển dụng Đối tác tài xế;</p></li><li><p>Chịu trách nhiệm mở rộng, quản lý các nguồn tuyển dụng/kết nối hợp tác với tất cả các đối tượng khác nhau: Đối tác đơn lẻ, Hợp tác xã, Doanh nghiệp vận tải,…</p></li><li><p>Phát triển mạng lưới đối tác ở các khu vực KCN: xây dựng và triển khai kênh/mạng lưới Khu công nghiệp trọng điểm.</p></li></ul><p><strong>2. Quản lý decal &amp; nhận diện thương hiệu</strong></p><ul><li><p>Chịu trách nhiệm đảm bảo số lượng Đối tác tài xế đang hoạt động dán decal logo Ahamove;</p></li><li><p>Quản lý số lượng decal nhập/xuất/tồn kho để luôn đảm bảo đủ số lượng decal dán cho Đối tác tài xế;</p></li><li><p>Giám sát các CTV dán decal thực hiện đúng quy trình dán decal logo của Ahamove;</p></li><li><p>Theo dõi và báo cáo tỷ lệ phủ decal theo khu vực, đối chiếu với mục tiêu KCN/nội thành/ngoại thành.</p></li></ul><p><strong>3. Chăm sóc &amp; đảm bảo chất lượng Đối tác tài xế sau tuyển dụng</strong></p><ul><li><p>Chăm sóc, hướng dẫn, giải đáp thắc mắc cho các Đối tác tài xế đến khi hoạt động ổn định;</p></li><li><p>Phối hợp cùng các bộ phận khác để tiếp nhận và xử lý các vấn đề của Đối tác tài xế;</p></li></ul><p></p>",
+    "priority": "NORMAL",
+    "applicationDeadline": null,
+    "openings": 1,
+    "salary": {
+     "mode": "NEGOTIATION",
+     "currency": "VND",
+     "period": "MONTHLY",
+     "periodName": "Theo tháng"
+    },
+    "screeningQuestions": [],
+    "slug": "chuyen-vien-tuyen-dung-tai-xe-xe-tai",
+    "requirementsHtml": "<h4>Yêu cầu chung:</h4>\n<ul>\n<li>Tốt nghiệp Cao Đẳng/Đại học (Logistics, Quản trị nhân lực, Marketing...)</li>\n<li>Kinh nghiệm tối thiểu 1 năm làm việc ở vị trí tương đương.</li>\n</ul>\n<h4>Kỹ năng & năng lực:</h4>\n<ul>\n<li>Kỹ năng giao tiếp, thuyết phục tốt; kỹ năng xử lý vấn đề; áp dụng công nghệ, data mindset trong giải quyết vấn đề lớn;</li>\n<li>Chủ động, quyết liệt trong việc hoàn thành mục tiêu;</li>\n<li>Không ngừng học hỏi, cập nhật xu thế thị trường trong ngành;</li>\n<li>Tinh thần trách nhiệm, quyết liệt, cầu thị và trung thực;</li>\n<li>Chuyên nghiệp, có khả năng tự tạo động lực phát triển bản thân cùng phát triển đội nhóm;</li>\n<li>Thành thạo Excel/Google Sheets ở mức xử lý dữ liệu tuyển dụng, tồn kho decal, báo cáo KPI;</li>\n<li>Khả năng đọc hiểu và trình bày báo cáo dạng số liệu (dashboard, biểu đồ);</li>\n<li>Có kinh nghiệm điều phối, giám sát cộng tác viên (CTV) hoặc đội nhóm nhỏ.</li>\n</ul>",
+    "benefitsHtml": "<ul>\n<li>Thu nhập thoả thuận;</li>\n<li>Bảo hiểm xã hội, Khám sức khỏe định kỳ, Bảo hiểm tai nạn, Bảo hiểm sức khỏe;</li>\n<li>Du lịch, YEP, Hoạt động Aha Hour, Quà tặng dịp đặc biệt, Câu lạc bộ Aha (Cầu lông, Bóng đá);</li>\n<li>Lương tháng 13, Thưởng hiệu quả công việc năm, Nghỉ phép,….</li>\n</ul>",
+    "createdAt": "2026-07-21T17:10:09.982Z",
+    "updatedAt": "2026-09-10T02:10:21.477Z",
+    "departmentId": "6a282a29b9a9803af49bbfc1",
+    "jobField": "OP",
+    "departmentName": "Supply Operations",
+    "_id": "chuyen-vien-tuyen-dung-tai-xe-xe-tai",
+    "employmentTypeName": "Nhân viên chính thức",
+    "jobFieldName": "Operations"
+   }
+  ],
+  "total": 7,
+  "page": 1,
+  "pageSize": 10
+ }
+}

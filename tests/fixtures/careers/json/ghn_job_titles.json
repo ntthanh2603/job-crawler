@@ -1,0 +1,356 @@
+{
+ "url": "https://online-gateway.ghn.vn/integration/recruit-ghn/public-api/list-recruit/get-job-title",
+ "method": "POST",
+ "request_json": null,
+ "body": {
+  "code": 200,
+  "message": "Success",
+  "data": {
+   "page": 0,
+   "pageSize": 0,
+   "total": 210,
+   "list": [
+    {
+     "id": "6ad04baba1640e8afe65e8a3",
+     "job_title_recruit": "Senior Investment Analyst",
+     "selectedOption": {
+      "Value": 100241,
+      "Label": "Senior Investment Analyst"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-15T03:42:35.173Z",
+     "updated_date": "2026-10-15T03:42:50.977Z",
+     "status": 7,
+     "key": "senior investment analyst-1792035755",
+     "order_by": 1
+    },
+    {
+     "id": "6aa8c94e56b15a407af7f44a",
+     "job_title_recruit": "Regional Franchise Field Sales Manager",
+     "selectedOption": {
+      "Value": 100493,
+      "Label": "Franchise Field Sales Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-09-15T04:27:58.946Z",
+     "updated_date": "2026-09-15T04:28:13.172Z",
+     "status": 7,
+     "key": "regional franchise field sales manager-1789446478",
+     "order_by": 1
+    },
+    {
+     "id": "6aa8c18170e165ec38d5b6b7",
+     "job_title_recruit": "Admin Bưu cục",
+     "selectedOption": {
+      "Value": 100489,
+      "Label": "SME Admin Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-09-15T03:54:41.439Z",
+     "updated_date": "2026-09-15T03:54:48.833Z",
+     "status": 7,
+     "key": "admin buu cuc-1789444481",
+     "order_by": 1
+    },
+    {
+     "id": "6a8bcfc2daadf4c47f983eaf",
+     "job_title_recruit": "Senior Facility Specialist",
+     "selectedOption": {
+      "Value": 100439,
+      "Label": "Facility Specialist"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-24T04:59:46.474Z",
+     "updated_date": "2026-08-24T04:59:54.992Z",
+     "status": 7,
+     "key": "senior facility specialist-1787547586",
+     "order_by": 1
+    },
+    {
+     "id": "6a87fb63ac37849c041d87cf",
+     "job_title_recruit": "Quản lý phát triển mạng lưới nhượng quyên - Bắc Giang/Bắc Ninh/Thái Bình/Hải Dương",
+     "selectedOption": {
+      "Value": 100493,
+      "Label": "Franchise Field Sales Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-21T07:16:51.14Z",
+     "updated_date": "2026-08-21T07:16:55.171Z",
+     "status": 7,
+     "key": "quan ly phat trien mang luoi nhuong quyen bac giangbac ninhthai binhhai duong-1787296611",
+     "order_by": 1
+    },
+    {
+     "id": "6a8422ebc6469e826c830848",
+     "job_title_recruit": "BCKD - Operations & Sales Performance Specialist",
+     "selectedOption": {
+      "Value": 100499,
+      "Label": "Operations & Sales Performance Specialist"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-18T09:16:27.364Z",
+     "updated_date": "2026-08-18T09:16:34.599Z",
+     "status": 7,
+     "key": "bckd operations sales performance specialist-1787044587",
+     "order_by": 1
+    },
+    {
+     "id": "6a82a135d5b573d4a82aad7a",
+     "job_title_recruit": "Employee Well-Being Executive",
+     "selectedOption": {
+      "Value": 6065,
+      "Label": "Employee Well-Being Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-17T05:50:45.778Z",
+     "updated_date": "2026-08-17T05:50:50.609Z",
+     "status": 7,
+     "key": "employee wellbeing executive-1786945845",
+     "order_by": 1
+    },
+    {
+     "id": "6a7de106798d2eff33fdbb4a",
+     "job_title_recruit": "Senior Business & Data Analyst",
+     "selectedOption": {
+      "Value": 100165,
+      "Label": "Data Analyst"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-13T15:21:42.527Z",
+     "updated_date": "2026-08-13T15:21:47.632Z",
+     "status": 7,
+     "key": "senior business data analyst-1786634502",
+     "order_by": 1
+    },
+    {
+     "id": "6a7a7f98c05ae98eeba3b056",
+     "job_title_recruit": "Legal Manager",
+     "selectedOption": {
+      "Value": 100025,
+      "Label": "Legal Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-11T01:49:12.415Z",
+     "updated_date": "2026-08-11T01:49:57.026Z",
+     "status": 7,
+     "key": "legal manager-1786412952",
+     "order_by": 1
+    },
+    {
+     "id": "6a73f76896fdfdbd1c0d8a73",
+     "job_title_recruit": "EV Charging Station",
+     "selectedOption": {
+      "Value": 100228,
+      "Label": "Mechanical & Electrical Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-06T02:54:32.768Z",
+     "updated_date": "2026-08-06T02:54:36.475Z",
+     "status": 7,
+     "key": "ev charging station-1785984872",
+     "order_by": 1
+    },
+    {
+     "id": "6a7152c153a02ace377b2488",
+     "job_title_recruit": "Franchise Sale Manager",
+     "selectedOption": {
+      "Value": 100493,
+      "Label": "Franchise Field Sales Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-04T02:47:29.308Z",
+     "updated_date": "2026-08-04T02:47:33.292Z",
+     "status": 7,
+     "key": "franchise sale manager-1785811649",
+     "order_by": 1
+    },
+    {
+     "id": "6a714a710f9a049bc4f818d5",
+     "job_title_recruit": "[Đồng Nai - Bình Dương] Nhân viên lấy hàng",
+     "selectedOption": {
+      "Value": 100250,
+      "Label": "SME Pickup Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-04T02:12:01.425Z",
+     "updated_date": "2026-08-04T02:12:04.488Z",
+     "status": 7,
+     "key": "dong nai binh duong nhan vien lay hang-1785809521",
+     "order_by": 1
+    },
+    {
+     "id": "6a714a010f9a049bc4f818d4",
+     "job_title_recruit": "[Đồng Nai - Bình Dương] Nhân viên kinh doanh thị trường (B2C)",
+     "selectedOption": {
+      "Value": 100177,
+      "Label": "Field Sales Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-08-04T02:10:09.604Z",
+     "updated_date": "2026-08-04T02:10:14.215Z",
+     "status": 7,
+     "key": "dong nai binh duong nhan vien kinh doanh thi truong b2c-1785809409",
+     "order_by": 1
+    },
+    {
+     "id": "6a4f5a68c6a7e1590275ecac",
+     "job_title_recruit": "[Văn Chung - Tân Bình] - Nhân Viên Lấy Hàng",
+     "selectedOption": {
+      "Value": 100250,
+      "Label": "SME Pickup Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-07-09T08:23:04.088Z",
+     "updated_date": "2026-07-09T08:23:12.756Z",
+     "status": 7,
+     "key": "van chung tan binh nhan vien lay hang-1783585384",
+     "order_by": 1
+    },
+    {
+     "id": "6a4e75e8fe27d9fc32e38758",
+     "job_title_recruit": "People Data Analyst",
+     "selectedOption": {
+      "Value": 100464,
+      "Label": "People Data Analyst"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-07-08T16:08:08.349Z",
+     "updated_date": "2026-07-08T16:08:39.886Z",
+     "status": 7,
+     "key": "people data analyst-1783526888",
+     "order_by": 1
+    },
+    {
+     "id": "6a4dc74b16bc9add417a4097",
+     "job_title_recruit": "Quản lý khu vực kinh doanh (Bình Dương - Đồng Nai - Long An)",
+     "selectedOption": {
+      "Value": 100180,
+      "Label": "Field Sales Manager"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-07-08T03:43:07.054Z",
+     "updated_date": "2026-07-08T03:43:11.334Z",
+     "status": 7,
+     "key": "quan ly khu vuc kinh doanh binh duong dong nai long an-1783482187",
+     "order_by": 1
+    },
+    {
+     "id": "6a4484386c18e7f7bab0b4e8",
+     "job_title_recruit": "Nhân Viên Xử Lí Khiếu Nại Đền Bù",
+     "selectedOption": {
+      "Value": 5965,
+      "Label": "Key Account Care Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-07-01T03:06:32.087Z",
+     "updated_date": "2026-07-01T03:06:43.041Z",
+     "status": 7,
+     "key": "nhan vien xu li khieu nai den bu-1782875192",
+     "order_by": 1
+    },
+    {
+     "id": "6a2faffaaeb31eb7f4eeaec1",
+     "job_title_recruit": "Senior HRBP Specialist",
+     "selectedOption": {
+      "Value": 14359,
+      "Label": "Senior HRBP Specialist"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-06-15T07:55:38.96Z",
+     "updated_date": "2026-06-15T07:56:17.279Z",
+     "status": 7,
+     "key": "senior hrbp specialist-1781510138",
+     "order_by": 1
+    },
+    {
+     "id": "6a2bec6923705c61ab34fd1a",
+     "job_title_recruit": "[Hóc Môn/Quận 12] Nhân viên kinh doanh thị trường (B2C)",
+     "selectedOption": {
+      "Value": 100177,
+      "Label": "Field Sales Executive"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-06-12T11:24:25.416Z",
+     "updated_date": "2026-06-12T11:24:29.055Z",
+     "status": 7,
+     "key": "hoc monquan 12 nhan vien kinh doanh thi truong b2c-1781263465",
+     "order_by": 1
+    },
+    {
+     "id": "6a2bebe81249f31eebb61dcf",
+     "job_title_recruit": "Key Account Specialist",
+     "selectedOption": {
+      "Value": 5861,
+      "Label": "Key Account Specialist"
+     },
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-06-12T11:22:16.864Z",
+     "updated_date": "2026-06-12T11:23:17.203Z",
+     "status": 7,
+     "key": "key account specialist-1781263336",
+     "order_by": 1
+    }
+   ]
+  }
+ }
+}

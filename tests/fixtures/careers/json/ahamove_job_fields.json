@@ -1,0 +1,23 @@
+{
+ "url": "https://api-ats.ahamove.com/api/v1/public/job-fields",
+ "method": "GET",
+ "request_json": null,
+ "body": [
+  {
+   "name": "Business Development",
+   "code": "BD"
+  },
+  {
+   "name": "Operations",
+   "code": "OP"
+  },
+  {
+   "name": "Technology",
+   "code": "TECH"
+  },
+  {
+   "name": "Service Center",
+   "code": "SERVICE_CENTER"
+  }
+ ]
+}

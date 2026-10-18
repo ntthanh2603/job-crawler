@@ -1,0 +1,110 @@
+{
+ "url": "https://ats.workatsea.com/ats/api/v1/user/job/list/?limit=50&offset=0",
+ "method": "GET",
+ "request_json": null,
+ "body": {
+  "code": 0,
+  "message": "success",
+  "data": {
+   "job_list": [
+    {
+     "id": 132647,
+     "job_id": "J02123507",
+     "job_name": "Key Account Management Associate - Fulfillment Services (HN/HCM) - Shopee",
+     "department_id": 1,
+     "employment_id": 1,
+     "region_id": 32,
+     "city_id": 33,
+     "post_type": 2,
+     "external_entity_id": 1,
+     "job_type_id": 0,
+     "job_description": "<p> </p><p><strong>1. New Shopee Seller Acquisition</strong></p><ul><li>Proactively identify and engage potential sellers to introduce Shopee Fulfillment Services (FBS);</li><li>Communicate the value proposition, key benefits, and operating process of FBS in a clear, persuasive, and consultative way;</li><li>Handle seller questions and concerns to support successful sign-ups and conversion;</li><li>Collaborate with internal teams to ensure a smooth and timely onboarding process for new sellers.</li></ul><p> </p><p><strong>2. Existing Shopee Seller Management</strong></p><ul><li>Build and maintain strong relationships with existing FBS sellers;</li><li>Support sellers in understanding product updates, policies, and fulfillment processes;</li><li>Address seller feedback, concerns, and operational issues in a timely and effective manner;</li><li>Work closely with internal stakeholders to ensure smooth execution and service quality;</li><li>Support sellers in planning and achieving monthly and yearly commercial targets;</li><li>Maintain strong product and process knowledge to provide accurate consultation and guidance.</li></ul><p> </p>",
+     "requirements": "<ul><li>Fresh graduates or candidates with less than 1 year of experience in Key Account, Sales, Business Development, or related fields;</li><li>Interest in e-commerce, logistics, or fulfillment;</li><li>Proactive, resilient, curious, and eager to learn;</li><li>Self-driven and result-oriented;</li><li>Good communication and presentation skills, with the ability to lead discussions with sellers confidently;</li><li>Strong planning, analytical, and execution skills;</li><li>Logical thinking and strong problem-solving ability;</li><li>Able to work with a wide range of businesses and stakeholders, both via phone and in person;</li><li>A strong team player with a sales mindset and the ambition to consistently exceed KPIs.</li></ul><p> </p><p><strong>Please note that only shortlisted candidates will be contacted for the next steps within three weeks.</strong></p>",
+     "sub_team_description": "<p> </p><p>We are looking for a motivated and customer-focused individual to support the growth of Shopee Fulfillment Services (FBS). This role will focus on both acquiring new sellers and managing existing sellers to drive adoption, improve seller experience, and support business growth.</p><p> </p><p>This is a great opportunity for fresh graduates or early-career talents who are passionate about sales, operations, and working with sellers in a fast-paced e-commerce environment.</p><p> </p>",
+     "application_form_id": 18
+    },
+    {
+     "id": 133521,
+     "job_id": "J02137979",
+     "job_name": "(Senior) Business Intelligence (SBS Performance) - Business Intelligence & Planning, Shopee",
+     "department_id": 3,
+     "employment_id": 2,
+     "region_id": 32,
+     "city_id": 34,
+     "post_type": 2,
+     "external_entity_id": 1,
+     "job_type_id": 0,
+     "job_description": "<ul><li> Data Analysis &amp; Reporting: Develop and manage key performance indicators (KPIs) and dashboards that provide critical insights into supply chain performance, consignment services, and retail operations. This includes building robust reporting frameworks that enhance decision-making processes.</li><li>Business Monitoring: Continuously monitor business metrics, identifying anomalies and trends. Investigate root causes and provide actionable insights to stakeholders through in-depth data analysis.</li><li>Stakeholder Communication: Collaborate with stakeholders across supply chain, retail, and consignment services to understand business needs, gather requirements, and deliver insightful data solutions that align with business objectives.</li><li>Continuous Improvement: Lead initiatives to enhance data management and reporting processes, ensuring data accuracy, consistency, and reliability across all dashboards and reports.</li></ul>",
+     "requirements": "<ul><li>2+ years’ experience in a Business Intelligence or Data Analytics role with proven business impact.</li><li>Guru in Excel Pivot Table, SQL is a must.</li><li>Capable of leading conversations in cross-functional teams to identify problems, collect requirements, and propose steps to resolve issues - both on a macro-level and a micro-level</li><li>Quick learner with a can-do attitude.</li><li>Strong ability to create user-friendly dashboards and visualizations for stakeholders.</li><li>Excellent written and verbal communication skills to interact with all levels of business stakeholders.</li><li>Fundamental knowledge of statistical programming language (Python, R) to manipulate and draw insights from large data sets.</li><li>Experience with ETL processes or working alongside data engineers is a plus.</li></ul><p> </p>",
+     "sub_team_description": "<p>BI team underpins Shopee Retail (Outright and Consignment), Warehouse, and Fulfillment services by delivering data-driven insights that improve efficiency, cost control, and growth. Working closely with Strategic Growth, Marketing, BD Acquisition, and Operations, the team ensures cross-functional alignment and enables informed, performance-driven decisions.</p>",
+     "application_form_id": 17
+    },
+    {
+     "id": 137243,
+     "job_id": "J02199266",
+     "job_name": "Senior Associate - FLM Process & Performance Specialist - SPX Express",
+     "department_id": 9,
+     "employment_id": 2,
+     "region_id": 32,
+     "city_id": 34,
+     "post_type": 2,
+     "external_entity_id": 5,
+     "job_type_id": 0,
+     "job_description": "<p>1. FLM Performance Management</p><ul><li>Own the FLM performance framework: define KPIs, key drivers and targets for First Mile (pickup success, pickup lead time, on-time handover) and Last Mile (delivery success, on-time delivery, first-attempt rate, failed delivery/return rate, rider productivity, cost per order).</li><li>Build and maintain performance dashboards and regular reports (daily / weekly / monthly) at hub, region and national level; run performance reviews (WBR/MBR) with Ops leadership.</li><li>Monitor performance, detect deviations early, and deep-dive root causes of underperforming hubs/regions; drive corrective action plans with ROM/Hub leads and track to closure.</li><li>Drive performance accountability among hub/regional stakeholders, ensuring they closely track their own KPIs and stay on track toward targets.  </li><li>Benchmark hubs and regions, set improvement targets, and lead bottom-performer improvement programs.</li><li>Partner with BI and Product to standardize metric definitions, data sources and reporting logic.</li><li>Act as a thought partner to Ops leadership, providing insight-driven recommendations to shape the project pipeline and investment priorities.  </li></ul><p> </p><p>2. Project Management (PMO)</p><ul><li>Lead FLM improvement projects end-to-end: problem scoping, business case, planning, pilot, nationwide rollout and post-implementation review.</li><li>Analyze FLM workflows (pickup, hub inbound, sorting, dispatch, delivery, failed delivery &amp; returns, COD handover) to identify process gaps and inefficiencies.</li><li>Design, document and implement SOPs and process improvement frameworks across regions</li><li>Embed project management standards and tools across initiatives (project charter, timeline, RACI, risk/issue log, project health dashboard).</li><li>Facilitate executive-level and working-level meetings with structured documentation (meeting minutes, action logs) and accountability tracking.</li><li>Key project areas:<ul><li>Hub Capacity &amp; Productivity: improve hub throughput, labor efficiency, layout and manpower planning.</li><li>Speed &amp; Reliability: reduce pickup and delivery lead time, improve on-time and first-attempt success.</li><li>Cost Efficiency: optimize cost per order through rider productivity, zone/route design and resource allocation.</li></ul></li></ul><p> </p>",
+     "requirements": "<ul><li>4+ years of experience in logistics, supply chain, operations, project management, consulting or related fields. Experience in First Mile / Last Mile, hub or e-commerce delivery operations is a strong plus.</li><li>Strong analytical and problem-solving skills with a structured and proactive approach. Advanced Excel / Google Sheets; SQL or BI tools (Looker Studio, Power BI) is a plus.</li><li>Proven experience building KPI frameworks, dashboards and performance reports.</li><li>Strong project management capabilities with experience handling multiple complex projects in fast-paced environments.</li><li>Demonstrated ability to influence stakeholders at various levels and drive alignment across departments without formal authority.</li><li>Excellent written and verbal communication skills. Presenting in English is a plus.</li><li>Self-starter mindset with high ownership and a bias for action.</li></ul><p> </p>",
+     "sub_team_description": "<p><strong>Role Purpose:</strong></p><p>Drive operational excellence across the First Mile &amp; Last Mile (FLM) network - pickup, hubs and delivery - through performance management, project management and continuous improvement. Ensure FLM operations are efficient, scalable and aligned with business goals on speed, quality, productivity and cost.</p>",
+     "application_form_id": 17
+    },
+    {
+     "id": 134189,
+     "job_id": "J02148842",
+     "job_name": "Supplier Sourcing Associate - Shopee",
+     "department_id": 1,
+     "employment_id": 1,
+     "region_id": 32,
+     "city_id": 33,
+     "post_type": 2,
+     "external_entity_id": 1,
+     "job_type_id": 0,
+     "job_description": "<ul><li>Conduct market price surveys, source, and evaluate reputable local suppliers </li><li>Negotiate prices, payment terms, and operational details; proceed with commercial contract execution. </li><li>Handle arising issues related to goods, operations, etc </li><li>Receive information from suppliers and assess its impact on business operations </li><li>Prepare periodic performance efficiency reports and manage the supplier database </li><li>Other tasks/duties assigned by the Head of Department/ Line Manager</li></ul>",
+     "requirements": "<ul><li>Fresh graduate or up to 1  year of experience in e-commerce operations, shop operations, commercial operations, or related fields;</li><li>Good knowledge of vendor sourcing practices (researching, evaluating and liaising with vendors).</li><li>Bachelor&#39;s degree in business, supply chain management, or a related field (preferred).</li><li>Excellent communication, interpersonal abilities and collaborative attitude.</li><li>Strong organizational and time management skills to handle multiple purchasing order and suppliers</li><li>Ability to work effectively in a team and adapt to changing priorities.</li><li>High ethical standards and integrity in procurement practices</li></ul><p> </p><p><strong>Please note that only shortlisted candidates will be contacted for the next steps within three weeks.</strong></p>",
+     "sub_team_description": "",
+     "application_form_id": 18
+    },
+    {
+     "id": 134958,
+     "job_id": "J02161387",
+     "job_name": "Merchant Strategy Manager, Merchant Planning - Shopeefood",
+     "department_id": 3,
+     "employment_id": 3,
+     "region_id": 32,
+     "city_id": 34,
+     "post_type": 2,
+     "external_entity_id": 1,
+     "job_type_id": 0,
+     "job_description": "<ul><li>Develop and execute strategic plans to achieve business objectives, focusing on merchant growth, investment, and performance improvement.</li><li>Analyze market trends, competitor strategies, and internal performance data to identify opportunities and recommend actionable strategies.</li><li>Design and implement initiatives to optimize merchant acquisition, and monetization across various market segments.</li><li>Collaborate cross-functionally with BD, Marketing, and Operations teams to align on goals and deploy effective strategies.</li><li>Monitor key performance metrics, generate insights, and prepare regular reports for management to ensure strategy effectiveness.</li></ul>",
+     "requirements": "<ul><li>Min 7 years experience in Data analysis/ Business analysis/ Strategy planning or consulting.</li><li>Strong analytical skills with proficiency in data visualization and tools such as Excel, Tableau, SQL, or equivalent.</li><li>Leadership: Experience mentoring and leading teams, fostering a culture of growth and continuous improvement.</li><li>Excellent communication, presentation, and stakeholder management skills with the ability to influence cross-functional teams.</li><li>Self-driven, adaptable to a fast-paced environment, and passionate about problem-solving and continuous improvement.</li></ul>",
+     "sub_team_description": "",
+     "application_form_id": 17
+    },
+    {
+     "id": 135536,
+     "job_id": "J02171029",
+     "job_name": "(Senior) Associate, CS Project Management - Operations, Shopee",
+     "department_id": 9,
+     "employment_id": 2,
+     "region_id": 32,
+     "city_id": 34,
+     "post_type": 2,
+     "external_entity_id": 1,
+     "job_type_id": 0,
+     "job_description": "<p><strong>Own the diagnosis, end to end</strong></p><ul><li>Analyze the current user support experience end to end - the upstream root cause, the reactive treatment, the operational handling, and how disputes are opened, evidenced, and closed - to find where it&#39;s actually breaking.</li><li>Build and maintain a contact-reason taxonomy and root-cause tree that separates the real root cause (policy, product, or operational failure) from downstream symptoms (confusion, mistrust, repeat contact).</li></ul><p><strong>Fix the root, not just the ticket</strong></p><ul><li>For every recurring issue, work out whether the durable fix is a root-cause fix (product/ops/policy), a communication fix (clearer messaging or education), or a Q&amp;A fix (better agent guidance) - and route it to the right owner instead of defaulting to a script update.</li><li>Quantify each pain point&#39;s volume, severity, and business impact - CS cost, resolution time, dispute overturn rate, user dissatisfaction - and use that to prioritize what gets fixed first.</li></ul><p><strong>Redesign the experience, cross-functionally</strong></p><ul><li>Partner with Policy, Product, Operations, and others to translate diagnosed pain points into concrete policy language, user communication, and UI/UX changes across the daily scenarios users actually run into.</li><li>Co-own the CS Q&amp;A, ticket resolution flow and knowledge-base updates that come out of each redesign cycle, so frontline guidance never drifts from the underlying fix.</li></ul><p><strong>Catch it before it escalates</strong></p><ul><li>Define and monitor the signals that flag a “suffering user” - repeat contact, escalation pattern, sentiment - and design proactive outreach for them before they churn or escalate further.</li><li>Run a recurring review cadence that closes the loop end to end: issues raised → fixes shipped (root cause / communication / Q&amp;A) → impact measured → next iteration prioritized.</li></ul><p> </p>",
+     "requirements": "<ul><li>Bachelor&#39;s degree or equivalent practical experience.</li><li>2+ years in CS Strategy/PMO, Process Excellence, Operations Excellence, or Product/Program Management, ideally within e-commerce, marketplace, fintech, or another fast-moving operational environment.</li><li>Structured, logical problem-solver - you can take a messy, ambiguous support issue and break it down into a clear root-cause tree and an actionable fix. Solid grasp of how support and dispute workflows work, with the ability to map, evaluate, and redesign them.</li><li>Working data skills in Excel/Google Sheets (Pivot Tables, basic formulas) to size problems and back up your recommendations. Comfortable with PowerPoint/Google Slides.</li><li>Confident communicator and stakeholder manager - able to draft user-facing policy or communication copy and bring Policy, Product, Design, and Ops along with you.</li><li>English communication skills.</li><li>Comfortable moving between the concrete (a UI screen, a Q&amp;A script) and the abstract (a root-cause hypothesis, a policy principle).</li><li>Thrives with multiple priorities, works well independently, and adapts quickly in a fast-paced environment.</li><li>Experience designing monitoring or early-warning mechanisms, or proactive support programs, not just reactive CS improvement.</li><li>Familiar with process-mapping tools (Lucidchart, Draw.io, or similar).</li><li>AI enthusiastist</li></ul><p> </p>",
+     "sub_team_description": "<p>Every contact a user makes with Customer Service is evidence that something broke upstream - a policy, a workflow, a screen, or a message that didn&#39;t land. As a CS PMO, you&#39;ll be the person who traces a support contact back to where it actually started, and makes sure the fix lands there too, instead of living inside a script.</p><p>You&#39;ll sit at the intersection of Policy, Product, Operations, Design, and the CS frontline - spotting where the user support experience breaks down, redesigning the policy, communication, and workflow behind it, and building the early-warning systems that catch a struggling user before they ever have to reach out. If you enjoy turning “why do we keep getting this same complaint” into a real, durable fix, this role is built for you.</p><p> </p>",
+     "application_form_id": 17
+    }
+   ],
+   "total_count": 2645
+  }
+ }
+}

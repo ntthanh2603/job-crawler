@@ -1,0 +1,55 @@
+{
+ "url": "https://online-gateway.ghn.vn/integration/recruit-ghn/public-api/footer/getall-fe",
+ "method": "POST",
+ "request_json": {
+  "type": 2
+ },
+ "body": {
+  "code": 200,
+  "message": "Success",
+  "data": [
+   {
+    "id": "64a44cdade5f41f88d8540b1",
+    "job_title": "Chuyên Viên Phát Triển Kinh Doanh",
+    "area": "Hồ Chí Minh ",
+    "salary": "13 - 18 triệu/tháng",
+    "hot_line": "0",
+    "url_recruit": "https://tuyendung.ghn.vn/recruit/detail/bdscvptkd-1688465121",
+    "type": 2,
+    "status": 1,
+    "created_employee": "0",
+    "created_employee_name": "Nhân viên A",
+    "created_date": "2023-07-04T16:46:18.861Z",
+    "updated_date": "2023-07-13T16:11:39.465Z"
+   },
+   {
+    "id": "64b0223bde5f41f88d8541ae",
+    "job_title": "Nhân Viên Phát Triển Kinh Doanh",
+    "area": "Hồ Chí Minh ",
+    "salary": "10 - 20 triệu/tháng",
+    "hot_line": "0",
+    "url_recruit": "https://tuyendung.ghn.vn/recruit/detail/bdenvptkd-1688711956",
+    "type": 2,
+    "status": 1,
+    "created_employee": "0",
+    "created_employee_name": "Nhân viên A",
+    "created_date": "2023-07-13T16:11:39.621Z",
+    "updated_date": "2023-07-13T16:11:39.621Z"
+   },
+   {
+    "id": "64b022acde5f41f88d8541af",
+    "job_title": "Nhân Viên Chăm Sóc Khách Hàng",
+    "area": "Hồ Chí Minh ",
+    "salary": "7 -10 triệu/tháng",
+    "hot_line": "0",
+    "url_recruit": "https://tuyendung.ghn.vn/recruit/detail/nvcskh-1688637637",
+    "type": 2,
+    "status": 1,
+    "created_employee": "0",
+    "created_employee_name": "Nhân viên A",
+    "created_date": "2023-07-13T16:13:32.766Z",
+    "updated_date": "2023-07-13T16:13:32.766Z"
+   }
+  ]
+ }
+}

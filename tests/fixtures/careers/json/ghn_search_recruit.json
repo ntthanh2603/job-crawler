@@ -1,0 +1,223 @@
+{
+ "url": "https://online-gateway.ghn.vn/integration/recruit-ghn/public-api/recruit/search-recruit?search=&page=1&ui=FE&pageSize=6&searchType=",
+ "method": "GET",
+ "request_json": null,
+ "body": {
+  "code": 200,
+  "message": "Success",
+  "data": {
+   "page": 1,
+   "pageSize": 6,
+   "total": 22,
+   "list": [
+    {
+     "id": "6ad3873dcfff840cf83ac286",
+     "job_type": "Kinh doanh",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "6a714a010f9a049bc4f818d4",
+      "label": "[Đồng Nai - Bình Dương] Nhân viên kinh doanh thị trường (B2C)"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 2,
+     "to_salary": 15000000,
+     "from_salary": 10000000,
+     "address": "Bình Dương",
+     "email_job_title": "tuyendung@example.com",
+     "fileId": "6ad32763130c72772e6e899a",
+     "fileName": "Logo GHN 2.png",
+     "content": "<p dir=\"ltr\">Bạn sẽ l&agrave; người trực tiếp mở rộng thị trường v&agrave; ph&aacute;t triển doanh thu th&ocirc;ng qua việc x&acirc;y dựng, ph&aacute;t triển v&agrave; duy tr&igrave; mối quan hệ với c&aacute;c kh&aacute;ch h&agrave;ng l&agrave; shop online, nh&agrave; b&aacute;n h&agrave;ng thương mại điện tử v&agrave; doanh nghiệp.</p>\n<p dir=\"ltr\"><strong>TR&Aacute;CH NHIỆM CH&Iacute;NH</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">T&igrave;m kiếm, tiếp cận v&agrave; ph&aacute;t triển kh&aacute;ch h&agrave;ng mới như shop online, cửa h&agrave;ng b&aacute;n lẻ v&agrave; doanh nghiệp thương mại điện tử c&oacute; nhu cầu sử dụng dịch vụ GHN.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Trực tiếp đi thị trường, khảo s&aacute;t khu vực, thu thập th&ocirc;ng tin v&agrave; x&aacute;c định cơ hội kinh doanh tiềm năng.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tư vấn v&agrave; giới thiệu giải ph&aacute;p giao h&agrave;ng ph&ugrave; hợp với nhu cầu của từng kh&aacute;ch h&agrave;ng.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Chăm s&oacute;c v&agrave; duy tr&igrave; mối quan hệ với kh&aacute;ch h&agrave;ng hiện tại để đảm bảo sự h&agrave;i l&ograve;ng v&agrave; tăng trưởng doanh thu.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Phối hợp với c&aacute;c bộ phận li&ecirc;n quan để xử l&yacute; c&aacute;c vấn đề ph&aacute;t sinh trong qu&aacute; tr&igrave;nh vận h&agrave;nh.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">B&aacute;o c&aacute;o kết quả l&agrave;m việc định kỳ v&agrave; đề xuất giải ph&aacute;p cải thiện hiệu quả kinh doanh.</p>\n</li>\n</ul>\n<p dir=\"ltr\"><strong>Y&Ecirc;U CẦU C&Ocirc;NG VIỆC</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tốt nghiệp Cao đẳng trở l&ecirc;n, ưu ti&ecirc;n c&aacute;c chuy&ecirc;n ng&agrave;nh Kinh tế, Quản trị Kinh doanh, Thương mại,...</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">C&oacute; &iacute;t nhất 06 th&aacute;ng - 1 năm kinh nghiệm trong lĩnh vực kinh doanh, b&aacute;n h&agrave;ng hoặc ph&aacute;t triển thị trường.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Kỹ năng giao tiếp v&agrave; thuyết phục tốt; c&oacute; khả năng l&agrave;m việc dưới &aacute;p lực cao.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tinh thần chủ động, năng động, y&ecirc;u th&iacute;ch c&ocirc;ng việc tại thị trường v&agrave; tiếp x&uacute;c kh&aacute;ch h&agrave;ng.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Sở hữu laptop c&aacute; nh&acirc;n v&agrave; phương tiện di chuyển ri&ecirc;ng.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Ưu ti&ecirc;n ứng vi&ecirc;n c&oacute; kinh nghiệm trong ng&agrave;nh logistics hoặc thương mại điện tử.</p>\n</li>\n</ul>\n<p dir=\"ltr\"><strong>ĐỊA CHỈ L&Agrave;M VIỆC</strong></p>\n<p dir=\"ltr\">- Khu vực 1: &Ocirc; 22, L&ocirc; LK-D khu nh&agrave; ở 22 th&aacute;ng 12, Phường Thuận Giao, Thị x&atilde; Thuận An, Tỉnh B&igrave;nh Dương.</p>\n<p dir=\"ltr\">- Khu vực 2: 29 V&otilde; Thị S&aacute;u, Phường Đ&ocirc;ng Ho&agrave;, Dĩ An, B&igrave;nh Dương</p>\n<p dir=\"ltr\">- Khu vực 3: Số 88 đường Phạm Thị Nghĩ, x&atilde; T&acirc;n Vĩnh Lộc, Th&agrave;nh phố Hồ Ch&iacute; Minh. (B&igrave;nh ch&aacute;nh)</p>\n<p dir=\"ltr\">- Khu vực 4: Số 804 đường T&acirc;n Kỳ T&acirc;n Qu&yacute;, phường B&igrave;nh Hưng H&ograve;a, Th&agrave;nh phố Hồ Ch&iacute; Minh.&nbsp; ( B&igrave;nh T&acirc;n)</p>\n<p dir=\"ltr\">Quan t&acirc;m vị tr&iacute;, li&ecirc;n hệ Zalo <strong>0000000000 (Ms. Thơ)</strong> để trao đổi chi tiết nh&eacute;!</p>",
+     "welfare": "<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Lương cứng + phụ cấp đi thị trường</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Đ&oacute;ng bảo hiểm full lương.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Lương th&aacute;ng 13.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Thưởng hiệu quả c&ocirc;ng việc.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Review lương 1 lần/năm.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Bảo hiểm sức khỏe c&aacute; nh&acirc;n.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tham gia kh&aacute;m sức khỏe định kỳ h&agrave;ng năm.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Nghỉ ph&eacute;p: 12 ng&agrave;y/năm</p>\n</li>\n</ul>\n<p dir=\"ltr\"><strong>CƠ HỘI V&Agrave; M&Ocirc;I TRƯỜNG</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Đ&agrave;o tạo chuy&ecirc;n s&acirc;u đầu v&agrave;o (sản phẩm, kỹ năng, thị trường).</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Lộ tr&igrave;nh thăng tiến r&otilde; r&agrave;ng.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">M&ocirc;i trường chuy&ecirc;n nghiệp, trẻ trung, được hỗ trợ từ quản l&yacute; gi&agrave;u kinh nghiệm.</p>\n</li>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-17T14:33:33.188Z",
+     "updated_date": "2026-10-17T14:43:29.563Z",
+     "posting_time": "2026-10-17T14:43:29.563Z",
+     "end_time": "2026-11-08T14:33:32.881Z",
+     "status": 7,
+     "key": "nvkd-1792247613"
+    },
+    {
+     "id": "6ad327850c860351b418ee0e",
+     "job_type": "Kinh doanh",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "692cf5d2b26893f5fbabd0b1",
+      "label": "Nhân viên Kinh Doanh"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 2,
+     "to_salary": 15000000,
+     "from_salary": 10000000,
+     "address": "Tăng Nhơn Phú, Quận 9",
+     "email_job_title": "tuyendung@example.com",
+     "fileId": "6ad32763130c72772e6e899a",
+     "fileName": "Logo GHN 2.png",
+     "content": "<p class=\"MsoNormal\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Bạn sẽ l&agrave; người trực tiếp mở rộng thị trường v&agrave; ph&aacute;t triển doanh thu th&ocirc;ng qua việc x&acirc;y dựng, ph&aacute;t triển v&agrave; duy tr&igrave; mối quan hệ với c&aacute;c kh&aacute;ch h&agrave;ng l&agrave; shop online, nh&agrave; b&aacute;n h&agrave;ng thương mại điện tử v&agrave; doanh nghiệp.</span></p>\n<p class=\"MsoNormal\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong><span style=\"line-height: 115%;\">TR&Aacute;CH NHIỆM CH&Iacute;NH</span></strong></span></p>\n<ul>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>T&igrave;m kiếm, tiếp cận v&agrave; ph&aacute;t triển kh&aacute;ch h&agrave;ng mới</strong> như shop online, cửa h&agrave;ng b&aacute;n lẻ v&agrave; doanh nghiệp thương mại điện tử c&oacute; nhu cầu sử dụng dịch vụ GHN.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Trực tiếp đi thị trường, khảo s&aacute;t khu vực</strong>, thu thập th&ocirc;ng tin v&agrave; x&aacute;c định cơ hội kinh doanh tiềm năng.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Tư vấn v&agrave; giới thiệu giải ph&aacute;p</strong> giao h&agrave;ng ph&ugrave; hợp với nhu cầu của từng kh&aacute;ch h&agrave;ng.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Chăm s&oacute;c v&agrave; duy tr&igrave; mối quan hệ với kh&aacute;ch h&agrave;ng</strong> hiện tại để đảm bảo sự h&agrave;i l&ograve;ng v&agrave; tăng trưởng doanh thu.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Phối hợp với c&aacute;c bộ phận li&ecirc;n quan để xử l&yacute; c&aacute;c vấn đề ph&aacute;t sinh trong qu&aacute; tr&igrave;nh vận h&agrave;nh.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">B&aacute;o c&aacute;o kết quả l&agrave;m việc định kỳ v&agrave; đề xuất giải ph&aacute;p cải thiện hiệu quả kinh doanh.</span></li>\n</ul>\n<p class=\"MsoNormal\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong><span style=\"line-height: 115%;\">Y&Ecirc;U CẦU C&Ocirc;NG VIỆC</span></strong></span></p>\n<ul>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Tốt nghiệp Cao đẳng trở l&ecirc;n, ưu ti&ecirc;n c&aacute;c chuy&ecirc;n ng&agrave;nh Kinh tế, Quản trị Kinh doanh, Thương mại,...</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">C&oacute; &iacute;t nhất 06 th&aacute;ng - 1 năm kinh nghiệm trong lĩnh vực kinh doanh, b&aacute;n h&agrave;ng hoặc ph&aacute;t triển thị trường.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Kỹ năng giao tiếp v&agrave; thuyết phục tốt; c&oacute; khả năng l&agrave;m việc dưới &aacute;p lực cao.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Tinh thần chủ động, năng động, y&ecirc;u th&iacute;ch c&ocirc;ng việc tại thị trường v&agrave; tiếp x&uacute;c kh&aacute;ch h&agrave;ng.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Sở hữu laptop c&aacute; nh&acirc;n v&agrave; phương tiện di chuyển ri&ecirc;ng.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Ưu ti&ecirc;n ứng vi&ecirc;n c&oacute; kinh nghiệm trong ng&agrave;nh logistics hoặc thương mại điện tử.</span></li>\n</ul>\n<p style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong><span style=\"line-height: 115%;\">ĐỊA CHỈ L&Agrave;M VIỆC</span></strong></span></p>\n<ul>\n<li style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Man Thiện, Tăng Nhơn Ph&uacute;, Quận 9</strong></span></li>\n<li style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>T&acirc;n Mỹ, Quận 7</strong></span></li>\n<li style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Nh&agrave; B&egrave;</strong></span></li>\n<li style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Ph&uacute; Nhuận</strong></span></li>\n</ul>\n<p style=\"font-family: Montserrat, sans-serif; font-size: 14pt;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>Li&ecirc;n hệ: 0000000000 ( Lu&acirc;n)</strong></span></p>",
+     "welfare": "<ul>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Lương cứng + phụ cấp đi thị trường</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Đ&oacute;ng bảo hiểm full lương.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Lương th&aacute;ng 13.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Thưởng hiệu quả c&ocirc;ng việc.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Review lương 1 lần/năm.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Bảo hiểm sức khỏe c&aacute; nh&acirc;n.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Tham gia kh&aacute;m sức khỏe định kỳ h&agrave;ng năm.</span></li>\n<li style=\"font-family: Montserrat, sans-serif;\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Nghỉ ph&eacute;p: 12 ng&agrave;y/năm</span>\n<p class=\"MsoNormal\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><strong>CƠ HỘI V&Agrave; M&Ocirc;I TRƯỜNG</strong></span></p>\n<ul>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Đ&agrave;o tạo chuy&ecirc;n s&acirc;u đầu v&agrave;o (sản phẩm, kỹ năng, thị trường).</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">Lộ tr&igrave;nh thăng tiến r&otilde; r&agrave;ng.</span></li>\n<li class=\"MsoNormal\" style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\"><span style=\"font-family: Montserrat, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);\">M&ocirc;i trường chuy&ecirc;n nghiệp, trẻ trung, được hỗ trợ từ quản l&yacute; gi&agrave;u kinh nghiệm.</span></li>\n</ul>\n</li>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-17T07:45:09.596Z",
+     "updated_date": "2026-10-17T07:46:00.043Z",
+     "posting_time": "2026-10-17T07:46:00.043Z",
+     "end_time": "2026-10-30T17:00:00Z",
+     "status": 7,
+     "key": "nvkd-1792223109"
+    },
+    {
+     "id": "6ad1fc07d472133c525324a0",
+     "job_type": "Kinh doanh",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "69153fe911d99139d92a8f63",
+      "label": "Field Sales Executive"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 2,
+     "to_salary": 20000000,
+     "from_salary": 15000000,
+     "address": "7/28 Thành Thái, Phường Diên Hồng, Thành phố Hồ Chí Minh",
+     "email_job_title": "tuyendung@example.com",
+     "fileId": "6acdd7e8c0325b02b7f00f9f",
+     "fileName": "Logo GHN 2.png",
+     "content": "<p><strong>M&Ocirc; TẢ C&Ocirc;NG VIỆC&nbsp;</strong><br>Bạn sẽ phụ tr&aacute;ch ph&aacute;t triển mảng Non-Ecom tại khu vực được ph&acirc;n c&ocirc;ng, tập trung t&igrave;m kiếm, mở rộng v&agrave; chăm s&oacute;c kh&aacute;ch h&agrave;ng doanh nghiệp. Đồng thời, phối hợp chặt chẽ với c&aacute;c V&ugrave;ng v&agrave; Khối ng&agrave;nh h&agrave;ng để để triển khai hoạt động kinh doanh hiệu quả. Vai tr&ograve; n&agrave;y tập trung v&agrave;o việc mở rộng thị trường, tối ưu vận h&agrave;nh v&agrave; th&uacute;c đẩy tăng trưởng doanh thu, lợi nhuận cho&nbsp;ng&agrave;nh h&agrave;ng Non-Ecom.</p>\n<p><strong>Tr&aacute;ch nhiệm ch&iacute;nh </strong></p>\n<ul>\n<li>Chủ động t&igrave;m kiếm, tiếp cận v&agrave; ph&aacute;t triển kh&aacute;ch h&agrave;ng doanh nghiệp nh&aacute;nh Non-Ecommerce (nh&agrave; ph&acirc;n phối, chuỗi b&aacute;n lẻ, xưởng sản xuất, văn ph&ograve;ng doanh nghiệp&hellip;).&nbsp;</li>\n<li>Tương t&aacute;c với kh&aacute;ch h&agrave;ng tiềm năng để thấu hiểu nhu cầu, th&aacute;ch thức v&agrave; mục ti&ecirc;u của họ, từ đ&oacute; giới thiệu, tư vấn giải ph&aacute;p v&agrave; dịch vụ vận chuyển ph&ugrave; hợp với nhu cầu của từng kh&aacute;ch h&agrave;ng.</li>\n<li>X&acirc;y dựng v&agrave; duy tr&igrave; mối quan hệ bền vững với c&aacute;c kh&aacute;ch h&agrave;ng doanh nghiệp Non-Ecom, cung cấp sự hỗ trợ, tư vấn v&agrave; chăm s&oacute;c li&ecirc;n tục trong suốt qu&aacute; tr&igrave;nh b&aacute;n h&agrave;ng v&agrave; sau b&aacute;n h&agrave;ng.</li>\n<li>Phối hợp chặt chẽ với c&aacute;c V&ugrave;ng v&agrave; bộ phận li&ecirc;n quan để đảm bảo trải nghiệm kh&aacute;ch h&agrave;ng liền mạch v&agrave; th&uacute;c đẩy hiệu quả kinh doanh. &nbsp;</li>\n<li>Cập nhật li&ecirc;n tục c&aacute;c xu hướng ng&agrave;nh, t&igrave;nh h&igrave;nh thị trường v&agrave; hoạt động của đối thủ cạnh tranh để đưa ra những nhận định v&agrave; đề xuất hỗ trợ ra quyết định chiến lược.</li>\n</ul>\n<p><strong>Y&Ecirc;U CẦU C&Ocirc;NG VIỆC </strong></p>\n<ul>\n<li>Tốt nghiệp Đại học c&aacute;c chuy&ecirc;n ng&agrave;nh Ngoại thương, Kinh doanh quốc tế, Xuất nhập khẩu, Logistics hoặc c&aacute;c chuy&ecirc;n ng&agrave;nh li&ecirc;n quan.</li>\n<li>Tối thiểu 1 năm kinh nghiệm thực chiến trong lĩnh vực Sales hoặc Business Development mảng Non-Ecommerce. Ưu ti&ecirc;n ứng vi&ecirc;n c&oacute; kinh nghiệm B2B, trực tiếp l&agrave;m việc với kh&aacute;ch h&agrave;ng Non-Ecom (kh&aacute;ch h&agrave;ng doanh nghiệp/truyền thống), đặc biệt trong c&aacute;c lĩnh vực Logistics, Vận chuyển, Ph&acirc;n phối, Dịch vụ hoặc B&aacute;n h&agrave;ng dự &aacute;n.</li>\n<li>Kỹ năng giao tiếp v&agrave; đ&agrave;m ph&aacute;n tốt, c&oacute; khả năng x&acirc;y dựng v&agrave; duy tr&igrave; mối quan hệ bền vững với kh&aacute;ch h&agrave;ng doanh nghiệp.</li>\n<li>Tinh thần chủ động, chịu được &aacute;p lực cao về doanh số (KPIs) v&agrave; sẵn&nbsp;s&agrave;ng đi thị trường/c&ocirc;ng t&aacute;c khi cần thiết.</li>\n<li>Sử dụng th&agrave;nh thạo Microsoft Excel; c&oacute; hiểu biết về c&aacute;c c&ocirc;ng cụ l&agrave;m b&aacute;o c&aacute;o l&agrave; một lợi thế lớn.&nbsp;</li>\n</ul>\n<p><strong>TH&Ocirc;NG TIN KH&Aacute;C </strong></p>\n<ul>\n<li><strong>Địa chỉ:</strong> T&ograve;a nh&agrave; Rivera Park, 7/28 Th&agrave;nh Th&aacute;i, Phường Di&ecirc;n Hồng, TP. HCM</li>\n<li><strong>Thời gian l&agrave;m việc:</strong> Từ thứ 2 đến thứ 6 (08h30 - 18h00)</li>\n<li><strong>Email:</strong> <a href=\"mailto:tuyendung@example.com\">tuyendung@example.com</a>&nbsp;</li>\n</ul>",
+     "welfare": "<ul>\n<li>Đ&oacute;ng bảo hiểm full lương.</li>\n<li>Lương th&aacute;ng 13.</li>\n<li>Thưởng hiệu quả c&ocirc;ng việc.</li>\n<li>Review lương 1 lần/năm.</li>\n<li>Bảo hiểm sức khỏe c&aacute; nh&acirc;n</li>\n<li>Tham gia kh&aacute;m sức khỏe định kỳ h&agrave;ng năm.&nbsp;</li>\n<li>Nghỉ ph&eacute;p: 12 ng&agrave;y/năm.</li>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-16T10:27:19.319Z",
+     "updated_date": "2026-10-16T10:28:53.714Z",
+     "posting_time": "2026-10-16T10:28:53.714Z",
+     "end_time": "2026-10-31T10:27:15.312Z",
+     "status": 7,
+     "key": "bdenvptkd-1792146439"
+    },
+    {
+     "id": "6ad1e0aff5cfafde8c6c2cec",
+     "job_type": "Công nghệ",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "6ad1dfbbd472133c5253249e",
+      "label": "Senior Product Owner"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 1,
+     "address": "GHN Office, Rivera Park Building, 7/28 Thanh Thai Street, District 10, Ho Chi Minh City",
+     "fileId": "6ad1e06c9ae001acf3513b69",
+     "fileName": "LOGO_CHUAN.png",
+     "content": "<h1 dir=\"ltr\">1. ABOUT GHN</h1>\n<p dir=\"ltr\">GHN is a top-tier tech-driven logistics company in Vietnam. We are the backbone of e-commerce, operating a nationwide network with over 20,000 direct staff (shippers, warehouse operatives) and 1,000+ office employees.</p>\n<p dir=\"ltr\">We are not just moving packages; we are moving fast. 2026 is forecasted to be a year of hyper-growth for us. We are aggressively expanding to serve millions of businesses and customers with our \"Smarter, Faster, More Cost-Effective\" philosophy. We need you to prepare our workforce engine for this exponential leap.</p>\n<h1 dir=\"ltr\">2. OUR PRODUCT CULTURE</h1>\n<p dir=\"ltr\">We don't build features; we solve problems. As a Product Owner, you will thrive in an environment defined by:</p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Data-Driven Discovery: Discovery isn't just about field trips; it starts with numbers. We rely on rigorous data analysis to identify bottlenecks and validate objectives. Data is the compass that tells us \"what is the right thing to build.\"</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Working Backward: Inspired by Amazon, we start with the desired customer/employee outcome and reverse-engineer our path to success.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">User-Centric: Whether it&rsquo;s a C-level executive or a delivery rider, every product decision begins and ends with their experience.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Dare to Fail: We innovate boldly. We provide a safe space to experiment because every failure is a stepping stone to excellence.</p>\n</li>\n</ul>\n<h1 dir=\"ltr\">3. YOUR MISSION</h1>\n<p dir=\"ltr\">Build the Engine for a 20,000-Strong Workforce.</p>\n<p dir=\"ltr\">We are looking for a strong Product Owner (Level: Middle to Senior) to join our HR Tech domain. You will take full ownership of critical product modules within the End-to-End Employee Lifecycle &mdash; from Acquisition (Hiring at scale); Operations Management (Time tracking, Shift, Productivity) to Compensation &amp; Rewards (Payroll, Bonus, Policies).</p>\n<p dir=\"ltr\">You are not just delivering features; you are solving the core logistics paradox: How to increase worker income by 10% annually while optimizing unit costs by 5%?</p>\n<p dir=\"ltr\">Your mission is to use technology and data to streamline operations, eliminate inefficiencies, and create a transparent, motivating working environment for our mass volume workforce.</p>\n<h1 dir=\"ltr\">4. WHAT YOU WILL DO</h1>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">End-to-End Ownership: You own your product modules. From identifying the problem (Discovery), to defining the solution and working with the Agile team to build it (Delivery) and measuring its success after release.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Data-Driven Problem Solving: You don't just execute requests. You analyze data to find \"the right problems to solve.\" You use metrics to justify your product decisions and prove the value (ROI) of what you build.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Solution Design: Work closely with the Development Team and UI/UX designers to translate complex business requirements (especially in Payroll/Incentives) into logical, scalable, and user-friendly solutions.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Stakeholder Collaboration: You are the primary contact for your product area. You work directly with Operations, HR, and teams to understand their pain points and negotiate the best solutions for the system.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Backlog Management: Maintain a healthy and prioritized backlog. Ensure the team always has a clear direction and understands the \"Why\" behind every \"What\".</p>\n</li>\n</ul>\n<h1 dir=\"ltr\">5. WHO YOU ARE</h1>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Experience: 3+ years in Product Management, Business Analysis, or related fields.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Education: Bachelor&rsquo;s degree in Human Resource, Logistics, Software Development, Information Systems, or a related field.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Strong Ownership: You treat the product as your own business. You are proactive, result-oriented, and accountable for the outcome.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Analytical Mindset: You are comfortable with numbers and logic. You can analyze data to make informed decisions.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Communication: Excellent ability to communicate complex ideas clearly to both technical and non-technical stakeholders.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Detail-Oriented: You care about the quality of the product. In HR/Payroll systems, precision is key.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Agile Proficiency: Familiarity with agile methodologies and product management tools.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">AI-Native Practice: Use AI daily across the product lifecycle, from synthesizing feedback and analyzing data to drafting specs, prototyping and testing scenarios. You know where AI fails, verify its outputs, and handle worker data responsibly.&nbsp;</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Plus Points: Work experience in a logistics company or experience with Mass Volume systems.</p>\n</li>\n</ul>",
+     "welfare": "<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Massive Impact: Your work directly affects the livelihood of 20,000+ Vietnamese families.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">The Challenge: Solve one of the toughest problems in the logistics industry (Scale vs. Efficiency).</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Empowerment: You have the autonomy to decide \"What\" to build and \"Why\".</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Growth: Ride the wave of e-commerce growth in 2026 and beyond.</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Competitive Package: Attractive salary and benefits commensurate with your impact.</p>\n</li>\n<ul>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">12 days of annual leave</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">13th-month salary and KPI bonuses</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">Health, Social, and Unemployment Insurance</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">PVI Insurance</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">Annual health checkup</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">Semi-annual salary reviews</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">Annual team building/company trip</p>\n</li>\n<li dir=\"ltr\" aria-level=\"2\">\n<p dir=\"ltr\" role=\"presentation\">Ongoing internal and external training opportunities.</p>\n</li>\n</ul>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-16T08:30:39.464Z",
+     "updated_date": "2026-10-16T08:32:17.213Z",
+     "posting_time": "2026-10-16T08:31:12.492Z",
+     "end_time": "2026-11-16T17:00:00Z",
+     "status": 7,
+     "key": "spo-1792139439"
+    },
+    {
+     "id": "6ad1c342f5cfafde8c6c2ceb",
+     "job_type": "Vận hành",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "6a714a710f9a049bc4f818d5",
+      "label": "[Đồng Nai - Bình Dương] Nhân viên lấy hàng"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 5,
+     "to_salary": 17000000,
+     "from_salary": 12000000,
+     "address": "Dĩ An - Thuận An - Bình Dương",
+     "email_job_title": "tuyendung@example.com",
+     "fileId": "6a8d196e0c4065b2a742075a",
+     "fileName": "Logo GHN 2.png",
+     "content": "<p dir=\"ltr\"><strong>1. M&Ocirc; TẢ C&Ocirc;NG VIỆC</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Lấy h&agrave;ng trong khu vực được ph&acirc;n c&ocirc;ng</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Hỗ trợ kh&aacute;ch h&agrave;ng khi c&oacute; y&ecirc;u cầu</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tự chủ trong sắp xếp lịch lấy h&agrave;ng</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">Qu&eacute;t đơn h&agrave;ng lấy h&agrave;ng th&agrave;nh c&ocirc;ng</li>\n</ul>\n<p dir=\"ltr\"><strong>2. Y&Ecirc;U CẦU C&Ocirc;NG VIỆC</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Ứng vi&ecirc;n <strong>c&oacute; xe m&aacute;y ri&ecirc;ng v&agrave; d&ugrave;ng điện thoại th&ocirc;ng minh</strong></p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">C&oacute; tinh thần tr&aacute;ch nhiệm, chăm chỉ v&agrave; thạo đường khu vực lấy h&agrave;ng</p>\n</li>\n</ul>\n<div style=\"line-height: 1.4;\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\"><strong>Địa điểm l&agrave;m việc:&nbsp;</strong></span></div>\n<div style=\"line-height: 1.4;\">\n<p dir=\"ltr\">Khu vực 1: &Ocirc; 22, L&ocirc; LK-D khu nh&agrave; ở 22 th&aacute;ng 12, Phường Thuận Giao, Thị x&atilde; Thuận An, Tỉnh B&igrave;nh Dương.</p>\n<p dir=\"ltr\">Khu vực 2:&nbsp; 29 V&otilde; Thị S&aacute;u, Phường Đ&ocirc;ng Ho&agrave;, Dĩ An, B&igrave;nh Dương</p>\n<span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\"><strong><strong id=\"docs-internal-guid-bc60a032-7fff-3617-27fb-02c9f40ebef6\"></strong></strong></span></div>\n<p>Li&ecirc;n hệ ứng tuyển: 0000000000 (Ms.Thơ)</p>",
+     "welfare": "<ul>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif; line-height: 1.4;\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Thu nhập ổn định + cơ hội thưởng theo khối lượng đơn h&agrave;ng (lấy c&agrave;ng nhiều thu nhập c&agrave;ng cao)</span></li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif; line-height: 1.4;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Thu nhập:<strong> 12tr &ndash; 15tr/th&aacute;ng hoặc hơn v&agrave;o m&ugrave;a cao điểm</strong></span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">C&oacute; chế độ bảo hiểm, ph&uacute;c lợi đầy đủ</span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Được đ&agrave;o tạo nghiệp vụ trước khi l&agrave;m việc</span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">M&ocirc;i trường l&agrave;m việc th&acirc;n thiện, kh&ocirc;ng g&ograve; b&oacute; thời gian</span></p>\n</li>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-16T06:25:06.331Z",
+     "updated_date": "2026-10-16T06:30:34.277Z",
+     "posting_time": "2026-10-16T06:26:59.703Z",
+     "end_time": "2026-11-08T06:25:05.905Z",
+     "status": 7,
+     "key": "q1nvlh-1792131906"
+    },
+    {
+     "id": "6ad1c280f5cfafde8c6c2cea",
+     "job_type": "Vận hành",
+     "provinceNameText": {
+      "value": 202,
+      "label": "Hồ Chí Minh"
+     },
+     "selectedListRecruit": {
+      "value": "6a0b009974bb48d3f9ea3e5a",
+      "label": "Quận 12 - Nhân viên lấy hàng"
+     },
+     "type": {
+      "value": "fulltime",
+      "label": "Toàn thời gian"
+     },
+     "quantityParse": 5,
+     "to_salary": 17000000,
+     "from_salary": 12000000,
+     "address": "508 Lê Thị Riêng, phường Thới An, Quận 12, TP.HCM",
+     "email_job_title": "tuyendung@example.com",
+     "fileId": "6a8d196e0c4065b2a742075a",
+     "fileName": "Logo GHN 2.png",
+     "content": "<p dir=\"ltr\"><strong>1. M&Ocirc; TẢ C&Ocirc;NG VIỆC</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Lấy h&agrave;ng trong khu vực được ph&acirc;n c&ocirc;ng</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Hỗ trợ kh&aacute;ch h&agrave;ng khi c&oacute; y&ecirc;u cầu</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Tự chủ trong sắp xếp lịch lấy h&agrave;ng</p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">Qu&eacute;t đơn h&agrave;ng lấy h&agrave;ng th&agrave;nh c&ocirc;ng</li>\n</ul>\n<p dir=\"ltr\"><strong>2. Y&Ecirc;U CẦU C&Ocirc;NG VIỆC</strong></p>\n<ul>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">Ứng vi&ecirc;n <strong>c&oacute; xe m&aacute;y ri&ecirc;ng v&agrave; d&ugrave;ng điện thoại th&ocirc;ng minh</strong></p>\n</li>\n<li dir=\"ltr\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\">C&oacute; tinh thần tr&aacute;ch nhiệm, chăm chỉ v&agrave; thạo đường khu vực lấy h&agrave;ng</p>\n</li>\n</ul>\n<div style=\"line-height: 1.4;\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\"><strong>Địa điểm l&agrave;m việc: 508 L&ecirc; Thị Ri&ecirc;ng, phường Thới An, Quận 12, TP.HCM</strong></span></div>\n<p>Li&ecirc;n hệ ứng tuyển: 0000000000 (Ms.Thơ)</p>",
+     "welfare": "<ul>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif; line-height: 1.4;\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Thu nhập ổn định + cơ hội thưởng theo khối lượng đơn h&agrave;ng (lấy c&agrave;ng nhiều thu nhập c&agrave;ng cao)</span></li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif; line-height: 1.4;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Thu nhập:<strong> 12tr &ndash; 15tr/th&aacute;ng hoặc hơn v&agrave;o m&ugrave;a cao điểm</strong></span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">C&oacute; chế độ bảo hiểm, ph&uacute;c lợi đầy đủ</span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">Được đ&agrave;o tạo nghiệp vụ trước khi l&agrave;m việc</span></p>\n</li>\n<li dir=\"ltr\" style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\" aria-level=\"1\">\n<p dir=\"ltr\" role=\"presentation\"><span style=\"font-size: 12pt; font-family: Montserrat, sans-serif;\">M&ocirc;i trường l&agrave;m việc th&acirc;n thiện, kh&ocirc;ng g&ograve; b&oacute; thời gian</span></p>\n</li>\n</ul>",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2026-10-16T06:21:52.499Z",
+     "updated_date": "2026-10-16T06:24:19.957Z",
+     "posting_time": "2026-10-16T06:24:19.957Z",
+     "end_time": "2026-11-08T06:21:52.075Z",
+     "status": 7,
+     "key": "q7bslh-1792131712"
+    }
+   ]
+  }
+ }
+}

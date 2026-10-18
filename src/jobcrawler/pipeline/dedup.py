@@ -130,7 +130,12 @@ def stored_fingerprint(
 
 
 def _apply_key(job: NormalizedJob) -> str | None:
-    """Nơi nộp hồ sơ; nguồn không ghi thì là chính trang tin (ứng tuyển trên trang đó)."""
+    """Nơi nộp hồ sơ; nguồn không ghi thì là chính trang tin (ứng tuyển trên trang đó). Tin không
+    có trang riêng (chung URL trang danh sách: tin trong JSON của trang SPA, tin LLM đọc từ trang
+    danh sách) thì URL đó không nói gì về nơi nộp."""
+    extra = job.raw.extra
+    if extra.get("shared_url") or extra.get("inline"):
+        return normalize_url(job.apply_url) if job.apply_url else None
     return normalize_url(job.apply_url or job.url)
 
 

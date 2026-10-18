@@ -433,6 +433,17 @@ async def test_category_pages_are_followed_to_their_jobs() -> None:
     assert f"{TGDD}/tuyen-dung/quan-ly-sieu-thi-bach-hoa-xanh-646" in opened
 
 
+async def test_jobs_embedded_in_next_data() -> None:
+    """VNG: danh sách tin chỉ có trong `__NEXT_DATA__` (HTML không có link tin)."""
+    url = "https://career.vng.com.vn/vi/tim-kiem-viec-lam"
+    fetcher = FakeFetcher()
+    fetcher.add(url, html("json/vng_search.html"))
+    jobs = await run(CareersSource(url), session(fetcher, max_rendered_pages=0))
+    assert len(jobs) >= 10
+    assert jobs[0].title == "Technical Support Engineer, GreenNode"
+    assert all(len(j.description or "") >= 100 for j in jobs)
+
+
 def test_pick_title_prefers_heading_matching_listing_text() -> None:
     banner = "TMA tự hào là nơi làm việc tin cậy của"
     assert pick_title("System Test Engineer", [banner, "System Test Engineer (HCM)"], None) == (

@@ -1,0 +1,69 @@
+{
+ "url": "https://online-gateway.ghn.vn/integration/recruit-ghn/public-api/blog/get-staff",
+ "method": "POST",
+ "request_json": {
+  "page": 1,
+  "pageSize": 5
+ },
+ "body": {
+  "code": 200,
+  "message": "Success",
+  "data": {
+   "page": 1,
+   "pageSize": 5,
+   "total": 2,
+   "list": [
+    {
+     "id": "646f0ff7df81605b211a5966",
+     "title": "Hành trình trưởng thành cùng GHN",
+     "description": "Sau gần 2 năm làm việc tại Giao Hàng Nhanh, Nguyệt đã và đang có một hành trình đáng nhớ.",
+     "content": "<p style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\"><img src=\"https://storage.googleapis.com/ghn_integrate_team/image-16850001483276701312173\" alt=\"\" width=\"1151\" height=\"591\"></span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Sau gần 2 năm l&agrave;m việc tại Giao H&agrave;ng Nhanh, Nguyệt đ&atilde; v&agrave; đang c&oacute; một h&agrave;nh tr&igrave;nh đ&aacute;ng nhớ.</span><br><br><span style=\"font-size: 12pt;\">Bắt đầu từ một sinh vi&ecirc;n mới ra trường, c&ograve;n thiếu kinh nghiệm, Nguyệt đ&atilde; d&agrave;nh to&agrave;n bộ nhiệt huyết của m&igrave;nh để l&agrave;m việc. Sau 10 th&aacute;ng, Nguyệt đ&atilde; được thăng tiến l&ecirc;n vị tr&iacute; Business Development Specialist, đảm nhận nhiều thử th&aacute;ch mới hơn v&agrave; tiếp tục đ&oacute;ng g&oacute;p cho c&ocirc;ng ty.</span><br><span style=\"font-size: 12pt;\">Trong suốt thời gian l&agrave;m việc tại Giao H&agrave;ng Nhanh, c&oacute; hai điều lu&ocirc;n l&agrave;m m&igrave;nh y&ecirc;u th&iacute;ch v&agrave; mong muốn gắn b&oacute; với nơi n&agrave;y.</span><br><br><span style=\"font-size: 12pt;\">Đầu ti&ecirc;n, m&ocirc;i trường l&agrave;m việc chuy&ecirc;n nghiệp v&agrave; quy tr&igrave;nh r&otilde; r&agrave;ng. Sếp lu&ocirc;n tận t&igrave;nh hướng dẫn v&agrave; hỗ trợ Nguyệt, gi&uacute;p Nguyệt ph&aacute;t triển nhiều kỹ năng mềm trong c&ocirc;ng việc. Đặc biệt, m&ocirc;i trường l&agrave;m việc của ph&ograve;ng Kinh doanh rất trẻ trung v&agrave; năng động, đồng nghiệp lu&ocirc;n sẵn s&agrave;ng hỗ trợ v&agrave; nhắc nhở lẫn nhau để c&ugrave;ng ho&agrave;n th&agrave;nh c&ocirc;ng việc.</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><br><span style=\"font-size: 12pt;\">Ngo&agrave;i ra, Giao H&agrave;ng Nhanh c&oacute; một m&ocirc;i trường để Nguyệt ph&aacute;t triển bản th&acirc;n. Trước đ&acirc;y, Nguyệt gặp &aacute;p lực từ việc l&agrave;m việc với kh&aacute;ch h&agrave;ng v&agrave; thiếu kỹ năng giải quyết vấn đề. Nhưng hiện tại, Nguyệt đ&atilde; trở th&agrave;nh một phi&ecirc;n bản tốt hơn, tự tin trong việc xử l&yacute; c&aacute;c t&igrave;nh huống kh&oacute; khăn với kh&aacute;ch h&agrave;ng v&agrave; c&oacute; khả năng lập kế hoạch để đạt được mục ti&ecirc;u. Việc thăng tiến trong c&ocirc;ng ty cũng r&otilde; r&agrave;ng, v&agrave; hiện tại, Nguyệt đ&atilde; vượt qua những giới hạn c&aacute; nh&acirc;n để thăng chức từ vị tr&iacute; Executive l&ecirc;n Specialist.</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><br><span style=\"font-size: 12pt;\">Đối với Nguyệt, tuổi trẻ, nhiệt huyết v&agrave; đam m&ecirc; l&agrave; những yếu tố quan trọng để vượt qua mọi thử th&aacute;ch v&agrave; kh&oacute; khăn trong c&ocirc;ng việc v&agrave; cả trong cuộc sống. Giao H&agrave;ng Nhanh l&agrave; nơi cho Nguyệt những thử th&aacute;ch v&agrave; trải nghiệm thực tế m&agrave; kh&ocirc;ng phải m&ocirc;i trường n&agrave;o cũng c&oacute; thể mang lại.</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><br><span style=\"font-size: 12pt;\">Ở tr&ecirc;n l&agrave; những lời chia sẻ của bạn V&otilde; Thị Xu&acirc;n Nguyệt - Business Development Specialist khi được hỏi về cảm nhận của bạn khi l&agrave;m việc tại GiaoHangNhanh (GHN).</span><br><br><span style=\"font-size: 12pt;\">Những chia sẻ của c&aacute;c ph&ograve;ng ban kh&aacute;c tại GHN sẽ sớm được bật m&iacute;, h&atilde;y c&ugrave;ng đ&oacute;n chờ nh&eacute;!</span></p>\n<p>&nbsp;</p>\n<p><span style=\"font-size: 12pt;\"><strong>Giao H&agrave;ng Nhanh đang tuyển rất nhiều vị tr&iacute;, đừng ngần ngại h&atilde;y bấm v&agrave;o đ&acirc;y để t&igrave;m kiếm được c&ocirc;ng việc ph&ugrave; hợp nh&eacute;: <span style=\"color: rgb(44, 11, 245);\"><a style=\"color: rgb(44, 11, 245);\" href=\"../../\">https://tuyendung.ghn.vn</a>&nbsp;</span></strong></span></p>",
+     "fileId": "646f0fc78eba7b8a879ebdfa",
+     "fileName": "Xuân Nguyệt BD - thumbnail-04.png",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2023-05-25T07:36:23.416Z",
+     "updated_date": "2023-07-20T10:59:54.777Z",
+     "status": 1,
+     "key": "ghn-open-culture:-hanh-trinh-truong-thanh-dang-nho-1685000183",
+     "name_staff": "Nhân viên A",
+     "description_staff": "Business Development Specialist",
+     "sepaking_staff": "Đối với Nguyệt, tuổi trẻ, nhiệt huyết và đam mê là những yếu tố quan trọng để vượt qua mọi thử thách và khó khăn trong công việc và cả trong cuộc sống.",
+     "file_name_staff": "Chị Nguyệt-13.png",
+     "file_id_staff": "64a449204943debe5301ec98",
+     "staff": "Nhân viên A",
+     "tag": [
+      "64b8ea13de5f41f88d854266"
+     ]
+    },
+    {
+     "id": "645db6a5df81605b211a5741",
+     "title": "Hành trình trưởng thành từ tấm chiếu mới",
+     "description": "Ở GHN, tinh thần \"thực chiến\" quyết liệt trong công việc chính là kim chỉ nam của tất cả mọi người.",
+     "content": "<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\"><img src=\"https://storage.googleapis.com/ghn_integrate_team/image-16849972037979745945211\" alt=\"\" width=\"1152\" height=\"611\"><br></span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Sắp tới l&agrave; cũng tr&ograve;n một năm l&agrave;m việc tại GHN của Trang rồi, cũng đi từng bước nhỏ từ một bạn Thực tập sinh - một tấm chiếu mới ch&iacute;nh hiệu trải qua mấy th&aacute;ng th&igrave; may mắn được c&acirc;n nhắc l&ecirc;n Cộng t&aacute;c vi&ecirc;n n&ecirc;n cũng c&oacute; hội trải nghiệm nhiều hơn v&agrave; tiếp tục gắn b&oacute; với GHN đến hiện tại.</span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Sau một năm th&igrave; Trang nhận thấy đ&acirc;y l&agrave; m&ocirc;i trường rất ph&ugrave; hợp cho c&aacute;c bạn Thực tập sinh, sinh vi&ecirc;n mới ra trường muốn trải nghiệm thực chiến ở c&aacute;c vị tr&iacute;, c&aacute;c bạn được trao quyền nhiều hơn, tham gia v&agrave;o nhiều c&ocirc;ng việc của c&ocirc;ng ty hơn, học hỏi được những kiến thức kỹ năng thực tế v&agrave; rất c&oacute; &iacute;ch cho c&ocirc;ng việc sau n&agrave;y của mọi người.</span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Ng&agrave;y đầu đi thực tập m&igrave;nh sợ sẽ v&agrave;o tr&uacute;ng một c&ocirc;ng ty c&oacute; m&ocirc;i trường \"toxic\", nhưng từ những ng&agrave;y đầu c&aacute;c anh chị v&agrave; c&aacute;c bạn chung team đ&atilde; thực sự hỗ trợ, gi&uacute;p đỡ m&igrave;nh rất nhiều. </span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">C&ocirc;ng việc m&igrave;nh được training rất kỹ, cũng được giao dần những task kh&oacute; hơn v&agrave; chị mentor của m&igrave;nh th&igrave; l&uacute;c n&agrave;o cũng sẵn s&agrave;ng hỗ trợ. L&uacute;c l&agrave;m th&igrave; rất nghi&ecirc;m t&uacute;c, c&ocirc;ng việc cũng kh&aacute; nhiều, đ&ocirc;i l&uacute;c m&igrave;nh cũng sẽ cảm thấy &aacute;p lực nhưng m&agrave; xen v&agrave;o đ&oacute; sẽ c&oacute; những buổi ăn xế m&agrave; mn được dịp thả lỏng ra v&agrave; cười đ&ugrave;a c&ugrave;ng nhau rất sảng kho&aacute;i.</span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Đối với m&igrave;nh, ở GHN, tinh thần \"thực chiến\" quyết liệt trong c&ocirc;ng việc ch&iacute;nh l&agrave; kim chỉ nam của tất cả mọi người để ph&aacute;t triển bản th&acirc;n từng ng&agrave;y. C&aacute;c bạn trẻ c&oacute; l&yacute; tưởng th&iacute;ch được thử th&aacute;ch vượt qua giới hạn bản th&acirc;n th&igrave; GHN chắc chắn l&agrave; m&ocirc;i trường ph&ugrave; hợp để bạn l&agrave;m việc đ&oacute;.</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\"><strong>&nbsp;</strong></span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Ở tr&ecirc;n l&agrave; những lời chia sẻ của bạn Huỳnh Thị Th&ugrave;y Trang - HRBP Officer khi được hỏi về cảm nhận của bạn khi l&agrave;m việc tại GHN.</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\"><strong>&nbsp;</strong></span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Để cảm nhận r&otilde; hơn về m&ocirc;i trường l&agrave;m việc tại GHN c&oacute; thực sự như những lời Trang chia sẻ hay kh&ocirc;ng, nhanh tay ứng tuyển v&agrave;o GHN tại:&nbsp;</span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Đối với c&aacute;c vị tr&iacute; thuộc khối Tech: <a href=\"https://tech.ghn.vn/\">https://tech.ghn.vn/</a>&nbsp;</span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Đối với c&aacute;c vị tr&iacute; thuộc khối Non-tech v&agrave; những vị tr&iacute; kh&aacute;c: <a href=\"../../\">https://tuyendung.ghn.vn/</a>&nbsp;</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\"><strong>&nbsp;</strong></span></p>\n<p dir=\"ltr\" style=\"text-align: justify; line-height: 1.5;\"><span style=\"font-size: 12pt;\">Những chia sẻ của c&aacute;c ph&ograve;ng ban kh&aacute;c tại GHN sẽ sớm được bật m&iacute;, h&atilde;y c&ugrave;ng đ&oacute;n chờ nh&eacute;!</span></p>\n<p style=\"text-align: justify; line-height: 1.5;\">&nbsp;</p>",
+     "fileId": "646f07288eba7b8a879ea2be",
+     "fileName": "thumbnail blog-05.png",
+     "created_employee": "0",
+     "updated_employee": "0",
+     "created_employee_name": "Nhân viên A",
+     "updated_employee_name": "Nhân viên A",
+     "created_date": "2023-05-12T03:46:45.006Z",
+     "updated_date": "2023-07-20T08:07:27.431Z",
+     "status": 1,
+     "key": "ghn-open-culture:-truong-thanh-tu-tam-chieu-moi-1683863205",
+     "name_staff": "Nhân viên A",
+     "description_staff": "HRBP Officer",
+     "sepaking_staff": "Ở GHN, tinh thần \"thực chiến\" quyết liệt trong công việc chính là kim chỉ nam của tất cả mọi người để phát triển bản thân từng ngày.",
+     "file_name_staff": "Trang-14.png",
+     "file_id_staff": "64a44a21dd7a204e2e8763d7",
+     "staff": "Nhân viên A",
+     "tag": [
+      "64b8ea13de5f41f88d854266"
+     ]
+    }
+   ]
+  }
+ }
+}
