@@ -287,7 +287,8 @@ async def _run_pipeline(
     # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào).
     website = company_in.website or step.website
     # Profile trên các trang tuyển dụng đã map khi index; trang nào chưa có thì tìm bằng SERP
-    # `site:`. KYC chưa chắc thì chỉ dùng profile khớp mạnh (cùng MST hoặc cùng website).
+    # `site:`. KYC mơ hồ thì chỉ dùng profile khớp mạnh (cùng MST hoặc cùng website); không tìm
+    # thấy website thì thêm profile trùng hẳn tên (đủ riêng), vì tên là tất cả những gì có.
     await board_service.lookup_profiles(
         res,
         state.company,
@@ -295,7 +296,12 @@ async def _run_pipeline(
         records=records,
     )
     board = await board_service.board_sources(
-        res, state.company.id, strong_only=step.status is not KycStatus.VERIFIED
+        res,
+        state.company.id,
+        policy=profile_policy(
+            step.status, name_profiles=res.settings.board_name_profiles_without_kyc
+        ),
+        names=_names(state.company),
     )
     if not website and not board:
         log.info("company.no_website", kyc_status=step.status.value if step.status else None)
@@ -392,6 +398,18 @@ async def _finish_run(
                 last_run_incomplete=outcome.incomplete_sources,
             )
         )
+
+
+def profile_policy(status: KycStatus | None, *, name_profiles: bool) -> board_service.ProfilePolicy:
+    if status is KycStatus.VERIFIED:
+        return "all"
+    if status is KycStatus.NOT_FOUND and name_profiles:
+        return "exact_name"
+    return "strong"
+
+
+def _names(company: Company) -> list[str]:
+    return [n for n in (company.input_name, company.legal_name, company.brand_name) if n]
 
 
 def _display_name(company: Company) -> str:

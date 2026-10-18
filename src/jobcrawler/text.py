@@ -100,6 +100,15 @@ _GENERIC_WORDS = frozenset(
 )  # fmt: skip
 
 
+def distinctive_key(key: str, *, min_chars: int = 6) -> bool:
+    """Khoá tên đủ riêng để khớp tên thôi cũng tin được: đủ dài và có ít nhất một từ không phải
+    từ chung của tên ngành nghề ("thuong mai dich vu" không đủ, "kiotviet" đủ)."""
+    words = key.split()
+    return len(key.replace(" ", "")) >= min_chars and any(
+        len(w) >= 3 and w not in _GENERIC_WORDS for w in words
+    )
+
+
 def company_match_key(name: str) -> str:
     """Khoá CHỈ dùng để map profile trên trang tuyển dụng ↔ doanh nghiệp
     (`source_profiles.name_norm`, alias `kind="match"`); KYC và gộp doanh nghiệp vẫn dùng

@@ -304,7 +304,18 @@ async def test_process_company_uses_indexed_board_jobs(
         sources = await board_service.board_sources(res, company_id)
         assert [s.name for s in sources] == ["board:fakeboard:7"]
         # KYC chưa chắc: profile chỉ khớp tên thì không dùng.
-        assert await board_service.board_sources(res, company_id, strong_only=True) == []
+        assert await board_service.board_sources(res, company_id, policy="strong") == []
+        # Không tìm thấy website: profile trùng hẳn tên doanh nghiệp vẫn dùng được.
+        exact = await board_service.board_sources(
+            res, company_id, policy="exact_name", names=[ACME]
+        )
+        assert [s.name for s in exact] == ["board:fakeboard:7"]
+        assert (
+            await board_service.board_sources(
+                res, company_id, policy="exact_name", names=["ACME Board Khác"]
+            )
+            == []
+        )
 
         offline = dataclasses.replace(res, http=FakeFetcher())  # pyright: ignore[reportArgumentType]
         result = await process_company(offline, CompanyIn(name=ACME))

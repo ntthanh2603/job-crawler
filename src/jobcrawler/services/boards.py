@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import func, or_, select, update
@@ -26,7 +27,7 @@ from jobcrawler.sources import boards
 from jobcrawler.sources.base import FetchRecord, Source, SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.boards.base import BoardAdapter
 from jobcrawler.sources.boards.profile_source import BoardProfileSource
-from jobcrawler.text import company_match_key
+from jobcrawler.text import company_match_key, distinctive_key
 
 log = get_logger(__name__)
 
@@ -99,6 +100,12 @@ async def index_boards(
 
 
 STRONG_SIGNALS = frozenset({"mst", "website"})
+# Profile nào của doanh nghiệp được dùng, theo mức chắc chắn của KYC:
+# - "all": mọi profile đã map (KYC đã xác minh);
+# - "strong": chỉ profile khớp MST/website (KYC mơ hồ);
+# - "exact_name": thêm profile khớp tên bằng rule mà khoá tên trùng hẳn tên doanh nghiệp và đủ
+#   riêng (doanh nghiệp không tìm được website, chỉ có tên).
+ProfilePolicy = Literal["all", "strong", "exact_name"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,10 +144,27 @@ class _ProfileIndex:
             return {external_id: RawJob.model_validate(raw) for external_id, raw in rows}
 
 
+def _usable(profile: SourceProfile, policy: ProfilePolicy, names: Sequence[str]) -> bool:
+    evidence = profile.match_evidence or {}
+    signal = evidence.get("signal")
+    if policy == "all" or signal in STRONG_SIGNALS:
+        return True
+    if policy == "strong" or signal != "name" or not evidence.get("rule"):
+        return False
+    key = company_match_key(profile.name_on_source)
+    return distinctive_key(key) and key in {company_match_key(n) for n in names}
+
+
 async def board_sources(
-    res: Resources, company_id: UUID, *, strong_only: bool = False, now: datetime | None = None
+    res: Resources,
+    company_id: UUID,
+    *,
+    policy: ProfilePolicy = "all",
+    names: Sequence[str] = (),
+    now: datetime | None = None,
 ) -> list[Source]:
-    """Nguồn tin của doanh nghiệp trên các trang tuyển dụng (profile đã map)."""
+    """Nguồn tin của doanh nghiệp trên các trang tuyển dụng (profile đã map, lọc theo
+    `policy`; `names`: tên đầu vào/pháp lý/thương hiệu, cho "exact_name")."""
     now = now or datetime.now(UTC)
     stale_before = now - timedelta(hours=res.settings.board_stale_hours)
     registry = boards.registry()
@@ -157,8 +181,7 @@ async def board_sources(
         adapter = registry.get(profile.source)
         if adapter is None or not adapter.enabled:
             continue
-        signal = (profile.match_evidence or {}).get("signal")
-        if strong_only and signal not in STRONG_SIGNALS:
+        if not _usable(profile, policy, names):
             continue
         fresh = profile.indexed_at is not None and profile.indexed_at >= stale_before
         sources.append(

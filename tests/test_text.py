@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.text import company_match_key, normalize_company_name, strip_accents
+from jobcrawler.text import (
+    company_match_key,
+    distinctive_key,
+    normalize_company_name,
+    strip_accents,
+)
 
 
 def test_strip_accents() -> None:
@@ -75,3 +80,10 @@ def test_company_match_key_keeps_generic_names() -> None:
     assert company_match_key("Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)") == (
         "ngan hang thuong mai ngoai thuong"
     )
+
+
+def test_distinctive_key() -> None:
+    assert distinctive_key("kiotviet")
+    assert distinctive_key("yakult")
+    assert not distinctive_key("thuong mai dich vu")  # toàn từ chung ngành
+    assert not distinctive_key("abc")  # quá ngắn

@@ -363,6 +363,35 @@ def _company(
     )
 
 
+def test_profile_policy_by_kyc_status() -> None:
+    from jobcrawler.schemas import KycStatus
+    from jobcrawler.services import boards as board_service
+    from jobcrawler.services.companies import profile_policy
+
+    assert profile_policy(KycStatus.VERIFIED, name_profiles=True) == "all"
+    assert profile_policy(KycStatus.NOT_FOUND, name_profiles=True) == "exact_name"
+    assert profile_policy(KycStatus.NOT_FOUND, name_profiles=False) == "strong"
+    assert profile_policy(KycStatus.AMBIGUOUS, name_profiles=True) == "strong"
+    assert profile_policy(None, name_profiles=True) == "strong"
+
+    def mapped(name: str, signal: str) -> SourceProfile:
+        profile = _profile(name)
+        profile.match_evidence = {"signal": signal, "rule": signal != "llm"}
+        return profile
+
+    usable = board_service._usable  # pyright: ignore[reportPrivateUsage]
+    names = ["KiotViet", "Công ty TNHH Thương mại Dịch vụ Kiotviet"]
+    assert usable(mapped("KIOTVIET", "name"), "exact_name", names)
+    assert not usable(mapped("KIOTVIET", "name"), "strong", names)
+    assert usable(mapped("Tên khác hẳn", "website"), "strong", names)
+    # LLM chọn, hay tên chung chung: không đủ khi KYC không tìm thấy website.
+    assert not usable(mapped("KIOTVIET", "llm"), "exact_name", names)
+    # Khoá tên phải trùng hẳn một tên của doanh nghiệp.
+    assert not usable(mapped("KIOTVIET", "name"), "exact_name", names[1:])
+    generic = ["Công ty TNHH Thương mại Dịch vụ"]
+    assert not usable(mapped("Thương mại Dịch vụ", "name"), "exact_name", generic)
+
+
 def test_decide_maps_profile_name_variants() -> None:
     mb = _company(5, "Ngân hàng TMCP Quân Đội")
     profile = _profile("Ngân Hàng Thương Mại Cổ Phần Quân Đội (MB Bank)")

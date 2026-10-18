@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     # Map profile ↔ doanh nghiệp: ngưỡng trigram để xét, độ tin cậy tối thiểu để nhận.
     profile_match_trigram: float = Field(default=0.6, gt=0, le=1)
     profile_match_min_confidence: float = Field(default=0.8, ge=0, le=1)
+    # KYC không tìm thấy website (chỉ có tên): vẫn dùng profile trên trang tuyển dụng có tên trùng
+    # hẳn tên doanh nghiệp (đủ riêng, khớp bằng rule). KYC mơ hồ: chỉ profile khớp MST/website.
+    board_name_profiles_without_kyc: bool = True
     # Doanh nghiệp chưa có profile trên một trang: tìm bằng SERP `site:` (cần SERP_API_KEY).
     board_serp_lookup: bool = True
     board_serp_lookup_seconds: float = Field(default=20, gt=0)
