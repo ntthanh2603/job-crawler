@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from jobcrawler.pipeline.dedup import (
     cluster_jobs,
     jd_minhash,
     jd_similarity,
     job_fingerprint,
     merge,
+    rank_conflict,
     stored_fingerprint,
+    title_similarity,
 )
 from jobcrawler.schemas import ExtractionMethod, WorkMode
 
@@ -201,3 +205,43 @@ def test_fingerprint_distinguishes_places_and_matches_stored_row() -> None:
     assert stored_fingerprint(
         job.title, locations, job.description_md, job.requirements_md
     ) == job_fingerprint(job)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("Java Developer", "Senior Java Developer"),
+        ("Kế toán", "Kế toán trưởng"),
+        ("Kỹ sư phần mềm", "Thực tập sinh Kỹ sư phần mềm"),
+        ("Chuyên viên tuyển dụng", "Trợ lý Chuyên viên tuyển dụng"),
+        ("Business Analyst I", "Business Analyst II"),
+        ("Sales Manager", "Sales"),
+    ],
+)
+def test_titles_differing_by_rank_are_different_jobs(a: str, b: str) -> None:
+    assert rank_conflict(a, b)
+    assert title_similarity(a, b) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        ("Nhân viên kinh doanh", "Kinh doanh"),
+        ("Kế Toán Tổng Hợp - Hà Nội (Tuyển Gấp)", "Kế toán tổng hợp"),
+        ("Senior Java Developer", "Java Developer (Senior)"),
+    ],
+)
+def test_titles_without_rank_difference_still_match(a: str, b: str) -> None:
+    assert not rank_conflict(a, b)
+    # Như khi gộp: so tiêu đề đã chuẩn hoá (bỏ dấu, bỏ nhiễu như "(Tuyển gấp)", tên tỉnh).
+    title_a = careers(title=a).title_normalized
+    title_b = careers(title=b).title_normalized
+    assert title_similarity(title_a, title_b) >= 90
+
+
+def test_junior_and_senior_with_template_jd_stay_separate() -> None:
+    junior = careers(external_id="j", title="Java Developer", url="https://careers.acme.vn/jobs/j")
+    senior = careers(
+        external_id="s", title="Senior Java Developer", url="https://careers.acme.vn/jobs/s"
+    )
+    assert len(cluster_jobs([junior, senior])) == 2

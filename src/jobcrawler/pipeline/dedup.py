@@ -73,8 +73,31 @@ def jd_similarity(a: MinHash, b: MinHash) -> float:
     return float(a.jaccard(b))
 
 
+# Từ chỉ cấp bậc / vai trò (đã bỏ dấu): hai tiêu đề lệch nhau ở các từ này là hai vị trí khác
+# nhau dù JD dùng chung mẫu ("Java Developer" / "Senior Java Developer", "Kế toán" / "Kế toán
+# trưởng"). `token_set_ratio` cho 100 khi từ của tiêu đề này nằm trọn trong tiêu đề kia.
+_RANK_TOKENS = frozenset(
+    {
+        "senior", "sr", "junior", "jr", "lead", "leader", "principal", "head", "chief",
+        "manager", "director", "intern", "internship", "fresher", "trainee", "assistant",
+        "deputy", "truong", "pho", "i", "ii", "iii", "iv",
+    }
+)  # fmt: skip
+_RANK_PHRASES = ("thuc tap", "tro ly", "giam doc")
+
+
+def rank_conflict(a: str, b: str) -> bool:
+    """Hai tiêu đề khác nhau ở từ chỉ cấp bậc."""
+    fa, fb = fold(a), fold(b)
+    if (set(fa.split()) ^ set(fb.split())) & _RANK_TOKENS:
+        return True
+    return any((f" {p} " in f" {fa} ") != (f" {p} " in f" {fb} ") for p in _RANK_PHRASES)
+
+
 def title_similarity(a: str, b: str) -> float:
-    return float(fuzz.token_set_ratio(a, b)) if a and b else 0.0
+    if not a or not b or rank_conflict(a, b):
+        return 0.0
+    return float(fuzz.token_set_ratio(a, b))
 
 
 def compatible_provinces(pa: set[str], pb: set[str]) -> bool:
