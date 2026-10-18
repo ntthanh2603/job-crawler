@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -73,7 +74,7 @@ class CompanyItem(BaseModel):
 
 class RunOut(BaseModel):
     run_id: str
-    company_id: int
+    company_id: UUID
     started_at: datetime
     finished_at: datetime | None
     duration_ms: int | None
@@ -101,7 +102,7 @@ class ProfileOut(BaseModel):
 
 
 class PostingOut(BaseModel):
-    id: int
+    id: UUID
     source: str
     url: str
     title: str | None
@@ -114,7 +115,7 @@ class PostingOut(BaseModel):
 
 
 class FailedPageItem(BaseModel):
-    id: int
+    id: UUID
     url: str
     source: str
     reason: str
@@ -197,7 +198,7 @@ class JobDetailOut(BaseModel):
 
 
 class RecentReview(BaseModel):
-    job_id: int
+    job_id: UUID
     title: str
     company_name: str
     correct: bool
@@ -225,7 +226,7 @@ class ReviewPageOut(BaseModel):
 
 
 class EnqueueIn(BaseModel):
-    company_ids: list[int] | None = Field(default=None, description="Các doanh nghiệp cần chạy.")
+    company_ids: list[UUID] | None = Field(default=None, description="Các doanh nghiệp cần chạy.")
     stale_hours: float | None = Field(
         default=None, description="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ."
     )
@@ -308,7 +309,7 @@ def _job_filters(
     source: str,
     status: str,
     salary_from: float | None,
-    company_id: int | None,
+    company_id: UUID | None,
     reviewed: str,
     sort: str,
     page: int,
@@ -409,7 +410,7 @@ async def get_companies(
 
 
 @router.get("/companies/{company_id}")
-async def get_company(request: Request, company_id: int) -> CompanyDetailOut:
+async def get_company(request: Request, company_id: UUID) -> CompanyDetailOut:
     async with res_of(request).sessionmaker() as session:
         d = await queries.company_detail(session, company_id)
     if d is None:
@@ -448,7 +449,7 @@ async def get_company(request: Request, company_id: int) -> CompanyDetailOut:
 @router.get("/companies/{company_id}/jobs")
 async def get_company_jobs(
     request: Request,
-    company_id: int,
+    company_id: UUID,
     status: Annotated[str, Query(description="active | inactive")] = "active",
     page: int = 1,
 ) -> PageOut[queries.JobItem]:
@@ -460,7 +461,7 @@ async def get_company_jobs(
 
 
 @router.get("/companies/{company_id}/runs")
-async def get_company_runs(request: Request, company_id: int, page: int = 1) -> PageOut[RunOut]:
+async def get_company_runs(request: Request, company_id: UUID, page: int = 1) -> PageOut[RunOut]:
     async with res_of(request).sessionmaker() as session:
         result = await queries.company_runs(session, company_id, page)
     return _page_out(result, [_run(r) for r in result.items])
@@ -468,7 +469,7 @@ async def get_company_runs(request: Request, company_id: int, page: int = 1) -> 
 
 @router.get("/companies/{company_id}/rejected")
 async def get_company_rejected(
-    request: Request, company_id: int, page: int = 1
+    request: Request, company_id: UUID, page: int = 1
 ) -> PageOut[PostingOut]:
     async with res_of(request).sessionmaker() as session:
         result = await queries.company_rejected(session, company_id, page)
@@ -549,7 +550,7 @@ async def get_run_logs(request: Request, run_id: uuid.UUID, page: int = 1) -> Pa
 
 
 @router.get("/failed-pages/{page_id}")
-async def get_failed_page(request: Request, page_id: int) -> FailedPageOut:
+async def get_failed_page(request: Request, page_id: UUID) -> FailedPageOut:
     async with res_of(request).sessionmaker() as session:
         page = await queries.failed_page(session, page_id)
     if page is None:
@@ -567,7 +568,7 @@ async def get_failed_page(request: Request, page_id: int) -> FailedPageOut:
 
 
 @router.get("/failed-pages/{page_id}/raw")
-async def get_failed_page_raw(request: Request, page_id: int) -> PlainTextResponse:
+async def get_failed_page_raw(request: Request, page_id: UUID) -> PlainTextResponse:
     async with res_of(request).sessionmaker() as session:
         page = await queries.failed_page(session, page_id)
     if page is None:
@@ -593,7 +594,7 @@ async def get_jobs(
     source: str = "",
     status: Annotated[str, Query(description="active | expired | removed | all")] = "active",
     salary_from: Annotated[float | None, Query(description="triệu VND")] = None,
-    company_id: int | None = None,
+    company_id: UUID | None = None,
     reviewed: Annotated[str, Query(description="no | yes | correct | wrong")] = "",
     sort: Annotated[str, Query(description="new | posted | salary | expires")] = "new",
     page: int = 1,
@@ -629,7 +630,7 @@ async def get_jobs_export(
     source: str = "",
     status: str = "active",
     salary_from: float | None = None,
-    company_id: int | None = None,
+    company_id: UUID | None = None,
     reviewed: str = "",
 ) -> StreamingResponse:
     f = _job_filters(
@@ -655,7 +656,7 @@ async def get_jobs_export(
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(request: Request, job_id: int) -> JobDetailOut:
+async def get_job(request: Request, job_id: UUID) -> JobDetailOut:
     async with res_of(request).sessionmaker() as session:
         d = await queries.job_detail(session, job_id)
     if d is None:
@@ -664,7 +665,7 @@ async def get_job(request: Request, job_id: int) -> JobDetailOut:
 
 
 @router.post("/jobs/{job_id}/review")
-async def post_review(request: Request, job_id: int, body: ReviewIn) -> dict[str, bool]:
+async def post_review(request: Request, job_id: UUID, body: ReviewIn) -> dict[str, bool]:
     res = res_of(request)
     if not await actions.job_exists(res, job_id):
         raise HTTPException(404, "Không có job này")
@@ -676,7 +677,7 @@ async def post_review(request: Request, job_id: int, body: ReviewIn) -> dict[str
 
 
 @router.delete("/jobs/{job_id}/review")
-async def delete_review(request: Request, job_id: int) -> dict[str, bool]:
+async def delete_review(request: Request, job_id: UUID) -> dict[str, bool]:
     async with res_of(request).sessionmaker.begin() as session:
         await evaluate.delete_review(session, job_id)
     return {"ok": True}
@@ -686,7 +687,7 @@ async def delete_review(request: Request, job_id: int) -> dict[str, bool]:
 
 
 @router.get("/review")
-async def get_review(request: Request, skip: int | None = None) -> ReviewPageOut:
+async def get_review(request: Request, skip: UUID | None = None) -> ReviewPageOut:
     """Tổng hợp precision + một job đang mở chưa kiểm (ngẫu nhiên) + các đánh giá gần nhất."""
     async with res_of(request).sessionmaker() as session:
         summary = await evaluate.review_summary(session)

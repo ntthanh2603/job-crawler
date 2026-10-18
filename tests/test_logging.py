@@ -28,21 +28,22 @@ class FakeWriter:
 
 
 def test_event_to_row_splits_columns_and_context() -> None:
-    run_id = uuid4()
-    ts, level, event, rid, company_id, context = jlog.event_to_row(
+    run_id, company = uuid4(), uuid4()
+    ts, level, event, rid, company_id, context, row_id = jlog.event_to_row(
         {
             "event": "company.start",
             "level": "info",
             "timestamp": "2026-01-01T00:00:00Z",
             "run_id": str(run_id),
-            "company_id": 7,
+            "company_id": company,
             "company": "Công ty ABC",
             "_record": object(),
         }
     )
     assert ts.tzinfo is not None
-    assert (level, event, rid, company_id) == ("info", "company.start", run_id, 7)
+    assert (level, event, rid, company_id) == ("info", "company.start", run_id, company)
     assert json.loads(context) == {"company": "Công ty ABC"}
+    assert row_id.version == 7
 
 
 def test_event_to_row_tolerates_bad_ids_and_formats_exceptions() -> None:
@@ -124,16 +125,16 @@ async def test_structlog_events_reach_sink_with_contextvars() -> None:
     sink = jlog.PgLogSink(writer, interval=60)
     sink.start()
     jlog.attach_sink(sink)
-    run_id = uuid4()
+    run_id, company_id = uuid4(), uuid4()
     try:
         log = jlog.get_logger("test")
-        with structlog.contextvars.bound_contextvars(run_id=str(run_id), company_id=42):
+        with structlog.contextvars.bound_contextvars(run_id=str(run_id), company_id=company_id):
             log.info("company.done", jobs_found=3)
         log.debug("hidden")  # dưới LOG_LEVEL=INFO
     finally:
         jlog.detach_sink(sink)
         await sink.close()
     [row] = writer.rows
-    assert row[1:5] == ("info", "company.done", run_id, 42)
+    assert row[1:5] == ("info", "company.done", run_id, company_id)
     assert json.loads(row[5]) == {"jobs_found": 3}
     assert isinstance(row[3], UUID)

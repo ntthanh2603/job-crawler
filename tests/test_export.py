@@ -5,6 +5,7 @@ import io
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 from jobcrawler.db.models import Job
 from jobcrawler.pipeline.store import job_to_out, job_values
@@ -17,7 +18,7 @@ from .jobs_fixtures import NOW, normalized, raw_job
 def job_row(**overrides: object) -> Job:
     values = job_values(
         normalized(raw_job()),
-        company_id=7,
+        company_id=UUID(int=7),
         company_name="Công ty Cổ phần ACME",
         source_urls=["https://careers.acme.vn/jobs/ke-toan-tong-hop", "https://topcv.vn/x"],
         confidence=0.92,
@@ -36,7 +37,7 @@ def job_row(**overrides: object) -> Job:
 def test_job_to_out_round_trip() -> None:
     out = job_to_out(job_row())
     assert out.title == "Kế toán tổng hợp"
-    assert out.company_id == 7
+    assert out.company_id == UUID(int=7)
     assert out.locations[0].province == "Hà Nội"
     assert out.salary is not None
     assert (out.salary.min, out.salary.max, out.salary.currency) == (15e6, 20e6, "VND")

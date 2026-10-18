@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from datasketch import MinHash
 from sqlalchemy import case, func, select, update
@@ -52,10 +53,10 @@ log = get_logger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class _PostingRow:
-    id: int
+    id: UUID
     first_seen_at: datetime
     last_seen_at: datetime
-    job_id: int | None
+    job_id: UUID | None
 
 
 @dataclass(slots=True)
@@ -74,7 +75,7 @@ def _key(job: NormalizedJob) -> tuple[str, str]:
 
 
 async def _upsert_posting(
-    session: AsyncSession, company_id: int, job: NormalizedJob, verdict: Verdict, now: datetime
+    session: AsyncSession, company_id: UUID, job: NormalizedJob, verdict: Verdict, now: datetime
 ) -> _PostingRow:
     expired = verdict.code == EXPIRED
     verification = {
@@ -113,7 +114,7 @@ async def _upsert_posting(
 def job_values(
     merged: NormalizedJob,
     *,
-    company_id: int,
+    company_id: UUID,
     company_name: str,
     source_urls: list[str],
     confidence: float,
@@ -204,7 +205,7 @@ def job_to_out(row: Job, *, now: datetime | None = None) -> JobOut:
     )
 
 
-async def refresh_active_jobs(session: AsyncSession, company_id: int) -> None:
+async def refresh_active_jobs(session: AsyncSession, company_id: UUID) -> None:
     """Ghi lại `companies.active_jobs` (danh sách doanh nghiệp đọc cột này, không đếm lại)."""
     count = (
         select(func.count())
@@ -247,12 +248,12 @@ class _ExistingMatcher:
     """Tìm job đã lưu (đang mở) của doanh nghiệp mà một cụm mới thực chất là nó. Mỗi job chỉ được
     nhận một lần; `claimed` là các job đã gắn tin của lượt này."""
 
-    def __init__(self, session: AsyncSession, company_id: int, *, claimed: set[int]) -> None:
+    def __init__(self, session: AsyncSession, company_id: UUID, *, claimed: set[UUID]) -> None:
         self.session = session
         self.company_id = company_id
         self.claimed = claimed
         self._meta: list[Any] | None = None
-        self._loaded: dict[int, tuple[ExistingJob, MinHash]] = {}
+        self._loaded: dict[UUID, tuple[ExistingJob, MinHash]] = {}
 
     async def find(self, job: NormalizedJob, fp: str) -> str | None:
         exact = (
@@ -337,7 +338,7 @@ class _ExistingMatcher:
 async def save_company_jobs(
     session: AsyncSession,
     *,
-    company_id: int,
+    company_id: UUID,
     company_name: str,
     jobs: Sequence[NormalizedJob],
     verdicts: Sequence[Verdict],
@@ -361,7 +362,7 @@ async def save_company_jobs(
         for k, row in postings.items()
         if row.job_id is not None and verdict_of[k].accepted
     }
-    previous: dict[int, str] = {}
+    previous: dict[UUID, str] = {}
     if previous_ids:
         result = await session.execute(
             select(Job.id, Job.cluster_key).where(
@@ -375,7 +376,7 @@ async def save_company_jobs(
     used_keys: set[str] = set()
     for cluster in clusters:
         rows = [postings[_key(m)] for m in cluster.members]
-        old = sorted({r.job_id for r in rows if r.job_id in previous})
+        old = sorted({r.job_id for r in rows if r.job_id is not None and r.job_id in previous})
         key = next((previous[j] for j in old if previous[j] not in used_keys), None)
         if key is not None:
             used_keys.add(key)
@@ -405,7 +406,7 @@ async def save_company_jobs(
             used_keys.add(key)
 
     out: list[JobOut] = []
-    touched: set[int] = set()
+    touched: set[UUID] = set()
     for cluster, merged, fp, key in zip(clusters, merged_jobs, fingerprints, keys, strict=True):
         rows = [postings[_key(m)] for m in cluster.members]
         member_verdicts = [verdict_of[_key(m)] for m in cluster.members]
@@ -451,7 +452,7 @@ async def save_company_jobs(
     if touched:
         conditions.append(Job.id.not_in(touched))
     if not complete:
-        conditions.append(Job.id.in_(gone - touched or {-1}))
+        conditions.append(Job.id.in_(gone - touched))  # rỗng: SQLAlchemy sinh điều kiện luôn sai
     stale = (
         update(Job)
         .where(*conditions)

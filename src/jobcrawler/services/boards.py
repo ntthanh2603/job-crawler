@@ -6,6 +6,7 @@ import asyncio
 import functools
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -99,7 +100,7 @@ async def index_boards(
 STRONG_SIGNALS = frozenset({"mst", "website"})
 
 
-async def load_indexed_jobs(res: Resources, profile_id: int) -> list[RawJob]:
+async def load_indexed_jobs(res: Resources, profile_id: UUID) -> list[RawJob]:
     """Tin đang mở của một profile trong index."""
     async with res.sessionmaker() as session:
         raws = await session.scalars(
@@ -112,7 +113,7 @@ async def load_indexed_jobs(res: Resources, profile_id: int) -> list[RawJob]:
 
 
 async def board_sources(
-    res: Resources, company_id: int, *, strong_only: bool = False, now: datetime | None = None
+    res: Resources, company_id: UUID, *, strong_only: bool = False, now: datetime | None = None
 ) -> list[Source]:
     """Nguồn tin của doanh nghiệp trên các trang tuyển dụng (profile đã map)."""
     now = now or datetime.now(UTC)

@@ -6,7 +6,7 @@ import dataclasses
 import json
 from datetime import timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
@@ -32,7 +32,7 @@ from .test_board_index_db import ACME, JOBS, indexer, reset, settings_for
 pytestmark = pytest.mark.integration
 
 
-async def company_jobs(res: Resources, company_id: int) -> list[Job]:
+async def company_jobs(res: Resources, company_id: UUID) -> list[Job]:
     async with res.sessionmaker() as s:
         rows = await s.scalars(select(Job).where(Job.company_id == company_id).order_by(Job.id))
         return list(rows)

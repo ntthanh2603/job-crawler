@@ -25,6 +25,7 @@ from jobcrawler.net.http import CurlTransport, HttpClient, HttpConfig
 from jobcrawler.net.kv import KeyValueStore, RedisKV
 from jobcrawler.net.proxy_pool import Proxy, ProxyPool, load_proxies
 from jobcrawler.net.ratelimit import RedisRateLimiter
+from jobcrawler.queues import queue_from_url
 
 log = jlog.get_logger(__name__)
 
@@ -118,7 +119,7 @@ async def open_resources(
             raise ResourceUnavailableError(f"Không kết nối được Redis ({where}): {exc}") from exc
 
         if queue is None:
-            queue = Queue.from_url(settings.redis_url, name=settings.queue_name)
+            queue = queue_from_url(settings.redis_url, settings.queue_name)
             await queue.connect()
             stack.push_async_callback(queue.disconnect)
 

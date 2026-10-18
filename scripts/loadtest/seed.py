@@ -38,18 +38,29 @@ async def step(conn: asyncpg.Connection, name: str, sql: str, *args: object) -> 
     print(f"  {name}: {time.perf_counter() - t:.1f} s", flush=True)
 
 
+SEED_ID = """
+CREATE FUNCTION seed_id(tag int, n bigint) RETURNS uuid LANGUAGE sql IMMUTABLE AS $$
+  SELECT (lpad(to_hex(1767225600000 + n), 12, '0') || '7000' || '8'
+          || lpad(to_hex(tag), 3, '0') || '000000000000')::uuid
+$$
+"""
+
+
 async def main() -> None:
 
     blob = CODEC.encode(Kind.JOB_TEXT.value, DESCRIPTION.encode(), dict_id=0)
     raw = CODEC.encode(Kind.POSTING.value, dumps({"title": "Nhân viên kinh doanh"}), dict_id=0)
     conn = await asyncpg.connect(LOAD)
     await conn.execute("SET synchronous_commit = off")
+    # Id UUIDv7 tất định theo số thứ tự (cùng dạng migration 0007 đổi dữ liệu cũ): khoá ngoại tính
+    # được bằng cùng hàm, không cần join khi sinh dữ liệu.
+    await conn.execute(SEED_ID)
     await step(
         conn,
         "companies",
         """
-        INSERT INTO companies (input_name, legal_name, primary_domain, kyc_status, tax_code)
-        SELECT 'Công ty Mẫu ' || i,
+        INSERT INTO companies (id, input_name, legal_name, primary_domain, kyc_status, tax_code)
+        SELECT seed_id(1, i), 'Công ty Mẫu ' || i,
                CASE WHEN i % 3 = 0 THEN 'CÔNG TY CỔ PHẦN MẪU SỐ ' || i END,
                'cty' || i || '.vn',
                (ARRAY['verified', 'not_found', 'ambiguous', NULL])[1 + i % 4],
@@ -62,12 +73,12 @@ async def main() -> None:
         conn,
         "jobs",
         """
-        INSERT INTO jobs (company_id, cluster_key, fingerprint, title, title_normalized,
+        INSERT INTO jobs (id, company_id, cluster_key, fingerprint, title, title_normalized,
                           company_name, level, employment_type, work_mode, locations,
                           salary_min, salary_max, salary_currency, salary_period,
                           salary_negotiable, description_md, canonical_source, status, confidence,
                           first_seen_at, last_seen_at, posted_at, expires_at, source_urls)
-        SELECT 1 + i % $2,
+        SELECT seed_id(6, i), seed_id(1, 1 + i % $2),
                'k' || i,
                md5(i::text),
                t.title || ' ' || (i % 977),
@@ -110,7 +121,7 @@ async def main() -> None:
         """
         INSERT INTO company_runs (run_id, company_id, started_at, finished_at, duration_ms, status,
                                   jobs_found, jobs_accepted, incomplete_sources)
-        SELECT gen_random_uuid(), 1 + i % $2,
+        SELECT gen_random_uuid(), seed_id(1, 1 + i % $2),
                now() - (i % 43200) * interval '1 minute',
                now() - (i % 43200) * interval '1 minute' + interval '90 seconds',
                20000 + i % 160000,
@@ -143,10 +154,10 @@ async def main() -> None:
         INSERT INTO job_postings (source, external_id, url, raw, company_id, accepted,
                                   verification_reasons, verified_at, status, job_id)
         SELECT (ARRAY['careers','topcv','vieclam24h'])[1 + i % 3], 'e' || i,
-               'https://cty.vn/jobs/' || i, $3, 1 + i % $2, i % 9 <> 0,
+               'https://cty.vn/jobs/' || i, $3, seed_id(1, 1 + i % $2), i % 9 <> 0,
                CASE WHEN i % 9 = 0 THEN ARRAY['EXPIRED: hết hạn'] ELSE ARRAY['SOURCE_CAREERS'] END,
                now() - (i % 30) * interval '1 day',
-               'active', CASE WHEN i % 9 <> 0 THEN i END
+               'active', CASE WHEN i % 9 <> 0 THEN seed_id(6, i) END
         FROM generate_series(1, $1) i
         """,
         POSTINGS,

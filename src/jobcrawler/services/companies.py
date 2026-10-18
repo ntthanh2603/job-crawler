@@ -5,12 +5,13 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jobcrawler.db.ids import uuid7
 from jobcrawler.db.models import (
     Company,
     CompanyAlias,
@@ -79,7 +80,7 @@ class KycStep:
 
 
 async def resolve(
-    res: Resources, session: AsyncSession, company_in: CompanyIn, company_id: int | None = None
+    res: Resources, session: AsyncSession, company_in: CompanyIn, company_id: UUID | None = None
 ) -> kyc.Resolved:
     """Doanh nghiệp theo id (job từ `enqueue`), không có thì tra cache KYC (MST, alias,
     trigram); chưa có thì tạo doanh nghiệp."""
@@ -318,7 +319,7 @@ async def _run_pipeline(
 
 
 async def _insert_fetches(
-    session: AsyncSession, run_id: UUID | None, company_id: int, records: list[FetchRecord]
+    session: AsyncSession, run_id: UUID | None, company_id: UUID, records: list[FetchRecord]
 ) -> None:
     if not records:
         return
@@ -345,7 +346,7 @@ async def _insert_fetches(
 async def _finish_run(
     res: Resources,
     run_id: UUID,
-    company_id: int,
+    company_id: UUID,
     outcome: PipelineOutcome,
     records: list[FetchRecord],
     finished_at: datetime,
@@ -386,13 +387,13 @@ def _display_name(company: Company) -> str:
 
 
 async def process_company(
-    res: Resources, company_in: CompanyIn, *, company_id: int | None = None
+    res: Resources, company_in: CompanyIn, *, company_id: UUID | None = None
 ) -> CompanyResult:
     """Chạy toàn bộ pipeline cho một doanh nghiệp và ghi `company_runs`, kể cả khi lỗi.
 
     `company_id`: doanh nghiệp đã `import` (job từ `enqueue`) — dùng đúng bản ghi đó thay vì
     tra theo tên."""
-    run_id = uuid4()
+    run_id = uuid7()
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
     deadline = t0 + res.settings.company_deadline_seconds

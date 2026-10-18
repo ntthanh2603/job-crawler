@@ -24,7 +24,7 @@ import { ago, cap, date, displayName, num, pct, provinces, salary, sourceLabel }
 import type { ReviewPage as ReviewData } from "@/lib/types"
 
 export function ReviewPage() {
-  const [skip, setSkip] = useState<number | null>(null)
+  const [skip, setSkip] = useState<string | null>(null)
   const query = useQuery({
     queryKey: ["review", skip],
     queryFn: () => api.get<ReviewData>(`/review${qs({ skip })}`),

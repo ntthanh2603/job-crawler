@@ -14,7 +14,6 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
-    Identity,
     Index,
     LargeBinary,
     MetaData,
@@ -27,6 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from jobcrawler.db.compress import Kind, ZstdJSON, ZstdText
+from jobcrawler.db.ids import uuid7
 from jobcrawler.schemas import (
     EmploymentType,
     FetchOutcome,
@@ -68,8 +68,9 @@ def one_of(column: str, values: type[StrEnum], name: str | None = None) -> Check
     return CheckConstraint(f"{column} IN ({allowed})", name=name or column)
 
 
-def _pk() -> Mapped[int]:
-    return mapped_column(BigInteger, Identity(), primary_key=True)
+def _pk() -> Mapped[uuid.UUID]:
+    # UUIDv7 (db/ids.py); `uuid_v7()` (migration 0007) cho insert bằng SQL thô / COPY.
+    return mapped_column(primary_key=True, default=uuid7, server_default=text("uuid_v7()"))
 
 
 def _created_at() -> Mapped[datetime]:
@@ -103,7 +104,7 @@ class Company(Base):
         Index("ix_companies_kyc_status", "kyc_status"),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     input_name: Mapped[str]
     # Website và ghi chú từ `companies.csv` (`jobcrawler import`), dùng lại khi enqueue.
     input_website: Mapped[str | None]
@@ -146,9 +147,9 @@ class CompanyAlias(Base):
         ),
     )
 
-    id: Mapped[int] = _pk()
-    company_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="CASCADE"), index=True
+    id: Mapped[uuid.UUID] = _pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), index=True
     )
     alias: Mapped[str]
     alias_norm: Mapped[str]
@@ -171,7 +172,7 @@ class SourceProfile(Base):
         ),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     source: Mapped[str]
     external_id: Mapped[str]
     url: Mapped[str]
@@ -182,8 +183,8 @@ class SourceProfile(Base):
     tax_code: Mapped[str | None]
     # Thông tin khác trên trang (logo, địa chỉ, quy mô...).
     info: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
-    company_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="SET NULL"), index=True
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), index=True
     )
     match_confidence: Mapped[float | None]
     match_evidence: Mapped[Any | None] = mapped_column(JSONB)
@@ -210,16 +211,16 @@ class JobPosting(Base):
         ),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     source: Mapped[str]
     external_id: Mapped[str]
     url: Mapped[str]
-    source_profile_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("source_profiles.id", ondelete="SET NULL"), index=True
+    source_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("source_profiles.id", ondelete="SET NULL"), index=True
     )
     # use_alter: jobs.canonical_posting_id ↔ job_postings.job_id tham chiếu vòng.
-    job_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="SET NULL", use_alter=True), index=True
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL", use_alter=True), index=True
     )
     # RawJob dạng JSON, nén zstd (xem db/compress.py).
     raw: Mapped[dict[str, Any]] = mapped_column(
@@ -238,8 +239,8 @@ class JobPosting(Base):
     # Số lượt index liên tiếp không còn thấy tin trên nguồn (≥ 2 → removed).
     missed_runs: Mapped[int] = mapped_column(server_default=text("0"))
     # Kết quả xác minh lần gần nhất (`pipeline/verify.py`), ghi cho cả tin bị loại.
-    company_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="SET NULL"), index=True
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), index=True
     )
     accepted: Mapped[bool | None]
     confidence: Mapped[float | None]
@@ -256,7 +257,7 @@ class BoardIndexRun(Base):
         Index("ix_board_index_runs_source_started_at", "source", "started_at"),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     source: Mapped[str]
     started_at: Mapped[datetime]
     finished_at: Mapped[datetime | None]
@@ -335,15 +336,13 @@ class Job(Base):
         Index("ix_jobs_first_seen_at_brin", "first_seen_at", postgresql_using="brin"),
     )
 
-    id: Mapped[int] = _pk()
-    company_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="CASCADE")
-    )
+    id: Mapped[uuid.UUID] = _pk()
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
     cluster_key: Mapped[str]
     # Dấu vân tay nội dung (pipeline/dedup.fingerprint): tiêu đề + nơi làm + JD đã chuẩn hoá.
     fingerprint: Mapped[str | None]
-    canonical_posting_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("job_postings.id", ondelete="SET NULL")
+    canonical_posting_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_postings.id", ondelete="SET NULL")
     )
     title: Mapped[str]
     title_normalized: Mapped[str]
@@ -385,9 +384,9 @@ class JobReview(Base):
 
     __tablename__ = "job_reviews"
 
-    id: Mapped[int] = _pk()
-    job_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
+    id: Mapped[uuid.UUID] = _pk()
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), unique=True
     )
     correct: Mapped[bool]
     note: Mapped[str | None]
@@ -404,9 +403,7 @@ class CompanyRun(Base):
     )
 
     run_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
-    company_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="CASCADE")
-    )
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
     started_at: Mapped[datetime]
     finished_at: Mapped[datetime | None]
     duration_ms: Mapped[int | None]
@@ -427,12 +424,12 @@ class SourceFetch(Base):
         Index("ix_source_fetches_fetched_at", "fetched_at", postgresql_using="brin"),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     run_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("company_runs.run_id", ondelete="CASCADE"), index=True
     )
-    company_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("companies.id", ondelete="CASCADE")
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE")
     )
     source: Mapped[str]
     url: Mapped[str]
@@ -454,12 +451,12 @@ class Log(Base):
         Index("ix_logs_run_id", "run_id", postgresql_where=text("run_id IS NOT NULL")),
     )
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     ts: Mapped[datetime] = mapped_column(server_default=func.now())
     level: Mapped[str]
     event: Mapped[str]
     run_id: Mapped[uuid.UUID | None]
-    company_id: Mapped[int | None] = mapped_column(BigInteger)
+    company_id: Mapped[uuid.UUID | None]
     context: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
 
 
@@ -468,7 +465,7 @@ class FailedPage(Base):
 
     __tablename__ = "failed_pages"
 
-    id: Mapped[int] = _pk()
+    id: Mapped[uuid.UUID] = _pk()
     url: Mapped[str]
     source: Mapped[str]
     reason: Mapped[str]

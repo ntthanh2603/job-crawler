@@ -41,6 +41,13 @@ dần (1.000 tin mới / đổi mỗi 5 giờ), nên các trang lớn (TopCV ~45
 
 Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng triệu việc làm.
 
+- **ID dạng UUIDv7** (migration 0007): khoá chính mọi bảng là UUID gồm 48 bit thời gian + phần
+  ngẫu nhiên, sinh ở ứng dụng (`db/ids.py`, tăng chặt trong một process) hoặc bằng `uuid_v7()` của
+  DB khi insert SQL thô. Sinh được ở mọi worker không cần hỏi DB, không lộ số lượng dòng, vẫn tăng
+  theo thời gian nên index ghi nối đuôi như bigint và `ORDER BY id` theo thứ tự tạo. Dữ liệu trước
+  0007 được đổi tất định (giữ thứ tự và quan hệ); `jobcrawler db downgrade 0006` đổi ngược về đúng
+  id số cũ. Link cũ dạng `/companies/123` báo "không tìm thấy". Riêng `compression_dicts.id` vẫn
+  là số: đó là mã từ điển ghi trong từng giá trị nén.
 - **Không trang nào tải cả bảng.** Mọi danh sách phân trang ở server (50 dòng/trang): việc làm,
   doanh nghiệp, việc làm / lượt chạy / tin bị loại của một doanh nghiệp, request / log của một lượt
   chạy, lịch sử index, hàng đợi (25 việc/trang mỗi hàng đợi).
@@ -63,18 +70,19 @@ Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng tri
 ### Số đo (dữ liệu giả lập)
 
 `scripts/loadtest/seed.py` tạo DB `jobcrawler_load` với 100 nghìn doanh nghiệp, 1 triệu việc làm,
-1 triệu lượt chạy, 2 triệu request, 1 triệu tin nguồn; `scripts/loadtest/bench.py --prepare` đo
-(máy dev, Postgres trong Docker Desktop, 17/10/2026):
+1 triệu lượt chạy, 2 triệu request, 1 triệu tin nguồn (id UUIDv7); `scripts/loadtest/bench.py
+--prepare` đo (máy dev, Postgres trong Docker Desktop, 18/10/2026 — sau khi đổi id sang UUID; số
+đo với id bigint hôm trước tương đương):
 
 | Truy vấn | Thời gian |
 |---|---|
-| Việc làm: mặc định / trang 150 / sắp theo lương / sắp hết hạn | 8 / 21 / 26 / 9 ms |
-| Việc làm: tìm "kế toán" (khớp 10% bảng) / tìm tên doanh nghiệp | 242 / 32 ms |
-| Việc làm: lọc tỉnh / nguồn + cấp bậc | 196 / 212 ms |
-| Doanh nghiệp: mặc định / tìm tên / tìm MST / lọc lượt cuối | 4 / 22 / 10 / 4 ms |
-| Trang doanh nghiệp + các tab, trang lượt chạy | 2–7 ms |
-| Tổng quan: lượt chạy / request theo giờ, thống kê 24 giờ | 14–113 ms |
-| Tổng quan: phân bố (chạy nền bằng cron, người xem không chờ) | 2,1 s |
+| Việc làm: mặc định / trang 150 / sắp theo lương / sắp hết hạn | 10 / 19 / 23 / 9 ms |
+| Việc làm: tìm "kế toán" (khớp 10% bảng) / tìm tên doanh nghiệp | 188 / 24 ms |
+| Việc làm: lọc tỉnh / nguồn + cấp bậc | 199 / 247 ms |
+| Doanh nghiệp: mặc định / tìm tên / tìm MST / lọc lượt cuối | 4 / 23 / 9 / 6 ms |
+| Trang doanh nghiệp + các tab, trang lượt chạy | 2–8 ms |
+| Tổng quan: lượt chạy / request theo giờ, thống kê 24 giờ | 15–107 ms |
+| Tổng quan: phân bố (chạy nền bằng cron, người xem không chờ) | 2,5 s |
 
 Chạy lại sau khi đổi truy vấn: `uv run python scripts/loadtest/seed.py` (≈ 8 phút) rồi
 `uv run python scripts/loadtest/bench.py --prepare`. Truy vấn nào > 300 ms được liệt kê cuối.

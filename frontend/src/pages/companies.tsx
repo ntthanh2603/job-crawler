@@ -147,7 +147,7 @@ export function CompaniesPage() {
   }
   const [search, setSearch] = useState(filters.q)
   useEffect(() => setSearch(filters.q), [filters.q])
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [staleHours, setStaleHours] = useState("24")
 
   const meta = useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: 300_000 })
@@ -166,7 +166,7 @@ export function CompaniesPage() {
   }
 
   const enqueue = useMutation({
-    mutationFn: (body: { company_ids?: number[]; stale_hours?: number; all?: boolean }) =>
+    mutationFn: (body: { company_ids?: string[]; stale_hours?: number; all?: boolean }) =>
       api.post<EnqueueResult>("/enqueue", body),
     onSuccess: (r) => {
       toast.success(enqueueMessage(r))
@@ -179,7 +179,7 @@ export function CompaniesPage() {
   const items = query.data?.items ?? []
   const allChecked = items.length > 0 && items.every((r) => selected.has(r.company.id))
   const toggleAll = () => setSelected(allChecked ? new Set() : new Set(items.map((r) => r.company.id)))
-  const toggle = (id: number) =>
+  const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)

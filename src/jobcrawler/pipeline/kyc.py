@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from pydantic import ValidationError
 from rapidfuzz import fuzz
@@ -917,7 +918,7 @@ async def _lock(session: AsyncSession, key: str) -> None:
     await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(key))))
 
 
-async def _add_alias(session: AsyncSession, company_id: int, alias: str, kind: str) -> None:
+async def _add_alias(session: AsyncSession, company_id: UUID, alias: str, kind: str) -> None:
     norm = normalize_company_name(alias)
     if len(norm) < 2:
         return
@@ -1028,7 +1029,7 @@ async def resolve_company(
 
 async def load_company(
     session: AsyncSession,
-    company_id: int,
+    company_id: UUID,
     company_in: CompanyIn,
     *,
     now: datetime | None = None,
@@ -1097,7 +1098,7 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
 
 
 async def apply_kyc(
-    session: AsyncSession, company_id: int, result: KycResult, *, now: datetime | None = None
+    session: AsyncSession, company_id: UUID, result: KycResult, *, now: datetime | None = None
 ) -> Company:
     """Lưu kết quả KYC vào `companies` + `company_aliases`. Trả bản ghi cuối cùng (có thể là
     doanh nghiệp khác nếu MST đã thuộc về nó: hai bản ghi được gộp)."""

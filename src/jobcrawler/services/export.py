@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Literal
+from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -156,13 +157,20 @@ class JobWriter:
         return self.count
 
 
-async def resolve_companies(session: AsyncSession, selectors: Sequence[str]) -> list[int]:
-    """`--company`: id, hoặc tên (khớp alias đã chuẩn hoá, hoặc một phần tên)."""
-    ids: list[int] = []
+def _as_uuid(value: str) -> UUID | None:
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+async def resolve_companies(session: AsyncSession, selectors: Sequence[str]) -> list[UUID]:
+    """`--company`: id (UUID), MST, hoặc tên (khớp alias đã chuẩn hoá, hoặc một phần tên)."""
+    ids: list[UUID] = []
     for selector in selectors:
         value = selector.strip()
-        if value.isdigit():
-            found = await session.scalars(select(Company.id).where(Company.id == int(value)))
+        if (company_id := _as_uuid(value)) is not None:
+            found = await session.scalars(select(Company.id).where(Company.id == company_id))
         else:
             norm = normalize_company_name(value)
             pattern = f"%{value}%"
@@ -172,6 +180,7 @@ async def resolve_companies(session: AsyncSession, selectors: Sequence[str]) -> 
                 .where(
                     or_(
                         CompanyAlias.alias_norm == norm,
+                        Company.tax_code == value,
                         Company.input_name.ilike(pattern),
                         Company.legal_name.ilike(pattern),
                         Company.brand_name.ilike(pattern),

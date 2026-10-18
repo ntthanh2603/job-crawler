@@ -9,7 +9,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -43,14 +43,15 @@ class Seed:
     client: httpx.AsyncClient
     settings: Settings
     tag: str
-    company_id: int
+    # Id dạng chuỗi như API trả về (UUID trong JSON).
+    company_id: str
     run_id: str
-    job_id: int
-    expired_job_id: int
-    failed_page_id: int
+    job_id: str
+    expired_job_id: str
+    failed_page_id: str
 
 
-async def seed(app_state: object, tag: str) -> tuple[int, str, int, int, int]:
+async def seed(app_state: object, tag: str) -> tuple[UUID, str, UUID, UUID, UUID]:
     res = app_state.res  # pyright: ignore[reportAttributeAccessIssue]
     now = datetime.now(UTC)
     async with res.sessionmaker.begin() as s:
@@ -223,7 +224,7 @@ async def web(integration_settings: Settings) -> AsyncIterator[Seed]:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://ui.test", headers=AUTH
             ) as client:
-                yield Seed(client, settings, tag, *ids)
+                yield Seed(client, settings, tag, *map(str, ids))
     finally:
         await drop_queue(settings.redis_url, settings.queue_name)
         await drop_queue(settings.redis_url, settings.board_queue_name)
@@ -288,7 +289,11 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
         1,
     )
     assert [f["id"] for f in d["failed_pages"]] == [web.failed_page_id]
-    assert (await web.client.get("/api/companies/999999999")).status_code == 404
+    assert (await web.client.get(f"/api/companies/{uuid4()}")).status_code == 404
+    old = await web.client.get("/api/companies/123")  # link cũ dùng id số
+    assert old.status_code == 404
+    assert old.json()["detail"].startswith("Không tìm thấy")
+    assert (await web.client.get("/api/jobs", params={"company_id": "x"})).status_code == 422
     # Danh sách con lấy theo trang.
     base = f"/api/companies/{web.company_id}"
     jobs = (await web.client.get(f"{base}/jobs")).json()
@@ -388,7 +393,7 @@ async def test_review_flow(web: Seed) -> None:
     assert [j["reviewed"] for j in reviewed["items"]] == [True]
     assert (await web.client.delete(f"/api/jobs/{web.job_id}/review")).json() == {"ok": True}
     assert (await web.client.get(f"/api/jobs/{web.job_id}")).json()["review"] is None
-    missing = await web.client.post("/api/jobs/999999999/review", json={"correct": True})
+    missing = await web.client.post(f"/api/jobs/{uuid4()}/review", json={"correct": True})
     assert missing.status_code == 404
 
 

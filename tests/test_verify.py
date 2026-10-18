@@ -5,6 +5,7 @@ import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -19,7 +20,7 @@ from .jobs_fixtures import NOW, board_job, normalized, raw_job
 JD = raw_job().description or ""
 
 ACME = CompanyContext(
-    company_id=1,
+    company_id=UUID(int=1),
     name="Công ty Cổ phần ACME",
     names=["ACME", "ACME Việt Nam JSC"],
     domains=["acme.vn"],
@@ -119,7 +120,9 @@ def test_rules_do_not_fire_on_ordinary_wording() -> None:
 
 def test_board_job_employer_must_match_company_or_mapped_profile() -> None:
     job = normalized(board_job("topcv", "job_2.html"))  # FPT Software
-    fpt = CompanyContext(company_id=2, name="Công ty TNHH Phần mềm FPT", names=["FPT Software"])
+    fpt = CompanyContext(
+        company_id=UUID(int=2), name="Công ty TNHH Phần mềm FPT", names=["FPT Software"]
+    )
     assert check_rules(job, fpt, now=NOW).accepted
 
     other = check_rules(job, ACME, now=NOW)
@@ -128,7 +131,7 @@ def test_board_job_employer_must_match_company_or_mapped_profile() -> None:
 
     # Profile đã map bằng MST/website dù tên khác: tên profile được tính là tên doanh nghiệp.
     viettel = CompanyContext(
-        company_id=3,
+        company_id=UUID(int=3),
         name="Tập đoàn Công nghiệp - Viễn thông Quân đội",
         profile_names=["Viettel Cyber Security"],
     )
@@ -141,7 +144,9 @@ def test_staffing_agency_on_board_is_agency_posting() -> None:
     # WORKLINK ("Kết nối nhân lực") đăng tuyển cho đơn vị khác ở Đồng Nai.
     job = normalized(board_job("glints", "job_2.html"))
     ctx = CompanyContext(
-        company_id=4, name="Công ty khách hàng", profile_names=[job.raw.company_name or ""]
+        company_id=UUID(int=4),
+        name="Công ty khách hàng",
+        profile_names=[job.raw.company_name or ""],
     )
     v = check_rules(job, ctx, now=NOW)
     assert v.code == verify.EXPIRED  # đăng từ 2025-10-30, không có hạn nộp
@@ -153,7 +158,7 @@ def test_topdev_jd_from_page_when_jsonld_has_only_headings() -> None:
     # JSON-LD chỉ có tiêu đề mục + quyền lợi; mô tả/yêu cầu đọc từ HTML trang nên tin được nhận.
     job = normalized(board_job("topdev", "job_2.html"))
     assert len(job.jd_text) >= 200
-    ctx = CompanyContext(company_id=5, name="F88", names=["F88 Business JSC"])
+    ctx = CompanyContext(company_id=UUID(int=5), name="F88", names=["F88 Business JSC"])
     v = check_rules(job, ctx, now=NOW)
     assert v.accepted, v.reasons
     assert v.code is None
@@ -230,7 +235,7 @@ async def test_clean_jobs_do_not_call_llm_and_cap_is_respected() -> None:
 
 
 async def test_every_decision_has_reasons_on_real_board_jobs() -> None:
-    ctx = CompanyContext(company_id=9, name="Ngân hàng TMCP Quân Đội", names=["MB Bank"])
+    ctx = CompanyContext(company_id=UUID(int=9), name="Ngân hàng TMCP Quân Đội", names=["MB Bank"])
     jobs = [normalized(board_job("careerviet", n)) for n in ("job_1.html", "job_2.html")]
     verdicts = await verify_jobs(jobs, ctx, no_llm(), now=NOW, until=0)
     assert all(v.reasons for v in verdicts)
@@ -258,7 +263,7 @@ async def test_llm_answers_are_cached_per_company_and_content() -> None:
     [offline] = await verify_jobs([job], ACME, no_llm(), now=NOW, until=until, kv=kv)
     assert offline.accepted
     # Doanh nghiệp khác / nội dung khác: hỏi lại.
-    other = dataclasses.replace(ACME, company_id=99)
+    other = dataclasses.replace(ACME, company_id=UUID(int=99))
     await verify_jobs([job], other, llm, now=NOW, until=until, kv=kv)
     changed = normalized(raw_job(method=ExtractionMethod.LLM, title="Kế toán thuế"))
     await verify_jobs([changed], ACME, llm, now=NOW, until=until, kv=kv)

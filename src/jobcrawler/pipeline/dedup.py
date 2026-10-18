@@ -27,6 +27,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from datasketch import MinHash
 from rapidfuzz import fuzz
@@ -182,7 +183,7 @@ def is_repost(title_a: str, title_b: str, jd: float) -> bool:
 class ExistingJob:
     """Một job đã lưu, đủ trường để so với tin mới (xem `same_existing`)."""
 
-    id: int
+    id: UUID
     cluster_key: str
     title: str
     title_normalized: str

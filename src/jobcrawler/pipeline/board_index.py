@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import case, func, insert, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -75,7 +76,7 @@ class IndexOptions:
 @dataclass(slots=True)
 class IndexStats:
     source: str
-    run_id: int | None = None
+    run_id: UUID | None = None
     status: RunStatus = RunStatus.RUNNING
     complete: bool = False  # danh sách đọc đủ
     truncated: bool = False  # còn tin chưa tải vì giới hạn số trang/thời gian
@@ -97,7 +98,7 @@ class IndexStats:
 
 @dataclass(frozen=True, slots=True)
 class _Existing:
-    id: int
+    id: UUID
     lastmod: datetime | None
     fetched_at: datetime | None
     status: str
@@ -170,7 +171,7 @@ class BoardIndexer:
         self.llm = llm
         self.clock = clock
         self.stats = IndexStats(source=adapter.name)
-        self.profile_ids: dict[str, int] = {}
+        self.profile_ids: dict[str, UUID] = {}
         self._profile_pages = 0
 
     # --- DB ---
@@ -227,7 +228,7 @@ class BoardIndexer:
             )
             return {r[0]: _Existing(*r[1:]) for r in rows}
 
-    async def _touch(self, ids: list[int], now: datetime) -> None:
+    async def _touch(self, ids: list[UUID], now: datetime) -> None:
         """Tin còn thấy trong danh sách: cập nhật `last_seen_at`, xoá đếm vắng mặt."""
         for i in range(0, len(ids), _CHUNK):
             async with self.sessionmaker.begin() as s:

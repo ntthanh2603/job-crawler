@@ -609,7 +609,9 @@ def index_boards(
     results = _run(go())
     if json_out:
         typer.echo(
-            json.dumps([dataclasses.asdict(r) for r in results], ensure_ascii=False, indent=2)
+            json.dumps(
+                [dataclasses.asdict(r) for r in results], ensure_ascii=False, indent=2, default=str
+            )
         )
     else:
         for r in results:
@@ -638,7 +640,7 @@ def export(
     ] = "out/",
     company: Annotated[
         list[str] | None,
-        typer.Option("--company", help="Id hoặc tên doanh nghiệp (lặp được)."),
+        typer.Option("--company", help="Id (UUID), MST hoặc tên doanh nghiệp (lặp được)."),
     ] = None,
     all_status: Annotated[
         bool, typer.Option("--all", help="Gồm cả job đã hết hạn / đã gỡ.")

@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from saq import Queue, Worker
@@ -79,8 +79,8 @@ class Scale:
     settings: Settings
     tag: str
     sites: list[str]
-    company_ids: list[int]
-    hang_id: int
+    company_ids: list[UUID]
+    hang_id: UUID
 
 
 @pytest.fixture
@@ -212,7 +212,7 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
                 .order_by(CompanyRun.started_at)
             )
         )
-    by_company: dict[int, list[CompanyRun]] = {}
+    by_company: dict[UUID, list[CompanyRun]] = {}
     for run in runs:
         by_company.setdefault(run.company_id, []).append(run)
     for i, company_id in enumerate(sc.company_ids):

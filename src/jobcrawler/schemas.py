@@ -114,7 +114,7 @@ class CompanyIn(BaseModel):
 class CompanyEntity(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     input_name: str
     legal_name: str | None = None
     brand_name: str | None = None
@@ -230,7 +230,7 @@ class JobOut(BaseModel):
 
     title: str
     title_normalized: str
-    company_id: int
+    company_id: UUID
     company_name: str
     level: JobLevel = JobLevel.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
@@ -258,7 +258,7 @@ class CompanyResult(BaseModel):
     """Kết quả một lần chạy `process_company`."""
 
     run_id: UUID
-    company_id: int
+    company_id: UUID
     company_name: str
     status: RunStatus
     kyc_status: KycStatus | None = None

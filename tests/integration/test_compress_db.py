@@ -59,7 +59,9 @@ async def test_migration_compresses_existing_rows(test_database_url: str) -> Non
         conn = await asyncpg.connect(dsn(test_database_url))
         try:
             stored = await conn.fetchrow(
-                "SELECT raw, octet_length(raw) AS size FROM job_postings WHERE id = $1", posting_id
+                "SELECT raw, octet_length(raw) AS size FROM job_postings"
+                " WHERE source = 'test' AND external_id = $1",
+                tag,
             )
             storage = await conn.fetch(
                 "SELECT attname, attstorage::text FROM pg_attribute"
@@ -74,8 +76,9 @@ async def test_migration_compresses_existing_rows(test_database_url: str) -> Non
 
         settings = Settings(database_url=test_database_url)
         async with open_resources(settings, db_logs=False) as res, res.sessionmaker() as s:
-            posting = await s.get(JobPosting, posting_id)
-            job = await s.get(Job, job_id)
+            # Id đã thành UUID (migration 0007): tìm lại theo khoá tự nhiên.
+            posting = await s.scalar(select(JobPosting).where(JobPosting.external_id == tag))
+            job = await s.scalar(select(Job).where(Job.cluster_key == tag))
         assert posting is not None
         assert posting.raw == raw
         assert job is not None
@@ -85,7 +88,7 @@ async def test_migration_compresses_existing_rows(test_database_url: str) -> Non
             None,
         )
 
-        # Hạ về 0003: dữ liệu trở lại jsonb/text như cũ.
+        # Hạ về 0003: dữ liệu trở lại jsonb/text như cũ, id về đúng số ban đầu.
         await asyncio.to_thread(migrate.downgrade, "0003", database_url=test_database_url)
         conn = await asyncpg.connect(dsn(test_database_url))
         try:

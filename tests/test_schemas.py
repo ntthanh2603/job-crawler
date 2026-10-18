@@ -25,7 +25,7 @@ def _job(**overrides: object) -> dict[str, object]:
     data: dict[str, object] = {
         "title": "Backend Engineer",
         "title_normalized": "backend engineer",
-        "company_id": 1,
+        "company_id": "00000000-0000-7000-8000-000000000001",
         "company_name": "ABC",
         "description_md": "x" * 300,
         "canonical_source": "greenhouse",

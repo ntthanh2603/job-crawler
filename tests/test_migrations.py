@@ -12,8 +12,9 @@ def _script() -> ScriptDirectory:
 
 def test_single_linear_head() -> None:
     script = _script()
-    assert script.get_heads() == ["0006"]
+    assert script.get_heads() == ["0007"]
     assert [r.revision for r in script.walk_revisions()] == [
+        "0007",
         "0006",
         "0005",
         "0004",

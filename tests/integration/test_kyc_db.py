@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import pytest
 from pydantic import SecretStr
@@ -57,7 +58,7 @@ async def resolve(
         return await kyc.resolve_company(session, company_in, trigram_threshold=0.7, **kwargs)
 
 
-async def aliases(sessions: async_sessionmaker[AsyncSession], company_id: int) -> set[tuple]:
+async def aliases(sessions: async_sessionmaker[AsyncSession], company_id: UUID) -> set[tuple]:
     async with sessions() as session:
         rows = await session.execute(
             select(CompanyAlias.kind, CompanyAlias.alias_norm).where(

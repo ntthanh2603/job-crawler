@@ -19,6 +19,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from rapidfuzz import fuzz
 
@@ -72,7 +73,7 @@ SPAM_JD_THRESHOLD = 0.9
 class CompanyContext:
     """Những gì đã biết về doanh nghiệp để đối chiếu tin."""
 
-    company_id: int
+    company_id: UUID
     name: str
     names: list[str] = field(default_factory=list)  # tên input/pháp lý/thương hiệu/alias
     profile_names: list[str] = field(default_factory=list)  # tên profile đã map trên các trang

@@ -13,12 +13,14 @@ from __future__ import annotations
 import dataclasses
 from contextlib import AsyncExitStack
 from typing import Any, Literal, Required
+from uuid import UUID
 
-from saq import CronJob, Queue, Worker
+from saq import CronJob, Worker
 from saq.types import Context
 
 from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
+from jobcrawler.queues import queue_from_url
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn
 from jobcrawler.services import boards, companies, maintenance, overview
@@ -51,6 +53,15 @@ async def shutdown(ctx: WorkerContext) -> None:
         await stack.aclose()
 
 
+def _as_uuid(value: object) -> UUID | None:
+    """Id doanh nghiệp trong tham số job (chuỗi UUID). Job xếp hàng trước migration 0007 mang id
+    số: bỏ qua, doanh nghiệp được tìm lại theo MST / tên."""
+    try:
+        return UUID(str(value)) if value is not None else None
+    except ValueError:
+        return None
+
+
 async def process_company(
     ctx: WorkerContext,
     *,
@@ -58,10 +69,12 @@ async def process_company(
     tax_code: str | None = None,
     website: str | None = None,
     note: str | None = None,
-    company_id: int | None = None,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     company_in = CompanyIn(name=name, tax_code=tax_code, website=website, note=note)
-    result = await companies.process_company(ctx["resources"], company_in, company_id=company_id)
+    result = await companies.process_company(
+        ctx["resources"], company_in, company_id=_as_uuid(company_id)
+    )
     return result.model_dump(mode="json", exclude={"jobs"})
 
 
@@ -129,7 +142,7 @@ def queue_name(settings: Settings, role: WorkerRole = "companies") -> str:
 
 
 def build_worker(settings: Settings, role: WorkerRole = "companies") -> Worker[WorkerContext]:
-    queue = Queue.from_url(settings.redis_url, name=queue_name(settings, role))
+    queue = queue_from_url(settings.redis_url, queue_name(settings, role))
     boards_role = role == "boards"
     worker: Worker[WorkerContext] = Worker(
         queue,

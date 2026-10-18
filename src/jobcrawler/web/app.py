@@ -14,15 +14,23 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from saq import Queue
 from starlette.datastructures import Headers
-from starlette.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from jobcrawler.config import Settings, get_settings
 from jobcrawler.logging import configure_logging, get_logger
+from jobcrawler.queues import queue_from_url
 from jobcrawler.resources import open_resources
 from jobcrawler.web import api
 
@@ -100,8 +108,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     # uvicorn --reload chạy app ở process con: cấu hình log lại ở đây.
     configure_logging(settings)
-    company_queue = Queue.from_url(settings.redis_url, name=settings.queue_name)
-    board_queue = Queue.from_url(settings.redis_url, name=settings.board_queue_name)
+    company_queue = queue_from_url(settings.redis_url, settings.queue_name)
+    board_queue = queue_from_url(settings.redis_url, settings.board_queue_name)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -131,6 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     password = settings.ui_password.get_secret_value() if settings.ui_password else None
     app.add_middleware(GuardMiddleware, username=settings.ui_username, password=password)
+
+    @app.exception_handler(RequestValidationError)
+    async def bad_id(request: Request, exc: RequestValidationError) -> Response:
+        # Id trong đường dẫn không phải UUID (link cũ dùng id số trước migration 0007): coi như
+        # không có, thay vì lỗi kiểm tra dữ liệu.
+        errors = exc.errors()
+        if errors and all(e["loc"][0] == "path" and e["type"] == "uuid_parsing" for e in errors):
+            return JSONResponse({"detail": "Không tìm thấy (đường dẫn cũ hoặc sai id)"}, 404)
+        return await request_validation_exception_handler(request, exc)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> PlainTextResponse:

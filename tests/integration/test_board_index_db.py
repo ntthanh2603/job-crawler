@@ -4,6 +4,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 from sqlalchemy import delete, func, select, text, update
@@ -44,7 +45,7 @@ def settings_for(integration_settings: Settings) -> Settings:
     return integration_settings.model_copy(update={"redis_prefix": "jc-test"})
 
 
-async def reset(res: Resources) -> int:
+async def reset(res: Resources) -> UUID:
     """Xoá dữ liệu của trang giả, tạo doanh nghiệp ACME đã KYC xác minh."""
     async with res.sessionmaker.begin() as s:
         await s.execute(delete(JobPosting).where(JobPosting.source == FakeBoard.name))
@@ -283,7 +284,7 @@ async def test_serp_lookup_adopts_profile_on_board(
         assert len(queries) == 1
 
 
-async def _company(res: Resources, company_id: int) -> Company:
+async def _company(res: Resources, company_id: UUID) -> Company:
     async with res.sessionmaker() as s:
         company = await s.get(Company, company_id)
         assert company is not None

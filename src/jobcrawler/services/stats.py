@@ -20,6 +20,7 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
+from jobcrawler.queues import queue_from_url
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import FetchOutcome, JobStatus, RunStatus
 
@@ -342,7 +343,7 @@ def targets(runs: RunStats) -> list[Target]:
 async def collect_stats(res: Resources, *, hours: float | None = 24, storage: bool = True) -> Stats:
     now = datetime.now(UTC)
     since = now - timedelta(hours=hours) if hours else None
-    board_queue = Queue.from_url(res.settings.redis_url, name=res.settings.board_queue_name)
+    board_queue = queue_from_url(res.settings.redis_url, res.settings.board_queue_name)
     await board_queue.connect()
     try:
         queues = [await queue_stats(res.queue), await queue_stats(board_queue)]

@@ -15,11 +15,11 @@ export type Salary = {
 }
 
 export type Job = {
-  id: number
+  id: string
   reviewed: boolean | null
   title: string
   title_normalized: string
-  company_id: number
+  company_id: string
   company_name: string
   level: string
   employment_type: string
@@ -44,7 +44,7 @@ export type Job = {
 }
 
 export type Posting = {
-  id: number
+  id: string
   source: string
   url: string
   title: string | null
@@ -71,7 +71,7 @@ export type JobDetail = {
 }
 
 export type Company = {
-  id: number
+  id: string
   input_name: string
   legal_name: string | null
   brand_name: string | null
@@ -97,7 +97,7 @@ export type CompanyItem = {
 
 export type Run = {
   run_id: string
-  company_id: number
+  company_id: string
   started_at: string
   finished_at: string | null
   duration_ms: number | null
@@ -108,7 +108,7 @@ export type Run = {
   error: string | null
 }
 
-export type FailedPageItem = { id: number; url: string; source: string; reason: string; created_at: string }
+export type FailedPageItem = { id: string; url: string; source: string; reason: string; created_at: string }
 
 export type CompanyDetail = {
   company: Company
@@ -256,7 +256,7 @@ export type Charts = {
   jobs_by_work_mode: Pair[]
   salary_bands: Pair[]
   kyc: Pair[]
-  top_companies: { id: number; name: string; active_jobs: number }[]
+  top_companies: { id: string; name: string; active_jobs: number }[]
 }
 
 export type Overview = {
@@ -301,7 +301,7 @@ export type ReviewPage = {
   by_source: { source: string; reviewed: number; correct: number; precision: number | null }[]
   next: JobDetail | null
   recent: {
-    job_id: number
+    job_id: string
     title: string
     company_name: string
     correct: boolean
@@ -322,7 +322,7 @@ export type EvalReport = {
   perf: Record<string, string>
   companies: {
     name: string
-    company_id: number | null
+    company_id: string | null
     golden: number
     predicted: number
     matched: number
@@ -338,7 +338,7 @@ export type EvalReport = {
 }
 
 export type BoardRun = {
-  id: number
+  id: string
   source: string
   started_at: string
   finished_at: string | null
@@ -369,7 +369,7 @@ export type QueueJob = {
   started: number
   error: string | null
   label: string
-  company_id: number | null
+  company_id: string | null
 }
 
 export type QueuePage = {

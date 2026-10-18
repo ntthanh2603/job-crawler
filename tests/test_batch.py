@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -97,12 +98,12 @@ def test_header_and_encoding_errors(tmp_path: Path) -> None:
 
 
 def test_job_key_separates_legal_entities_with_same_name() -> None:
-    a = Company(id=1, input_name="Công ty TNHH ABC", tax_code=None)
-    b = Company(id=2, input_name="Công ty Cổ phần ABC", tax_code="0101234567")
+    a = Company(id=UUID(int=1), input_name="Công ty TNHH ABC", tax_code=None)
+    b = Company(id=UUID(int=2), input_name="Công ty Cổ phần ABC", tax_code="0101234567")
     assert batch.job_key(a) == "company:abc"
     assert batch.job_key(b) == "company:abc:0101234567"
     assert batch.job_kwargs(b) == {
-        "company_id": 2,
+        "company_id": str(UUID(int=2)),  # tham số job SAQ là JSON
         "name": "Công ty Cổ phần ABC",
         "tax_code": "0101234567",
         "website": None,

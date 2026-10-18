@@ -90,8 +90,8 @@ export function ReviewBox({
   const save = useMutation({
     mutationFn: (correct: boolean) => api.post(`/jobs/${job.id}/review`, { correct, note }),
     onSuccess: (_, correct) => {
-      toast.success(`Đã ghi việc #${job.id}: ${correct ? "Đúng" : "Sai"}`)
-      client.invalidateQueries({ queryKey: ["job", String(job.id)] })
+      toast.success(`Đã ghi “${job.title}”: ${correct ? "Đúng" : "Sai"}`)
+      client.invalidateQueries({ queryKey: ["job", job.id] })
       client.invalidateQueries({ queryKey: ["review"] })
       client.invalidateQueries({ queryKey: ["jobs"] })
       onDone?.()
@@ -102,7 +102,7 @@ export function ReviewBox({
     mutationFn: () => api.delete(`/jobs/${job.id}/review`),
     onSuccess: () => {
       toast.success("Đã xoá đánh giá")
-      client.invalidateQueries({ queryKey: ["job", String(job.id)] })
+      client.invalidateQueries({ queryKey: ["job", job.id] })
       client.invalidateQueries({ queryKey: ["review"] })
     },
   })

@@ -13,7 +13,7 @@ from sqlalchemy import make_url, select, text
 
 from jobcrawler.config import get_settings
 from jobcrawler.db.compress import load_dictionaries
-from jobcrawler.db.models import CompanyRun
+from jobcrawler.db.models import Company, CompanyRun
 from jobcrawler.db.session import create_engine, create_sessionmaker
 from jobcrawler.services import maintenance, overview, stats
 from jobcrawler.web import queries
@@ -56,6 +56,10 @@ async def main() -> None:
         results.append((name, ms, info))
         print(f"{ms:8.1f} ms  {name}  {info}", flush=True)
 
+    async with sm() as s:
+        cid = await s.scalar(select(Company.id).where(Company.input_name == "Công ty Mẫu 4242"))
+    assert cid is not None, "chưa seed: chạy scripts/loadtest/seed.py"
+
     J = queries.JobFilters
     await bench("jobs: mặc định (đang mở, mới nhất)", queries.list_jobs, J())
     await bench("jobs: trang 150", queries.list_jobs, J(page=150))
@@ -67,7 +71,7 @@ async def main() -> None:
     )
     await bench("jobs: nguồn topcv + senior", queries.list_jobs, J(source="topcv", level="senior"))
     await bench("jobs: sắp hết hạn", queries.list_jobs, J(sort="expires"))
-    await bench("jobs: một doanh nghiệp", queries.list_jobs, J(company_id=4242, status=""))
+    await bench("jobs: một doanh nghiệp", queries.list_jobs, J(company_id=cid, status=""))
     C = queries.CompanyFilters
     await bench("companies: mặc định", queries.list_companies, C())
     await bench("companies: tìm 'Mẫu 4242'", queries.list_companies, C(q="Mẫu 4242"))
@@ -76,13 +80,13 @@ async def main() -> None:
     await bench(
         "companies: có việc + verified", queries.list_companies, C(jobs="with", kyc="verified")
     )
-    await bench("company: chi tiết", queries.company_detail, 4242)
-    await bench("company: việc đang mở", queries.company_jobs, 4242)
-    await bench("company: lượt chạy", queries.company_runs, 4242)
-    await bench("company: tin bị loại", queries.company_rejected, 4242)
+    await bench("company: chi tiết", queries.company_detail, cid)
+    await bench("company: việc đang mở", queries.company_jobs, cid)
+    await bench("company: lượt chạy", queries.company_runs, cid)
+    await bench("company: tin bị loại", queries.company_rejected, cid)
     async with sm() as s:
         run_id = await s.scalar(
-            select(CompanyRun.run_id).where(CompanyRun.company_id == 4242).limit(1)
+            select(CompanyRun.run_id).where(CompanyRun.company_id == cid).limit(1)
         )
     await bench("run: chi tiết", queries.run_detail, run_id)
     await bench("run: request", queries.run_fetches, run_id)
@@ -118,4 +122,5 @@ async def main() -> None:
         print(f"  {ms:.0f} ms  {name}")
 
 
+sys.stdout.reconfigure(encoding="utf-8")  # pyright: ignore[reportAttributeAccessIssue]  # tên tiếng Việt khi in ra pipe
 asyncio.run(main())

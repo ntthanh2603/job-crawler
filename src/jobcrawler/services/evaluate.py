@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from rapidfuzz import fuzz
 from sqlalchemy import delete, func, select
@@ -139,7 +140,7 @@ class Predicted:
     title: str
     urls: set[str]
     source: str
-    job_id: int | None = None
+    job_id: UUID | None = None
 
 
 def score(golden: GoldenJob, predicted: Predicted) -> float:
@@ -181,7 +182,7 @@ def ratio(num: int, den: int) -> float | None:
 @dataclass(slots=True)
 class CompanyEval:
     name: str
-    company_id: int | None
+    company_id: UUID | None
     golden: int
     predicted: int
     matched: int
@@ -242,7 +243,7 @@ class EvalReport:
         return ratio(self.matched, self.golden)
 
 
-async def find_company_id(session: AsyncSession, company: CompanyIn) -> int | None:
+async def find_company_id(session: AsyncSession, company: CompanyIn) -> UUID | None:
     """Doanh nghiệp trong DB: theo MST, rồi tên chuẩn hoá (đã import/chạy)."""
     if company.tax_code:
         found = await session.scalar(select(Company.id).where(Company.tax_code == company.tax_code))
@@ -261,7 +262,7 @@ def source_kind(source: str) -> str:
 
 
 async def predicted_for(
-    session: AsyncSession, company_id: int, *, include_inactive: bool = False
+    session: AsyncSession, company_id: UUID, *, include_inactive: bool = False
 ) -> tuple[list[Predicted], list[Predicted]]:
     """(job sau gộp, tin của từng nguồn đã được nhận) của một doanh nghiệp."""
     stmt = select(Job).where(Job.company_id == company_id)
@@ -372,7 +373,7 @@ SAMPLE_COLUMNS = [
 
 @dataclass(slots=True)
 class SampleJob:
-    job_id: int
+    job_id: UUID
     company: str
     title: str
     locations: str
@@ -568,10 +569,10 @@ def report_json(report: EvalReport) -> str:
         ],
         "warnings": report.warnings,
     }
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
 
 
-async def latest_run_perf(session: AsyncSession, company_ids: Sequence[int]) -> dict[str, Any]:
+async def latest_run_perf(session: AsyncSession, company_ids: Sequence[UUID]) -> dict[str, Any]:
     """p95 thời gian và tỉ lệ failed theo lượt mới nhất của các doanh nghiệp golden."""
     if not company_ids:
         return {}
@@ -623,7 +624,7 @@ class ReviewSummary:
 
 async def record_review(
     session: AsyncSession,
-    job_id: int,
+    job_id: UUID,
     *,
     correct: bool,
     note: str | None = None,
@@ -642,7 +643,7 @@ async def record_review(
     )
 
 
-async def delete_review(session: AsyncSession, job_id: int) -> None:
+async def delete_review(session: AsyncSession, job_id: UUID) -> None:
     await session.execute(delete(JobReview).where(JobReview.job_id == job_id))
 
 
@@ -669,7 +670,7 @@ async def review_summary(session: AsyncSession) -> ReviewSummary:
     )
 
 
-async def next_unreviewed(session: AsyncSession, *, exclude: int | None = None) -> int | None:
+async def next_unreviewed(session: AsyncSession, *, exclude: UUID | None = None) -> UUID | None:
     """Id một job đang mở chưa kiểm, chọn ngẫu nhiên."""
     stmt = (
         select(Job.id)

@@ -8,6 +8,7 @@ import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import UUID
 
 from saq import Queue
 from sqlalchemy import select
@@ -28,7 +29,7 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 async def enqueue_companies(
     res: Resources,
     *,
-    company_ids: Sequence[int] | None = None,
+    company_ids: Sequence[UUID] | None = None,
     stale_hours: float | None = None,
 ) -> batch.EnqueueResult:
     """`company_ids` None = mọi doanh nghiệp (lọc `stale_hours` nếu có)."""
@@ -131,6 +132,6 @@ async def export_stream(res: Resources, filters: JobFilters, fmt: str) -> AsyncI
             yield buffer.getvalue()
 
 
-async def job_exists(res: Resources, job_id: int) -> bool:
+async def job_exists(res: Resources, job_id: UUID) -> bool:
     async with res.sessionmaker() as session:
         return await session.scalar(select(Job.id).where(Job.id == job_id)) is not None

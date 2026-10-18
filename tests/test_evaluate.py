@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -98,7 +99,7 @@ def test_report_numbers_and_markdown() -> None:
     report = EvalReport(
         generated_at=datetime(2026, 10, 17, tzinfo=UTC),
         companies=[
-            CompanyEval("ACME", 1, golden=10, predicted=10, matched=9, run_status="ok"),
+            CompanyEval("ACME", UUID(int=1), golden=10, predicted=10, matched=9, run_status="ok"),
             CompanyEval("Beta", None, golden=5, predicted=0, matched=0, missing=["Kế | toán"]),
         ],
         sources=[SourceEval("topcv", predicted=8, matched=8, golden=10)],

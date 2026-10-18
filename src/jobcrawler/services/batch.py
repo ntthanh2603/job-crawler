@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from pydantic import ValidationError
 from saq import Queue
@@ -161,7 +162,7 @@ class ImportResult:
     updated: int = 0
     unchanged: int = 0
     # Id doanh nghiệp theo thứ tự dòng trong file (không trùng).
-    company_ids: list[int] = field(default_factory=list)
+    company_ids: list[UUID] = field(default_factory=list)
 
 
 def _pick(candidates: Iterable[Company], company_in: CompanyIn) -> Company | None:
@@ -266,7 +267,7 @@ class EnqueueResult:
 async def select_companies(
     session: AsyncSession,
     *,
-    company_ids: Sequence[int] | None = None,
+    company_ids: Sequence[UUID] | None = None,
     stale_hours: float | None = None,
     limit: int | None = None,
     now: datetime | None = None,
@@ -303,7 +304,7 @@ def job_key(company: Company) -> str:
 
 def job_kwargs(company: Company) -> dict[str, Any]:
     return {
-        "company_id": company.id,
+        "company_id": str(company.id),  # tham số job SAQ là JSON
         "name": company.input_name,
         "tax_code": company.tax_code,
         "website": company.input_website,

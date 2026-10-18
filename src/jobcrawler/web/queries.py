@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import Select, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +41,7 @@ PROVINCE_NAMES = sorted(PROVINCES)
 class JobItem(JobOut):
     """`JobOut` kèm id dòng `jobs` và kết quả kiểm tay (để giao diện/API dẫn link)."""
 
-    id: int
+    id: UUID
     reviewed: bool | None = None  # None: chưa kiểm; True/False: đúng/sai
 
 
@@ -151,7 +152,7 @@ class CompanyDetail:
     failed_pages: list[FailedPage]
 
 
-async def company_detail(session: AsyncSession, company_id: int) -> CompanyDetail | None:
+async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDetail | None:
     """Thông tin doanh nghiệp + số đếm cho các tab; danh sách việc làm / lượt chạy / tin bị loại
     lấy theo trang (`company_jobs`, `company_runs`, `company_rejected`)."""
     company = await session.get(Company, company_id)
@@ -202,7 +203,7 @@ async def company_detail(session: AsyncSession, company_id: int) -> CompanyDetai
 
 
 async def company_jobs(
-    session: AsyncSession, company_id: int, *, active: bool = True, page: int | None = 1
+    session: AsyncSession, company_id: UUID, *, active: bool = True, page: int | None = 1
 ) -> Page[JobItem]:
     """Việc làm của một doanh nghiệp (index company_id, status, first_seen_at)."""
     status = (
@@ -219,7 +220,7 @@ async def company_jobs(
 
 
 async def company_runs(
-    session: AsyncSession, company_id: int, page: int | None = 1
+    session: AsyncSession, company_id: UUID, page: int | None = 1
 ) -> Page[CompanyRun]:
     return await paginate(
         session,
@@ -229,14 +230,14 @@ async def company_runs(
     )
 
 
-def _rejected_query(company_id: int) -> Select[JobPosting]:
+def _rejected_query(company_id: UUID) -> Select[JobPosting]:
     return select(JobPosting).where(
         JobPosting.company_id == company_id, JobPosting.accepted.is_(False)
     )
 
 
 async def company_rejected(
-    session: AsyncSession, company_id: int, page: int | None = 1
+    session: AsyncSession, company_id: UUID, page: int | None = 1
 ) -> Page[JobPosting]:
     """Tin bị loại (index ix_job_postings_company_rejected)."""
     return await paginate(
@@ -327,7 +328,7 @@ class JobFilters:
     source: str = ""
     status: str = JobStatus.ACTIVE.value  # "" = mọi trạng thái
     salary_from: float | None = None  # triệu VND/tháng
-    company_id: int | None = None
+    company_id: UUID | None = None
     reviewed: str = ""  # yes | no | correct | wrong
     sort: str = "new"
     page: int = 1
@@ -412,7 +413,7 @@ class JobDetail:
     company: Company | None
 
 
-async def job_detail(session: AsyncSession, job_id: int) -> JobDetail | None:
+async def job_detail(session: AsyncSession, job_id: UUID) -> JobDetail | None:
     row = await session.get(Job, job_id)
     if row is None:
         return None
@@ -482,7 +483,7 @@ async def recent_runs(session: AsyncSession, limit: int = 15) -> list[tuple[Comp
     return [(run, name) for run, name in rows]
 
 
-async def failed_page(session: AsyncSession, page_id: int) -> FailedPage | None:
+async def failed_page(session: AsyncSession, page_id: UUID) -> FailedPage | None:
     return await session.get(FailedPage, page_id)
 
 

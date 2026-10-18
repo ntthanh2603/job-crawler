@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +45,7 @@ Enrich = Callable[[SourceProfile], Awaitable[None]]
 
 @dataclass(frozen=True, slots=True)
 class Decision:
-    company_id: int | None
+    company_id: UUID | None
     confidence: float
     evidence: dict[str, Any]
 
@@ -68,9 +69,9 @@ def decide(profile: SourceProfile, candidates: list[tuple[Company, str, float]])
     """Quyết định bằng rule. None: còn mơ hồ (cần LLM). Decision(company_id=None): không khớp."""
     name_norm = profile.name_norm or ""
     domain = _profile_domain(profile)
-    strong: dict[int, tuple[float, str]] = {}
-    by_name: dict[int, Company] = {}
-    plausible: dict[int, Company] = {}
+    strong: dict[UUID, tuple[float, str]] = {}
+    by_name: dict[UUID, Company] = {}
+    plausible: dict[UUID, Company] = {}
     for company, alias_norm, _sim in candidates:
         if profile.tax_code and company.tax_code and profile.tax_code != company.tax_code:
             continue  # khác MST: chắc chắn khác pháp nhân
@@ -189,7 +190,7 @@ async def map_profiles(
             .order_by(SourceProfile.id, similarity.desc())
         )
     ).all()
-    by_profile: dict[int, list[tuple[int, str, float]]] = {}
+    by_profile: dict[UUID, list[tuple[UUID, str, float]]] = {}
     for profile_id, company_id, alias_norm, sim in rows:
         if sim >= trigram_threshold:
             options = by_profile.setdefault(profile_id, [])
@@ -197,11 +198,10 @@ async def map_profiles(
                 options.append((company_id, alias_norm, sim))
 
     # Không có ứng viên: chỉ ghi đã thử.
-    await session.execute(
-        update(SourceProfile)
-        .where(*pending, SourceProfile.id.not_in(list(by_profile) or [-1]))
-        .values(matched_at=now)
-    )
+    no_candidate = update(SourceProfile).where(*pending).values(matched_at=now)
+    if by_profile:
+        no_candidate = no_candidate.where(SourceProfile.id.not_in(list(by_profile)))
+    await session.execute(no_candidate)
     if not by_profile:
         return 0
 
@@ -233,7 +233,7 @@ async def map_profiles(
         evidence = {
             **decision.evidence,
             "candidates": [
-                {"company_id": c.id, "alias_norm": alias, "similarity": round(sim, 3)}
+                {"company_id": str(c.id), "alias_norm": alias, "similarity": round(sim, 3)}
                 for c, alias, sim in candidates
             ],
         }

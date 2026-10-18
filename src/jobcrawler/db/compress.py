@@ -35,6 +35,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.types import TypeDecorator
 
+from jobcrawler.db.ids import NIL
 from jobcrawler.logging import get_logger
 
 log = get_logger(__name__)
@@ -501,7 +502,7 @@ async def recompress(
         *(bindparam(f"old_{c}", type_=LargeBinary) for c in columns),
     )
     written = 0
-    last = 0
+    last = NIL
     while written < limit:
         async with sessionmaker.begin() as session:
             rows = (

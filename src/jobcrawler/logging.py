@@ -22,10 +22,12 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from jobcrawler.config import Settings
+from jobcrawler.db.ids import uuid7
 
-LOG_COLUMNS = ("ts", "level", "event", "run_id", "company_id", "context")
+# `id` sinh lúc ghi event (UUIDv7 tăng chặt trong process): ORDER BY id đúng thứ tự sự kiện.
+LOG_COLUMNS = ("ts", "level", "event", "run_id", "company_id", "context", "id")
 
-LogRow = tuple[datetime, str, str, UUID | None, int | None, str]
+LogRow = tuple[datetime, str, str, UUID | None, UUID | None, str, UUID]
 LogWriter = Callable[[list[LogRow]], Awaitable[None]]
 
 # Các khoá đã có cột riêng hoặc là metadata của structlog/logging, không đưa vào `context`.
@@ -46,10 +48,6 @@ def _as_uuid(value: Any) -> UUID | None:
         return UUID(str(value))
     except ValueError:
         return None
-
-
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _format_exception(exc_info: Any) -> str | None:
@@ -74,8 +72,9 @@ def event_to_row(event_dict: MutableMapping[str, Any]) -> LogRow:
         str(event_dict.get("level", "info")),
         str(event_dict.get("event", "")),
         _as_uuid(event_dict.get("run_id")),
-        _as_int(event_dict.get("company_id")),
+        _as_uuid(event_dict.get("company_id")),
         json.dumps(context, default=str, ensure_ascii=False),
+        uuid7(),
     )
 
 

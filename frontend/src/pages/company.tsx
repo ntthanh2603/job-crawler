@@ -59,7 +59,7 @@ const ALIAS_KINDS: Record<string, string> = {
 }
 
 /** Việc làm của doanh nghiệp theo trang, chuyển giữa đang mở / đã đóng. */
-function CompanyJobs({ id, active, inactive }: { id: number; active: number; inactive: number }) {
+function CompanyJobs({ id, active, inactive }: { id: string; active: number; inactive: number }) {
   const [status, setStatus] = useState<"active" | "inactive">("active")
   return (
     <Section
@@ -132,7 +132,7 @@ export function CompanyPage() {
     queryFn: () => api.get<CompanyDetail>(`/companies/${id}`),
   })
   const run = useMutation({
-    mutationFn: () => api.post<EnqueueResult>("/enqueue", { company_ids: [Number(id)] }),
+    mutationFn: () => api.post<EnqueueResult>("/enqueue", { company_ids: [id] }),
     onSuccess: (r) => {
       if (r.enqueued) toast.success("Đã đưa vào hàng đợi. Lượt chạy mới sẽ hiện sau ít phút.")
       else toast.warning("Doanh nghiệp đang có việc chờ hoặc đang chạy trong hàng đợi")

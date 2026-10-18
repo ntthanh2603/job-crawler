@@ -59,7 +59,7 @@ export function RunPage() {
   if (!query.data) return <Loading rows={10} />
   const d = query.data
   const r = d.run
-  const name = d.company_name ? companyName({ brand_name: null, legal_name: null, input_name: d.company_name }) : `#${r.company_id}`
+  const name = d.company_name ? companyName({ brand_name: null, legal_name: null, input_name: d.company_name }) : "Doanh nghiệp"
 
   return (
     <>

@@ -18,8 +18,8 @@ export function FailedPagePage() {
   return (
     <>
       <PageHeader
-        title={`Trang parse lỗi #${p.id}`}
-        description={`${sourceLabel(p.source)} · ${dt(p.created_at)} · HTTP ${p.http_status ?? "–"}`}
+        title="Trang parse lỗi"
+        description={`${sourceLabel(p.source)} · ${dt(p.created_at)} · HTTP ${p.http_status ?? "–"} · ${p.reason}`}
         actions={
           <>
             {p.run_id && (

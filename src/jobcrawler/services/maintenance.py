@@ -16,12 +16,14 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.config import Settings
 from jobcrawler.db import compress
+from jobcrawler.db.ids import NIL
 from jobcrawler.db.models import BoardIndexRun, CompanyRun, Job, JobPosting
 from jobcrawler.logging import get_logger
 from jobcrawler.pipeline import store
@@ -167,8 +169,8 @@ async def dedupe_jobs(
     dung: job cũ nhất giữ lại, tin của job trùng chuyển sang nó, job trùng → `removed`. Sau khi
     chạy, index `ux_jobs_company_fingerprint_active` bảo đảm không còn job trùng."""
     report = DedupReport()
-    last_id = 0
-    touched: set[int] = set()
+    last_id = NIL
+    touched: set[UUID] = set()
     now = datetime.now(UTC)
     while limit is None or report.scanned < limit:
         async with sessionmaker.begin() as session:
@@ -259,7 +261,7 @@ async def reclean_jobs(
     tương đối, email Cloudflare…) lên mô tả / yêu cầu / quyền lợi của job đã lưu — khi đổi luật
     làm sạch mà không muốn chạy lại doanh nghiệp. Nội dung đã sạch đi qua không đổi."""
     report = RecleanReport()
-    last_id = 0
+    last_id = NIL
     while True:
         async with sessionmaker.begin() as session:
             rows = (

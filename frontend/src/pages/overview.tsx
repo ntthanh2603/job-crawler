@@ -310,7 +310,7 @@ export function OverviewPage() {
             <Section title="Doanh nghiệp nhiều việc nhất" description="Số việc đang mở">
               <BarList
                 items={charts.top_companies.map((c) => ({
-                  key: String(c.id),
+                  key: c.id,
                   label: displayName(c.name),
                   value: c.active_jobs,
                   href: `/companies/${c.id}`,

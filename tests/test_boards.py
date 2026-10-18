@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
 
@@ -114,7 +115,7 @@ def test_plan_fetches_order() -> None:
         fetched: datetime | None = recent,
         status: str = "active",
     ) -> _Existing:
-        return _Existing(id_, lastmod, fetched, status, None, None, "h")
+        return _Existing(UUID(int=id_), lastmod, fetched, status, None, None, "h")
 
     entries = {
         k: BoardEntry(url=f"u{k}", external_id=k, lastmod=lm)
@@ -140,7 +141,7 @@ def test_plan_fetches_order() -> None:
 
 def _profile(name: str, *, website: str | None = None, tax: str | None = None) -> SourceProfile:
     return SourceProfile(
-        id=1,
+        id=UUID(int=1),
         source="fakeboard",
         external_id="7",
         url=f"{HOME}cong-ty/x-7",

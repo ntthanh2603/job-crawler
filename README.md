@@ -93,7 +93,7 @@ Giới hạn đang đặt khi chưa có proxy và cách nới: [docs/OPERATIONS.
 ```bash
 uv run jobcrawler run "KiotViet" --website kiotviet.vn   # in job đã làm sạch (--json: CompanyResult)
 uv run jobcrawler export --format jsonl --out out/        # out/jobs.jsonl, mỗi dòng một JobOut
-uv run jobcrawler export --format csv --out out/ --company KiotViet --company 42 [--all]
+uv run jobcrawler export --format csv --out out/ --company KiotViet --company 0101234567 [--all]  # tên, MST hoặc id
 ```
 
 Sau bước thu thập, `process_company` chuẩn hoá từng tin (HTML → markdown sạch, ftfy, bỏ
