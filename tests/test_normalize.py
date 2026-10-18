@@ -212,6 +212,13 @@ def test_parse_experience_from_jd_needs_context() -> None:
         ("Hôm nay", False, NOW),
         ("Còn 15 ngày", True, NOW + timedelta(days=15)),
         ("3 weeks left", True, NOW + timedelta(weeks=3)),
+        ("a month ago", False, NOW - timedelta(days=30)),
+        ("Một tuần trước", False, NOW - timedelta(weeks=1)),
+        # Khoảng ngày: hạn nộp là ngày cuối, ngày đăng là ngày đầu.
+        ("01/10/2026 - 31/10/2026", True, datetime(2026, 10, 31, 16, 59, 59, tzinfo=UTC)),
+        ("01/10/2026 - 31/10/2026", False, datetime(2026, 9, 30, 17, 0, tzinfo=UTC)),
+        ("Từ 01/10 đến 31/10/2026", True, datetime(2026, 10, 31, 16, 59, 59, tzinfo=UTC)),
+        ("12/31/2026", True, datetime(2026, 12, 31, 16, 59, 59, tzinfo=UTC)),
     ],
 )
 def test_parse_date(raw: str, end_of_day: bool, expected: datetime) -> None:
@@ -221,6 +228,9 @@ def test_parse_date(raw: str, end_of_day: bool, expected: datetime) -> None:
 def test_parse_date_rejects_garbage() -> None:
     assert parse_date("Đang cập nhật", now=NOW) is None
     assert parse_date("", now=NOW) is None
+    # Tên tỉnh "Hà Nam" bỏ dấu là "ha nam": không phải "a năm" (một năm).
+    assert parse_date("Hà Nam", now=NOW, end_of_day=True) is None
+    assert parse_date("Làm việc tại Hà Nam, Ninh Bình", now=NOW) is None
 
 
 # --- cấp bậc, loại hình, hình thức ----------------------------------------------------------------

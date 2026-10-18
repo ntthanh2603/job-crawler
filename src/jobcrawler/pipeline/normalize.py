@@ -1191,9 +1191,14 @@ def classify_work_mode(raw: str | None, title: str, locations: Sequence[str] = (
 
 # --- ngày -----------------------------------------------------------------------------------------
 
+# "2 ngày trước", "một tuần", "a month ago". Số đứng riêng (không dính chữ trước: "Hà Nam" bỏ
+# dấu là "ha nam", không phải "a năm"); "a/an" chỉ đi với đơn vị tiếng Anh, "một" với tiếng Việt.
 _RELATIVE = re.compile(
-    r"(?P<n>\d+|mot|a|an)\+?\s*(?P<unit>phut|minutes?|mins?|gio|hours?|hrs?|ngay|days?|tuan|"
-    r"weeks?|thang|months?|nam|years?)\s*(?P<dir>truoc|ago|nua|left|remaining|con lai)?"
+    r"(?<![a-z\d])(?:(?P<n>\d+)\+?\s*(?P<unit>phut|minutes?|mins?|gio|hours?|hrs?|ngay|days?|"
+    r"tuan|weeks?|thang|months?|nam|years?)"
+    r"|mot\s+(?P<vi>phut|gio|ngay|tuan|thang|nam)"
+    r"|an?\s+(?P<en>minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?))"
+    r"\b\s*(?P<dir>truoc|ago|nua|left|remaining|con lai)?"
 )
 _UNITS = {
     "phut": timedelta(minutes=1),
@@ -1259,6 +1264,11 @@ def _safe_date(y: int, m: int, d: int) -> date | None:
         return None
 
 
+def _ymd_swapped(m: re.Match[str]) -> tuple[int, int, int]:
+    """Ngày dạng tháng/ngày/năm khi ngày/tháng/năm không hợp lệ ("12/31/2026")."""
+    return int(m[3]), int(m[1]), int(m[2])
+
+
 def parse_date(raw: str | None, *, now: datetime, end_of_day: bool = False) -> datetime | None:
     """Ngày thô → UTC. Hiểu ISO/RFC (qua `parse_datetime`), "30/11/2025" (ngày trước tháng),
     "30 tháng 11 năm 2025", "Nov 30, 2025", "2 ngày trước", "hôm qua", "Còn 15 ngày"."""
@@ -1268,11 +1278,14 @@ def parse_date(raw: str | None, *, now: datetime, end_of_day: bool = False) -> d
     if (iso := parse_datetime(text, end_of_day=end_of_day)) is not None:
         return iso
     folded = fold(text)
-    if m := _DMY.search(text):
-        d, mo, y = int(m[1]), int(m[2]), int(m[3])
-        day = _safe_date(y, mo, d) or _safe_date(y, d, mo)
-        if day is not None:
-            return _day(day, end_of_day=end_of_day)
+    # Khoảng ngày ("01/10/2026 - 31/10/2026"): hạn nộp là ngày muộn nhất, ngày đăng là sớm nhất.
+    days = [
+        day
+        for m in _DMY.finditer(text)
+        if (day := _safe_date(int(m[3]), int(m[2]), int(m[1])) or _safe_date(*_ymd_swapped(m)))
+    ]
+    if days:
+        return _day(max(days) if end_of_day else min(days), end_of_day=end_of_day)
     if m := _YMD.search(text):
         day = _safe_date(int(m[1]), int(m[2]), int(m[3]))
         if day is not None:
@@ -1292,8 +1305,8 @@ def parse_date(raw: str | None, *, now: datetime, end_of_day: bool = False) -> d
     if _has(folded, "hom qua", "yesterday"):
         return now - timedelta(days=1)
     if m := _RELATIVE.search(folded):
-        n = 1 if m["n"] in ("mot", "a", "an") else int(m["n"])
-        delta = _unit_delta(m["unit"]) * n
+        n = int(m["n"]) if m["n"] else 1
+        delta = _unit_delta(m["unit"] or m["vi"] or m["en"]) * n
         direction = m["dir"] or ""
         if direction in ("truoc", "ago"):
             return now - delta
