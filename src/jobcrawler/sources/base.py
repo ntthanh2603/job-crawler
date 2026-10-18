@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from jobcrawler.llm import LLMClient
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import Fetcher, FetchResult
+from jobcrawler.net.urls import normalize_url
 from jobcrawler.schemas import FetchOutcome, RawJob
 from jobcrawler.text import strip_accents
 
@@ -101,6 +102,35 @@ class SourceLimits:
         )
 
 
+@dataclass(slots=True)
+class KnownJobs:
+    """Tin của doanh nghiệp đã tải chi tiết ở lượt gần đây (≤ JOB_REUSE_DAYS): nguồn dùng lại
+    thay vì tải lại trang chi tiết, để lượt sau đi tiếp tới tin chưa tải (giới hạn trang chi tiết
+    tính theo lần tải thật)."""
+
+    by_url: dict[str, RawJob] = field(default_factory=dict)
+    by_key: dict[tuple[str, str], RawJob] = field(default_factory=dict)
+    used: set[tuple[str, str]] = field(default_factory=set)  # (source, external_id) đã dùng lại
+
+    @classmethod
+    def of(cls, jobs: Iterable[tuple[RawJob, str]]) -> KnownJobs:
+        """`jobs`: (tin, URL đã lưu của tin)."""
+        known = cls()
+        for job, url in jobs:
+            known.by_key[(job.source, job.external_id)] = job
+            for u in (url, job.url):
+                known.by_url.setdefault(normalize_url(u) or u, job)
+        return known
+
+    def take(self, *, url: str | None = None, key: tuple[str, str] | None = None) -> RawJob | None:
+        job = self.by_key.get(key) if key is not None else None
+        if job is None and url is not None:
+            job = self.by_url.get(normalize_url(url) or url)
+        if job is not None:
+            self.used.add((job.source, job.external_id))
+        return job
+
+
 @dataclass
 class SourceSession:
     """Fetch/render nhân danh một nguồn: ghi `FetchRecord`, dừng nguồn khi bị chặn."""
@@ -114,6 +144,11 @@ class SourceSession:
     failed_pages: int = 0
     # Lý do nguồn dừng trước khi lấy hết tin (chạm giới hạn, trang lỗi tạm thời).
     truncated: list[str] = field(default_factory=list)
+    known: KnownJobs | None = None
+
+    def reuse(self, *, url: str | None = None, key: tuple[str, str] | None = None) -> RawJob | None:
+        """Tin đã tải chi tiết ở lượt gần đây (None: cần tải)."""
+        return self.known.take(url=url, key=key) if self.known is not None else None
 
     def _record(self, result: FetchResult) -> FetchResult:
         self.records.append(FetchRecord.from_result(self.name, result))

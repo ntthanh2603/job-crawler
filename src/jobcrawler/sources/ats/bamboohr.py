@@ -122,7 +122,14 @@ class BambooHRSource(Source):
         except ValueError as exc:
             raise SourceError(FetchOutcome.ERROR, f"không phải JSON: {result.url}") from exc
         session.count(result, len(items))
-        items = vietnam_first(items, _location)
+        pending: list[dict[str, Any]] = []
+        for item in vietnam_first(items, _location):
+            known = session.reuse(key=(KIND, f"{self.key}:{item['id']}"))
+            if known is not None:
+                yield known
+            else:
+                pending.append(item)
+        items = pending
         if len(items) > session.limits.max_detail_pages:
             session.truncate("detail_pages")
             items = items[: session.limits.max_detail_pages]

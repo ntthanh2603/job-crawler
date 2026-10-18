@@ -114,15 +114,23 @@ def parse_detail(
     )
 
 
-def listing_only(posting: dict[str, Any], *, ref: AtsRef) -> RawJob:
-    """Tin chỉ có ở danh sách (chưa lấy chi tiết vì hết giới hạn trang)."""
+def posting_url(posting: dict[str, Any], *, ref: AtsRef) -> str:
     host, site = ref.params["host"], ref.params["site"]
-    url = f"https://{host}/{site}{posting['externalPath']}"
+    return f"https://{host}/{site}{posting['externalPath']}"
+
+
+def posting_key(posting: dict[str, Any], *, ref: AtsRef) -> str:
     bullets = posting.get("bulletFields") or []
     req_id = text_or_none(bullets[0]) if bullets else posting["externalPath"]
+    return f"{ref.key}:{req_id}"
+
+
+def listing_only(posting: dict[str, Any], *, ref: AtsRef) -> RawJob:
+    """Tin chỉ có ở danh sách (chưa lấy chi tiết vì hết giới hạn trang)."""
+    url = posting_url(posting, ref=ref)
     return RawJob(
         source=KIND,
-        external_id=f"{ref.key}:{req_id}",
+        external_id=posting_key(posting, ref=ref),
         url=url,
         title=posting["title"],
         locations=[loc] if (loc := text_or_none(posting.get("locationsText"))) else [],
@@ -200,14 +208,25 @@ class WorkdaySource(Source):
         postings = await self._listing(session)
         limit = session.limits.max_detail_pages
         step = session.limits.detail_concurrency
-        detailed = postings[:limit]
+        # Tin đã lấy chi tiết ở lượt gần đây: dùng lại, giới hạn tính theo lần tải thật.
+        pending: list[dict[str, Any]] = []
+        for posting in postings:
+            known = session.reuse(
+                url=posting_url(posting, ref=self.ref),
+                key=(KIND, posting_key(posting, ref=self.ref)),
+            )
+            if known is not None:
+                yield known
+            else:
+                pending.append(posting)
+        detailed = pending[:limit]
         for i in range(0, len(detailed), step):
             batch = detailed[i : i + step]
             for job in await gather_all(self._detail(session, p) for p in batch):
                 yield job
-        if len(postings) > limit:
+        if len(pending) > limit:
             session.truncate("detail_pages")
-        for posting in postings[limit:]:
+        for posting in pending[limit:]:
             yield listing_only(posting, ref=self.ref)
 
 

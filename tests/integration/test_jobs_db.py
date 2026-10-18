@@ -218,6 +218,53 @@ async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: 
         assert (posting.accepted, posting.job_id, posting.status) == (False, None, "expired")
 
 
+CAREERS = Path(__file__).parents[1] / "fixtures" / "careers"
+BASE_JOB = (
+    "https://careers.base.vn/job/hn-business-development-executive-junior-b2b-sales-1yoe-29675"
+)
+
+
+async def test_careers_details_are_reused_on_the_next_run(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lượt sau dùng lại chi tiết tin đã tải (JOB_REUSE_DAYS), không mở lại trang tin."""
+    monkeypatch.setattr(boards, "registry", dict)
+    fetcher = FakeFetcher()
+    for url, name in [
+        ("https://base.vn/", "base_vn/home.html"),
+        ("https://careers.base.vn/", "base_vn/careers.html"),
+        ("https://careers.base.vn/alljobs", "base_vn/alljobs.html"),
+        (BASE_JOB, "base_vn/job_29675.html"),
+    ]:
+        fetcher.add_file(url, CAREERS / name)
+    company = CompanyIn(name=f"Base Reuse {uuid4().hex[:6]}", website="https://careers.base.vn/")
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        live = dataclasses.replace(res, http=fetcher)  # pyright: ignore[reportArgumentType]
+
+        async def posting() -> JobPosting:
+            async with res.sessionmaker() as s:
+                row = await s.scalar(
+                    select(JobPosting).where(
+                        JobPosting.url == BASE_JOB, JobPosting.company_id == first.company_id
+                    )
+                )
+            assert row is not None
+            return row
+
+        first = await process_company(live, company)
+        assert first.jobs_accepted == 1
+        fetched_at = (await posting()).fetched_at
+        assert fetched_at is not None
+        assert [u for _, u, _ in fetcher.calls].count(BASE_JOB) == 1
+
+        second = await process_company(live, company)
+        assert second.jobs_accepted == 1
+        assert [u for _, u, _ in fetcher.calls].count(BASE_JOB) == 1  # không mở lại
+        again = await posting()
+        assert again.fetched_at == fetched_at  # mốc tải giữ nguyên: hết hạn dùng lại thì tải lại
+        assert again.last_seen_at > fetched_at
+
+
 async def test_deferred_posting_keeps_its_job_open(integration_settings: Settings) -> None:
     """Tin LLM chưa kịp chấm (hoãn): không ghi là bị loại, job cũ của nó vẫn mở."""
     async with open_resources(integration_settings, db_logs=False) as res:

@@ -841,6 +841,13 @@ class CareersSource(Source):
                 if found or inline:
                     break
 
+        def reuse(url: str) -> RawJob | None:
+            """Tin đã tải ở lượt gần đây: dùng lại, không mở trang (không tính vào giới hạn)."""
+            known = session.reuse(url=url)
+            if known is not None:
+                done_urls.add(url)
+            return known
+
         opened = 0
         while pending and opened < limits.max_detail_pages:
             batch: list[JobLink] = []
@@ -848,9 +855,15 @@ class CareersSource(Source):
             while pending and len(batch) < size:
                 url = next(iter(pending))
                 link = pending.pop(url)
-                if url not in done_urls:
-                    done_urls.add(url)
-                    batch.append(link)
+                if url in done_urls:
+                    continue
+                if (known := reuse(url)) is not None:
+                    if known.external_id not in yielded:
+                        yielded.add(known.external_id)
+                        yield known
+                    continue
+                done_urls.add(url)
+                batch.append(link)
             opened += len(batch)
             for link, (job, more) in zip(
                 batch, await gather_all(self._detail(session, link) for link in batch), strict=True
@@ -861,5 +874,11 @@ class CareersSource(Source):
                 if job is not None and job.external_id not in yielded:
                     yielded.add(job.external_id)
                     yield job
+        # Hết lượt mở trang: tin còn lại đã biết thì vẫn dùng lại được.
+        for url in list(pending):
+            known = reuse(url) if url not in done_urls else None
+            if known is not None and known.external_id not in yielded:
+                yielded.add(known.external_id)
+                yield known
         if any(url not in done_urls for url in pending):
             session.truncate("detail_pages")

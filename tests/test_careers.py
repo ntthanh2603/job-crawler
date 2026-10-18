@@ -9,7 +9,7 @@ from jobcrawler.llm import LLMClient
 from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pages import Link
 from jobcrawler.schemas import ExtractionMethod, RawJob
-from jobcrawler.sources.base import SourceLimits, SourceSession
+from jobcrawler.sources.base import KnownJobs, SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,
     Page,
@@ -345,6 +345,46 @@ async def test_capped_or_failed_pages_mark_source_truncated() -> None:
     s503 = session(flaky)
     assert await run(CareersSource(listing), s503) == []
     assert s503.truncated == ["page_error"]
+
+
+async def test_known_details_are_reused_without_counting_toward_the_cap() -> None:
+    listing = "https://a.vn/tuyen-dung"
+    fetcher = FakeFetcher()
+    fetcher.add(
+        listing,
+        "".join(f'<a href="/tuyen-dung/vi-tri-so-{i}">Vị trí số {i}</a>' for i in range(6)),
+    )
+    for i in range(6):
+        fetcher.add(f"https://a.vn/tuyen-dung/vi-tri-so-{i}", JD.format(title=f"Vị trí số {i}"))
+    # Lượt trước đã tải chi tiết tin 0–3.
+    known = KnownJobs.of(
+        (
+            RawJob(
+                source="careers",
+                external_id=f"old-{i}",
+                url=f"https://a.vn/tuyen-dung/vi-tri-so-{i}",
+                title=f"Vị trí số {i} (đã lưu)",
+                method=ExtractionMethod.HEURISTIC,
+            ),
+            f"https://a.vn/tuyen-dung/vi-tri-so-{i}",
+        )
+        for i in range(4)
+    )
+    s = session(fetcher, max_detail_pages=2)
+    s.known = known
+    jobs = await run(CareersSource(listing), s)
+    assert sorted(j.title for j in jobs) == [
+        *(f"Vị trí số {i} (đã lưu)" for i in range(4)),
+        "Vị trí số 4",
+        "Vị trí số 5",
+    ]
+    opened = [u for kind, u, _ in fetcher.calls if kind == "fetch" and u != listing]
+    assert sorted(opened) == [
+        "https://a.vn/tuyen-dung/vi-tri-so-4",
+        "https://a.vn/tuyen-dung/vi-tri-so-5",
+    ]
+    assert s.truncated == []
+    assert known.used == {("careers", f"old-{i}") for i in range(4)}
 
 
 def test_pick_title_prefers_heading_matching_listing_text() -> None:

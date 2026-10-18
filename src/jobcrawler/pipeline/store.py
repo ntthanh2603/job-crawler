@@ -8,7 +8,7 @@ gộp thành một dòng `jobs`. Upsert theo khoá duy nhất nên chạy lại 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -75,7 +75,13 @@ def _key(job: NormalizedJob) -> tuple[str, str]:
 
 
 async def _upsert_posting(
-    session: AsyncSession, company_id: UUID, job: NormalizedJob, verdict: Verdict, now: datetime
+    session: AsyncSession,
+    company_id: UUID,
+    job: NormalizedJob,
+    verdict: Verdict,
+    now: datetime,
+    *,
+    reused: bool = False,
 ) -> _PostingRow:
     expired = verdict.code == EXPIRED
     verification = {
@@ -94,6 +100,9 @@ async def _upsert_posting(
         "status": (JobStatus.EXPIRED if expired else JobStatus.ACTIVE).value,
         "missed_runs": 0,
     }
+    # Tin website/ATS vừa tải chi tiết: mốc để lượt sau dùng lại (tin dùng lại giữ mốc cũ).
+    if not job.board and not reused:
+        content["fetched_at"] = now
     stmt = pg_insert(JobPosting).values(
         source=job.source, external_id=job.external_id, first_seen_at=now, **content, **verification
     )
@@ -345,6 +354,7 @@ async def save_company_jobs(
     clusters: Sequence[Cluster],
     now: datetime,
     complete: bool,
+    reused_postings: Collection[tuple[str, str]] = (),
 ) -> SaveResult:
     """Ghi tin + job của một lượt chạy (trong transaction của `session`).
 
@@ -352,13 +362,18 @@ async def save_company_jobs(
     `expired` nếu đã quá hạn nộp). Lượt `partial` không đụng tới job cũ.
 
     Tin hoãn xác minh (`Verdict.deferred`) không được ghi: tin và job cũ của nó giữ nguyên như
-    lượt trước cho tới khi được chấm."""
+    lượt trước cho tới khi được chấm.
+
+    `reused_postings`: (nguồn, mã tin) dùng lại chi tiết đã tải ở lượt trước — giữ nguyên
+    `fetched_at` để hết hạn dùng lại thì lượt sau tải lại."""
     postings: dict[tuple[str, str], _PostingRow] = {}
     verdict_of: dict[tuple[str, str], Verdict] = {}
     for job, verdict in zip(jobs, verdicts, strict=True):
         if verdict.deferred:
             continue
-        postings[_key(job)] = await _upsert_posting(session, company_id, job, verdict, now)
+        postings[_key(job)] = await _upsert_posting(
+            session, company_id, job, verdict, now, reused=_key(job) in reused_postings
+        )
         verdict_of[_key(job)] = verdict
 
     # Job đã gắn với tin của lượt trước → dùng lại khoá cụm của job đó.

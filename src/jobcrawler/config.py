@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     source_max_detail_pages: int = Field(default=80, ge=0)
     source_max_listing_pages: int = Field(default=10, ge=1)
     source_max_rendered_pages: int = Field(default=10, ge=0)
+    # Tin website/ATS đã tải chi tiết trong chừng này ngày thì dùng lại, không tải lại (lượt sau
+    # của doanh nghiệp nhiều tin đi tiếp tới tin chưa tải). 0: luôn tải lại.
+    job_reuse_days: float = Field(default=3, ge=0)
     # Request/giây tới API công khai của ATS (host dùng chung cho mọi doanh nghiệp).
     # Ghi đè từng host bằng RATE_LIMITS.
     ats_rate_per_second: float = Field(default=2.0, gt=0)

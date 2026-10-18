@@ -20,6 +20,7 @@ from jobcrawler.net.http import Fetcher
 from jobcrawler.schemas import FetchOutcome, RawJob
 from jobcrawler.sources.base import (
     FetchRecord,
+    KnownJobs,
     Source,
     SourceError,
     SourceLimits,
@@ -108,17 +109,19 @@ async def collect(
     limits: SourceLimits | None = None,
     records: list[FetchRecord] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    known: KnownJobs | None = None,
 ) -> CollectResult:
     """Chạy song song mọi nguồn tới `deadline` (theo `clock`, mặc định `time.monotonic()`).
 
     `records`: danh sách nhận các `FetchRecord` (truyền vào để vẫn còn khi bị huỷ giữa chừng).
+    `known`: tin đã tải chi tiết ở lượt gần đây, nguồn dùng lại thay vì tải lại.
     """
     limits = limits or SourceLimits()
     result = CollectResult(records=records if records is not None else [])
     sinks: list[list[RawJob]] = []
     tasks: dict[asyncio.Task[None], SourceReport] = {}
     for source in sources:
-        session = SourceSession(source.name, fetcher, llm, limits, result.records)
+        session = SourceSession(source.name, fetcher, llm, limits, result.records, known=known)
         report = SourceReport(name=source.name, url=source.url)
         sink: list[RawJob] = []
         sinks.append(sink)

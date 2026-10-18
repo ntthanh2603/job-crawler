@@ -6,7 +6,12 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from uuid import UUID
 
+from sqlalchemy import or_, select
+
+from jobcrawler.db.models import JobPosting
 from jobcrawler.llm import LLMClient
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import Fetcher
@@ -15,8 +20,9 @@ from jobcrawler.net.urls import parse_domain_input
 from jobcrawler.pipeline.collect import CollectResult, collect
 from jobcrawler.pipeline.discovery import DiscoveryResult, discover, sources_for
 from jobcrawler.resources import Resources
-from jobcrawler.schemas import RawJob
-from jobcrawler.sources.base import FetchRecord, Source, SourceLimits, SourceSession
+from jobcrawler.schemas import JobStatus, RawJob
+from jobcrawler.sources import boards
+from jobcrawler.sources.base import FetchRecord, KnownJobs, Source, SourceLimits, SourceSession
 
 log = get_logger(__name__)
 
@@ -24,6 +30,34 @@ DISCOVERY_SOURCE = "discovery"
 # Nguồn tìm được không qua website (profile trên trang tuyển dụng): chạy song song với bước tìm
 # nguồn trên website, không phải chờ nó.
 SourceFactory = Callable[[], Awaitable[Sequence[Source]]]
+
+
+async def load_known_jobs(
+    res: Resources, company_id: UUID, *, now: datetime, max_age_days: float
+) -> KnownJobs:
+    """Tin website/ATS của doanh nghiệp đã tải chi tiết trong `max_age_days` ngày, còn mở và đã
+    được nhận: nguồn dùng lại thay vì mở lại trang chi tiết."""
+    if max_age_days <= 0:
+        return KnownJobs()
+    async with res.sessionmaker() as session:
+        rows = await session.execute(
+            select(JobPosting.raw, JobPosting.url).where(
+                JobPosting.company_id == company_id,
+                JobPosting.source.not_in(list(boards.registry())),
+                JobPosting.status == JobStatus.ACTIVE.value,
+                JobPosting.accepted.is_(True),
+                JobPosting.fetched_at >= now - timedelta(days=max_age_days),
+                or_(JobPosting.expires_at.is_(None), JobPosting.expires_at > now),
+            )
+        )
+        jobs = [(RawJob.model_validate(raw), url) for raw, url in rows]
+    # Tin chỉ có tiêu đề (bóc từ trang danh sách) hay chưa lấy chi tiết: lượt sau tải lại.
+    usable = [
+        (job, url)
+        for job, url in jobs
+        if not job.extra.get("inline") and job.extra.get("detail") != "skipped"
+    ]
+    return KnownJobs.of(usable)
 
 
 def merge_collected(a: CollectResult, b: CollectResult) -> CollectResult:
@@ -66,6 +100,7 @@ async def website_jobs(
     records: list[FetchRecord] | None = None,
     extra_sources: Sequence[Source] = (),
     board_sources: SourceFactory | None = None,
+    known: KnownJobs | None = None,
 ) -> WebsiteJobs:
     """Tìm nguồn trên `website` (domain hoặc URL) rồi thu thập song song tới `deadline`
     (`time.monotonic()`), cùng các nguồn có sẵn `extra_sources` (vd. profile trên trang tuyển
@@ -80,10 +115,16 @@ async def website_jobs(
         assert board_sources is not None
         found = await board_sources()
         return await collect(
-            list(found), fetcher=fetcher, llm=llm, deadline=deadline, limits=limits, records=records
+            list(found),
+            fetcher=fetcher,
+            llm=llm,
+            deadline=deadline,
+            limits=limits,
+            records=records,
+            known=known,
         )
 
-    boards = asyncio.create_task(collect_boards()) if board_sources is not None else None
+    boards_task = asyncio.create_task(collect_boards()) if board_sources is not None else None
     try:
         out = await _website_jobs(
             website,
@@ -99,16 +140,17 @@ async def website_jobs(
             discovery_timeout=discovery_timeout,
             records=records,
             extra_sources=extra_sources,
+            known=known,
         )
-        if boards is not None and not discover_only:
-            board_result = await boards
+        if boards_task is not None and not discover_only:
+            board_result = await boards_task
             out.collected = merge_collected(out.collected, board_result)
             out.incomplete_sources += board_result.incomplete_sources
         return out
     finally:
-        if boards is not None and not boards.done():
-            boards.cancel()
-            await asyncio.gather(boards, return_exceptions=True)
+        if boards_task is not None and not boards_task.done():
+            boards_task.cancel()
+            await asyncio.gather(boards_task, return_exceptions=True)
 
 
 async def _website_jobs(
@@ -126,6 +168,7 @@ async def _website_jobs(
     discovery_timeout: float | None,
     records: list[FetchRecord],
     extra_sources: Sequence[Source],
+    known: KnownJobs | None,
 ) -> WebsiteJobs:
     if website is None:
         out = WebsiteJobs(website="", domain="", discovery=None)
@@ -136,6 +179,7 @@ async def _website_jobs(
             deadline=deadline,
             limits=limits,
             records=records,
+            known=known,
         )
         out.incomplete_sources = out.collected.incomplete_sources
         return out
@@ -172,6 +216,7 @@ async def _website_jobs(
         deadline=deadline,
         limits=limits,
         records=records,
+        known=known,
     )
     out.incomplete_sources += out.collected.incomplete_sources
     return out
@@ -187,6 +232,7 @@ async def jobs_for_website(
     records: list[FetchRecord] | None = None,
     extra_sources: Sequence[Source] = (),
     board_sources: SourceFactory | None = None,
+    known: KnownJobs | None = None,
 ) -> WebsiteJobs:
     s = res.settings
     return await website_jobs(
@@ -204,4 +250,5 @@ async def jobs_for_website(
         records=records,
         extra_sources=extra_sources,
         board_sources=board_sources,
+        known=known,
     )

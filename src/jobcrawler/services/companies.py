@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -218,6 +219,7 @@ async def process_jobs(
     website: str | None,
     deadline: float,
     complete: bool,
+    reused: Collection[tuple[str, str]] = (),
 ) -> ProcessedJobs:
     """Chuẩn hoá → xác minh → gộp → lưu các tin đã thu thập; trả job đã nhận.
 
@@ -268,6 +270,7 @@ async def process_jobs(
             clusters=clusters,
             now=now,
             complete=complete and not deferred,
+            reused_postings=reused,
         )
     return ProcessedJobs(jobs=saved.jobs, deferred=deferred)
 
@@ -308,11 +311,22 @@ async def _run_pipeline(
             names=_names(state.company),
         )
 
+    known = await website_jobs.load_known_jobs(
+        res,
+        state.company.id,
+        now=datetime.now(UTC),
+        max_age_days=res.settings.job_reuse_days,
+    )
     if website:
         # Profile trên trang tuyển dụng được thu thập ngay, song song với bước tìm nguồn trên
         # website (không phải chờ discovery).
         found = await website_jobs.jobs_for_website(
-            res, website, deadline=deadline, records=records, board_sources=board_list
+            res,
+            website,
+            deadline=deadline,
+            records=records,
+            board_sources=board_list,
+            known=known,
         )
     else:
         board = await board_list()
@@ -336,6 +350,7 @@ async def _run_pipeline(
         website=website,
         deadline=deadline,
         complete=not incomplete and not failed,
+        reused=known.used,
     )
     if processed.deferred:
         incomplete.append(VERIFY_SOURCE)

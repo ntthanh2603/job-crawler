@@ -22,7 +22,7 @@ from jobcrawler.sources.ats import (
     workable,
     workday,
 )
-from jobcrawler.sources.base import Source, SourceError, SourceLimits, SourceSession
+from jobcrawler.sources.base import KnownJobs, Source, SourceError, SourceLimits, SourceSession
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -408,6 +408,13 @@ async def test_bamboohr_source_and_missing_company() -> None:
     capped = session(fetcher, max_detail_pages=1)
     await collect(source, capped)
     assert capped.truncated == ["detail_pages"]
+    # Chi tiết đã tải ở lượt trước: dùng lại, không gọi API chi tiết.
+    reusing = session(fetcher)
+    reusing.known = KnownJobs.of([(jobs[0], jobs[0].url)])
+    calls = len(fetcher.calls)
+    again = await collect(source, reusing)
+    assert [j.external_id for j in again] == ["seek:15"]
+    assert not any("/15/detail" in u for _, u, _ in fetcher.calls[calls:])
 
     gone = FakeFetcher()
     gone.add(
