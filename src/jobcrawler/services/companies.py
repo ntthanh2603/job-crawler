@@ -45,6 +45,8 @@ from jobcrawler.sources.base import FetchRecord, failed_page_rows
 log = get_logger(__name__)
 
 KYC_SOURCE = "kyc"
+# Có tin hoãn xác minh (LLM chưa kịp chấm) trong lượt chạy.
+VERIFY_SOURCE = "verify"
 # Phần cuối trước timeout SAQ dành cho việc lưu (không chạy LLM nữa). Đủ rộng để DB chậm lúc tải
 # cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed).
 SAVE_MARGIN_SECONDS = 8.0
@@ -59,6 +61,12 @@ class PipelineOutcome:
     error: str | None = None
     kyc_status: KycStatus | None = None
     website: str | None = None
+
+
+@dataclass(slots=True)
+class ProcessedJobs:
+    jobs: list[JobOut]  # job đã nhận (đã gộp)
+    deferred: int = 0  # tin hoãn xác minh (LLM chưa kịp chấm)
 
 
 @dataclass(slots=True)
@@ -210,11 +218,12 @@ async def process_jobs(
     website: str | None,
     deadline: float,
     complete: bool,
-) -> list[JobOut]:
+) -> ProcessedJobs:
     """Chuẩn hoá → xác minh → gộp → lưu các tin đã thu thập; trả job đã nhận.
 
     Bước LLM (chấm tin nghi ngờ, phân loại trường mơ hồ) được chạy tới `deadline` cộng phần
-    đệm trước timeout SAQ (chừa SAVE_MARGIN_SECONDS để lưu)."""
+    đệm trước timeout SAQ (chừa SAVE_MARGIN_SECONDS để lưu). Còn tin hoãn xác minh thì lượt chạy
+    không đủ để đóng job cũ."""
     s = res.settings
     now = datetime.now(UTC)
     until = deadline + max(
@@ -239,6 +248,7 @@ async def process_jobs(
         kv=kv,
     )
     accepted = [job for job, v in zip(normalized, verdicts, strict=True) if v.accepted]
+    deferred = sum(v.deferred for v in verdicts)
     clusters = dedup.cluster_jobs(accepted, sigs=sigs)
     log.info("dedup.done", accepted=len(accepted), jobs=len(clusters))
     await normalize.classify_unclear(
@@ -257,9 +267,9 @@ async def process_jobs(
             verdicts=verdicts,
             clusters=clusters,
             now=now,
-            complete=complete,
+            complete=complete and not deferred,
         )
-    return saved.jobs
+    return ProcessedJobs(jobs=saved.jobs, deferred=deferred)
 
 
 async def _run_pipeline(
@@ -300,7 +310,7 @@ async def _run_pipeline(
     incomplete += found.incomplete_sources
     # Nguồn lỗi/bị chặn (không phải hết giờ) cũng khiến lượt chạy không đủ để coi job cũ đã gỡ.
     failed = [r.name for r in found.collected.reports if r.outcome is not FetchOutcome.OK]
-    jobs = await process_jobs(
+    processed = await process_jobs(
         res,
         state.company,
         found.jobs,
@@ -308,10 +318,12 @@ async def _run_pipeline(
         deadline=deadline,
         complete=not incomplete and not failed,
     )
+    if processed.deferred:
+        incomplete.append(VERIFY_SOURCE)
     return PipelineOutcome(
         status=RunStatus.PARTIAL if incomplete else ok,
         jobs_found=len(found.jobs),
-        jobs=jobs,
+        jobs=processed.jobs,
         incomplete_sources=incomplete,
         kyc_status=step.status,
         website=website,

@@ -218,6 +218,47 @@ async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: 
         assert (posting.accepted, posting.job_id, posting.status) == (False, None, "expired")
 
 
+async def test_deferred_posting_keeps_its_job_open(integration_settings: Settings) -> None:
+    """Tin LLM chưa kịp chấm (hoãn): không ghi là bị loại, job cũ của nó vẫn mở."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME deferred {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        job = normalized(raw_job(external_id=f"d-{uuid4().hex[:8]}"), board=False)
+
+        async def save(verdict: Verdict, *, complete: bool) -> store.SaveResult:
+            clusters = dedup.cluster_jobs([job]) if verdict.accepted else []
+            async with res.sessionmaker.begin() as s:
+                return await store.save_company_jobs(
+                    s,
+                    company_id=company_id,
+                    company_name="ACME",
+                    jobs=[job],
+                    verdicts=[verdict],
+                    clusters=clusters,
+                    now=NOW,
+                    complete=complete,
+                )
+
+        await save(Verdict(accepted=True, confidence=0.9, reasons=["TEST"]), complete=True)
+        [row] = await company_jobs(res, company_id)
+        deferred = Verdict(accepted=True, confidence=0.6)
+        deferred.defer("không kịp / vượt giới hạn LLM")
+        saved = await save(deferred, complete=False)
+        assert saved.postings == 0
+        assert saved.removed == 0
+        [again] = await company_jobs(res, company_id)
+        assert (again.id, again.status) == (row.id, "active")
+        async with res.sessionmaker() as s:
+            posting = await s.scalar(
+                select(JobPosting).where(JobPosting.external_id == job.external_id)
+            )
+        assert posting is not None
+        assert (posting.accepted, posting.job_id) == (True, row.id)
+
+
 async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
     integration_settings: Settings,
 ) -> None:

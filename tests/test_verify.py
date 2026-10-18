@@ -231,7 +231,28 @@ async def test_clean_jobs_do_not_call_llm_and_cap_is_respected() -> None:
     assert isinstance(chat, FakeChatClient)
     assert len(chat.calls) == 2
     assert [v.accepted for v in verdicts] == [True, True, True, False]
+    # Vượt giới hạn: hoãn tới lượt sau, không phải loại.
+    assert verdicts[3].deferred
+    assert verdicts[3].code == verify.DEFERRED
     assert "vượt giới hạn LLM" in verdicts[3].reasons[-1]
+
+
+async def test_llm_out_of_time_or_failing_defers_instead_of_rejecting() -> None:
+    job = normalized(raw_job(method=ExtractionMethod.LLM))
+    # Hết giờ trước khi kịp hỏi.
+    [late] = await verify_jobs([job], ACME, llm_reply(), now=NOW, until=time.monotonic())
+    assert late.deferred
+    assert not late.accepted
+    assert late.code == verify.DEFERRED
+    # LLM lỗi (trả JSON hỏng) cũng là hoãn: lỗi tạm thời, không phải bằng chứng tin xấu.
+    broken = LLMClient(FakeChatClient(["không phải JSON"]), model="qwen")
+    [failed] = await verify_jobs([job], ACME, broken, now=NOW, until=time.monotonic() + 10)
+    assert failed.deferred
+    # Rule loại vẫn loại ngay, không hoãn.
+    expired = normalized(raw_job(method=ExtractionMethod.LLM, expires_at=NOW - timedelta(days=1)))
+    [v] = await verify_jobs([expired], ACME, llm_reply(), now=NOW, until=time.monotonic())
+    assert v.code == verify.EXPIRED
+    assert not v.deferred
 
 
 async def test_every_decision_has_reasons_on_real_board_jobs() -> None:

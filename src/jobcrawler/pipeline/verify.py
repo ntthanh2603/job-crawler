@@ -7,7 +7,8 @@ Mã loại: `EXPIRED`, `EMPTY_JD`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_
 Độ tin cậy ban đầu theo nguồn và cách bóc (ATS API > JSON-LD > parser > heuristic > LLM). Tin có
 điểm cần xem lại (tên nhà tuyển dụng khác, dấu hiệu lừa đảo nhẹ, bóc bằng LLM...) bị hạ dưới
 ngưỡng và phải được LLM xác nhận (`confidence ≥ VERIFY_MIN_CONFIDENCE`, mặc định 0.8). Không có
-LLM / hết giờ thì loại: ưu tiên chính xác hơn số lượng.
+LLM thì loại: ưu tiên chính xác hơn số lượng. Có LLM nhưng hết giờ / vượt giới hạn / LLM lỗi thì
+hoãn (`DEFERRED`): không nhận, không loại, lượt sau chấm tiếp (câu trả lời đã có được cache).
 """
 
 from __future__ import annotations
@@ -44,6 +45,8 @@ SCAM_SIGNALS = "SCAM_SIGNALS"
 NOT_A_JOB = "NOT_A_JOB"
 SPAM_REPOST = "SPAM_REPOST"
 LOW_CONFIDENCE = "LOW_CONFIDENCE"
+# Không phải mã loại: tin nghi ngờ chưa được LLM chấm trong lượt này.
+DEFERRED = "DEFERRED"
 REJECT_CODES = (
     EXPIRED,
     EMPTY_JD,
@@ -111,12 +114,15 @@ class Verdict:
     reasons: list[str] = field(default_factory=list)
     concerns: list[str] = field(default_factory=list)  # điểm cần LLM xem lại
     llm: bool = False
+    deferred: bool = False  # chưa chấm xong: không nhận, không loại
 
     @property
     def code(self) -> str | None:
-        """Mã loại chính (None nếu nhận)."""
+        """Mã loại chính (None nếu nhận, `DEFERRED` nếu hoãn)."""
         if self.accepted:
             return None
+        if self.deferred:
+            return DEFERRED
         return next(
             (r.split(":")[0] for r in self.reasons if r.split(":")[0] in REJECT_CODES), None
         )
@@ -124,6 +130,11 @@ class Verdict:
     def reject(self, code: str, detail: str | None = None) -> None:
         self.accepted = False
         self.reasons.append(f"{code}: {detail}" if detail else code)
+
+    def defer(self, detail: str) -> None:
+        self.accepted = False
+        self.deferred = True
+        self.reasons.append(f"{DEFERRED}: {detail}")
 
 
 # --- nhà tuyển dụng -------------------------------------------------------------------------------
@@ -538,7 +549,7 @@ async def _llm_check(
         jd=job.jd_text,
     )
     if result.value is None:
-        verdict.reject(LOW_CONFIDENCE, f"LLM không trả lời ({result.error})")
+        verdict.defer(f"LLM không trả lời ({result.error})")
         return
     _apply_llm(verdict, result.value, min_confidence)
 
@@ -576,8 +587,9 @@ async def verify_jobs(
     kv: KeyValueStore | None = None,
 ) -> list[Verdict]:
     """Xác minh mọi tin của một doanh nghiệp. LLM chỉ chấm tin còn nghi ngờ (tối đa `max_llm`
-    lời gọi, dừng ở `until` theo `time.monotonic()`); tin nghi ngờ không được chấm thì bị loại.
-    Câu trả lời của LLM được cache theo doanh nghiệp + nội dung tin (`kv`, 7 ngày)."""
+    lời gọi, dừng ở `until` theo `time.monotonic()`); tin nghi ngờ không được chấm thì bị loại
+    khi không có LLM, hoãn (`Verdict.deferred`) khi có LLM mà không kịp. Câu trả lời của LLM được
+    cache theo doanh nghiệp + nội dung tin (`kv`, 7 ngày)."""
     sigs = sigs or Signatures()
     verdicts = [
         check_rules(job, ctx, now=now, min_jd_chars=min_jd_chars, board_max_age=board_max_age)
@@ -613,17 +625,21 @@ async def verify_jobs(
     for i in suspects:
         v = verdicts[i]
         if v.accepted and not v.llm:
-            why = "LLM chưa cấu hình" if not llm.enabled else "không kịp / vượt giới hạn LLM"
-            v.reject(LOW_CONFIDENCE, f"{'; '.join(v.concerns)} ({why})")
+            concerns = "; ".join(v.concerns)
+            if llm.enabled:
+                v.defer(f"{concerns} (không kịp / vượt giới hạn LLM)")
+            else:
+                v.reject(LOW_CONFIDENCE, f"{concerns} (LLM chưa cấu hình)")
 
     for job, v in zip(jobs, verdicts, strict=True):
-        if not v.accepted:
+        if not v.accepted and not v.deferred:
             log.info("verify.reject", url=job.url, title=job.title, reasons=v.reasons)
     codes = Counter(v.code for v in verdicts if not v.accepted)
     log.info(
         "verify.done",
         jobs=len(jobs),
         accepted=sum(v.accepted for v in verdicts),
+        deferred=sum(v.deferred for v in verdicts),
         llm=sum(v.llm for v in verdicts),
         rejected=dict(codes),
     )

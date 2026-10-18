@@ -349,10 +349,15 @@ async def save_company_jobs(
     """Ghi tin + job của một lượt chạy (trong transaction của `session`).
 
     `complete`: lượt chạy đủ mọi nguồn — job cũ không còn thấy được đánh `removed` (hoặc
-    `expired` nếu đã quá hạn nộp). Lượt `partial` không đụng tới job cũ."""
+    `expired` nếu đã quá hạn nộp). Lượt `partial` không đụng tới job cũ.
+
+    Tin hoãn xác minh (`Verdict.deferred`) không được ghi: tin và job cũ của nó giữ nguyên như
+    lượt trước cho tới khi được chấm."""
     postings: dict[tuple[str, str], _PostingRow] = {}
     verdict_of: dict[tuple[str, str], Verdict] = {}
     for job, verdict in zip(jobs, verdicts, strict=True):
+        if verdict.deferred:
+            continue
         postings[_key(job)] = await _upsert_posting(session, company_id, job, verdict, now)
         verdict_of[_key(job)] = verdict
 
