@@ -385,7 +385,8 @@ def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
         )
         parents = segs if by_id else segs[:-1]
         job_seg = any(s in JOB_SEGMENTS for s in parents) or any(
-            s.startswith(("tuyen-dung-", "viec-lam-", "job-", "career-")) for s in segs
+            s.startswith(("tuyen-dung-", "viec-lam-", "job-", "career-", "recruitment-"))
+            for s in segs
         )
         last = segs[-1]
         slug = by_id or ((bool(re.search(r"\d", last)) or last.count("-") >= 2) and len(last) >= 5)

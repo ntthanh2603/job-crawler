@@ -101,6 +101,22 @@ def test_job_links_scoring() -> None:
     ]
 
 
+def test_recruitment_section_detail_links_are_jobs() -> None:
+    """Viettel (DOM sau khi render): /recruitment-information/detail/<mã>."""
+    base = "https://tuyendung.viettel.vn"
+    links = [
+        Link(f"{base}/recruitment-information/detail/44404", "Kỹ sư phát triển phần mềm"),
+        Link(f"{base}/recruitment-information/detail/44398", "Chuyên viên phân tích dữ liệu"),
+        Link(f"{base}/recruitment-event/search", "Sự kiện tuyển dụng"),
+        Link(f"{base}/page/page-recruitmentEvent", "Sự kiện"),
+    ]
+    found = job_links(links, f"{base}/recruitment-information/search")
+    assert [j.url for j in found] == [
+        f"{base}/recruitment-information/detail/44404",
+        f"{base}/recruitment-information/detail/44398",
+    ]
+
+
 def test_listing_root_page_does_not_treat_every_link_as_child() -> None:
     links = [
         Link("https://jobs.a.vn/ve-chung-toi-va-van-hoa", "Về chúng tôi và văn hoá"),
