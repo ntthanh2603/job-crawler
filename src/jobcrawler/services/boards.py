@@ -299,6 +299,55 @@ async def _adopt_profile(
     return True
 
 
+async def rerun_companies_with_new_jobs(
+    res: Resources, source: str, since: datetime, *, now: datetime | None = None
+) -> int:
+    """Sau một lượt index: xếp `process_company` cho doanh nghiệp có profile trên `source` vừa
+    có tin mới (hoặc vừa được map) từ `since`, nếu lượt chạy gần nhất cũ hơn
+    BOARD_RERUN_MIN_HOURS giờ. Trả số job đã xếp."""
+    from jobcrawler.queues import queue_from_url
+    from jobcrawler.services import batch
+
+    s = res.settings
+    if not s.board_rerun_companies:
+        return 0
+    now = now or datetime.now(UTC)
+    fresh_jobs = (
+        select(SourceProfile.company_id)
+        .join(JobPosting, JobPosting.source_profile_id == SourceProfile.id)
+        .where(
+            JobPosting.source == source,
+            JobPosting.first_seen_at >= since,
+            SourceProfile.company_id.is_not(None),
+        )
+    )
+    new_profiles = select(SourceProfile.company_id).where(
+        SourceProfile.source == source,
+        SourceProfile.matched_at >= since,
+        SourceProfile.company_id.is_not(None),
+    )
+    cutoff = now - timedelta(hours=s.board_rerun_min_hours)
+    async with res.sessionmaker() as session:
+        companies = list(
+            await session.scalars(
+                select(Company).where(
+                    or_(Company.id.in_(fresh_jobs), Company.id.in_(new_profiles)),
+                    or_(Company.last_run_at.is_(None), Company.last_run_at < cutoff),
+                )
+            )
+        )
+    if not companies:
+        return 0
+    queue = queue_from_url(s.redis_url, s.queue_name)
+    await queue.connect()
+    try:
+        result = await batch.enqueue_companies(queue, companies, s)
+    finally:
+        await queue.disconnect()
+    log.info("boards.rerun_companies", source=source, enqueued=result.enqueued)
+    return result.enqueued
+
+
 @dataclass(slots=True)
 class MapReport:
     matched: int

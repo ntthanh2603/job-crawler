@@ -4,7 +4,7 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import delete, func, select, text, update
@@ -265,6 +265,45 @@ async def test_refetch_without_profile_link_keeps_job_on_profile(
         row = (await postings(res))["11"]
         assert row.raw["title"] == "Kế toán trưởng"
         assert row.source_profile_id == linked
+
+
+async def test_index_run_enqueues_companies_with_new_jobs(
+    integration_settings: Settings,
+) -> None:
+    from saq import Queue
+
+    from .test_batch_db import drop_queue
+
+    name = f"jobcrawler-test-{uuid4().hex[:8]}"
+    settings = settings_for(integration_settings).model_copy(update={"queue_name": name})
+    async with open_resources(settings, db_logs=False) as res:
+        company_id = await reset(res)
+        started = datetime.now(UTC)
+        await indexer(res, fake_site(JOBS)).run()  # ACME (profile 7) có 2 tin mới
+        queue = Queue.from_url(settings.redis_url, name=name)
+        await queue.connect()
+        try:
+            # Doanh nghiệp vừa chạy (trong BOARD_RERUN_MIN_HOURS) thì không xếp lại.
+            async with res.sessionmaker.begin() as s:
+                await s.execute(
+                    update(Company)
+                    .where(Company.id == company_id)
+                    .values(last_run_at=datetime.now(UTC))
+                )
+            rerun = board_service.rerun_companies_with_new_jobs
+            assert await rerun(res, FakeBoard.name, started) == 0
+            async with res.sessionmaker.begin() as s:
+                await s.execute(
+                    update(Company)
+                    .where(Company.id == company_id)
+                    .values(last_run_at=datetime(2020, 1, 1, tzinfo=UTC))
+                )
+            assert await rerun(res, FakeBoard.name, started) == 1
+            # Đã có trong hàng đợi (cùng khoá doanh nghiệp): không xếp trùng.
+            assert await rerun(res, FakeBoard.name, started) == 0
+        finally:
+            await queue.disconnect()
+            await drop_queue(settings.redis_url, name)
 
 
 async def test_blocked_detail_stops_run_and_lock(integration_settings: Settings) -> None:

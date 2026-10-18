@@ -6,6 +6,7 @@ import asyncio
 import csv
 import io
 import re
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -305,7 +306,20 @@ def job_key(company: Company) -> str:
     return f"{key}:{company.tax_code}" if company.tax_code else key
 
 
-def job_kwargs(company: Company) -> dict[str, Any]:
+def job_key_for(company_in: CompanyIn) -> str:
+    key = f"company:{normalize_company_name(company_in.name)}"
+    return f"{key}:{company_in.tax_code}" if company_in.tax_code else key
+
+
+def job_kwargs(company: Company | CompanyIn, company_id: UUID | None = None) -> dict[str, Any]:
+    if isinstance(company, CompanyIn):
+        return {
+            "company_id": str(company_id) if company_id else None,
+            "name": company.name,
+            "tax_code": company.tax_code,
+            "website": company.website,
+            "note": company.note,
+        }
     return {
         "company_id": str(company.id),  # tham số job SAQ là JSON
         "name": company.input_name,
@@ -313,6 +327,29 @@ def job_kwargs(company: Company) -> dict[str, Any]:
         "website": company.input_website,
         "note": company.note,
     }
+
+
+async def enqueue_continuation(
+    queue: Queue,
+    company_in: CompanyIn,
+    company_id: UUID,
+    settings: Settings,
+    *,
+    continuation: int,
+) -> bool:
+    """Lượt chạy tiếp của một doanh nghiệp vừa chạy `partial` (khoá riêng: lượt hiện tại vẫn giữ
+    khoá chính tới khi xong)."""
+    key = f"{job_key_for(company_in)}:cont{continuation}"
+    job = await queue.enqueue(
+        "process_company",
+        key=key,
+        timeout=settings.company_timeout_seconds,
+        retries=settings.company_job_retries,
+        scheduled=int(time.time() + settings.company_continuation_delay_seconds),
+        continuation=continuation,
+        **job_kwargs(company_in, company_id),
+    )
+    return job is not None
 
 
 async def enqueue_companies(

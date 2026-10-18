@@ -140,6 +140,10 @@ class Settings(BaseSettings):
     board_name_profiles_without_kyc: bool = True
     # Doanh nghiệp chưa có profile trên một trang: tìm bằng SERP `site:` (cần SERP_API_KEY).
     board_serp_lookup: bool = True
+    # Sau mỗi lượt index: doanh nghiệp có profile (đã map) vừa có tin mới được xếp chạy lại, nếu
+    # lượt chạy gần nhất đã cũ hơn chừng này giờ.
+    board_rerun_companies: bool = True
+    board_rerun_min_hours: float = Field(default=6, ge=0)
     board_serp_lookup_seconds: float = Field(default=20, gt=0)
 
     # Chuẩn hoá, xác minh, gộp (process_company sau bước thu thập).
@@ -159,6 +163,10 @@ class Settings(BaseSettings):
     company_timeout_seconds: int = Field(default=180, gt=0)
     # Số lần chạy tối đa một job `process_company` (worker chết / timeout cứng thì chạy lại).
     company_job_retries: int = Field(default=2, ge=1)
+    # Lượt `partial` (chạm giới hạn, hết giờ, tin chờ LLM): tự xếp lượt chạy tiếp, tối đa chừng
+    # này lần liên tiếp, sau chừng này giây (lượt sau dùng lại tin đã tải nên đi tiếp được).
+    company_max_continuations: int = Field(default=2, ge=0)
+    company_continuation_delay_seconds: float = Field(default=60, ge=0)
 
     # Queue riêng cho lượt index trang tuyển dụng (job dài hàng giờ) để không chiếm chỗ của
     # doanh nghiệp: `jobcrawler worker --boards` (service `indexer` trong compose).

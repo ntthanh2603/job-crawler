@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from typing import Any, Literal, Required
 from uuid import UUID
 
@@ -22,8 +23,8 @@ from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
 from jobcrawler.queues import queue_from_url
 from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import CompanyIn
-from jobcrawler.services import boards, companies, maintenance, overview
+from jobcrawler.schemas import CompanyIn, RunStatus
+from jobcrawler.services import batch, boards, companies, maintenance, overview
 
 log = get_logger(__name__)
 
@@ -70,11 +71,24 @@ async def process_company(
     website: str | None = None,
     note: str | None = None,
     company_id: str | None = None,
+    continuation: int = 0,
 ) -> dict[str, Any]:
+    """`continuation`: số lượt chạy tiếp liền trước (lượt `partial` tự xếp lượt sau)."""
+    res = ctx["resources"]
     company_in = CompanyIn(name=name, tax_code=tax_code, website=website, note=note)
-    result = await companies.process_company(
-        ctx["resources"], company_in, company_id=_as_uuid(company_id)
-    )
+    result = await companies.process_company(res, company_in, company_id=_as_uuid(company_id))
+    if result.status is RunStatus.PARTIAL and continuation < res.settings.company_max_continuations:
+        # Chạm giới hạn / hết giờ / tin chờ LLM: lượt sau dùng lại phần đã tải và đi tiếp.
+        queued = await batch.enqueue_continuation(
+            res.queue, company_in, result.company_id, res.settings, continuation=continuation + 1
+        )
+        log.info(
+            "company.continue",
+            company_id=result.company_id,
+            continuation=continuation + 1,
+            queued=queued,
+            incomplete_sources=result.incomplete_sources,
+        )
     return result.model_dump(mode="json", exclude={"jobs"})
 
 
@@ -84,11 +98,17 @@ def board_job_timeout(settings: Settings) -> int:
 
 
 async def index_board(ctx: WorkerContext, *, source: str) -> dict[str, Any]:
-    """Index tăng dần một trang tuyển dụng."""
+    """Index tăng dần một trang tuyển dụng, rồi xếp chạy lại doanh nghiệp có profile vừa có tin
+    mới (để tin mới gắn vào doanh nghiệp mà không chờ lượt chạy kế tiếp)."""
     res = ctx["resources"]
     [adapter] = boards.selected_boards(res.settings, [source])
+    started = datetime.now(UTC)
     stats = await boards.index_board(res, adapter, boards.index_options(res.settings))
-    return dataclasses.asdict(stats)
+    out = dataclasses.asdict(stats)
+    out["companies_enqueued"] = await boards.rerun_companies_with_new_jobs(
+        res, adapter.name, started
+    )
+    return out
 
 
 async def index_boards_cron(ctx: WorkerContext) -> dict[str, Any]:
