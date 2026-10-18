@@ -56,7 +56,10 @@ Tìm nguồn: link trên trang chủ → sitemap.xml → đường dẫn phổ b
 nhiều ứng viên thì LLM chọn trong danh sách. Kết quả cache 7 ngày trên Redis (`--refresh` bỏ qua).
 ATS có adapter: Greenhouse, Lever, Ashby, Workable, Workday, BambooHR, Recruitee, Teamtailor
 (SmartRecruiters chỉ nhận diện: robots.txt cấm API). Trang careers khác: JSON-LD → parser chung →
-LLM; mở bằng Chromium khi HTML không có danh sách tin.
+LLM; mở bằng Chromium khi HTML không có danh sách tin. Trang SPA: đọc tin từ JSON nhúng
+(`__NEXT_DATA__`) và từ API trang gọi khi render, rồi đọc tiếp các trang sau của API; trang danh
+mục / theo tỉnh được đi tiếp tới tin. Doanh nghiệp nhiều tin được thu qua nhiều lượt (lượt
+`partial` tự chạy tiếp, dùng lại tin đã tải): xem [docs/OPERATIONS.md](docs/OPERATIONS.md#thu-thập-đủ-việc-của-một-doanh-nghiệp).
 
 ## Index trang tuyển dụng
 
@@ -65,6 +68,7 @@ uv run jobcrawler index-boards --list                      # các trang và tr�
 uv run jobcrawler index-boards --source itviec             # index tăng dần một trang
 uv run jobcrawler index-boards --max-jobs 50 --budget-minutes 10   # chạy thử mọi trang
 uv run jobcrawler index-boards --map-only                  # map lại profile ↔ doanh nghiệp
+uv run jobcrawler index-boards --rematch                   # tính lại khoá tên rồi map lại (sau nâng cấp)
 ```
 
 Worker chạy cron `BOARD_INDEX_CRON` (mặc định mỗi 5 giờ), mỗi trang một job `index_board`.
@@ -72,7 +76,9 @@ Mỗi lượt đọc danh sách tin (sitemap kèm `lastmod`, trang danh sách, A
 tải trang chi tiết của tin mới / đã đổi / lâu chưa tải (gửi kèm ETag), lưu `job_postings` và
 `source_profiles`, đánh dấu tin vắng 2 lượt là gỡ, rồi map profile có tên gần với doanh nghiệp
 đầu vào (MST → website → tên; mơ hồ thì LLM). `process_company` lấy tin từ index của profile đã
-map (cũ hơn `BOARD_STALE_HOURS` thì crawl trực tiếp trang profile).
+map khi index đủ tin của profile đó và chưa cũ hơn `BOARD_STALE_HOURS`; không thì đọc danh sách
+tin trên trang profile (đủ các trang), dùng lại tin đã index và chỉ tải tin còn thiếu. Doanh
+nghiệp có profile vừa có tin mới được xếp chạy lại sau lượt index.
 Giới hạn đang đặt khi chưa có proxy và cách nới: [docs/OPERATIONS.md](docs/OPERATIONS.md#index-trang-tuyển-dụng--đang-chạy-không-proxy).
 
 | Trang | Danh sách | Ghi chú |
