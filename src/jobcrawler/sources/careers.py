@@ -527,6 +527,7 @@ class ListingScan:
     next_pages: list[str]
     # API danh sách tin (hoặc trang có JSON nhúng) còn trang sau: (cách phân trang, số tin đã đọc).
     apis: list[tuple[json_jobs.Pager, int]] = field(default_factory=list)
+    id_names: dict[tuple[str, str], str] = field(default_factory=dict)  # danh mục trang tải kèm
 
     @property
     def empty(self) -> bool:
@@ -572,11 +573,13 @@ def scan_listing(page: Page) -> ListingScan:
     texts = {link.url: link.text for link in links}
     ids = {job.external_id for job in jobs}
     apis: list[tuple[json_jobs.Pager, int]] = []
-    for doc in json_docs(page):
+    docs = json_docs(page)
+    names = json_jobs.id_names(docs)
+    for doc in docs:
         arrays = json_jobs.job_arrays(doc)
         if arrays and (pager := json_jobs.pager_for(doc, arrays[0])) is not None:
             apis.append((pager, len(arrays[0].items)))
-        extracted = json_jobs.extract(doc, page_url=page.url, links=texts)
+        extracted = json_jobs.extract(doc, page_url=page.url, links=texts, names=names)
         for job in extracted.jobs:
             if job.external_id not in ids:
                 ids.add(job.external_id)
@@ -585,7 +588,7 @@ def scan_listing(page: Page) -> ListingScan:
             if url not in known and url != page.url:
                 known.add(url)
                 found.append(JobLink(url=url, title=title))
-    return ListingScan(page, links, jobs, found, listing_links(links, page.url), apis)
+    return ListingScan(page, links, jobs, found, listing_links(links, page.url), apis, names)
 
 
 async def scan_with_render(
@@ -758,6 +761,7 @@ class CareersSource(Source):
         page: Page,
         links: dict[str, str],
         seen: set[str],
+        names: json_jobs.IdNames,
     ) -> AsyncIterator[RawJob | JobLink]:
         """Đọc các trang sau của API danh sách tin: tin có mô tả, hoặc link trang tin. `seen`: mã
         tin / URL đã có — trang không có gì mới (API bỏ qua tham số trang) thì dừng."""
@@ -776,7 +780,7 @@ class CareersSource(Source):
                     continue
                 read += len(arrays[0].items)
                 pager = json_jobs.with_doc(pager, doc)
-                extracted = json_jobs.extract(doc, page_url=page.url, links=links)
+                extracted = json_jobs.extract(doc, page_url=page.url, links=links, names=names)
                 for job in extracted.jobs:
                     if job.external_id not in seen:
                         seen.add(job.external_id)
@@ -999,7 +1003,9 @@ class CareersSource(Source):
         for scan in scans:
             texts = {link.url: link.text for link in scan.links}
             for pager, first in scan.apis:
-                async for item in self._api_jobs(session, pager, first, scan.page, texts, seen):
+                async for item in self._api_jobs(
+                    session, pager, first, scan.page, texts, seen, scan.id_names
+                ):
                     if isinstance(item, JobLink):
                         add_links([item])
                     elif item.external_id not in yielded:

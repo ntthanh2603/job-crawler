@@ -1,0 +1,499 @@
+{
+ "url": "https://ats.workatsea.com/ats/api/v1/user/meta/slice/?flags=2147851120&from_career=true",
+ "method": "GET",
+ "request_json": null,
+ "body": {
+  "code": 0,
+  "message": "success",
+  "data": {
+   "flat_locations": [
+    {
+     "region_id": 1,
+     "region_name": "Brazil",
+     "region_abbr": "BR",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 2,
+     "city_name": "São Paulo",
+     "city_abbr": "São Paulo",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 13,
+     "region_transify_key": "region_brazil",
+     "city_transify_key": "city_saopaulo",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 3,
+     "region_name": "China",
+     "region_abbr": "CN",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 5,
+     "city_name": "Shanghai",
+     "city_abbr": "Shanghai",
+     "city_count": 2,
+     "default_city": 1,
+     "career_value_city": 3,
+     "region_transify_key": "region_china",
+     "city_transify_key": "city_shanghai",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 3,
+     "region_name": "China",
+     "region_abbr": "CN",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 6,
+     "city_name": "Shenzhen",
+     "city_abbr": "Shenzhen",
+     "city_count": 2,
+     "default_city": 1,
+     "career_value_city": 2,
+     "region_transify_key": "region_china",
+     "city_transify_key": "city_shenzhen",
+     "display_sites": [
+      4,
+      2
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 8,
+     "city_name": "Bandung",
+     "city_abbr": "Bandung",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 18,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_bandung",
+     "display_sites": [
+      4,
+      6
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 9,
+     "city_name": "Bekasi",
+     "city_abbr": "Bekasi",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 19,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_bekasi",
+     "display_sites": [
+      4
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 10,
+     "city_name": "Jakarta",
+     "city_abbr": "Jakarta",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 5,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_jakarta",
+     "display_sites": [
+      3,
+      4,
+      2,
+      1,
+      6
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 11,
+     "city_name": "Medan",
+     "city_abbr": "Medan",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 20,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_medan",
+     "display_sites": [
+      4,
+      6
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 12,
+     "city_name": "Solo",
+     "city_abbr": "Solo",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 17,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_solo",
+     "display_sites": [
+      4
+     ]
+    },
+    {
+     "region_id": 7,
+     "region_name": "Indonesia",
+     "region_abbr": "ID",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 13,
+     "city_name": "Yogyakarta",
+     "city_abbr": "Yogyakarta",
+     "city_count": 6,
+     "default_city": 1,
+     "career_value_city": 14,
+     "region_transify_key": "region_indonesia",
+     "city_transify_key": "city_yogyakarta",
+     "display_sites": [
+      3,
+      4,
+      6
+     ]
+    },
+    {
+     "region_id": 14,
+     "region_name": "Japan",
+     "region_abbr": "JP",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 15,
+     "city_name": "Tokyo",
+     "city_abbr": "Tokyo",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 11,
+     "region_transify_key": "region_japan",
+     "city_transify_key": "city_tokyo",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 16,
+     "region_name": "Malaysia",
+     "region_abbr": "MY",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 17,
+     "city_name": "Kuala Lumpur",
+     "city_abbr": "Kuala Lumpur",
+     "city_count": 3,
+     "default_city": 1,
+     "career_value_city": 6,
+     "region_transify_key": "region_malaysia",
+     "city_transify_key": "city_kualalumpur",
+     "display_sites": [
+      3,
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 16,
+     "region_name": "Malaysia",
+     "region_abbr": "MY",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 100049,
+     "city_name": "Sabah",
+     "city_abbr": "Sabah",
+     "city_count": 3,
+     "default_city": 0,
+     "career_value_city": 100049,
+     "region_transify_key": "region_malaysia",
+     "city_transify_key": "ATS_city_Sabah_959391",
+     "display_sites": [
+      4
+     ]
+    },
+    {
+     "region_id": 16,
+     "region_name": "Malaysia",
+     "region_abbr": "MY",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 100050,
+     "city_name": "Sarawak",
+     "city_abbr": "Sarawak",
+     "city_count": 3,
+     "default_city": 0,
+     "career_value_city": 100050,
+     "region_transify_key": "region_malaysia",
+     "city_transify_key": "ATS_city_Sarawak_721553",
+     "display_sites": [
+      4
+     ]
+    },
+    {
+     "region_id": 18,
+     "region_name": "Mexico",
+     "region_abbr": "MX",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 19,
+     "city_name": "Mexico City",
+     "city_abbr": "Mexico City",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 21,
+     "region_transify_key": "region_mexico",
+     "city_transify_key": "city_mexicocity",
+     "display_sites": [
+      4,
+      2,
+      1,
+      3
+     ]
+    },
+    {
+     "region_id": 20,
+     "region_name": "Philippines",
+     "region_abbr": "PH",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 21,
+     "city_name": "Manila",
+     "city_abbr": "Manila",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 10,
+     "region_transify_key": "region_philippines",
+     "city_transify_key": "city_manila",
+     "display_sites": [
+      3,
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 24,
+     "region_name": "Singapore",
+     "region_abbr": "SG",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 25,
+     "city_name": "Singapore",
+     "city_abbr": "Singapore",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 1,
+     "region_transify_key": "region_city_singapore",
+     "city_transify_key": "region_city_singapore",
+     "display_sites": [
+      3,
+      1,
+      2,
+      4
+     ]
+    },
+    {
+     "region_id": 26,
+     "region_name": "South Korea",
+     "region_abbr": "KR",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 27,
+     "city_name": "Seoul",
+     "city_abbr": "Seoul",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 12,
+     "region_transify_key": "region_southkorea",
+     "city_transify_key": "city_seoul",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 28,
+     "region_name": "Taipei",
+     "region_abbr": "TW",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 29,
+     "city_name": "Taipei",
+     "city_abbr": "Taipei",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 4,
+     "region_transify_key": "region_city_taipei",
+     "city_transify_key": "region_city_taipei",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 30,
+     "region_name": "Thailand",
+     "region_abbr": "TH",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 31,
+     "city_name": "Bangkok",
+     "city_abbr": "Bangkok",
+     "city_count": 1,
+     "default_city": 1,
+     "career_value_city": 7,
+     "region_transify_key": "region_thailand",
+     "city_transify_key": "city_bangkok",
+     "display_sites": [
+      3,
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 32,
+     "region_name": "Vietnam",
+     "region_abbr": "VN",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 33,
+     "city_name": "Hanoi",
+     "city_abbr": "Hanoi",
+     "city_count": 2,
+     "default_city": 1,
+     "career_value_city": 9,
+     "region_transify_key": "region_vietnam",
+     "city_transify_key": "city_hanoi",
+     "display_sites": [
+      4,
+      2,
+      1
+     ]
+    },
+    {
+     "region_id": 32,
+     "region_name": "Vietnam",
+     "region_abbr": "VN",
+     "default_region": 1,
+     "career_value_region": 0,
+     "city_id": 34,
+     "city_name": "Ho Chi Minh City",
+     "city_abbr": "Ho Chi Minh City",
+     "city_count": 2,
+     "default_city": 1,
+     "career_value_city": 8,
+     "region_transify_key": "region_vietnam",
+     "city_transify_key": "city_hochiminhcity",
+     "display_sites": [
+      3,
+      4,
+      2,
+      1
+     ]
+    }
+   ],
+   "dept_list": [
+    {
+     "dept_id": 1,
+     "dept_name": "Business Development and Partnerships",
+     "name_transify_key": "department_bd",
+     "desc_transify_key": "department_description_bd",
+     "default_dept": 1,
+     "career_value": 101,
+     "display_sites": [
+      3,
+      4,
+      1,
+      6
+     ]
+    },
+    {
+     "dept_id": 3,
+     "dept_name": "Business Intelligence and Data Analytics",
+     "name_transify_key": "department_dataana",
+     "desc_transify_key": "department_description_dataana",
+     "default_dept": 1,
+     "career_value": 103,
+     "display_sites": [
+      3,
+      4,
+      1,
+      2,
+      6
+     ]
+    },
+    {
+     "dept_id": 100005,
+     "dept_name": "Compliance",
+     "name_transify_key": "department_cp",
+     "desc_transify_key": "department_description_cp",
+     "default_dept": 1,
+     "career_value": 119,
+     "display_sites": [
+      3,
+      4,
+      2,
+      6
+     ]
+    },
+    {
+     "dept_id": 2,
+     "dept_name": "Cross Border eCommerce",
+     "name_transify_key": "department_cbecommerce",
+     "desc_transify_key": "department_description_cbecommerce",
+     "default_dept": 1,
+     "career_value": 102,
+     "display_sites": [
+      4
+     ]
+    },
+    {
+     "dept_id": 4,
+     "dept_name": "Data Science",
+     "name_transify_key": "department_datasci",
+     "desc_transify_key": "department_description_datasci",
+     "default_dept": 1,
+     "career_value": 112,
+     "display_sites": [
+      3,
+      4,
+      6
+     ]
+    }
+   ]
+  }
+ }
+}

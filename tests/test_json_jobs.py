@@ -17,6 +17,7 @@ from jobcrawler.sources.json_jobs import (
     JsonDoc,
     embedded_json,
     extract,
+    id_names,
     job_arrays,
     pager_for,
     to_job,
@@ -82,6 +83,11 @@ def test_shopee_offset_api() -> None:
     ]
     assert all(len(j.description or "") >= 100 for j in found.jobs)
     assert found.jobs[0].locations == []  # chỉ có mã thành phố, không đoán
+    # Danh mục nơi làm trang tải kèm: mã → tên.
+    names = id_names([doc("shopee_meta.json"), api])
+    assert names[("region", "32")] == "Vietnam"
+    named = extract(api, page_url="https://careers.shopee.vn/jobs", links={}, names=names)
+    assert named.jobs[0].locations[0] in {"Hanoi, Vietnam", "Ho Chi Minh City, Vietnam"}
     # Mã ổn định giữa các lượt.
     again = extract(api, page_url="https://careers.shopee.vn/jobs", links={})
     assert [j.external_id for j in again.jobs] == [j.external_id for j in found.jobs]

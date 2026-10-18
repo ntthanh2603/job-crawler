@@ -288,6 +288,50 @@ def _item_url(item: Mapping[str, Any], *, page_url: str, links: Mapping[str, str
     return None
 
 
+IdNames = Mapping[tuple[str, str], str]
+
+
+def id_names(docs: Sequence[JsonDoc]) -> dict[tuple[str, str], str]:
+    """Tên theo mã từ các danh mục trang tải kèm: `{region_id: 32, region_name: "Vietnam",
+    city_id: 33, city_name: "Hanoi"}` → {("region", "32"): "Vietnam", ("city", "33"): "Hanoi"}.
+    Dùng để đọc `city_id` của tin thành tên nơi làm."""
+    found: dict[tuple[str, str], str] = {}
+
+    def walk(node: Any, depth: int) -> None:
+        if depth > _MAX_DEPTH:
+            return
+        if isinstance(node, list):
+            for value in node:
+                walk(value, depth + 1)
+        elif isinstance(node, dict):
+            keys = {_norm(k): v for k, v in node.items()}
+            for key, value in keys.items():
+                if not key.endswith("id") or len(key) <= 2:
+                    continue
+                name = keys.get(key[:-2] + "name")
+                if isinstance(name, str) and name.strip() and isinstance(value, str | int):
+                    found.setdefault((key[:-2], str(value)), name.strip())
+            for value in node.values():
+                if isinstance(value, dict | list):
+                    walk(value, depth + 1)
+
+    for doc in docs:
+        walk(doc.data, 0)
+    return found
+
+
+def _id_locations(item: Mapping[str, Any], names: IdNames) -> list[str]:
+    """Nơi làm ghi bằng mã (`city_id`, `region_id`) → tên theo danh mục."""
+    found: list[str] = []
+    for key, value in item.items():
+        norm = _norm(key)
+        if not norm.endswith("id") or not any(w in norm for w in _LOCATION):
+            continue
+        if isinstance(value, str | int) and (name := names.get((norm[:-2], str(value)))):
+            found.append(name)
+    return found
+
+
 @dataclass(slots=True)
 class Extracted:
     jobs: list[RawJob] = field(default_factory=list)  # có mô tả: không cần trang chi tiết
@@ -295,7 +339,12 @@ class Extracted:
 
 
 def to_job(
-    item: Mapping[str, Any], *, doc: JsonDoc, page_url: str, links: Mapping[str, str]
+    item: Mapping[str, Any],
+    *,
+    doc: JsonDoc,
+    page_url: str,
+    links: Mapping[str, str],
+    names: IdNames | None = None,
 ) -> RawJob | tuple[str, str] | None:
     """Một phần tử → `RawJob` (đủ mô tả), (URL, tên vị trí) (chỉ có link), hoặc None."""
     title = _title(item)
@@ -322,6 +371,9 @@ def to_job(
     low = next((_number(v) for k, v in salaries if "from" in k or "min" in k), None)
     high = next((_number(v) for k, v in salaries if k.startswith("to") or "max" in k), None)
     locations = [t for _, v in _fields(item, _LOCATION) if (t := _text(v)) and not t.isdigit()]
+    # Chỉ có mã nơi làm: tên theo danh mục, thành phố trước, quốc gia sau ("Hanoi, Vietnam").
+    if not locations and names and (coded := _id_locations(item, names)):
+        locations = [", ".join(reversed(coded))]
     deadline = _first(item, _DEADLINE)
     posted = _first(item, _POSTED)
     employment = _first(item, _EMPLOYMENT)
@@ -355,13 +407,15 @@ def to_job(
     )
 
 
-def extract(doc: JsonDoc, *, page_url: str, links: Mapping[str, str]) -> Extracted:
-    """Tin và link tin trong một tài liệu JSON."""
+def extract(
+    doc: JsonDoc, *, page_url: str, links: Mapping[str, str], names: IdNames | None = None
+) -> Extracted:
+    """Tin và link tin trong một tài liệu JSON (`names`: tên theo mã, xem `id_names`)."""
     out = Extracted()
     seen: set[str] = set()
     for array in job_arrays(doc):
         for item in array.items:
-            found = to_job(item, doc=doc, page_url=page_url, links=links)
+            found = to_job(item, doc=doc, page_url=page_url, links=links, names=names)
             if isinstance(found, RawJob):
                 if found.external_id not in seen:
                     seen.add(found.external_id)
