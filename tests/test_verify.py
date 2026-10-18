@@ -85,9 +85,14 @@ def test_clean_careers_job_is_accepted_with_reasons() -> None:
             verify.AGENCY_POSTING,
         ),
         (
-            {"description": JD + "<p>Our client is a leading bank.</p>"},
+            {"description": JD + "<p>Our client is looking for a Java developer.</p>"},
             verify.AGENCY_POSTING,
         ),
+        (
+            {"description": JD + "<p>Tên công ty sẽ được bảo mật cho tới vòng phỏng vấn.</p>"},
+            verify.AGENCY_POSTING,
+        ),
+        ({"title": "Tuyển dụng 05 vị trí"}, verify.NOT_A_JOB),
         ({"title": "Kế toán trưởng (Confidential)"}, verify.AGENCY_POSTING),
         (
             {"description": JD + "<p>Ứng viên phải đặt cọc đồng phục 500k.</p>"},
@@ -116,6 +121,57 @@ def test_rules_do_not_fire_on_ordinary_wording() -> None:
     # "không phải đa cấp" vẫn là điểm cần LLM xem lại.
     assert v.concerns == ["dấu hiệu lừa đảo: đa cấp"]
     assert v.confidence < 0.8
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # Nhiệm vụ thường gặp trong JD ngân hàng/tài chính (trước đây bị coi là tin tuyển hộ).
+        "Tuân thủ quy định bảo mật thông tin khách hàng của ngân hàng.",
+        "Đảm bảo bảo mật thông tin công ty và khách hàng.",
+        "Đảm bảo thông tin khách hàng được bảo mật tuyệt đối.",
+        "Khách hàng của chúng tôi là các doanh nghiệp lớn trong và ngoài nước.",
+        # "đã cấp" (đã cấp phát) bỏ dấu trùng "đa cấp".
+        "Kiểm soát vật tư đã cấp phát cho các công trình.",
+        # Việc của thu ngân / tư vấn tuyển sinh, công ty trả phí đào tạo.
+        "Tư vấn và thu tiền đăng ký khóa học của học viên.",
+        "Công ty đóng phí đào tạo chứng chỉ cho nhân viên.",
+    ],
+)
+def test_ordinary_duties_are_not_agency_or_scam(sentence: str) -> None:
+    v = rules({"description": JD + f"<p>{sentence}</p>"})
+    assert v.accepted, v.reasons
+    assert v.concerns == []
+
+
+@pytest.mark.parametrize(
+    ("sentence", "concern"),
+    [
+        # Công ty gia công phần mềm cũng nói vậy về khách hàng của dự án: để LLM xem.
+        ("Our client is a leading bank in Singapore.", "có thể là tin tuyển hộ: our client is a"),
+        ("Có kinh nghiệm headhunt là lợi thế.", "có thể là tin tuyển hộ: headhunt"),
+        ("Ứng viên đóng tiền đồng phục khi nhận việc.", "dấu hiệu lừa đảo: dong tien dong phuc"),
+    ],
+)
+def test_ambiguous_agency_or_scam_wording_goes_to_llm(sentence: str, concern: str) -> None:
+    v = rules({"description": JD + f"<p>{sentence}</p>"})
+    assert v.accepted, v.reasons
+    assert v.concerns == [concern]
+    assert v.confidence < 0.8
+
+
+def test_multi_position_title_with_role_and_full_jd_is_kept() -> None:
+    long_jd = JD + "<p>" + "Giám sát thi công, nghiệm thu khối lượng hạng mục cầu. " * 4 + "</p>"
+    v = rules({"title": "Tuyển dụng 05 vị trí Kỹ sư cầu đường", "description": long_jd})
+    assert v.accepted, v.reasons
+    short = rules(
+        {
+            "title": "Tuyển dụng 05 vị trí Kỹ sư cầu đường",
+            "description": "<p>" + "Kỹ sư cầu đường làm việc tại công trường. " * 6 + "</p>",
+            "requirements": None,
+        }
+    )
+    assert short.code == verify.NOT_A_JOB
 
 
 def test_board_job_employer_must_match_company_or_mapped_profile() -> None:

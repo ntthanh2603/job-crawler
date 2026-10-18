@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -216,34 +217,53 @@ def _apply_domain_ok(job: NormalizedJob, ctx: CompanyContext) -> bool:
 
 _AGENCY = re.compile(
     r"tuyen (dung )?(cho|giup) (doi tac|khach hang)"
-    r"|(khach hang|doi tac) cua chung toi (la|dang can|dang tim|can tuyen|hien dang)"
-    r"|\bour client (is|a|an)\b|on behalf of (our|a) client|\bclient of ours\b"
-    r"|(cong ty|ten cong ty|thong tin cong ty) (se )?(duoc )?bao mat"
-    r"|bao mat (ten|thong tin) (cong ty|khach hang)"
+    r"|(khach hang|doi tac) cua chung toi (dang can|dang tim|can tuyen|hien dang)"
+    # "Khách hàng của chúng tôi là một tập đoàn FDI" (không phải "là các doanh nghiệp lớn").
+    r"|(khach hang|doi tac) cua chung toi la (mot )?(cong ty|tap doan|doanh nghiep|ngan hang"
+    r"|nha may|to chuc)"
+    r"|\bour client (is )?(looking|seeking|hiring|searching|recruiting)\b"
+    r"|on behalf of (our|a) client|\bclient of ours\b"
+    r"|(ten|thong tin) (ve )?(cong ty|khach hang|doi tac)( tuyen dung)? (se )?(duoc )?bao mat"
+    r"|bao mat ten (cong ty|khach hang|doi tac)"
     r"|confidential (company|client)|(company|client) (name )?(is|will be) confidential"
-    r"|\bheadhunt"
+)
+# Câu của nhà tuyển dụng hộ hay của chính doanh nghiệp (công ty gia công phần mềm cũng nói "our
+# client is a US bank"; JD của chuyên viên tuyển dụng nhắc "headhunt"): để LLM xem.
+_AGENCY_WEAK = re.compile(r"\bour client is (a|an|one)\b|\bheadhunt")
+# "Đảm bảo thông tin khách hàng được bảo mật": nhiệm vụ của vị trí, không phải giấu tên công ty.
+_DUTY = re.compile(
+    r"(dam bao|giu|tuan thu|cam ket|chiu trach nhiem|quy dinh|quan ly|nham|de)( \w+){0,3} ?$"
 )
 _AGENCY_NAME = re.compile(
     r"\b(bao mat|confidential|an danh|headhunt\w*|nhan luc|recruitment|staffing|manpower|"
     r"executive search|cung ung lao dong|tu van tuyen dung|talent solutions)\b"
 )
 # Tín hiệu lừa đảo chắc chắn (loại) và nhẹ (nhờ LLM xem).
+# Văn bản đã `fold` (bỏ dấu): "đa cấp" không so ở đây vì trùng "đã cấp" (đã cấp phát).
 _SCAM_STRONG = re.compile(
-    r"(nop|dong|thu|dat coc) (phi|tien) (ho so|dao tao|dong phuc|dang ky|giu cho|tuyen dung|"
+    r"(nop|dong|dat coc) phi (ho so|dao tao|dong phuc|dang ky|giu cho|tuyen dung|"
     r"gioi thieu|xu ly ho so|kham suc khoe|the nhan vien)"
-    r"|(ung vien|nguoi lao dong|ban) (phai|can|se) (dat coc|nop tien|dong tien|chuyen khoan)"
+    # Thu tiền/phí của ứng viên ("thu tiền đăng ký khoá học" là việc của thu ngân, không tính).
+    r"|thu (phi|tien) (ho so|dong phuc|giu cho|tuyen dung|xu ly ho so|the nhan vien)"
+    r"|(ung vien|nguoi lao dong|ban) (phai|can|se) (dat coc|nop tien|dong tien|nop phi|dong phi"
+    r"|chuyen khoan)"
     r"|dat coc (dong phuc|ho so|tien|truoc)"
     r"|viec nhe luong cao"
     r"|(cong tac vien|ctv) online|kiem tien online|viec lam online tai nha|nhap lieu tai nha"
-    r"|\bda cap\b"
 )
 _SCAM_WEAK = re.compile(
     r"(khong can|khong yeu cau) (kinh nghiem|bang cap).{0,60}(thu nhap|luong) "
     r"(khung|cuc khung|cao ngat|len den \d+ (trieu|tr))"
     r"|\btelegram\b"
     r"|\d+ ?(k|trieu|tr) ?(moi )?ngay\b.{0,40}\b(ctv|cong tac vien)\b"
+    r"|(nop|dong) tien (ho so|dao tao|dong phuc|dang ky|giu cho|tuyen dung|xu ly ho so"
+    r"|kham suc khoe|the nhan vien)"
 )
+# So trên chữ còn dấu (NFC, viết thường).
+_DA_CAP = re.compile(r"(?<!\w)đa cấp(?!\w)")
 _NEGATION = re.compile(r"(khong|mien|free|no)\s+(phai\s+)?(la\s+)?(thu\s+)?$")
+# Người trả là công ty: "Công ty đóng phí đào tạo cho nhân viên".
+_COMPANY_PAYS = re.compile(r"(cong ty|chung toi|doanh nghiep)( se| ho tro| chi tra)? ?$")
 _EXPIRED_TEXT = re.compile(
     r"tin (tuyen dung )?(nay )?da het han|vi tri (nay )?da (duoc tuyen|dong|du nguoi)"
     r"|no longer accepting applications|this job (posting )?(has )?expired"
@@ -310,6 +330,10 @@ _GENERIC_TITLES = frozenset(
 _MULTI_POSITION_TITLE = re.compile(
     r"^(thong bao )?tuyen dung (thang \d+|nhieu vi tri|\d+ vi tri|cac vi tri|dot \d+|nam \d{4})"
 )
+# Phần còn lại của tiêu đề "Tuyển dụng 05 vị trí Kỹ sư cầu đường" có tên vị trí thật không.
+_ANNOUNCEMENT_WORDS = frozenset(
+    {"thang", "nam", "dot", "cac", "vi", "tri", "nhieu", "moi", "nhat", "tai", "o", "nhan", "su"}
+)
 _NEWS_SEGMENTS = frozenset(
     {
         "blog",
@@ -347,12 +371,32 @@ def _fold_head(text: str | None, limit: int = 4000) -> str:
     return fold(text[:limit]) if text else ""
 
 
-def _strong_scam(text: str) -> str | None:
+def _strong_scam(text: str, original: str) -> str | None:
+    """`text`: văn bản đã fold; `original`: chữ còn dấu (để nhận "đa cấp")."""
     for m in _SCAM_STRONG.finditer(text):
-        if _NEGATION.search(text[max(0, m.start() - 20) : m.start()]):
+        before = text[max(0, m.start() - 25) : m.start()]
+        if _NEGATION.search(before) or _COMPANY_PAYS.search(before):
+            continue
+        return m.group(0)
+    for m in _DA_CAP.finditer(original):
+        if _NEGATION.search(fold(original[max(0, m.start() - 20) : m.start()]) + " "):
+            continue
+        return "đa cấp"
+    return None
+
+
+def _agency(text: str) -> str | None:
+    for m in _AGENCY.finditer(text):
+        if m.group(0).startswith(("ten ", "thong tin ")) and _DUTY.search(
+            text[max(0, m.start() - 40) : m.start()]
+        ):
             continue
         return m.group(0)
     return None
+
+
+def _original(*parts: str | None, limit: int = 4000) -> str:
+    return " ".join(unicodedata.normalize("NFC", p[:limit]).lower() for p in parts if p)
 
 
 def _news_url(job: NormalizedJob) -> bool:
@@ -369,8 +413,11 @@ def _not_a_job(job: NormalizedJob, ctx: CompanyContext) -> str | None:
     stripped = " ".join(_TITLE_FILLERS.sub(" ", stripped).split())
     if title in _GENERIC_TITLES or stripped in _GENERIC_TITLES or not stripped:
         return "trang danh mục/giới thiệu"
-    if _MULTI_POSITION_TITLE.match(title):
-        return "thông báo tuyển nhiều vị trí"
+    if m := _MULTI_POSITION_TITLE.match(title):
+        rest = [w for w in title[m.end() :].split() if not w.isdigit()]
+        # Có tên vị trí và JD đủ dài: một tin thật ("Tuyển dụng 05 vị trí Kỹ sư cầu đường").
+        if not any(w not in _ANNOUNCEMENT_WORDS for w in rest) or len(job.jd_text) < 400:
+            return "thông báo tuyển nhiều vị trí"
     if _LISTING_TITLE.match(title) or _LISTING_SEO.search(title):
         return "trang danh sách việc làm"
     if provinces.province_pattern().fullmatch(_PLACE_PREFIX.sub("", title)):
@@ -441,8 +488,8 @@ def check_rules(
     # AGENCY_POSTING. Nhà tuyển dụng trên tin là đơn vị cung ứng nhân sự (kể cả khi profile của
     # nó đã được map vào doanh nghiệp) — trừ khi chính doanh nghiệp là đơn vị đó.
     own_agency = any(_AGENCY_NAME.search(k) for k in ctx.name_keys())
-    if (m := _AGENCY.search(full)) is not None:
-        verdict.reject(AGENCY_POSTING, m.group(0))
+    if (hit := _agency(full)) is not None:
+        verdict.reject(AGENCY_POSTING, hit)
     elif re.search(r"\bconfidential\b", fold(job.title)):
         verdict.reject(AGENCY_POSTING, "tiêu đề ghi confidential")
     elif (
@@ -452,11 +499,16 @@ def check_rules(
         and (m := _AGENCY_NAME.search(employer_key(employer))) is not None
     ):
         verdict.reject(AGENCY_POSTING, f"nhà tuyển dụng là đơn vị tuyển dụng hộ: {employer}")
+    elif (m := _AGENCY_WEAK.search(full)) is not None:
+        verdict.concerns.append(f"có thể là tin tuyển hộ: {m.group(0)}")
 
     # SCAM_SIGNALS
-    if (hit := _strong_scam(full)) is not None:
+    original = _original(
+        job.title, job.raw.company_name, job.description_md, job.requirements_md, job.benefits_md
+    )
+    if (hit := _strong_scam(full, original)) is not None:
         verdict.reject(SCAM_SIGNALS, hit)
-    elif (m := _SCAM_WEAK.search(full)) is not None or re.search(r"\bda cap\b", full):
+    elif (m := _SCAM_WEAK.search(full)) is not None or _DA_CAP.search(original):
         verdict.concerns.append(f"dấu hiệu lừa đảo: {m.group(0) if m else 'đa cấp'}")
 
     if job.raw.method is ExtractionMethod.LLM:
