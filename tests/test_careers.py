@@ -14,9 +14,11 @@ from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources.base import KnownJobs, SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,
+    JobLink,
     Page,
     _stop,  # pyright: ignore[reportPrivateUsage]
     clean_card_text,
+    hub_page,
     jd_signals,
     job_links,
     labeled_fields,
@@ -388,6 +390,47 @@ async def test_known_details_are_reused_without_counting_toward_the_cap() -> Non
     ]
     assert s.truncated == []
     assert known.used == {("careers", f"old-{i}") for i in range(4)}
+
+
+TGDD = "https://vieclam.thegioididong.com"
+
+
+def test_hub_pages_are_category_pages_not_jobs() -> None:
+    category = scan_listing(
+        Page(
+            f"{TGDD}/tuyen-dung/ban-hang-thu-ngan-ky-thuat-kho-sieu-thi", html("tgdd/category.html")
+        )
+    )
+    assert hub_page(category.page.url, category.job_links)
+    province = scan_listing(Page(f"{TGDD}/tuyen-dung-thanh-pho-ha-noi", html("tgdd/province.html")))
+    assert hub_page(province.page.url, province.job_links)
+    # Trang tin có mã: khối "việc làm khác" không làm nó thành danh mục.
+    job = scan_listing(
+        Page(f"{TGDD}/tuyen-dung/nhan-vien-sieu-thi-bach-hoa-xanh-45", html("tgdd/job_45.html"))
+    )
+    assert not hub_page(job.page.url, job.job_links)
+    related = [JobLink(f"https://a.vn/jobs/vi-tri-{i}-{100 + i}", None) for i in range(5)]
+    assert not hub_page("https://a.vn/jobs/ke-toan-99", related)
+    assert hub_page("https://a.vn/jobs/phong-ke-toan", related)
+
+
+async def test_category_pages_are_followed_to_their_jobs() -> None:
+    """vieclam.thegioididong.com: trang chủ careers chỉ dẫn tới trang ngành nghề / tỉnh thành,
+    tin nằm trên các trang đó."""
+    fetcher = FakeFetcher()
+    fetcher.add(f"{TGDD}/", html("tgdd/home.html"))
+    category = f"{TGDD}/tuyen-dung/ban-hang-thu-ngan-ky-thuat-kho-sieu-thi"
+    fetcher.add(category, html("tgdd/category.html"))
+    job = f"{TGDD}/tuyen-dung/nhan-vien-sieu-thi-bach-hoa-xanh-45"
+    fetcher.add(job, html("tgdd/job_45.html"))
+    s = session(fetcher, max_detail_pages=200, max_rendered_pages=0)
+    jobs = await run(CareersSource(f"{TGDD}/"), s)
+    # Trang ngành nghề không bị lưu thành tin; tin trên đó được mở.
+    assert [j.url for j in jobs] == [job]
+    assert jobs[0].title == "Nhân Viên Siêu Thị Bách Hóa Xanh"
+    opened = {u for kind, u, _ in fetcher.calls if kind == "fetch"}
+    assert job in opened
+    assert f"{TGDD}/tuyen-dung/quan-ly-sieu-thi-bach-hoa-xanh-646" in opened
 
 
 def test_pick_title_prefers_heading_matching_listing_text() -> None:

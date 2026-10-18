@@ -86,6 +86,9 @@ class SourceLimits:
     max_detail_pages: int = 80  # trang chi tiết mỗi nguồn
     max_listing_pages: int = 10  # trang danh sách (phân trang, "xem tất cả")
     max_rendered_pages: int = 10  # trang mở bằng trình duyệt mỗi nguồn
+    # Trang danh mục / theo tỉnh mở như trang chi tiết rồi hoá ra là danh sách con: không tính
+    # vào `max_detail_pages`, tối đa chừng này trang.
+    max_sub_listings: int = 60
     detail_concurrency: int = 4
     ats_rate: float = 2.0  # request/giây tới API công khai của ATS
     max_failed_pages: int = 5  # trang parse lỗi lưu HTML, mỗi nguồn
@@ -97,6 +100,7 @@ class SourceLimits:
             max_detail_pages=s.source_max_detail_pages,
             max_listing_pages=s.source_max_listing_pages,
             max_rendered_pages=s.source_max_rendered_pages,
+            max_sub_listings=s.source_max_sub_listings,
             ats_rate=s.ats_rate_per_second,
             max_failed_pages=s.failed_pages_per_run,
         )

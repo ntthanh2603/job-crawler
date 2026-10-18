@@ -227,6 +227,9 @@ LISTING_SEGMENTS = frozenset(
 )
 # Trang "chi tiết" có từ ngần này link tin trở lên thì là danh sách con.
 _SUB_LISTING_LINKS = 3
+# Trang không có mã tin trong URL mà dẫn tới từ ngần này tin có mã: trang danh mục / theo tỉnh
+# (vieclam.thegioididong.com/tuyen-dung/ban-hang-thu-ngan... → /tuyen-dung/nhan-vien-...-45).
+_HUB_ID_LINKS = 3
 
 # Nhóm từ khoá của một bản mô tả công việc (đã bỏ dấu). Đếm số nhóm xuất hiện.
 _JD_SIGNALS: tuple[tuple[str, ...], ...] = (
@@ -308,6 +311,22 @@ def _stop(segment: str) -> bool:
     heads = any(segment == h or segment.startswith(h + "-") for h in _STOP_HEADS)
     tails = any(segment == t or segment.endswith("-" + t) for t in _STOP_TAILS)
     return heads or tails
+
+
+def _has_job_id(url: str) -> bool:
+    """URL mang mã tin: đoạn cuối có số (`-45`, `/744000153509469/`) hoặc tham số `?id=`."""
+    segs = _segments(url)
+    if segs and _HAS_ID.search(segs[-1]):
+        return True
+    return any(_is_id_param(k.lower()) for k, _ in parse_qsl(urlsplit(url).query))
+
+
+def hub_page(page_url: str, links: Sequence[JobLink]) -> bool:
+    """Trang mở như tin nhưng là trang danh mục: URL không có mã tin, dẫn tới nhiều tin có mã.
+    Trang tin thật có mã thì khối "việc làm khác" trên đó không làm nó thành danh mục."""
+    if _has_job_id(page_url):
+        return False
+    return sum(1 for link in links if _has_job_id(link.url)) >= _HUB_ID_LINKS
 
 
 def _content_segments(segs: list[str]) -> list[str]:
@@ -709,33 +728,35 @@ class CareersSource(Source):
 
     async def _detail(
         self, session: SourceSession, link: JobLink
-    ) -> tuple[RawJob | None, list[JobLink]]:
-        """(tin ở trang chi tiết, link tin mới thấy trên trang).
+    ) -> tuple[RawJob | None, list[JobLink], bool]:
+        """(tin ở trang chi tiết, link tin mới thấy trên trang, trang là danh mục?).
 
-        Trang không rõ là tin mà có nhiều link tin thì có thể là danh sách con (theo phòng ban,
-        địa điểm): lấy cả các link đó. Trang tin thật cũng hay có mục "vị trí khác" nên vẫn bóc
-        tin như thường (LLM quyết định khi không rõ).
+        Trang danh mục / theo tỉnh (URL không có mã tin, dẫn tới nhiều tin có mã): không phải tin,
+        lấy link tin trên đó. Trang không rõ là tin mà có nhiều link tin thì có thể là danh sách
+        con (theo phòng ban, địa điểm): lấy cả các link đó. Trang tin thật cũng hay có mục "vị trí
+        khác" nên vẫn bóc tin như thường (LLM quyết định khi không rõ).
         """
         page = await fetch_page(session, link.url)
         if page is None:
-            return None, []
+            return None, [], False
         if postings := jsonld.raw_jobs(page.html, page.url):
             job = postings[0]
             if not same_site(job.url, page.url):
                 job = job.model_copy(update={"url": page.url})
-            return job, []
+            return job, [], False
+        sub = scan_listing(page)
+        if hub_page(page.url, sub.job_links):
+            return None, [*(JobLink(j.url, j.title) for j in sub.jobs), *sub.job_links], True
         tree = parse(page.html)
         og_title = meta_content(tree, "og:title")
         node = main_node(tree)
         if node is None:
-            return None, []
+            return None, [], False
         markdown = html_to_markdown(node.html or "")
         signals = jd_signals(markdown)
         more: list[JobLink] = []
-        if signals < _CLEAR_JD:
-            sub = scan_listing(page)
-            if len(sub.job_links) >= _SUB_LISTING_LINKS:
-                more = sub.job_links
+        if signals < _CLEAR_JD and len(sub.job_links) >= _SUB_LISTING_LINKS:
+            more = sub.job_links
         headings = [node_text(h) for h in node.css("h1, h2")]
         extra = [
             text
@@ -749,7 +770,7 @@ class CareersSource(Source):
             extra=extra,
             slug=slug_hint(page.url),
         )
-        return await self._parse_detail(session, page, title, markdown, signals), more
+        return await self._parse_detail(session, page, title, markdown, signals), more, False
 
     async def _parse_detail(
         self, session: SourceSession, page: Page, title: str | None, markdown: str, signals: int
@@ -861,6 +882,7 @@ class CareersSource(Source):
             return known
 
         opened = 0
+        hubs = 0  # trang danh mục đã mở (không tính vào giới hạn trang tin)
         while pending and opened < limits.max_detail_pages:
             batch: list[JobLink] = []
             size = min(limits.detail_concurrency, limits.max_detail_pages - opened)
@@ -877,10 +899,16 @@ class CareersSource(Source):
                 done_urls.add(url)
                 batch.append(link)
             opened += len(batch)
-            for link, (job, more) in zip(
+            for link, (job, more, hub) in zip(
                 batch, await gather_all(self._detail(session, link) for link in batch), strict=True
             ):
                 add_links(more)
+                if hub:
+                    hubs += 1
+                    if hubs <= limits.max_sub_listings:
+                        opened -= 1
+                    log.debug("careers.hub", url=link.url, links=len(more))
+                    continue
                 if job is not None:
                     session.count(link.url, 1)
                 if job is not None and job.external_id not in yielded:

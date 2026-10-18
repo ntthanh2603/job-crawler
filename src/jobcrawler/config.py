@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     source_max_detail_pages: int = Field(default=80, ge=0)
     source_max_listing_pages: int = Field(default=10, ge=1)
     source_max_rendered_pages: int = Field(default=10, ge=0)
+    # Trang danh mục / theo tỉnh của trang careers (dẫn tới tin), mỗi nguồn.
+    source_max_sub_listings: int = Field(default=60, ge=0)
     # Tin website/ATS đã tải chi tiết trong chừng này ngày thì dùng lại, không tải lại (lượt sau
     # của doanh nghiệp nhiều tin đi tiếp tới tin chưa tải). 0: luôn tải lại.
     job_reuse_days: float = Field(default=3, ge=0)
