@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import functools
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from jobcrawler.config import Settings
@@ -100,16 +100,40 @@ async def index_boards(
 STRONG_SIGNALS = frozenset({"mst", "website"})
 
 
-async def load_indexed_jobs(res: Resources, profile_id: UUID) -> list[RawJob]:
-    """Tin đang mở của một profile trong index."""
-    async with res.sessionmaker() as session:
-        raws = await session.scalars(
-            select(JobPosting.raw).where(
-                JobPosting.source_profile_id == profile_id,
-                JobPosting.status == JobStatus.ACTIVE.value,
+@dataclass(frozen=True, slots=True)
+class _ProfileIndex:
+    """Tin của một profile trong index (`job_postings`), cho `BoardProfileSource`."""
+
+    res: Resources
+    source: str
+    profile_id: UUID
+
+    async def for_profile(self) -> list[RawJob]:
+        async with self.res.sessionmaker() as session:
+            raws = await session.scalars(
+                select(JobPosting.raw).where(
+                    JobPosting.source_profile_id == self.profile_id,
+                    JobPosting.status == JobStatus.ACTIVE.value,
+                )
             )
-        )
-        return [RawJob.model_validate(raw) for raw in raws]
+            return [RawJob.model_validate(raw) for raw in raws]
+
+    async def by_ids(self, external_ids: Sequence[str]) -> dict[str, RawJob]:
+        if not external_ids:
+            return {}
+        async with self.res.sessionmaker() as session:
+            rows = await session.execute(
+                select(JobPosting.external_id, JobPosting.raw).where(
+                    JobPosting.source == self.source,
+                    JobPosting.external_id.in_(list(external_ids)),
+                    JobPosting.status != JobStatus.REMOVED.value,
+                    or_(
+                        JobPosting.source_profile_id.is_(None),
+                        JobPosting.source_profile_id == self.profile_id,
+                    ),
+                )
+            )
+            return {external_id: RawJob.model_validate(raw) for external_id, raw in rows}
 
 
 async def board_sources(
@@ -142,7 +166,8 @@ async def board_sources(
                 external_id=profile.external_id,
                 url=profile.url,
                 fresh=fresh,
-                load_indexed=functools.partial(load_indexed_jobs, res, profile.id),
+                index=_ProfileIndex(res, profile.source, profile.id),
+                name=profile.name_on_source,
             )
         )
     return sources

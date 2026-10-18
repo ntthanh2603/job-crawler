@@ -5,8 +5,9 @@ Một adapter biết ba việc:
 1. `entries()`: liệt kê URL tin đang mở (thường từ sitemap, kèm `lastmod`) — để lượt index chỉ
    tải tin mới hoặc đã đổi.
 2. `parse_job()`: bóc một trang chi tiết thành `RawJob` + profile nhà tuyển dụng trên trang.
-3. `parse_profile()` / `profile_job_urls()`: đọc trang profile nhà tuyển dụng (website, MST,
-   danh sách tin) — dùng khi map profile ↔ doanh nghiệp và khi crawl trực tiếp một doanh nghiệp.
+3. `parse_profile()` / `profile_listing()`: đọc trang profile nhà tuyển dụng (website, MST,
+   danh sách tin, kể cả các trang sau) — dùng khi map profile ↔ doanh nghiệp và khi crawl trực
+   tiếp một doanh nghiệp.
 
 Phần lớn trang tuyển dụng Việt Nam có sitemap + JSON-LD JobPosting nên `SitemapBoard` cài sẵn
 các bước đó; adapter chỉ khai báo URL sitemap, mẫu URL tin/profile và phần đặc thù.
@@ -29,7 +30,14 @@ from selectolax.lexbor import LexborHTMLParser
 
 from jobcrawler.logging import get_logger
 from jobcrawler.net.urls import host_of, normalize_url, same_site
-from jobcrawler.pages import Link, clean_text, extract_links, meta_content, parse
+from jobcrawler.pages import (
+    Link,
+    clean_text,
+    extract_links,
+    meta_content,
+    next_page_urls,
+    parse,
+)
 from jobcrawler.schemas import FetchOutcome, RawJob
 from jobcrawler.sources import jsonld
 from jobcrawler.sources.base import SourceError, SourceSession, parse_datetime, text_or_none
@@ -76,6 +84,25 @@ class ProfileRef(BaseModel):
 class BoardJob:
     job: RawJob
     profile: ProfileRef | None
+
+
+@dataclass(slots=True)
+class ProfilePage:
+    """Một trang danh sách tin của profile."""
+
+    urls: list[str]  # URL tin (đã chuẩn hoá)
+    next_url: str | None = None  # trang sau
+    last: bool = False  # trang cuối và chắc chắn đã liệt kê đủ tin của profile
+
+
+@dataclass(slots=True)
+class ProfileListing:
+    """Tin đang mở của một profile, đọc trực tiếp trên trang tuyển dụng."""
+
+    urls: list[str]
+    # Chắc chắn là toàn bộ tin của profile (tin đã index không có ở đây là đã đóng). Sai: chỉ
+    # là một phần (trang chỉ hiện tin nổi bật, chưa biết cách phân trang...).
+    complete: bool = False
 
 
 @dataclass(slots=True)
@@ -199,6 +226,8 @@ class BoardAdapter(ABC):
     profile_name_selector: ClassVar[str | None] = None
     # Trang profile có liệt kê link tin đang mở trong HTML (không: chỉ dùng tin đã index).
     profile_lists_jobs: ClassVar[bool] = True
+    # Phân trang của trang profile đã kiểm bằng mẫu thật: đọc hết các trang là đủ mọi tin.
+    profile_listing_complete: ClassVar[bool] = False
     # `identifier` của JobPosting là mã tin (CareerViet, CareerLink). Phần lớn trang ghi mã
     # CÔNG TY ở đó: không giữ trong tin, chỉ dùng để nhận ra link profile.
     identifier_is_job: ClassVar[bool] = False
@@ -287,6 +316,48 @@ class BoardAdapter(ABC):
         links = extract_links(parse(html), url)
         urls = (self.canonical(link.url) for link in links)
         return list(dict.fromkeys(u for u in urls if self.job_id(u)))
+
+    def profile_page(self, html: str, url: str) -> ProfilePage:
+        """Một trang danh sách tin của profile: link tin + trang sau (link `?page=N` cùng đường
+        dẫn)."""
+        pages = next_page_urls(extract_links(parse(html), url), url)
+        next_url = pages[0] if pages else None
+        return ProfilePage(
+            urls=self.profile_job_urls(html, url),
+            next_url=next_url,
+            last=next_url is None and self.profile_listing_complete,
+        )
+
+    async def profile_listing(
+        self, session: SourceSession, profile_url: str, *, max_pages: int
+    ) -> ProfileListing:
+        """Mọi tin đang mở của profile: đọc trang danh sách tin rồi các trang sau (tối đa
+        `max_pages`). Trang đầu lỗi thì ném `SourceError`; trang sau lỗi hoặc chạm giới hạn thì
+        trả phần đã đọc (`complete=False`) và đánh dấu nguồn chưa xong."""
+        url: str | None = self.profile_jobs_url(profile_url)
+        found: dict[str, None] = {}
+        for i in range(max_pages):
+            assert url is not None
+            result = await (
+                session.fetch_ok(url, rate=self.rate)
+                if i == 0
+                else session.fetch(url, rate=self.rate)
+            )
+            if not result.ok:
+                session.truncate("profile_pages")
+                return ProfileListing(list(found))
+            page = self.profile_page(result.text, result.final_url)
+            fresh = [u for u in page.urls if u not in found]
+            found.update(dict.fromkeys(fresh))
+            session.count(result, len(page.urls))
+            if page.next_url is None:
+                return ProfileListing(list(found), complete=page.last)
+            if not fresh:
+                # Trang sau lặp lại trang trước (tham số trang bị bỏ qua): dừng.
+                return ProfileListing(list(found))
+            url = page.next_url
+        session.truncate("profile_pages")
+        return ProfileListing(list(found))
 
     def find_profile_link(
         self,

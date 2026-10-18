@@ -8,7 +8,8 @@
   `emailAddress`, `contactName`). Trang đã render (trình duyệt) có JSON-LD thì dùng JSON-LD,
   nhưng `baseSalary` ở đó sai (luôn USD/HOUR) nên bỏ số, chỉ giữ chữ.
 - Profile `/nha-tuyen-dung/<slug>-c<companyId>`: `__NEXT_DATA__.companyProfile` (địa chỉ,
-  website thường trống); không có MST.
+  website thường trống); không có MST. Trang profile chỉ hiện 20 tin đầu (`companyJobs`): danh
+  sách tin của profile lấy bằng chính API tìm kiếm, lọc `companyId`.
 Mẫu: tests/fixtures/boards/vietnamworks/.
 """
 
@@ -34,6 +35,7 @@ from jobcrawler.sources.boards.base import (
     BoardEntry,
     BoardJob,
     ListingState,
+    ProfileListing,
     ProfileRef,
     SitemapBoard,
 )
@@ -197,24 +199,76 @@ class VietnamWorks(SitemapBoard):
         r"^https://www\.vietnamworks\.com/(?:nha-tuyen-dung|companies)/[^/]+-c(?P<id>\d+)$"
     )
 
+    @staticmethod
+    def _search_body(page: int, filters: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return {
+            "userId": 0,
+            "query": "",
+            "filter": filters or [],
+            "ranges": [],
+            "order": [{"field": "approvedOn", "value": "desc"}],
+            "hitsPerPage": PAGE_SIZE,
+            "page": page,
+            # `jobUrl` chỉ được điền khi xin kèm `alias`.
+            "retrieveFields": ["jobId", "alias", "jobUrl", "lastUpdatedOn"],
+        }
+
+    def _hit_url(self, hit: dict[str, Any]) -> str:
+        url = str(hit.get("jobUrl") or "")
+        if not url and hit.get("alias") and hit.get("jobId"):
+            url = f"{self.home}{hit['alias']}-{hit['jobId']}-jv"
+        return self.canonical(url)
+
+    async def profile_listing(
+        self, session: SourceSession, profile_url: str, *, max_pages: int
+    ) -> ProfileListing:
+        """Tin của một nhà tuyển dụng: API tìm kiếm lọc theo `companyId` (đủ mọi tin, trang
+        profile chỉ hiện 20 tin đầu)."""
+        company_id = self.profile_id(profile_url)
+        if company_id is None:
+            return await super().profile_listing(session, profile_url, max_pages=max_pages)
+        filters = [{"field": "companyId", "value": company_id}]
+        found: dict[str, None] = {}
+        for page in range(max_pages):
+            fetch = session.fetch_ok if page == 0 else session.fetch
+            result = await fetch(
+                API,
+                method="POST",
+                json=self._search_body(page, filters),
+                headers=JSON_HEADERS,
+                rate=self.rate,
+            )
+            try:
+                data = result.json() if result.ok else None
+            except ValueError:
+                data = None
+            if not isinstance(data, dict):
+                if page == 0:
+                    raise SourceError(FetchOutcome.ERROR, f"API tin của nhà tuyển dụng lỗi: {API}")
+                session.truncate("profile_pages")
+                return ProfileListing(list(found))
+            hits = data.get("data") or []
+            urls = [u for u in (self._hit_url(h) for h in hits) if self.job_id(u)]
+            found.update(dict.fromkeys(urls))
+            session.count(result, len(urls))
+            meta = data.get("meta") or {}
+            if not hits or page + 1 >= int(meta.get("nbPages") or 0):
+                total = int(meta.get("nbHits") or 0)
+                return ProfileListing(list(found), complete=len(found) >= total)
+        session.truncate("profile_pages")
+        return ProfileListing(list(found))
+
     async def entries(
         self, session: SourceSession, state: ListingState
     ) -> AsyncIterator[BoardEntry]:
         page = 0
         while page < MAX_PAGES:
-            body = {
-                "userId": 0,
-                "query": "",
-                "filter": [],
-                "ranges": [],
-                "order": [{"field": "approvedOn", "value": "desc"}],
-                "hitsPerPage": PAGE_SIZE,
-                "page": page,
-                # `jobUrl` chỉ được điền khi xin kèm `alias`.
-                "retrieveFields": ["jobId", "alias", "jobUrl", "lastUpdatedOn"],
-            }
             result = await session.fetch(
-                API, method="POST", json=body, headers=JSON_HEADERS, rate=self.rate
+                API,
+                method="POST",
+                json=self._search_body(page),
+                headers=JSON_HEADERS,
+                rate=self.rate,
             )
             state.sitemaps += 1
             try:
@@ -228,10 +282,7 @@ class VietnamWorks(SitemapBoard):
                 return
             hits = data.get("data") or []
             for hit in hits:
-                url = str(hit.get("jobUrl") or "")
-                if not url and hit.get("alias") and hit.get("jobId"):
-                    url = f"{self.home}{hit['alias']}-{hit['jobId']}-jv"
-                url = self.canonical(url)
+                url = self._hit_url(hit)
                 if (external_id := self.job_id(url)) is not None:
                     yield BoardEntry(
                         url=url,

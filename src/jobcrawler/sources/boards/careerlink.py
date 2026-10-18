@@ -5,7 +5,8 @@
 - URL tin `/tim-viec-lam/<slug>/<id>`; `identifier` của JobPosting là mã tin.
 - `hiringOrganization.sameAs` = profile `/viec-lam-cua/<slug>/<id>`. Profile 3470 ("CareerLink's
   client") là chỗ giữ cho tin ẩn danh/headhunter: không phải nhà tuyển dụng thật.
-- Trang profile: website `#company-media a[itemprop=url]`, link tin đang mở; không có MST.
+- Trang profile: website `#company-media a[itemprop=url]`, link tin đang mở (20 tin/trang,
+  `?page=N`); không có MST.
 Mẫu: tests/fixtures/boards/careerlink/.
 """
 
@@ -32,6 +33,8 @@ class CareerLink(ListingBoard):
     profile_selector = 'a.text-reset[href^="/viec-lam-cua/"]'
     identifier_is_job = True
     placeholder_profiles = frozenset({"3470"})
+    # Trang profile chia trang `?page=N` (20 tin/trang).
+    profile_listing_complete = True
 
     def parse_profile(self, html: str, url: str) -> ProfileRef | None:
         profile = super().parse_profile(html, url)

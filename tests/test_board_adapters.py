@@ -455,6 +455,106 @@ def test_profile_job_urls(board: str, name: str, jobs_url: str | None, min_jobs:
         )
 
 
+@pytest.mark.parametrize(
+    ("board", "name", "next_url", "last"),
+    [
+        (
+            "careerlink",
+            "company_1.html",
+            "https://www.careerlink.vn/viec-lam-cua/fe-credit/19032?page=2",
+            False,
+        ),
+        (
+            "vieclam24h",
+            "company_1.html",
+            "https://vieclam24h.vn/danh-sach-tin-tuyen-dung-ngan-hang-tmcp-viet-nam-thinh-vuong-vpbank"
+            "-ntd4082455p73.html?page=2",
+            False,
+        ),
+        # "1/2 trang", phân trang bằng JavaScript: trang sau qua `?page=`.
+        (
+            "topcv",
+            "company_1_jobs.html",
+            "https://www.topcv.vn/cong-ty/fpt-software-cid3/tuyen-dung.html?page=2",
+            False,
+        ),
+        # Không biết phân trang: không bao giờ coi là đủ.
+        ("jobsgo", "company_1.html", None, False),
+        ("itviec", "company_1.html", None, False),
+    ],
+)
+def test_profile_page_next_url(board: str, name: str, next_url: str | None, last: bool) -> None:
+    adapter = REGISTRY[board]
+    html, url = page(board, name)
+    profile_page = adapter.profile_page(html, url)
+    assert profile_page.urls == adapter.profile_job_urls(html, url)
+    assert profile_page.next_url == next_url
+    assert profile_page.last is last
+
+
+def test_topcv_last_profile_page_is_complete() -> None:
+    topcv = REGISTRY["topcv"]
+    html, url = page("topcv", "company_1_jobs.html")
+    last = html.replace(
+        '<span class="hight-light">1</span>/2 trang', '<span class="hight-light">2</span>/2 trang'
+    )
+    profile_page = topcv.profile_page(last, url + "?page=2")
+    assert profile_page.next_url is None
+    assert profile_page.last
+
+
+async def test_profile_listing_follows_pages_until_last() -> None:
+    careerlink = REGISTRY["careerlink"]
+    html, url = page("careerlink", "company_1.html")
+    first = careerlink.profile_job_urls(html, url)
+    fetcher = FakeFetcher()
+    fetcher.add(url, html)
+    # Trang 2 (cuối): 1 tin mới, không còn trang sau.
+    fetcher.add(
+        f"{url}?page=2",
+        '<a href="https://www.careerlink.vn/tim-viec-lam/ke-toan-tong-hop/9999999">Kế toán</a>',
+    )
+    s = session(fetcher)
+    listing = await careerlink.profile_listing(s, url, max_pages=5)
+    assert listing.urls == [
+        *first,
+        "https://www.careerlink.vn/tim-viec-lam/ke-toan-tong-hop/9999999",
+    ]
+    assert listing.complete
+    assert s.truncated == []
+
+    # Chạm giới hạn trang: phần đã đọc, nguồn chưa xong.
+    capped = session(fetcher)
+    listing = await careerlink.profile_listing(capped, url, max_pages=1)
+    assert listing.urls == first
+    assert not listing.complete
+    assert capped.truncated == ["profile_pages"]
+
+
+async def test_vietnamworks_profile_listing_uses_company_filter() -> None:
+    vnw = REGISTRY["vietnamworks"]
+    bodies: list[dict[str, Any]] = []
+
+    def search(kwargs: dict[str, Any]) -> FetchResult:
+        bodies.append(kwargs["json"])
+        hits = [{"jobId": 2120057 + i, "alias": f"vi-tri-{i}", "jobUrl": ""} for i in range(3)]
+        body = {"data": hits, "meta": {"nbHits": 3, "nbPages": 1}}
+        return fetch_result(VNW_API, json.dumps(body), content_type="application/json")
+
+    fetcher = FakeFetcher()
+    fetcher.add_route(VNW_API, search)
+    listing = await vnw.profile_listing(
+        session(fetcher),
+        "https://www.vietnamworks.com/nha-tuyen-dung/vinfast-trading-and-production-jsc-c273080",
+        max_pages=5,
+    )
+    assert bodies[0]["filter"] == [{"field": "companyId", "value": "273080"}]
+    assert listing.urls == [
+        f"https://www.vietnamworks.com/vi-tri-{i}-{2120057 + i}-jv" for i in range(3)
+    ]
+    assert listing.complete
+
+
 def test_topcv_brand_profile_jobs_url() -> None:
     topcv = REGISTRY["topcv"]
     assert topcv.profile_jobs_url("https://www.topcv.vn/brand/ipa?id=219468") == (

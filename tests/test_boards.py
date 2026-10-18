@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import gzip
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -11,21 +13,29 @@ from jobcrawler.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.llm import LLMClient
 from jobcrawler.pipeline.board_index import _Existing, plan_fetches
 from jobcrawler.pipeline.profiles import decide
-from jobcrawler.schemas import FetchOutcome
-from jobcrawler.sources.base import SourceError, SourceSession
+from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.sources.base import SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.boards.base import (
     BoardEntry,
     ListingState,
     parse_sitemap,
     sitemap_body,
 )
+from jobcrawler.sources.boards.profile_source import BoardProfileSource
 from jobcrawler.text import normalize_company_name
 
 from .boards_fake import HOME, FakeBoard, fake_site, job_page, sitemap_index, urlset
 
+ACME_NAME = "Công ty Cổ phần ACME"
 
-def session(fetcher: FakeFetcher) -> SourceSession:
-    return SourceSession("board:fakeboard", fetcher, LLMClient(FakeChatClient(["{}"]), model=None))
+
+def session(fetcher: FakeFetcher, **limits: Any) -> SourceSession:
+    return SourceSession(
+        "board:fakeboard",
+        fetcher,
+        LLMClient(FakeChatClient(["{}"]), model=None),
+        SourceLimits(**limits),
+    )
 
 
 def test_parse_sitemap_and_gzip() -> None:
@@ -90,6 +100,158 @@ async def test_sitemap_board_listing_errors() -> None:
     with pytest.raises(SourceError) as exc:
         _ = [e async for e in board.entries(session(blocked), ListingState())]
     assert exc.value.outcome is FetchOutcome.BLOCKED
+
+
+class MemoryIndex:
+    """`ProfileIndex` trong bộ nhớ."""
+
+    def __init__(self, jobs: list[RawJob], others: list[RawJob] | None = None) -> None:
+        self.jobs = jobs
+        self.others = {j.external_id: j for j in others or []}
+        self.asked: list[list[str]] = []
+
+    async def for_profile(self) -> list[RawJob]:
+        return list(self.jobs)
+
+    async def by_ids(self, external_ids: Sequence[str]) -> dict[str, RawJob]:
+        self.asked.append(list(external_ids))
+        return {i: self.others[i] for i in external_ids if i in self.others}
+
+
+def indexed_job(n: int, title: str = "Tin cũ") -> RawJob:
+    return RawJob(
+        source=FakeBoard.name,
+        external_id=str(n),
+        url=f"{HOME}viec-lam/tin-{n}.html",
+        title=title,
+        method=ExtractionMethod.JSONLD,
+    )
+
+
+class PagedBoard(FakeBoard):
+    profile_listing_complete = True
+
+
+PROFILE = f"{HOME}cong-ty/acme-7"
+
+
+def profile_site(*pages: list[int]) -> FakeFetcher:
+    """Trang profile chia trang: trang i liệt kê các tin trong `pages[i]`."""
+    fetcher = fake_site(
+        {
+            f"viec-lam/tin-{n}.html": (f"Tin {n}", ACME_NAME, "cong-ty/acme-7")
+            for p in pages
+            for n in p
+        }
+    )
+    for i, numbers in enumerate(pages, start=1):
+        links = "".join(f'<a href="/viec-lam/tin-{n}.html">Tin {n}</a>' for n in numbers)
+        if i < len(pages):
+            links += f'<a href="/cong-ty/acme-7?page={i + 1}">{i + 1}</a>'
+        fetcher.add(PROFILE if i == 1 else f"{PROFILE}?page={i}", f"<h1>ACME</h1>{links}")
+    return fetcher
+
+
+async def collect_profile(source: BoardProfileSource, s: SourceSession) -> list[RawJob]:
+    return [job async for job in source.jobs(s)]
+
+
+async def test_profile_source_merges_listing_with_index() -> None:
+    # Index có tin 1 (còn trên trang) và 9 (đã đóng); trang profile 2 trang: 1, 2 | 3.
+    index = MemoryIndex(
+        [indexed_job(1), indexed_job(9)], others=[indexed_job(2, "Chưa gắn profile")]
+    )
+    fetcher = profile_site([1, 2], [3])
+    source = BoardProfileSource(
+        PagedBoard(), external_id="7", url=PROFILE, fresh=False, index=index, name=ACME_NAME
+    )
+    s = session(fetcher)
+    jobs = await collect_profile(source, s)
+    # Tin 9 không còn trên danh sách đủ → bỏ; tin 2 có trong index (chưa gắn profile) → không
+    # tải lại; chỉ tải chi tiết tin 3.
+    assert [(j.external_id, j.title) for j in jobs] == [
+        ("1", "Tin cũ"),
+        ("2", "Chưa gắn profile"),
+        ("3", "Tin 3"),
+    ]
+    assert index.asked == [["2", "3"]]
+    assert [u for _, u, _ in fetcher.calls] == [
+        PROFILE,
+        f"{PROFILE}?page=2",
+        f"{HOME}viec-lam/tin-3.html",
+    ]
+    assert s.truncated == []
+
+    # Không chắc danh sách đủ (adapter chưa kiểm phân trang): giữ mọi tin index.
+    loose = BoardProfileSource(
+        FakeBoard(), external_id="7", url=PROFILE, fresh=False, index=index, name=ACME_NAME
+    )
+    jobs = await collect_profile(loose, session(profile_site([1, 2], [3])))
+    assert {j.external_id for j in jobs} == {"1", "9", "2", "3"}
+
+    # Index còn mới: không gọi mạng.
+    quiet = FakeFetcher()
+    fresh = BoardProfileSource(
+        PagedBoard(), external_id="7", url=PROFILE, fresh=True, index=index, name=ACME_NAME
+    )
+    assert [j.external_id for j in await collect_profile(fresh, session(quiet))] == ["1", "9"]
+    assert quiet.calls == []
+
+
+async def test_profile_source_falls_back_to_index_and_skips_foreign_jobs() -> None:
+    index = MemoryIndex([indexed_job(1)])
+    blocked = FakeFetcher()
+    blocked.add(PROFILE, status=403, outcome=FetchOutcome.BLOCKED)
+    source = BoardProfileSource(
+        PagedBoard(), external_id="7", url=PROFILE, fresh=False, index=index, name=ACME_NAME
+    )
+    got: list[RawJob] = []
+
+    async def drain() -> None:
+        async for job in source.jobs(session(blocked)):
+            got.append(job)
+
+    with pytest.raises(SourceError):
+        await drain()
+    assert [j.external_id for j in got] == ["1"]  # trang profile bị chặn: dùng tin đã index
+
+    # Khối "việc làm tương tự" trên trang profile: tin của nhà tuyển dụng khác thì bỏ.
+    fetcher = fake_site(
+        {
+            "viec-lam/tin-5.html": ("Tin 5", ACME_NAME, "cong-ty/acme-7"),
+            "viec-lam/tin-6.html": ("Tin 6", "Công ty TNHH Khác Hẳn", "cong-ty/khac-8"),
+        }
+    )
+    fetcher.add(PROFILE, '<a href="/viec-lam/tin-5.html">5</a><a href="/viec-lam/tin-6.html">6</a>')
+    jobs = await collect_profile(
+        BoardProfileSource(
+            PagedBoard(),
+            external_id="7",
+            url=PROFILE,
+            fresh=False,
+            index=MemoryIndex([]),
+            name=ACME_NAME,
+        ),
+        session(fetcher),
+    )
+    assert [j.external_id for j in jobs] == ["5"]
+
+    # Chạm giới hạn trang chi tiết: nguồn chưa xong.
+    many = profile_site(list(range(10, 16)))
+    s = session(many, max_detail_pages=2)
+    jobs = await collect_profile(
+        BoardProfileSource(
+            PagedBoard(),
+            external_id="7",
+            url=PROFILE,
+            fresh=False,
+            index=MemoryIndex([]),
+            name=ACME_NAME,
+        ),
+        s,
+    )
+    assert len(jobs) == 2
+    assert s.truncated == ["detail_pages"]
 
 
 def test_parse_job_with_profile() -> None:

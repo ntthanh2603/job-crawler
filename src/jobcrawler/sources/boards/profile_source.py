@@ -1,13 +1,15 @@
 """Tin của một doanh nghiệp trên một trang tuyển dụng (profile đã map), cho `process_company`.
 
-Index của profile còn mới (≤ BOARD_STALE_HOURS) thì lấy tin từ `job_postings`; cũ hơn thì crawl
-trực tiếp trang profile (danh sách tin → trang chi tiết). Crawl bị chặn/lỗi thì dùng tạm tin đã
-index rồi báo nguồn chưa xong.
+Index của profile còn mới (≤ BOARD_STALE_HOURS, mọi tin của profile đã tải) thì lấy tin từ
+`job_postings`. Cũ hơn thì đọc danh sách tin trên trang profile (đủ các trang) và gộp với index:
+tin đã index dùng luôn, chỉ tải trang chi tiết của tin chưa có. Đọc danh sách bị chặn/lỗi thì
+dùng tạm tin đã index rồi báo nguồn chưa xong.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Sequence
+from typing import Protocol
 
 from jobcrawler.logging import get_logger
 from jobcrawler.schemas import RawJob
@@ -19,10 +21,21 @@ from jobcrawler.sources.base import (
     transient_failure,
 )
 from jobcrawler.sources.boards.base import BoardAdapter
+from jobcrawler.text import normalize_company_name
 
 log = get_logger(__name__)
 
-LoadIndexed = Callable[[], Awaitable[list[RawJob]]]
+
+class ProfileIndex(Protocol):
+    """Tin trên trang tuyển dụng đã có trong index (`job_postings`)."""
+
+    async def for_profile(self) -> list[RawJob]:
+        """Tin đang mở gắn với profile."""
+        ...
+
+    async def by_ids(self, external_ids: Sequence[str]) -> dict[str, RawJob]:
+        """Tin chưa gỡ theo mã tin, chưa gắn profile nào hoặc gắn đúng profile này."""
+        ...
 
 
 class BoardProfileSource(Source):
@@ -35,12 +48,14 @@ class BoardProfileSource(Source):
         external_id: str,
         url: str,
         fresh: bool,
-        load_indexed: LoadIndexed,
+        index: ProfileIndex,
+        name: str | None = None,
     ) -> None:
         super().__init__(external_id, url)
         self.adapter = adapter
         self.fresh = fresh
-        self.load_indexed = load_indexed
+        self.index = index
+        self.profile_name = normalize_company_name(name) if name else None
 
     @property
     def name(self) -> str:
@@ -56,36 +71,60 @@ class BoardProfileSource(Source):
         if parsed is None:
             session.fail_page(result, "no_job: không bóc được tin từ trang chi tiết")
             return None
+        profile = parsed.profile
+        if (
+            profile is not None
+            and profile.external_id != self.key
+            and self.profile_name
+            and normalize_company_name(profile.name) != self.profile_name
+        ):
+            # Link trong khối "việc làm tương tự" của trang profile: tin của nhà tuyển dụng khác.
+            log.info("board.profile_foreign_job", url=url, employer=profile.name)
+            return None
         session.count(url, 1)
         return parsed.job
 
-    async def _crawl(self, session: SourceSession) -> AsyncIterator[RawJob]:
-        jobs_url = self.adapter.profile_jobs_url(self.url)
-        page = await session.fetch_ok(jobs_url, rate=self.adapter.rate)
-        urls = self.adapter.profile_job_urls(page.text, page.final_url)
-        session.count(jobs_url, len(urls))
-        if len(urls) > session.limits.max_detail_pages:
-            session.truncate("detail_pages")
-            urls = urls[: session.limits.max_detail_pages]
-        step = session.limits.detail_concurrency
-        for i in range(0, len(urls), step):
-            for job in await gather_all(self._detail(session, u) for u in urls[i : i + step]):
-                if job is not None:
-                    yield job
-
     async def jobs(self, session: SourceSession) -> AsyncIterator[RawJob]:
+        indexed = {job.external_id: job for job in await self.index.for_profile()}
         if self.fresh or not self.adapter.profile_lists_jobs:
-            for job in await self.load_indexed():
+            for job in indexed.values():
                 yield job
             return
-        yielded = 0
         try:
-            async for job in self._crawl(session):
-                yielded += 1
-                yield job
+            listing = await self.adapter.profile_listing(
+                session, self.url, max_pages=session.limits.max_listing_pages
+            )
         except SourceError:
-            if yielded == 0:
-                # Không crawl được: dùng tin đã index (có thể cũ) rồi báo lỗi nguồn.
-                for job in await self.load_indexed():
-                    yield job
+            # Không đọc được danh sách: dùng tin đã index (có thể cũ) rồi báo lỗi nguồn.
+            for job in indexed.values():
+                yield job
             raise
+        listed: dict[str, str] = {}
+        for url in listing.urls:
+            if (job_id := self.adapter.job_id(url)) is not None:
+                listed.setdefault(job_id, url)
+        if not listed:
+            # Trang không liệt kê tin nào (hết tin, hoặc đổi bố cục): không đủ để bỏ tin index.
+            for job in indexed.values():
+                yield job
+            return
+        for job_id, job in indexed.items():
+            # Danh sách chắc chắn đủ: tin index không còn trên trang là đã đóng.
+            if job_id in listed or not listing.complete:
+                yield job
+        missing = [job_id for job_id in listed if job_id not in indexed]
+        if missing:
+            known = await self.index.by_ids(missing)
+            for job_id in missing:
+                if (job := known.get(job_id)) is not None:
+                    yield job
+            missing = [job_id for job_id in missing if job_id not in known]
+        if len(missing) > session.limits.max_detail_pages:
+            session.truncate("detail_pages")
+            missing = missing[: session.limits.max_detail_pages]
+        step = session.limits.detail_concurrency
+        for i in range(0, len(missing), step):
+            batch = [listed[job_id] for job_id in missing[i : i + step]]
+            for job in await gather_all(self._detail(session, url) for url in batch):
+                if job is not None:
+                    yield job

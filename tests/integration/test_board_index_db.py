@@ -227,7 +227,7 @@ async def test_process_company_uses_indexed_board_jobs(
         assert result.jobs_found == 2  # 2 tin của ACME từ index, không gọi mạng
         assert result.incomplete_sources == []
 
-        # Index cũ hơn BOARD_STALE_HOURS: crawl trực tiếp trang profile.
+        # Index cũ hơn BOARD_STALE_HOURS: đọc danh sách tin trên trang profile, gộp với index.
         async with res.sessionmaker.begin() as s:
             await s.execute(
                 update(SourceProfile)
@@ -237,15 +237,33 @@ async def test_process_company_uses_indexed_board_jobs(
         site = fake_site(JOBS)
         site.add(
             f"{HOME}cong-ty/acme-7",
+            '<h1>ACME</h1><a href="/viec-lam/ke-toan-11.html">Kế toán</a>'
+            '<a href="/viec-lam/thu-ky-14.html">Thư ký</a>',
+        )
+        site.add(f"{HOME}viec-lam/thu-ky-14.html", job_page("Thư ký", ACME, "cong-ty/acme-7"))
+        crawling = dataclasses.replace(res, http=site)  # pyright: ignore[reportArgumentType]
+        result = await process_company(crawling, CompanyIn(name=ACME))
+        # Chưa chắc danh sách trên trang là đủ: giữ cả 2 tin đã index, chỉ tải tin mới (14).
+        assert result.jobs_found == 3
+        assert [u for _, u, _ in site.calls] == [
+            f"{HOME}cong-ty/acme-7",
+            f"{HOME}viec-lam/thu-ky-14.html",
+        ]
+
+        # Adapter đã kiểm phân trang (danh sách đủ): tin index không còn trên trang là đã đóng.
+        class PagedBoard(FakeBoard):
+            profile_listing_complete = True
+
+        monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: PagedBoard()})
+        site = fake_site(JOBS)
+        site.add(
+            f"{HOME}cong-ty/acme-7",
             '<h1>ACME</h1><a href="/viec-lam/ke-toan-11.html">Kế toán</a>',
         )
         crawling = dataclasses.replace(res, http=site)  # pyright: ignore[reportArgumentType]
         result = await process_company(crawling, CompanyIn(name=ACME))
         assert result.jobs_found == 1
-        assert [u for _, u, _ in site.calls] == [
-            f"{HOME}cong-ty/acme-7",
-            f"{HOME}viec-lam/ke-toan-11.html",
-        ]
+        assert [u for _, u, _ in site.calls] == [f"{HOME}cong-ty/acme-7"]
 
 
 async def test_serp_lookup_adopts_profile_on_board(

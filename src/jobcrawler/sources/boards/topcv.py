@@ -6,7 +6,8 @@
 - JSON-LD: `hiringOrganization.sameAs` = profile trên TopCV (`/cong-ty/<slug>/<id>.html`, thương
   hiệu: `/brand/<slug>?id=<id>`); `identifier` là mã công ty.
 - Trang profile: Organization JSON-LD (website ở `sameAs`, địa chỉ); tin đang mở ở trang riêng
-  `/cong-ty/<slug>-cid<id>/tuyen-dung.html` (thương hiệu: `/brand/<slug>/tuyen-dung?id=<id>`).
+  `/cong-ty/<slug>-cid<id>/tuyen-dung.html` (thương hiệu: `/brand/<slug>/tuyen-dung?id=<id>`),
+  chia trang bằng JavaScript ("1/2 trang", `data-page-url`): trang sau đọc bằng `?page=N`.
 Mẫu: tests/fixtures/boards/topcv/.
 """
 
@@ -15,9 +16,12 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from jobcrawler.sources.boards.base import SitemapBoard
+from jobcrawler.pages import parse
+from jobcrawler.sources.boards.base import ProfilePage, SitemapBoard
 
 _BRAND = re.compile(r"^https://www\.topcv\.vn/brand/(?P<slug>[^/?]+)$")
+# "<span class="hight-light">1</span>/2 trang" trong #job-listing-paginate-text.
+_PAGES = re.compile(r"(\d+)\s*/\s*(\d+)\s*trang")
 _COMPANY = re.compile(r"^https://www\.topcv\.vn/cong-ty/(?P<slug>[^/]+)/(?P<id>\d+)\.html$")
 
 
@@ -47,6 +51,24 @@ class TopCV(SitemapBoard):
     def profile_id(self, url: str) -> str | None:
         m = self.profile_url.search(self.canonical(url))
         return (m.group("id") or m.group("bid")) if m else None
+
+    def profile_page(self, html: str, url: str) -> ProfilePage:
+        urls = self.profile_job_urls(html, url)
+        tree = parse(html)
+        box = tree.css_first("#job-listing-paginate-text")
+        m = _PAGES.search(box.text(deep=True, separator=" ")) if box is not None else None
+        if m is None:
+            # Không có phân trang: một trang. Không chắc là đủ (trang có thể đổi bố cục).
+            return ProfilePage(urls=urls)
+        current, total = int(m[1]), int(m[2])
+        if current >= total:
+            return ProfilePage(urls=urls, last=True)
+        node = tree.css_first("[data-page-url]")
+        base = (node.attributes.get("data-page-url") if node is not None else None) or url
+        base = base.split("?")[0]
+        brand_id = parse_qs(urlsplit(url).query).get("id")
+        query = f"id={brand_id[0]}&" if brand_id and "/brand/" in base else ""
+        return ProfilePage(urls=urls, next_url=f"{base}?{query}page={current + 1}")
 
     def profile_jobs_url(self, profile_url: str) -> str:
         url = self.canonical(profile_url)

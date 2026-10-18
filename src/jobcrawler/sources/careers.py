@@ -24,6 +24,7 @@ from jobcrawler.logging import get_logger
 from jobcrawler.net.http import FetchResult, WaitUntil
 from jobcrawler.net.urls import host_of, normalize_url, path_segments, same_site
 from jobcrawler.pages import (
+    PAGE_PARAMS,
     Link,
     clean_text,
     extract_links,
@@ -31,7 +32,9 @@ from jobcrawler.pages import (
     looks_like_spa_shell,
     main_node,
     meta_content,
+    next_page_urls,
     node_text,
+    page_number,
     parse,
 )
 from jobcrawler.prompts import job_detail, job_listing
@@ -190,8 +193,6 @@ _VIEW_ALL = re.compile(
 )
 # Chữ "xem tất cả" trơn: chỉ tính khi đường dẫn trông như trang việc làm (/alljobs, /careers).
 _VIEW_ALL_SHORT = re.compile(r"^(xem tat ca|tat ca|view all|see all|show all|all)$")
-_PAGE_PARAMS = frozenset({"page", "p", "trang", "paged", "pg", "pagenumber", "page_no"})
-_PAGE_PATH = re.compile(r"/(?:page|trang)[/-](\d+)/?$", re.IGNORECASE)
 _ID_PARAMS = frozenset({"id", "job", "jid", "post", "pid", "slug", "code"})
 # Đoạn cuối của trang danh sách (không phải tin): /careers/all-jobs, /alljobs, /tim-viec.
 LISTING_SEGMENTS = frozenset(
@@ -335,7 +336,7 @@ def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
         if not segs or segs[-1] in LISTING_SEGMENTS or any(_stop(s) for s in segs):
             continue
         query = {k.lower() for k, _ in parse_qsl(urlsplit(url).query)}
-        if query & _PAGE_PARAMS:
+        if query & PAGE_PARAMS:
             continue
         by_id = any(_is_id_param(k) for k in query)  # /job-detail.html?id=12
         # Trang con của trang danh sách (/tuyen-dung → /tuyen-dung/ke-toan). Trang danh sách là
@@ -365,15 +366,6 @@ def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
     return list(best.values())
 
 
-def _page_number(url: str) -> int | None:
-    for key, value in parse_qsl(urlsplit(url).query):
-        if key.lower() in _PAGE_PARAMS and value.isdigit():
-            return int(value)
-    if m := _PAGE_PATH.search(urlsplit(url).path):
-        return int(m.group(1))
-    return None
-
-
 def _listing_like(link: Link, segs: list[str]) -> bool:
     """Trang mục lục việc làm (/tim-kiem-viec-lam, /en/jobs/, /search/) hoặc link "xem tất cả
     vị trí" (không phải trang chính sách, tin đã lưu...)."""
@@ -389,21 +381,17 @@ def _listing_like(link: Link, segs: list[str]) -> bool:
 
 def listing_links(links: list[Link], page_url: str) -> list[str]:
     """Trang danh sách tiếp theo: phân trang của trang hiện tại, link "xem tất cả vị trí"."""
-    current = _page_number(page_url) or 1
-    base_path = _PAGE_PATH.sub("/", urlsplit(page_url).path).rstrip("/")
-    pages: dict[int, str] = {}
-    others: list[str] = []
-    for link in links:
-        if not same_site(link.url, page_url) or link.url == page_url:
-            continue
-        number = _page_number(link.url)
-        path = _PAGE_PATH.sub("/", urlsplit(link.url).path).rstrip("/")
-        if number is not None and number > current and path == base_path:
-            pages.setdefault(number, link.url)
-        elif (segs := _segments(link.url)) and _listing_like(link, segs):
-            others.append(link.url)
-    ordered = [pages[n] for n in sorted(pages)]
-    return list(dict.fromkeys([*ordered, *others]))
+    pages = next_page_urls(links, page_url)
+    others = [
+        link.url
+        for link in links
+        if same_site(link.url, page_url)
+        and link.url != page_url
+        and page_number(link.url) is None
+        and (segs := _segments(link.url))
+        and _listing_like(link, segs)
+    ]
+    return list(dict.fromkeys([*pages, *others]))
 
 
 def jd_signals(markdown: str) -> int:

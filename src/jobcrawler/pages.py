@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
+from urllib.parse import parse_qsl, urlsplit
 
 from markdownify import markdownify
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
-from jobcrawler.net.urls import normalize_url
+from jobcrawler.net.urls import normalize_url, same_site
 
 # Phần không phải nội dung: menu, footer, form, script... Bỏ trước khi lấy nội dung chính.
 _NOISE = (
@@ -90,6 +92,40 @@ def extract_links(tree: LexborHTMLParser, page_url: str) -> list[Link]:
         )
         links.append(Link(url=url, text=text))
     return links
+
+
+# Tham số / đường dẫn phân trang: ?page=2, ?p=2, ?trang=2, /page/2, /trang-2.
+PAGE_PARAMS = frozenset({"page", "p", "trang", "paged", "pg", "pagenumber", "page_no"})
+PAGE_PATH = re.compile(r"/(?:page|trang)[/-](\d+)/?$", re.IGNORECASE)
+
+
+def page_number(url: str) -> int | None:
+    """Số trang ghi trong URL (None: URL không có tham số / đường dẫn phân trang)."""
+    for key, value in parse_qsl(urlsplit(url).query):
+        if key.lower() in PAGE_PARAMS and value.isdigit():
+            return int(value)
+    if m := PAGE_PATH.search(urlsplit(url).path):
+        return int(m.group(1))
+    return None
+
+
+def page_path(url: str) -> str:
+    """Đường dẫn bỏ phần số trang (/tuyen-dung/page/2 → /tuyen-dung)."""
+    return PAGE_PATH.sub("/", urlsplit(url).path).rstrip("/")
+
+
+def next_page_urls(links: Iterable[Link], page_url: str) -> list[str]:
+    """Các trang sau của cùng danh sách (cùng đường dẫn, số trang lớn hơn), theo thứ tự số."""
+    current = page_number(page_url) or 1
+    base = page_path(page_url)
+    pages: dict[int, str] = {}
+    for link in links:
+        if not same_site(link.url, page_url) or link.url == page_url:
+            continue
+        number = page_number(link.url)
+        if number is not None and number > current and page_path(link.url) == base:
+            pages.setdefault(number, link.url)
+    return [pages[n] for n in sorted(pages)]
 
 
 def meta_content(tree: LexborHTMLParser, *names: str) -> str | None:

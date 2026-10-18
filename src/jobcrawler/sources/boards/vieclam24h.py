@@ -57,6 +57,8 @@ class Vieclam24h(ListingBoard):
         r"^https://vieclam24h\.vn/danh-sach-tin-tuyen-dung-[^/]*-ntd(?P<id>\d+)p\d+\.html$"
     )
     profile_selector = 'a[title][href*="/danh-sach-tin-tuyen-dung-"]'
+    # Trang profile chia trang `?page=N` (link `rel=next`).
+    profile_listing_complete = True
 
     def parse_job(self, html: str, url: str) -> BoardJob | None:
         parsed = super().parse_job(html, url)
