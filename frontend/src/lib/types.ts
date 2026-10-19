@@ -95,15 +95,26 @@ export type CompanyItem = {
   active_jobs: number
 }
 
+/** Loại lượt chạy: build = lượt đủ (ghi bộ khung), poll = chỉ các trang trong bộ khung. */
+export type RunKind = "build" | "poll"
+
+/** Vì sao lượt chạy được xếp. */
+export type RunTrigger = "nightly" | "schedule" | "error" | "board" | "new" | "manual" | "continuation"
+
 export type Run = {
   run_id: string
   company_id: string
+  kind: RunKind
+  trigger: RunTrigger
   started_at: string
   finished_at: string | null
   duration_ms: number | null
   status: string
   jobs_found: number
   jobs_accepted: number
+  /** Việc làm mới thấy lần đầu / việc làm đóng (hết hạn, gỡ) trong lượt này. */
+  jobs_new: number
+  jobs_closed: number
   incomplete_sources: string[]
   error: string | null
 }
@@ -264,7 +275,9 @@ export type Overview = {
   chart: { hour: string; counts: Record<string, number>; total: number }[]
   fetch_chart: { hour: string; ok: number; blocked: number; error: number }[]
   charts: Charts
-  recent_runs: (Run & { company_name: string })[]
+  // Lượt chạy gần đây (cache trang tổng quan): chưa có kind / trigger / số tin mới, đóng.
+  recent_runs: (Omit<Run, "kind" | "trigger" | "jobs_new" | "jobs_closed"> &
+    Partial<Pick<Run, "kind" | "trigger" | "jobs_new" | "jobs_closed">> & { company_name: string })[]
 }
 
 export type Meta = {
@@ -354,6 +367,8 @@ export type BoardRun = {
   profiles_new: number
   profiles_matched: number
   error: string | null
+  /** full = index đủ (đêm), tail = index đuôi (ngày, chỉ phần mới nhất của danh sách). */
+  mode: "full" | "tail"
 }
 
 export type Boards = { boards: BoardStats[]; queue: QueueStats }
@@ -372,10 +387,199 @@ export type QueueJob = {
   error: string | null
   label: string
   company_id: string | null
+  /** Vì sao job được xếp (xem RunTrigger); null với việc định kỳ, index trang tuyển dụng. */
+  trigger: RunTrigger | null
   /** Lượt tự chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường). */
   continuation: number
 }
 
 export type QueuePage = {
   queues: (QueueStats & { jobs: QueueJob[]; page: number; pages: number; total: number })[]
+}
+
+// --- trang Cài đặt ---------------------------------------------------------------------------------
+
+export type SettingKind = "int" | "float" | "bool" | "str" | "enum" | "secret" | "list" | "dict" | "window" | "cron"
+
+/** Giá trị đang dùng lấy từ đâu: mặc định của code, biến môi trường / .env, hay đặt ở giao diện. */
+export type SettingSource = "default" | "env" | "ui"
+
+export type SettingValue = string | number | boolean | string[] | Record<string, string | number> | null
+
+export type SettingOption = { value: string; label: string; help: string | null }
+
+export type SettingItem = {
+  key: string
+  label: string
+  help: string
+  kind: SettingKind
+  options: SettingOption[]
+  unit: string | null
+  min: number | null
+  max: number | null
+  min_exclusive: boolean
+  max_exclusive: boolean
+  /** Để trống được (null). */
+  nullable: boolean
+  placeholder: string | null
+  /** Kiểu giá trị của bảng `dict` ("str" | "float"). */
+  value_type: string | null
+  /** false: chỉ có hiệu lực sau khi khởi động lại service. */
+  live: boolean
+  /** Bí mật luôn là null (xem `is_set`); proxy đã ẩn mật khẩu. */
+  value: SettingValue
+  default: SettingValue
+  env_value: SettingValue
+  source: SettingSource
+  secret: boolean
+  is_set: boolean | null
+  env_is_set: boolean | null
+}
+
+export type SettingGroup = { group: string; title: string; description: string; items: SettingItem[] }
+
+export type SettingsPage = { version: number; groups: SettingGroup[] }
+
+export type SettingsSaved = SettingsPage & { restart_required: string[] }
+
+// --- trang Workers -----------------------------------------------------------------------------------
+
+export type WorkerStats = {
+  http_done: number
+  http_failed: number
+  render_done: number
+  render_failed: number
+  http_inflight: number
+  render_inflight: number
+  bytes_in: number
+  cpu_percent: number
+  rss_bytes: number
+  proxies_alive: number
+}
+
+export type WorkerStatus = {
+  worker_id: string
+  hostname: string
+  version: string
+  pool: string
+  http_slots: number
+  render_slots: number
+  local_proxies: number
+  labels: Record<string, string>
+  started_at_ms: number
+  registered_at_ms: number
+  last_seen_ms: number
+  leased: number
+  completed: number
+  stats: WorkerStats
+  alive: boolean
+  draining: boolean
+}
+
+export type WorkerPoolSummary = {
+  workers: number
+  http_slots: number
+  render_slots: number
+  http_inflight: number
+  render_inflight: number
+}
+
+export type WorkersPage = {
+  workers: WorkerStatus[]
+  summary: Omit<WorkerPoolSummary, "workers"> & {
+    alive: number
+    gone: number
+    draining: number
+    pools: Record<string, WorkerPoolSummary>
+    done: number
+    failed: number
+  }
+  /** Giờ máy chủ (ms epoch) lúc trả lời, để tính "lần cuối báo" không lệch đồng hồ. */
+  now_ms: number
+}
+
+// --- lịch thu thập: bộ khung, poll, độ trễ phát hiện --------------------------------------------------
+
+/** Trạng thái lịch của một doanh nghiệp (`company_schedules.state`). */
+export type ScheduleState = "new" | "ready" | "no_sources" | "broken" | "paused"
+
+export type CrawlSchedule = {
+  state: ScheduleState
+  plans: number
+  next_build_at: string | null
+  next_poll_at: string | null
+  last_build_at: string | null
+  last_build_status: string | null
+  last_poll_at: string | null
+  last_poll_ok_at: string | null
+  last_poll_ms: number | null
+  last_change_at: string | null
+  poll_failures: number
+  polls: number
+  last_error: string | null
+}
+
+/** Bộ khung của một nguồn: trang danh sách / API đọc ở mỗi lượt poll. */
+export type CrawlPlan = {
+  id: string
+  source: string
+  kind: string
+  url: string
+  status: "active" | "broken" | "retired"
+  jobs: number
+  built_at: string
+  polled_at: string | null
+  changed_at: string | null
+  failures: number
+  last_error: string | null
+  listings: string[]
+  hubs: number
+  apis: string[]
+  rendered: number
+  llm_listing: boolean
+  ignored: number
+}
+
+export type CompanyCrawl = { schedule: CrawlSchedule | null; plans: CrawlPlan[]; poll_interval_seconds: number }
+
+export type CrawlStatus = {
+  target_seconds: number
+  poll_interval_seconds: number
+  polls: {
+    minutes: number
+    polls: number
+    ok: number
+    failed: number
+    broken: number
+    skipped: number
+    changed: number
+    new_jobs: number
+    per_second: number
+    duration_p50: number | null
+    duration_p95: number | null
+    window_p50: number | null
+    window_p95: number | null
+    /** Tỉ lệ lượt poll có cửa sổ phát hiện ≤ mục tiêu (0..1). */
+    within_target: number | null
+    /** Số lượt theo ngưỡng cửa sổ (giây): 30, 60, 90, 120, 135, 150, 165, 180, 210, 240, 300, 600, 1800, 3600, +∞. */
+    window_histogram: number[]
+  }
+  freshness: {
+    ready: number
+    by_state: Partial<Record<ScheduleState, number>>
+    age_p50: number | null
+    age_p95: number | null
+    age_max: number | null
+    overdue: number
+    never_polled: number
+  }
+  windows: {
+    timezone: string
+    build: string
+    poll: string
+    in_build: boolean
+    in_poll: boolean
+    next_build_start: string
+    next_poll_start: string
+  }
 }

@@ -348,7 +348,7 @@ export function StatCard({
 }) {
   return (
     <div className={cn("min-w-0 rounded-xl border bg-card p-4 shadow-card sm:px-5", className)}>
-      <div className="flex min-h-6 items-start justify-between gap-2">
+      <div className="flex min-h-6 flex-wrap items-start justify-between gap-x-2 gap-y-1">
         <span className="pt-0.5 text-meta font-medium text-muted-foreground">
           {typeof title === "string" ? cap(title) : title}
         </span>

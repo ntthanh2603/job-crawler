@@ -1,8 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Briefcase, ExternalLinkIcon, Play } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { Briefcase, ExternalLinkIcon, Radar } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { Link, useParams } from "react-router"
-import { toast } from "sonner"
 
 import {
   ErrorState,
@@ -26,6 +25,7 @@ import {
   useRowLink,
   useTabParam,
 } from "@/components/common"
+import { CompanyCrawlTab, JobDelta, RunTags, ScheduleBadge, useCrawlActions } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -47,7 +47,7 @@ import {
   shortUrl,
   sourceLabel,
 } from "@/lib/format"
-import type { CompanyDetail, EnqueueResult, Job, Page, Posting, Run } from "@/lib/types"
+import type { CompanyCrawl, CompanyDetail, Job, Page, Posting, Run } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -69,7 +69,7 @@ const ALIAS_KINDS: Record<string, string> = {
   english: "Tên tiếng Anh",
 }
 
-const TABS = ["jobs", "runs", "rejected"] as const
+const TABS = ["jobs", "crawl", "runs", "rejected"] as const
 
 /** Việc làm của doanh nghiệp theo trang, chuyển giữa đang mở / đã đóng. */
 function CompanyJobs({ id, active, inactive }: { id: string; active: number; inactive: number }) {
@@ -150,6 +150,7 @@ function CompanyRuns({ id }: { id: string }) {
                 <TableHead>Bắt đầu</TableHead>
                 <TableHead>Kết quả</TableHead>
                 <TableHead className="text-right">Tin nhận / thấy</TableHead>
+                <TableHead className="text-right">Mới / đóng</TableHead>
                 <TableHead>Nguồn chưa xong, lỗi</TableHead>
               </TableRow>
             </TableHeader>
@@ -163,12 +164,18 @@ function CompanyRuns({ id }: { id: string }) {
                     <div className="text-meta text-muted-foreground">{cap(ago(r.started_at))}</div>
                   </TableCell>
                   <TableCell>
-                    <StatusBadge value={r.status} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <StatusBadge value={r.status} />
+                      <RunTags kind={r.kind} trigger={r.trigger} />
+                    </div>
                     <div className="mt-0.5 text-meta text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     <span className="font-medium">{num(r.jobs_accepted)}</span>
                     <span className="text-muted-foreground"> / {num(r.jobs_found)}</span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <JobDelta added={r.jobs_new} closed={r.jobs_closed} />
                   </TableCell>
                   <TableCell className="max-w-96 min-w-48 text-meta whitespace-normal [overflow-wrap:anywhere]">
                     <IncompleteSources sources={r.incomplete_sources} />
@@ -222,8 +229,7 @@ function CompanyRejected({ id }: { id: string }) {
 }
 
 export function CompanyPage() {
-  const { id } = useParams()
-  const client = useQueryClient()
+  const { id = "" } = useParams()
   const [tab, setTab] = useTabParam(TABS, "jobs")
   const query = useQuery({
     queryKey: ["company", id],
@@ -234,16 +240,13 @@ export function CompanyPage() {
     queryKey: ["company-runs", id, 1],
     queryFn: () => api.get<Page<Run>>(`/companies/${id}/runs?page=1`),
   })
-  const run = useMutation({
-    mutationFn: () => api.post<EnqueueResult>("/enqueue", { company_ids: [id] }),
-    onSuccess: (r) => {
-      if (r.enqueued) toast.success("Đã đưa vào hàng đợi. Lượt chạy mới sẽ hiện sau ít phút.")
-      else toast.warning("Doanh nghiệp đang có việc chờ hoặc đang chạy trong hàng đợi")
-      client.invalidateQueries({ queryKey: ["company", id] })
-      client.invalidateQueries({ queryKey: ["queue-summary"] })
-    },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
+  // Lịch thu thập (cùng khoá với tab "Bộ khung & lịch"): trạng thái hiện ở thẻ số liệu.
+  const crawl = useQuery({
+    queryKey: ["company-crawl", id],
+    queryFn: () => api.get<CompanyCrawl>(`/companies/${id}/crawl`),
+    refetchInterval: 15_000,
   })
+  const { poll } = useCrawlActions(id)
 
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
@@ -266,8 +269,8 @@ export function CompanyPage() {
                 <Briefcase /> Mọi việc làm
               </Link>
             </Button>
-            <Button onClick={() => run.mutate()} disabled={run.isPending}>
-              <Play /> {run.isPending ? "Đang xếp hàng…" : "Chạy lại"}
+            <Button onClick={() => poll.mutate()} disabled={poll.isPending}>
+              <Radar /> {poll.isPending ? "Đang xếp hàng…" : "Poll ngay"}
             </Button>
           </>
         }
@@ -293,13 +296,35 @@ export function CompanyPage() {
           hint={
             last ? (
               <span className="flex flex-wrap items-center gap-1.5">
-                {duration(last.duration_ms)} · nhận {num(last.jobs_accepted)}/{num(last.jobs_found)} tin
+                <RunTags kind={last.kind} trigger={last.trigger} />
+                {duration(last.duration_ms)} · +{num(last.jobs_new)} mới · {num(last.jobs_closed)} đóng
                 <IncompleteSources sources={last.incomplete_sources} />
               </span>
             ) : undefined
           }
         />
-        <StatCard label="Tin bị loại" value={num(d.rejected_total)} hint="Không qua bước xác minh" />
+        <button
+          type="button"
+          onClick={() => setTab("crawl")}
+          className="rounded-xl text-left transition-shadow hover:[&>div]:border-primary/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <StatCard
+            className="h-full"
+            label="Lịch thu thập"
+            value={crawl.data ? `${num(crawl.data.plans.filter((p) => p.status === "active").length)} nguồn` : "…"}
+            status={crawl.data && !crawl.data.schedule ? { tone: "muted", text: "Chưa có lịch" } : undefined}
+            hint={
+              crawl.data?.schedule ? (
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <ScheduleBadge state={crawl.data.schedule.state} />
+                  {crawl.data.schedule.last_poll_at ? `Poll ${ago(crawl.data.schedule.last_poll_at)}` : "Chưa poll"}
+                </span>
+              ) : (
+                "Bộ khung được tạo ở lượt build đầu tiên"
+              )
+            }
+          />
+        </button>
         <StatCard
           label="Profile trang tuyển dụng"
           value={num(d.profiles.length)}
@@ -312,12 +337,16 @@ export function CompanyPage() {
           <TabBar
             items={[
               { value: "jobs", label: "Việc làm", count: d.active_jobs + d.inactive_jobs },
+              { value: "crawl", label: "Bộ khung & lịch", count: crawl.data?.plans.length },
               { value: "runs", label: "Lượt chạy", count: d.runs_total },
               { value: "rejected", label: "Tin bị loại", count: d.rejected_total },
             ]}
           />
           <TabsContent value="jobs">
             <CompanyJobs id={c.id} active={d.active_jobs} inactive={d.inactive_jobs} />
+          </TabsContent>
+          <TabsContent value="crawl">
+            <CompanyCrawlTab id={c.id} />
           </TabsContent>
           <TabsContent value="runs">
             <CompanyRuns id={c.id} />

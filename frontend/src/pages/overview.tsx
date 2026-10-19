@@ -27,6 +27,8 @@ import {
   useTabParam,
 } from "@/components/common"
 import { BarList, ShareBar, StackedColumns, type BarItem } from "@/components/charts"
+import { JobDelta, RunTags } from "@/components/crawl"
+import { DetectionSection } from "@/components/detection"
 import { Button } from "@/components/ui/button"
 import type { ChartConfig } from "@/components/ui/chart"
 import { Label } from "@/components/ui/label"
@@ -292,12 +294,18 @@ function RunsTab({ data }: { data: Overview }) {
                     <TableCell className="whitespace-normal">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <StatusBadge value={r.status} />
+                        <RunTags kind={r.kind} trigger={r.trigger} />
                         <IncompleteSources sources={r.incomplete_sources} />
                       </div>
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       <span className="font-medium">{num(r.jobs_accepted)}</span>
                       <span className="text-muted-foreground"> / {num(r.jobs_found)}</span>
+                      {r.jobs_new !== undefined && (
+                        <div>
+                          <JobDelta added={r.jobs_new} closed={r.jobs_closed ?? 0} />
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -490,9 +498,13 @@ function StorageTab({ data, measured, onMeasure }: { data: Overview; measured: b
   )
 }
 
+const LATENCY_RANGES = [15, 60, 360]
+
 export function OverviewPage() {
   const [params, setParams] = useSearchParams()
   const hours = params.get("hours") ?? "24"
+  // Khoảng đo độ trễ phát hiện (phút), lưu ở `?latency=` để giữ khi tải lại.
+  const latency = LATENCY_RANGES.includes(Number(params.get("latency"))) ? Number(params.get("latency")) : 60
   const [tab, setTab] = useTabParam(TABS, "runs")
   const [storage, setStorage] = useState(false)
   const [auto, setAuto] = useState(false)
@@ -509,6 +521,17 @@ export function OverviewPage() {
       r.queued ? toast.success("Đã đưa lượt bảo trì vào hàng đợi") : toast.warning("Đang có lượt bảo trì chờ hoặc đang chạy"),
     onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
+
+  const setLatency = (v: number) =>
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        if (v === 60) out.delete("latency")
+        else out.set("latency", String(v))
+        return out
+      },
+      { replace: true },
+    )
 
   const setHours = (v: string) =>
     setParams((prev) => {
@@ -558,7 +581,7 @@ export function OverviewPage() {
             <ConfirmButton
               size="default"
               title="Chạy bảo trì ngay?"
-              description="Đóng các lượt chạy bị treo, xoá dữ liệu quá hạn lưu, huấn luyện từ điển nén và nén lại dữ liệu. Worker doanh nghiệp sẽ chạy việc này."
+              description="Đóng các lượt chạy bị treo, xoá dữ liệu quá hạn lưu, huấn luyện từ điển nén và nén lại dữ liệu. Runner hàng đợi build sẽ chạy việc này."
               onConfirm={() => maintenance.mutate()}
             >
               <Wrench /> Bảo trì
@@ -609,15 +632,17 @@ export function OverviewPage() {
                 value={num(active + queued)}
                 status={
                   !workers
-                    ? { tone: "warn", text: "Không có worker" }
+                    ? { tone: "warn", text: "Không có runner" }
                     : active
                       ? { tone: "info", text: "Đang chạy", pulse: true }
                       : undefined
                 }
-                hint={`${num(active)} đang chạy · ${num(queued)} đang chờ · ${num(workers)} worker`}
+                hint={`${num(active)} đang chạy · ${num(queued)} đang chờ · ${num(workers)} runner`}
               />
             </Link>
           </StatGrid>
+
+          <DetectionSection minutes={latency} onMinutes={setLatency} />
 
           <Tabs value={tab} onValueChange={setTab} className="gap-6">
             <TabBar

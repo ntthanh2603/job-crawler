@@ -3,6 +3,7 @@ import {
   BookOpen,
   Briefcase,
   Building2,
+  Cpu,
   Globe,
   Layers,
   LayoutDashboard,
@@ -10,6 +11,7 @@ import {
   Menu,
   Monitor,
   Moon,
+  SlidersHorizontal,
   Sun,
   Target,
   UserRound,
@@ -46,6 +48,13 @@ const GROUPS = [
     items: [
       { to: "/review", label: "Kiểm tay", icon: ListChecks },
       { to: "/eval", label: "Golden set", icon: Target },
+    ],
+  },
+  {
+    title: "Hệ thống",
+    items: [
+      { to: "/workers", label: "Workers", icon: Cpu },
+      { to: "/settings", label: "Cài đặt", icon: SlidersHorizontal },
     ],
   },
 ]
@@ -94,7 +103,16 @@ function Brand() {
   )
 }
 
-/** Số việc trong hàng đợi (dùng chung cho mục "Hàng đợi" và dòng trạng thái worker). */
+/** Tên ngắn của hàng đợi (build, poll, trang tuyển dụng) cho dòng trạng thái. */
+function queueShortName(name: string) {
+  if (name.includes("poll")) return "poll"
+  if (name.includes("board")) return "trang tuyển dụng"
+  if (name.includes("build")) return "build"
+  return name
+}
+
+/** Số việc trong ba hàng đợi (build, poll, trang tuyển dụng), dùng cho mục "Hàng đợi" và dòng
+ * trạng thái runner. */
 function useQueueSummary() {
   const query = useQuery({
     queryKey: ["queue-summary"],
@@ -108,6 +126,8 @@ function useQueueSummary() {
     active: queues.reduce((n, q) => n + q.active, 0),
     queued: queues.reduce((n, q) => n + q.queued, 0),
     workers: queues.reduce((n, q) => n + q.workers, 0),
+    // Hàng đợi không có runner nào nhận việc (một process runner có thể chạy nhiều vai).
+    idle: queues.filter((q) => !q.workers && !q.error).map((q) => queueShortName(q.name)),
     error: query.isError || queues.some((q) => q.error),
   }
 }
@@ -181,17 +201,21 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <span
                 className={cn(
                   "relative size-2 rounded-full",
-                  queue.error || !queue.workers ? "bg-warning" : queue.active ? "bg-success" : "bg-muted-foreground/50",
+                  queue.error || queue.idle.length ? "bg-warning" : queue.active ? "bg-success" : "bg-muted-foreground/50",
                 )}
               />
             </span>
-            {queue.error
-              ? "Không đọc được hàng đợi"
-              : !queue.workers
-                ? "Không có worker nào chạy"
-                : queue.active
-                  ? `${num(queue.active)} việc đang chạy · ${num(queue.workers)} worker`
-                  : `Đang rảnh · ${num(queue.workers)} worker`}
+            <span className="min-w-0 truncate">
+              {queue.error
+                ? "Không đọc được hàng đợi"
+                : !queue.workers
+                  ? "Không có runner nào chạy"
+                  : queue.idle.length
+                    ? `Hàng đợi ${queue.idle.join(", ")} không có runner`
+                    : queue.active
+                      ? `${num(queue.active)} việc đang chạy`
+                      : "Runner đang rảnh"}
+            </span>
           </div>
         )}
         <div className="flex items-center justify-between gap-2">

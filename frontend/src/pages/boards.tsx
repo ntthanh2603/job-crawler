@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, Globe, RefreshCw } from "lucide-react"
+import { useState } from "react"
 import { toast } from "sonner"
 
 import {
   ConfirmButton,
   ErrorState,
+  FilterSelect,
   InfoTip,
   PagedList,
   PageHeader,
@@ -13,6 +15,7 @@ import {
   StatCard,
   StatGrid,
   StatusBadge,
+  Tag,
   TextLink,
 } from "@/components/common"
 import { Progress } from "@/components/ui/progress"
@@ -21,7 +24,31 @@ import { api } from "@/lib/api"
 import { ago, cap, dt, num, sourceLabel } from "@/lib/format"
 import type { BoardRun, Boards } from "@/lib/types"
 
+const MODES: Record<BoardRun["mode"], { label: string; title: string; className: string }> = {
+  full: {
+    label: "Đủ",
+    title: "Index đủ: đọc toàn bộ sitemap / danh sách (ban đêm)",
+    className: "bg-neutral-tone/12 text-neutral-ink",
+  },
+  tail: {
+    label: "Đuôi",
+    title: "Index đuôi: chỉ đọc phần mới nhất của danh sách để bắt tin mới nhanh (ban ngày)",
+    className: "bg-info/12 text-info-ink",
+  },
+}
+
+function ModeTag({ mode }: { mode: BoardRun["mode"] }) {
+  const m = MODES[mode] ?? MODES.full
+  return (
+    <Tag title={m.title} className={m.className}>
+      {m.label}
+    </Tag>
+  )
+}
+
 export function BoardsPage() {
+  // Lọc lượt index theo kiểu (đủ / đuôi) trên trang đang xem.
+  const [mode, setMode] = useState("")
   const client = useQueryClient()
   const query = useQuery({ queryKey: ["boards"], queryFn: () => api.get<Boards>("/boards"), refetchInterval: 30_000 })
   const index = useMutation({
@@ -72,7 +99,7 @@ export function BoardsPage() {
               hint={`Trên ${num(profiles)} profile nhà tuyển dụng`}
             />
             <StatCard
-              label="Worker index"
+              label="Runner index"
               value={num(d.queue.workers)}
               status={d.queue.workers ? { tone: "good", text: "Đang chạy" } : { tone: "warn", text: "Đang dừng" }}
             />
@@ -157,56 +184,84 @@ export function BoardsPage() {
             </Table>
           </Section>
 
-          <Section title="Các lượt index gần đây" description="Mới nhất trước" bodyClassName="p-0">
+          <Section
+            title="Các lượt index gần đây"
+            description="Mới nhất trước · index đủ chạy ban đêm, index đuôi chạy vài phút một lần ban ngày"
+            actions={
+              <FilterSelect
+                label="Kiểu"
+                value={mode}
+                onChange={setMode}
+                options={[
+                  ["full", "Index đủ"],
+                  ["tail", "Index đuôi"],
+                ]}
+              />
+            }
+            bodyClassName="p-0"
+          >
             <PagedList<BoardRun> queryKey={["board-runs"]} url="/boards/runs" empty="Chưa có lượt index nào.">
-              {(runs) => (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Trang</TableHead>
-                      <TableHead>Kết quả</TableHead>
-                      <TableHead className="px-2 text-right">Thấy</TableHead>
-                      <TableHead className="px-2 text-right">Tải</TableHead>
-                      <TableHead className="px-2 text-right">Mới</TableHead>
-                      <TableHead className="px-2 text-right">Đổi</TableHead>
-                      <TableHead className="px-2 text-right">Lỗi</TableHead>
-                      <TableHead className="px-2 text-right">Gỡ</TableHead>
-                      <TableHead className="text-right">
-                        <span className="inline-flex items-center gap-1">
-                          Profile
-                          <InfoTip>Profile nhà tuyển dụng mới / khớp được doanh nghiệp trong lượt này.</InfoTip>
-                        </span>
-                      </TableHead>
-                      <TableHead>Ghi chú</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {runs.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>
-                          <div className="font-medium">{sourceLabel(r.source)}</div>
-                          <div className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge value={r.status} pulse={r.status === "running"} />
-                        </TableCell>
-                        <TableCell className="px-2 text-right tabular-nums">{num(r.urls_seen)}</TableCell>
-                        <TableCell className="px-2 text-right tabular-nums">{num(r.fetched)}</TableCell>
-                        <TableCell className="px-2 text-right font-medium tabular-nums">{num(r.new)}</TableCell>
-                        <TableCell className="px-2 text-right tabular-nums">{num(r.updated)}</TableCell>
-                        <TableCell className={`px-2 text-right tabular-nums ${r.failed ? "text-danger-ink" : ""}`}>{num(r.failed)}</TableCell>
-                        <TableCell className="px-2 text-right tabular-nums">{num(r.removed)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {num(r.profiles_new)} / {num(r.profiles_matched)}
-                        </TableCell>
-                        <TableCell className="max-w-56 truncate text-meta text-muted-foreground" title={r.error ?? ""}>
-                          {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
-                        </TableCell>
+              {(all) => {
+                const runs = mode ? all.filter((r) => (r.mode ?? "full") === mode) : all
+                if (!runs.length)
+                  return (
+                    <p className="px-5 py-10 text-center text-sm text-muted-foreground">
+                      Trang này không có lượt index {mode === "tail" ? "đuôi" : "đủ"} nào. Chuyển trang hoặc bỏ lọc để xem
+                      thêm.
+                    </p>
+                  )
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Trang</TableHead>
+                        <TableHead>Kết quả</TableHead>
+                        <TableHead className="px-2 text-right">Thấy</TableHead>
+                        <TableHead className="px-2 text-right">Tải</TableHead>
+                        <TableHead className="px-2 text-right">Mới</TableHead>
+                        <TableHead className="px-2 text-right">Đổi</TableHead>
+                        <TableHead className="px-2 text-right">Lỗi</TableHead>
+                        <TableHead className="px-2 text-right">Gỡ</TableHead>
+                        <TableHead className="text-right">
+                          <span className="inline-flex items-center gap-1">
+                            Profile
+                            <InfoTip>Profile nhà tuyển dụng mới / khớp được doanh nghiệp trong lượt này.</InfoTip>
+                          </span>
+                        </TableHead>
+                        <TableHead>Ghi chú</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+                    </TableHeader>
+                    <TableBody>
+                      {runs.map((r) => (
+                        <TableRow key={r.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium">{sourceLabel(r.source)}</span>
+                              <ModeTag mode={r.mode ?? "full"} />
+                            </div>
+                            <div className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">{dt(r.started_at)}</div>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge value={r.status} pulse={r.status === "running"} />
+                          </TableCell>
+                          <TableCell className="px-2 text-right tabular-nums">{num(r.urls_seen)}</TableCell>
+                          <TableCell className="px-2 text-right tabular-nums">{num(r.fetched)}</TableCell>
+                          <TableCell className="px-2 text-right font-medium tabular-nums">{num(r.new)}</TableCell>
+                          <TableCell className="px-2 text-right tabular-nums">{num(r.updated)}</TableCell>
+                          <TableCell className={`px-2 text-right tabular-nums ${r.failed ? "text-danger-ink" : ""}`}>{num(r.failed)}</TableCell>
+                          <TableCell className="px-2 text-right tabular-nums">{num(r.removed)}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {num(r.profiles_new)} / {num(r.profiles_matched)}
+                          </TableCell>
+                          <TableCell className="max-w-56 truncate text-meta text-muted-foreground" title={r.error ?? ""}>
+                            {[!r.complete && "Danh sách chưa đủ", r.error && cap(r.error)].filter(Boolean).join(". ") || "–"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              }}
             </PagedList>
           </Section>
         </div>

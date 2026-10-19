@@ -22,6 +22,8 @@ const pages = {
   eval: lazyPage(() => import("@/pages/eval"), "EvalPage"),
   boards: lazyPage(() => import("@/pages/boards"), "BoardsPage"),
   queue: lazyPage(() => import("@/pages/queue"), "QueuePage"),
+  workers: lazyPage(() => import("@/pages/workers"), "WorkersPage"),
+  settings: lazyPage(() => import("@/pages/settings"), "SettingsPage"),
 }
 
 function page(Component: ComponentType) {
@@ -63,6 +65,8 @@ export function App() {
         <Route path="eval" element={page(pages.eval)} />
         <Route path="boards" element={page(pages.boards)} />
         <Route path="queue" element={page(pages.queue)} />
+        <Route path="workers" element={page(pages.workers)} />
+        <Route path="settings" element={page(pages.settings)} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

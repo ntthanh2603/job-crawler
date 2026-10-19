@@ -21,6 +21,7 @@ import {
   useTabParam,
   type Tone,
 } from "@/components/common"
+import { RunTags } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -88,8 +89,9 @@ function RunProblems({ run }: { run: RunDetail["run"] }) {
             </div>
             {run.incomplete_sources.length > 0 && (
               <p className="text-meta text-muted-foreground">
-                Tin đã thu được vẫn được lưu. Việc làm cũ của nguồn chưa xong không bị coi là đã gỡ; hệ thống tự xếp lượt
-                chạy tiếp (sau khoảng một phút, có giới hạn số lần) để đọc nốt phần còn lại.
+                {run.kind === "poll"
+                  ? "Tin đã thu được vẫn được lưu; việc làm của nguồn lỗi không bị coi là đã gỡ. Lỗi tạm lặp lại nhiều lượt, hoặc bộ khung hỏng (trang chính lỗi, cấu trúc đổi), thì bộ khung được build lại."
+                  : "Tin đã thu được vẫn được lưu. Việc làm cũ của nguồn chưa xong không bị coi là đã gỡ; hệ thống tự xếp lượt chạy tiếp (sau khoảng một phút, có giới hạn số lần) để đọc nốt phần còn lại."}
               </p>
             )}
           </div>
@@ -127,7 +129,7 @@ export function RunPage() {
           { to: "/companies", label: "Doanh nghiệp" },
           { to: `/companies/${r.company_id}?tab=runs`, label: name },
         ]}
-        title={`Lượt chạy ${dt(r.started_at)}`}
+        title={`${r.kind === "poll" ? "Lượt poll" : r.kind === "build" ? "Lượt build" : "Lượt chạy"} ${dt(r.started_at)}`}
         actions={
           <Button variant="outline" asChild>
             <Link to={`/companies/${r.company_id}`}>
@@ -138,6 +140,7 @@ export function RunPage() {
       >
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-muted-foreground">
           <StatusBadge value={r.status} />
+          <RunTags kind={r.kind} trigger={r.trigger} />
           <span>{cap(ago(r.started_at))}</span>
           <code className="truncate font-mono text-meta text-muted-foreground/80" title="Mã lượt chạy">
             {r.run_id}
@@ -148,6 +151,16 @@ export function RunPage() {
       <StatGrid className="mb-6 grid-cols-2 xl:grid-cols-4">
         <StatCard label="Thời gian" value={duration(r.duration_ms)} hint={r.finished_at ? `Xong lúc ${hour(r.finished_at)}` : "Chưa xong"} />
         <StatCard
+          label="Việc làm mới / đóng"
+          value={
+            <>
+              <span className={r.jobs_new ? "text-success-ink" : undefined}>+{num(r.jobs_new)}</span>
+              <span className="text-muted-foreground"> / {num(r.jobs_closed)}</span>
+            </>
+          }
+          hint="Việc làm thấy lần đầu / đã đóng (hết hạn, gỡ)"
+        />
+        <StatCard
           label="Tin nhận / thấy"
           value={
             <>
@@ -157,11 +170,10 @@ export function RunPage() {
           }
           hint="Sau xác minh và gộp trùng"
         />
-        <StatCard label="Request" value={num(d.fetches_total)} hint={`${num(d.by_source.length)} nguồn`} />
         <StatCard
-          label="Trang parse lỗi"
-          value={num(d.failed_pages.length)}
-          hint={d.failed_pages.length ? "Lưu HTML 7 ngày để xem lại" : "Không có"}
+          label="Request"
+          value={num(d.fetches_total)}
+          hint={`${num(d.by_source.length)} nguồn${d.failed_pages.length ? ` · ${num(d.failed_pages.length)} trang parse lỗi` : ""}`}
         />
       </StatGrid>
 
