@@ -173,7 +173,9 @@ export function QueuePage() {
                                   </Tag>
                                 )}
                               </div>
-                              <div className="text-meta text-muted-foreground">{FUNCTIONS[j.function] ?? j.function}</div>
+                              {j.label && (
+                                <div className="text-meta text-muted-foreground">{FUNCTIONS[j.function] ?? j.function}</div>
+                              )}
                             </TableCell>
                             <TableCell>
                               <StatusBadge value={j.status} tone={state.tone} text={state.text} pulse={state.pulse} />

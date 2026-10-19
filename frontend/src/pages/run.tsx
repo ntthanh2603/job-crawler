@@ -167,8 +167,8 @@ export function RunPage() {
 
       <RunProblems run={r} />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="min-w-0 space-y-6">
+      <div className="space-y-6">
+        <div className={cn("grid gap-6", d.failed_pages.length > 0 && "xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]")}>
           <Section title="Theo nguồn" description="Số request và kết quả" bodyClassName="p-0">
             {d.by_source.length ? (
               <Table>
@@ -182,7 +182,7 @@ export function RunPage() {
                 <TableBody>
                   {d.by_source.map((s) => (
                     <TableRow key={s.source}>
-                      <TableCell className="max-w-56">
+                      <TableCell className="max-w-80">
                         <div className="font-medium">{sourceLabel(s.source)}</div>
                         <div className="truncate font-mono text-meta text-muted-foreground" title={s.source}>
                           {s.source}
