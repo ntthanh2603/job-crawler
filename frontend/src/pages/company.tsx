@@ -284,7 +284,7 @@ export function CompanyPage() {
         </div>
       </PageHeader>
 
-      <StatGrid className="mb-6 grid-cols-2 xl:grid-cols-4">
+      <StatGrid className="mb-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Việc đang mở" value={num(d.active_jobs)} hint={`${num(d.inactive_jobs)} việc đã đóng`} />
         <StatCard
           label="Lượt chạy mới nhất"
