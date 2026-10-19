@@ -162,6 +162,10 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
 - `GATEWAY_TOKEN` bắt buộc khi gateway mở ra ngoài; TLS ở load balancer (HTTP/2 tới gateway) hoặc
   `GATEWAY_TLS_CERT/KEY`. Worker chỉ có token, không có thông tin DB / LLM / SERP.
 - API key SERP / LLM chỉ ở backend (SERP gọi thẳng từ backend, không qua worker).
-- `UI_PASSWORD` cho giao diện; cổng Postgres / Redis không mở ra Internet.
+- `UI_PASSWORD` cho giao diện (sai 20 lần / IP trong 5 phút → 429; sau reverse proxy đặt
+  `FORWARDED_ALLOW_IPS` để thấy IP thật). Cổng Postgres / Redis không mở ra Internet (compose
+  một máy chỉ mở ở `127.0.0.1`); máy dữ liệu riêng thì chặn bằng firewall, chỉ cho máy ứng dụng.
+- Log được che bí mật trước khi ghi (URL có mật khẩu, token, khoá API); thao tác của người vận
+  hành ghi ở `audit_events` (bí mật bị che). Báo lỗ hổng: [SECURITY.md](../SECURITY.md).
 - Proxy tại worker nằm trong file / biến môi trường của máy worker; danh sách proxy chung (nếu dùng
   `PROXY_MODE=central`) lưu ở DB, giao diện chỉ hiện dạng che mật khẩu.

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+import grpc
 import pytest
+from grpc_health.v1 import health_pb2, health_pb2_grpc
 from typer.testing import CliRunner
 
 from jobcrawler.entrypoints.cli import app
@@ -90,3 +93,141 @@ def test_index_boards_rejects_unknown_source() -> None:
     result = runner.invoke(app, ["index-boards", "--source", "khong-co"])
     assert result.exit_code == 2
     assert "không có adapter khong-co" in result.output
+
+
+# --- gateway-health ------------------------------------------------------------------------------
+
+
+class _Channel:
+    """Kênh giả: không mở kết nối nào."""
+
+    def __init__(self, target: str, **kwargs: Any) -> None:
+        self.target = target
+        self.kwargs = kwargs
+
+    def __enter__(self) -> _Channel:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+class _RpcFailure(grpc.RpcError):
+    def code(self) -> grpc.StatusCode:
+        return grpc.StatusCode.UNAVAILABLE
+
+    def details(self) -> str:
+        return "failed to connect to all addresses"
+
+
+class _Health:
+    """Thay `HealthStub`: gọi như constructor, ghi lại kênh và request."""
+
+    def __init__(self, reply: Any) -> None:
+        self.reply = reply
+        self.channels: list[_Channel] = []
+        self.requests: list[tuple[str, float | None]] = []
+
+    def __call__(self, channel: _Channel) -> _Health:
+        self.channels.append(channel)
+        return self
+
+    def Check(self, request: Any, timeout: float | None = None) -> Any:
+        self.requests.append((request.service, timeout))
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return health_pb2.HealthCheckResponse(status=self.reply)
+
+
+def _gateway_settings(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
+    from jobcrawler.config import Settings
+    from jobcrawler.entrypoints import cli
+
+    fields: dict[str, Any] = {
+        "gateway_host": "0.0.0.0",
+        "gateway_port": 50051,
+        "gateway_tls_cert": None,
+        "gateway_tls_key": None,
+    }
+    settings = Settings(**(fields | overrides))
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+
+
+def _health(monkeypatch: pytest.MonkeyPatch, reply: Any) -> _Health:
+    fake = _Health(reply)
+    monkeypatch.setattr(health_pb2_grpc, "HealthStub", fake)
+    monkeypatch.setattr(grpc, "insecure_channel", lambda target, **kw: _Channel(target, **kw))
+    return fake
+
+
+def test_gateway_health_serving(monkeypatch: pytest.MonkeyPatch) -> None:
+    _gateway_settings(monkeypatch)
+    fake = _health(monkeypatch, health_pb2.HealthCheckResponse.SERVING)
+    result = runner.invoke(app, ["gateway-health"])
+    assert result.exit_code == 0, result.output
+    assert "SERVING 127.0.0.1:50051" in result.output
+    assert fake.channels[0].target == "127.0.0.1:50051"
+    assert fake.requests == [("", 5.0)]
+
+
+@pytest.mark.parametrize(
+    ("reply", "message"),
+    [
+        (health_pb2.HealthCheckResponse.NOT_SERVING, "NOT_SERVING"),
+        (_RpcFailure(), "UNAVAILABLE failed to connect to all addresses"),
+    ],
+)
+def test_gateway_health_fails(monkeypatch: pytest.MonkeyPatch, reply: Any, message: str) -> None:
+    _gateway_settings(monkeypatch)
+    _health(monkeypatch, reply)
+    result = runner.invoke(
+        app, ["gateway-health", "--addr", "gw:6000", "--service", "x", "--timeout", "1"]
+    )
+    assert result.exit_code == 1
+    assert f"gw:6000: {message}" in result.output
+
+
+def test_gateway_health_uses_tls_when_configured(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cert, key = tmp_path / "gw.crt", tmp_path / "gw.key"
+    cert.write_bytes(b"CERT")
+    key.write_bytes(b"KEY")
+    _gateway_settings(monkeypatch, gateway_tls_cert=cert, gateway_tls_key=key, gateway_port=6443)
+    fake = _health(monkeypatch, health_pb2.HealthCheckResponse.SERVING)
+    roots: list[bytes | None] = []
+
+    def credentials(root_certificates: bytes | None = None) -> str:
+        roots.append(root_certificates)
+        return "creds"
+
+    monkeypatch.setattr(grpc, "ssl_channel_credentials", credentials)
+    monkeypatch.setattr(
+        grpc, "secure_channel", lambda target, creds, **kw: _Channel(target, creds=creds, **kw)
+    )
+    result = runner.invoke(app, ["gateway-health", "--server-name", "gw.example.com"])
+    assert result.exit_code == 0, result.output
+    assert roots == [b"CERT"]
+    channel = fake.channels[0]
+    assert channel.target == "127.0.0.1:6443"
+    assert channel.kwargs == {
+        "creds": "creds",
+        "options": [("grpc.ssl_target_name_override", "gw.example.com")],
+    }
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("0.0.0.0", "127.0.0.1:50051"),
+        ("", "127.0.0.1:50051"),
+        ("::", "[::1]:50051"),
+        ("[::]", "[::1]:50051"),
+        ("10.0.0.5", "10.0.0.5:50051"),
+        ("fd00::5", "[fd00::5]:50051"),
+    ],
+)
+def test_local_gateway_addr(host: str, expected: str) -> None:
+    from jobcrawler.entrypoints.cli import _local_gateway_addr
+
+    assert _local_gateway_addr(host, 50051) == expected

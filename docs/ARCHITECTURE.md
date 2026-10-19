@@ -340,13 +340,13 @@ sequenceDiagram
   participant W as worker
   H->>H: robots.txt → HTTP cache → proxy chung (nếu central) → rate limit theo domain
   H->>F: RemoteTransport.request / RemoteRenderer.render
-  F->>R: XADD gw:fetch:<pool>:http|render {FetchTask}
+  F->>R: XADD gw:fetch:<pool>:http|render[:hi] {FetchTask}
   W->>G: Lease(http_slots, render_slots, wait_ms)
-  G->>R: XREADGROUP (consumer = worker) + XDEL
+  G->>R: XREADGROUP :hi rồi thường + XDEL + HSET gw:inflight:<worker>
   G-->>W: FetchTask[]
   W->>W: curl_cffi / Chromium qua proxy (task → proxy tại worker → đi thẳng)
   W->>G: Complete(FetchResult: status, headers, body zstd, JSON bắt được)
-  G->>R: LPUSH gw:reply:<client_id>
+  G->>R: HDEL gw:inflight:<worker> + LPUSH gw:reply:<client_id>
   R-->>F: BRPOP → Future của task
   F-->>H: RawResponse → nhận diện trang chặn, retry, ghi cache
 ```
@@ -354,15 +354,27 @@ sequenceDiagram
 - **Một việc = một request** (HTTP hoặc mở trang). Mọi logic (robots, rate limit, retry, nhận diện
   chặn, parse) nằm ở backend; worker không giữ trạng thái, chỉ tải và trả nguyên văn.
 - `task_id = <client_id>.<seq>`: gateway biết trả kết quả về process nào mà không cần nhớ gì, nên
-  chạy nhiều replica sau load balancer. Việc quá `deadline_ms` (timeout + `FETCH_QUEUE_GRACE_SECONDS`)
-  bị bỏ — backend đã thôi chờ và tự thử lại theo retry của `HttpClient`.
+  chạy nhiều replica sau load balancer (trạng thái chung nằm ở Redis).
+- **Ưu tiên poll**: lượt poll đặt `fetch_priority` (`priority_fetches()` trong `dispatch.py`),
+  việc của nó vào stream `…:hi`; Lease đọc `:hi` trước. Ban ngày build (doanh nghiệp mới, bộ khung
+  hỏng) không làm chậm poll.
+- **Việc đang giữ**: Lease ghi `gw:inflight:<worker>` (task → hạn); Complete chỉ nhận kết quả của
+  việc worker đó đang giữ. Worker `Leave` hoặc quá hạn báo sống → gateway trả `ERROR_KIND_WORKER_LOST`
+  cho các việc còn giữ; backend gửi lại ngay một lần rồi để `HttpClient` thử lại (không đổ lỗi
+  cho proxy).
+- **Chờ hàng**: backend chờ từng khung `timeout + FETCH_QUEUE_GRACE_SECONDS`; hết khung mà bộ đếm
+  `gw:progress:<pool>:<kind>` (Lease tăng) vẫn nhích — hàng chỉ đông — thì chờ tiếp, tổng tối đa
+  `timeout + FETCH_QUEUE_MAX_WAIT_SECONDS` (cũng là `deadline_ms` của việc). Thôi chờ thì xoá việc
+  của mình khỏi stream để worker không tải trang không ai đợi.
 - **Pool**: worker khai `WORKER_POOL`; `FETCH_ROUTES` định tuyến domain → pool (vd. trang tuyển dụng
   qua pool proxy dân cư); pool không có worker sống thì về `default`; không có worker nào thì lỗi
   ngay (`no_worker`).
 - **Proxy** (`PROXY_MODE`): `worker` (mặc định — mỗi worker dùng proxy của mình, gắn theo domain,
   nghỉ khi lỗi), `central` (backend chọn từ danh sách chung, giữ sức khoẻ proxy trên Redis), `off`.
-- **Đăng ký / sống / dừng**: `Register` trả `WorkerConfig` (slot, impersonate, heartbeat… sửa ở
-  trang Cài đặt, đẩy xuống qua `config_version`); `Heartbeat` mỗi 5 s kèm số liệu; gateway quên
+- **Đăng ký / sống / dừng**: `Register` trả `WorkerConfig` (slot — là mức trần, worker lấy số nhỏ
+  hơn với cấu hình của mình —, impersonate, heartbeat… sửa ở trang Cài đặt, đẩy xuống qua
+  `config_version`); `Heartbeat` mỗi 5 s kèm số liệu (cả lý do render đang tạm tắt: Chromium
+  lỗi thì worker lùi 30 s → 10 phút rồi thử lại); gateway quên
   worker (khởi động lại) → `NOT_FOUND` → worker đăng ký lại; trang Workers yêu cầu "dừng nhận việc"
   (drain) → worker làm nốt rồi `Leave`. Token (`GATEWAY_TOKEN`) và TLS tuỳ chọn.
 
@@ -396,6 +408,7 @@ erDiagram
   companies ||--o{ jobs : "việc đã gộp"
   jobs ||--o{ job_postings : "các bản tin"
   jobs ||--o{ job_reviews : "kiểm tay"
+  audit_events }o..o| companies : "thao tác"
 ```
 
 | Bảng                                                     | Nội dung                                                                                                   |
@@ -411,9 +424,11 @@ erDiagram
 | `source_fetches`, `failed_pages`, `logs`                 | từng request, trang parse lỗi kèm HTML, log                                                                 |
 | `board_index_runs`                                       | lịch sử index từng trang tuyển dụng (`stats.mode`: `full` / `tail`)                                        |
 | `job_reviews`, `app_settings`, `compression_dicts`       | kiểm tay; cài đặt sửa ở giao diện; từ điển zstd                                                             |
+| `audit_events`                                           | nhật ký thao tác của người vận hành (ai, lúc nào, làm gì, trước → sau); chỉ ghi thêm, bảo trì không dọn    |
 
-- Một migration duy nhất (`0001_initial_schema`): extension `pg_trgm`, `unaccent`, hàm `uuid_v7()`,
-  mọi bảng, ràng buộc đặt tên theo `NAMING_CONVENTION`, cột nén `STORAGE EXTERNAL`.
+- Migration: `0001_initial_schema` (extension `pg_trgm`, `unaccent`, hàm `uuid_v7()`, mọi bảng,
+  ràng buộc đặt tên theo `NAMING_CONVENTION`, cột nén `STORAGE EXTERNAL`), `0002_audit_events`.
+  Đổi schema chỉ bằng revision mới (`jobcrawler db revision`), không sửa revision đã chạy.
 - Khoá chính UUIDv7 (sinh ở ứng dụng, tăng theo thời gian). Cột lớn nén zstd kèm từ điển huấn luyện
   trên chính dữ liệu (`db/compress.py`).
 
@@ -424,14 +439,37 @@ FastAPI (`web/app.py`, `web/api.py`, `web/settings_api.py`) phục vụ API `/ap
 request), Hàng đợi (build / poll / trang tuyển dụng), Trang tuyển dụng (lượt đủ / đuôi), Doanh
 nghiệp (tab "Bộ khung & lịch": nguồn, trang/API trong bộ khung, mốc poll/build, nút Poll ngay /
 Build lại), Việc làm, Kiểm tay, Golden set, **Workers** (worker đang kết nối, slot, proxy, dừng nhận
-việc), **Cài đặt** (10 nhóm, ghi rõ mục cần khởi động lại). Đăng nhập HTTP Basic khi đặt
-`UI_PASSWORD`; request ghi từ site khác bị chặn. Giao diện chỉ hiện trạng thái, không hướng dẫn
-chạy lệnh.
+việc), **Cài đặt** (10 nhóm chia mục con, ghi rõ mục cần khởi động lại), **Nhật ký thao tác**
+(`/api/audit`). Giao diện chỉ hiện trạng thái, không hướng dẫn chạy lệnh.
+
+Middleware, từ ngoài vào:
+
+- `RequestIdMiddleware`: nhận `X-Request-Id` của client nếu là UUID, không thì sinh UUIDv7; gắn
+  vào contextvars của structlog (mọi log của request kèm `request_id`) và trả lại ở header; log
+  `http.request` cho `/api/*` (method, path, status, thời gian, người dùng); lỗi chưa xử lý →
+  500 `{"detail", "request_id"}`.
+- `GuardMiddleware`: HTTP Basic khi đặt `UI_PASSWORD` (sai 20 lần trong 5 phút từ một IP → 429
+  kèm `Retry-After`, đếm trên Redis, Redis lỗi thì cho qua); request ghi từ site khác bị chặn.
+  Mọi lỗi cùng dạng JSON `{"detail": ...}`.
+- File trong `/assets` (tên có hash) cache một năm; `index.html` không cache.
+
+Mọi thao tác thay đổi trạng thái (lưu cài đặt, build / poll ngay, xếp build, import, kiểm tay,
+index trang tuyển dụng, bảo trì, chấm golden set, dừng worker) ghi một dòng `audit_events`
+(`services/audit.py`): lưu cài đặt và kiểm tay ghi trong cùng transaction với thay đổi; các thao
+tác còn lại ghi sau khi thành công, ghi nhật ký lỗi không làm hỏng request. Cài đặt bí mật và mật
+khẩu proxy luôn bị che.
+
+Frontend: React data router (`router.tsx`) — trang lỗi trong khung ứng dụng, nhận ra chunk cũ sau
+khi triển khai bản mới (mời tải lại); toast lỗi mặc định cho mọi mutation (`lib/query-client.ts`);
+bộ lọc trên URL qua `useUrlFilters`; khoá truy vấn dùng chung ở `lib/queries.ts`.
 
 ## 15. Quan sát
 
-- Log structlog có ngữ cảnh (`run_id`, `company`, `source`, `poll`) ra terminal và bảng `logs`;
-  `poll.done` mỗi lượt poll (số request, mới / gỡ, cửa sổ phát hiện, thời gian).
+- Log structlog có ngữ cảnh (`request_id`, `run_id`, `company`, `source`, `poll`) ra terminal và
+  bảng `logs`; `poll.done` mỗi lượt poll (số request, mới / gỡ, cửa sổ phát hiện, thời gian).
+  Trước khi ghi, log được che bí mật (mật khẩu trong URL, `Bearer …`, khoá tên `*token*`,
+  `*password*`, `*api_key*`…), traceback in gọn không kèm biến cục bộ (backend và worker).
+- `audit_events` / trang Nhật ký thao tác: ai đổi gì, lúc nào, kèm `request_id` để tìm log.
 - `source_fetches`: mọi request của một lượt build / poll có thay đổi (nguồn, mã HTTP, proxy — kể cả
   proxy tại worker `w:…`, thời gian, số tin, kết quả).
 - `crawl_plans.last_error`, `company_schedules.last_error`: vì sao bộ khung hỏng / poll lỗi.
@@ -449,4 +487,10 @@ chạy lệnh.
   gateway gRPC đầu-cuối với worker giả, index trang tuyển dụng (đủ, đuôi), API, cài đặt.
 - **Đo thật**: `scripts/loadtest/sla_site.py` + `sla_report.py` (độ trễ đầu-cuối trên site giả),
   `fake_sites.py` (hàng trăm site giả để thử tải poll).
-- Kiểm tra mỗi thay đổi: `ruff format`, `ruff check`, `pyright`, `pytest`.
+- **Frontend**: Vitest (`frontend/src/**/*.test.ts(x)`): hàm thuần (định dạng, mô hình trang Cài
+  đặt, API client, bộ lọc URL, nhật ký), trang lỗi.
+- `TEST_DATABASE_URL` phải là DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại); khi
+  `CI` được đặt mà thiếu DB thì test tích hợp báo lỗi thay vì bỏ qua.
+- Kiểm tra mỗi thay đổi: `task check` (ruff format/check, pyright, proto, pytest, typecheck +
+  test + build frontend) — cũng là việc CI (`.github/workflows/ci.yml`) chạy mỗi lần push lên
+  `main`.

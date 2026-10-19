@@ -15,6 +15,13 @@
 # cho dự phòng (chỉ một bản giữ khoá làm việc); `api` / `gateway` để sau load balancer.
 name: jobcrawler-backend
 
+# Log của container xoay vòng (mặc định json-file không giới hạn).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 x-backend: &backend
   image: ${BACKEND_IMAGE:-jobcrawler-backend:latest}
   env_file:
@@ -24,6 +31,7 @@ x-backend: &backend
     LOG_FORMAT: ${LOG_FORMAT:-json}
   init: true
   restart: unless-stopped
+  logging: *logging
 
 services:
   migrate:
@@ -36,12 +44,26 @@ services:
     command: ["jobcrawler", "ui", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "${API_PUBLISH:-127.0.0.1:8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   gateway:
     <<: *backend
     command: ["jobcrawler", "gateway"]
     ports:
       - "${GATEWAY_PUBLISH:-0.0.0.0:50051}:50051"
+    # grpc.health.v1 qua `jobcrawler gateway-health` (TLS theo GATEWAY_TLS_CERT/KEY; chứng chỉ không
+    # có tên 127.0.0.1 thì thêm `--server-name`, CA công khai thì `--ca-cert`).
+    healthcheck:
+      test: ["CMD", "jobcrawler", "gateway-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
 
   scheduler:
     <<: *backend

@@ -1,0 +1,142 @@
+# go-task v3 (https://taskfile.dev): `task --list` để xem các lệnh. Chạy được trên Windows (Task
+# dùng trình thông dịch shell riêng; không dùng cú pháp chỉ có ở bash).
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  # --- cài đặt ---------------------------------------------------------------------------------
+
+  setup:
+    desc: Cài dependency Python (uv) + frontend (npm), tạo .env từ .env.example nếu chưa có
+    preconditions:
+      - sh: uv --version
+        msg: "Cần uv: https://docs.astral.sh/uv/"
+      - sh: npm --version
+        msg: "Cần Node.js + npm (bản trong .nvmrc)"
+    cmds:
+      - uv sync
+      - task: ui:install
+      - task: env
+
+  env:
+    desc: Tạo .env từ .env.example (giữ nguyên nếu đã có)
+    cmds:
+      - uv run --no-project python -c "import pathlib, shutil; p = pathlib.Path('.env'); p.exists() or shutil.copyfile('.env.example', p)"
+
+  # --- docker compose --------------------------------------------------------------------------
+
+  up:
+    desc: Build image và chạy cả stack (docker-compose.yaml)
+    cmds:
+      - docker compose up -d --build
+
+  infra:
+    desc: Chỉ Postgres + Redis (chạy backend trên máy / test tích hợp), chờ healthy
+    cmds:
+      - docker compose up -d --wait postgres redis
+
+  down:
+    desc: Dừng stack (giữ volume dữ liệu)
+    cmds:
+      - docker compose down
+
+  # --- chất lượng mã ---------------------------------------------------------------------------
+
+  fmt:
+    desc: Định dạng + sửa lỗi lint tự sửa được (ruff)
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  lint:
+    desc: ruff format --check, ruff check, typecheck frontend
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+      - task: ui:typecheck
+
+  typecheck:
+    desc: pyright + tsc
+    cmds:
+      - uv run pyright
+      - task: ui:typecheck
+
+  test:
+    desc: "pytest (tích hợp cần Postgres + Redis + TEST_DATABASE_URL kết thúc `_test`); thêm tham số sau --"
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  test:unit:
+    desc: pytest bỏ test tích hợp (không cần Postgres / Redis)
+    cmds:
+      - uv run pytest -m "not integration" {{.CLI_ARGS}}
+
+  check:
+    desc: Mọi thứ CI chạy (lint, typecheck, proto, test, build giao diện) — chạy trước khi commit
+    cmds:
+      - task: lint
+      - uv run pyright
+      - task: proto:check
+      - task: test
+      - task: ui:test
+      - task: ui:build
+
+  # --- proto, DB -------------------------------------------------------------------------------
+
+  proto:
+    desc: Sinh lại mã Python từ proto/jcproto/v1/*.proto
+    cmds:
+      - uv run python scripts/gen_proto.py
+
+  proto:check:
+    desc: Kiểm tra mã sinh từ proto đã khớp .proto
+    cmds:
+      - uv run python scripts/gen_proto.py --check
+
+  migrate:
+    desc: Áp migration Alembic lên DATABASE_URL
+    cmds:
+      - uv run jobcrawler db upgrade
+
+  migration:
+    desc: 'Sinh migration Alembic mới từ model (task migration NAME="mô tả")'
+    requires:
+      vars: [NAME]
+    cmds:
+      - uv run jobcrawler db revision -m "{{.NAME}}"
+
+  # --- giao diện (frontend/) -------------------------------------------------------------------
+
+  ui:install:
+    desc: npm ci trong frontend/
+    dir: frontend
+    cmds:
+      - npm ci --no-audit --no-fund
+
+  ui:dev:
+    desc: Vite dev server http://localhost:5173 (API ở cổng 8000)
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  ui:build:
+    desc: Build giao diện vào backend/jobcrawler/web/dist
+    dir: frontend
+    cmds:
+      - npm run build
+
+  ui:typecheck:
+    desc: tsc -b
+    dir: frontend
+    cmds:
+      - npm run typecheck
+
+  ui:test:
+    desc: Test giao diện một lượt (bỏ qua nếu chưa có script test:run)
+    dir: frontend
+    cmds:
+      - npm run test:run --if-present

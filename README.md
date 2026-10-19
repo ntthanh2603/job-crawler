@@ -9,6 +9,8 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
 - Triển khai và quy mô 10.000 doanh nghiệp: [docs/DEPLOY.md](docs/DEPLOY.md)
 - Vận hành (dịch vụ, giới hạn, bảo trì, sự cố): [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Đặc tả gốc: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md); tiến độ ghi trong commit message.
+- Quy ước khi sửa mã (người và coding agent): [AGENTS.md](AGENTS.md); báo lỗ hổng:
+  [SECURITY.md](SECURITY.md).
 
 ## Cấu trúc repo
 
@@ -126,13 +128,21 @@ cd frontend && npm run dev                    # sửa giao diện: http://localh
 
 ## Phát triển
 
+Lệnh gom trong `Taskfile.yml` ([go-task](https://taskfile.dev)); `task --list` để xem hết.
+
 ```bash
-uv run ruff format . && uv run ruff check .
-uv run pyright
-uv run pytest                                 # tích hợp cần TEST_DATABASE_URL + Redis (xem .env.example)
-uv run python scripts/gen_proto.py            # sau khi sửa proto/jcproto/v1/crawl.proto
-uv run jobcrawler db revision -m "mô tả"      # sinh migration mới từ model
+task setup                       # uv sync + npm ci + .env từ .env.example
+task infra                       # chỉ Postgres + Redis
+task check                       # mọi thứ CI chạy: ruff, pyright, proto, pytest, test + build giao diện
+task test:unit                   # pytest bỏ test tích hợp
+task proto                       # sau khi sửa proto/jcproto/v1/crawl.proto
+task migration NAME="mô tả"      # sinh migration mới từ model
 ```
 
-Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng `FakeChatClient`,
-worker dùng gateway giả + server HTTP cục bộ.
+- Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
+  `FakeChatClient`, worker dùng gateway giả + server HTTP cục bộ. Test tích hợp cần
+  `TEST_DATABASE_URL` trỏ tới DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại).
+- CI (`.github/workflows/ci.yml`) chạy `task check` tương đương mỗi lần push lên `main`, kèm
+  build image; `audit.yml` kiểm lỗ hổng dependency mỗi tuần.
+- Hook tuỳ chọn: `uvx pre-commit install -t pre-commit -t commit-msg` (ruff, gitleaks, kiểm tra
+  commit message kiểu Conventional Commits).

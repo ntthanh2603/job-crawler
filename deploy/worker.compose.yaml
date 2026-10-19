@@ -16,6 +16,13 @@
 # lên registry, hoặc build ngay trên máy worker.
 name: jobcrawler-worker
 
+# Log của container xoay vòng (mặc định json-file không giới hạn).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   worker:
     image: ${WORKER_IMAGE:-jobcrawler-worker:latest}
@@ -40,3 +47,4 @@ services:
     init: true
     shm_size: 1gb
     restart: unless-stopped
+    logging: *logging

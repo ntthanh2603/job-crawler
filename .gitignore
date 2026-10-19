@@ -222,3 +222,6 @@ __marimo__/
 # jobcrawler
 proxies.txt
 out/
+config/*proxies*.txt
+!config/proxies.example.txt
+deploy/*.env

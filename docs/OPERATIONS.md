@@ -20,10 +20,18 @@ lớn, và những việc cần làm khi đổi cấu hình. Giao diện web ch�
 | `runner-boards` | index trang tuyển dụng: đủ (00:30), đuôi (mỗi 2 phút, 6h–23h)                     | `RUNNER_BOARDS_REPLICAS` |
 | `worker`        | lấy trang (curl_cffi + Chromium) qua proxy của worker                             | `WORKER_REPLICAS`        |
 
-Đổi mã nguồn: `docker compose build && docker compose up -d` (migration chạy tự động). Image
-backend (`backend/Dockerfile`) không có Chromium; image worker (`worker/Dockerfile`) có. Cả hai
-build từ thư mục gốc repo và luôn cài lại gói của workspace (cache của uv cho gói cục bộ chỉ theo
-`pyproject.toml`, không ép thì image có thể mang mã cũ).
+Đổi mã nguồn: `docker compose build && docker compose up -d` (hoặc `task up`; migration chạy tự
+động). Image backend (`backend/Dockerfile`) không có Chromium; image worker (`worker/Dockerfile`)
+có. Cả hai build từ thư mục gốc repo và luôn cài lại gói của workspace (cache của uv cho gói cục
+bộ chỉ theo `pyproject.toml`, không ép thì image có thể mang mã cũ).
+
+- Postgres (`15432`) và Redis (`16379`) chỉ mở ở `127.0.0.1` của máy host (Redis không có mật
+  khẩu). Chạy CLI / test trên máy host thì dùng `127.0.0.1` trong URL, không dùng `localhost`:
+  trên Windows `localhost` thử IPv6 `::1` trước và mỗi kết nối mới chờ thêm ~2 s.
+- Log của mọi container xoay vòng (json-file, 10 MB × 3).
+- `gateway` có healthcheck (`jobcrawler gateway-health`, dịch vụ health chuẩn của gRPC, dùng TLS
+  khi đặt `GATEWAY_TLS_CERT/KEY`); `worker` chỉ khởi động khi gateway healthy. Image backend cũ
+  (trước lệnh này) làm gateway luôn unhealthy: build lại image trước khi `up`.
 
 ## Lịch thu thập
 
@@ -81,7 +89,12 @@ uv run python scripts/loadtest/sla_report.py sla.jsonl
 - Không có worker nào → mọi request lỗi `no_worker` ngay (lượt chạy ghi lỗi, poll đếm lỗi); có
   worker trở lại thì tự chạy tiếp.
 - Cấu hình đẩy xuống mọi worker (slot, impersonate, heartbeat…) sửa ở trang Cài đặt → nhóm
-  "Worker lấy trang"; worker nhận trong ≤ 5 s.
+  "Worker lấy trang"; worker nhận trong ≤ 5 s. Slot đặt ở đây là **mức trần**: worker dùng số nhỏ
+  hơn giữa giá trị này và `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` của máy nó.
+- Chromium lỗi (không mở được, crash): worker tạm tắt render rồi thử lại sau 30 s, 1, 2… tối đa 10
+  phút; trang Workers ghi "Tạm tắt · thử lại sau …". Máy không cài Chromium thì tắt hẳn.
+- Cột "Xong / lỗi" của trang Workers kèm "trả lại" (việc giao lại khi worker rời) và "bỏ" (kết
+  quả gửi muộn): tăng đều là dấu hiệu worker mất kết nối / quá tải.
 - Mở gateway ra ngoài mạng nội bộ: đặt `GATEWAY_TOKEN` (worker gửi cùng token) và TLS
   (`GATEWAY_TLS_CERT/KEY`, hoặc đặt sau reverse proxy có TLS hỗ trợ HTTP/2).
 
@@ -115,8 +128,13 @@ mục kết nối (DB, Redis, cổng, token, mật khẩu giao diện) chỉ đ�
 - **Runner chết** (OOM, kill): runner sống báo mỗi 10 s; entry im quá `QUEUE_RECLAIM_SECONDS` (60 s)
   bị runner khác thu hồi và chạy lại. **Dừng êm** (deploy): runner ngừng nhận việc, chờ 2 s, huỷ
   job đang chạy và xếp lại ngay (không tính vào số lần chạy).
-- Việc lấy trang (`<prefix>:gw:fetch:<pool>:http|render`) là hàng "nhiều nhất một lần": worker chết
-  giữa chừng thì backend hết chờ (`timeout + FETCH_QUEUE_GRACE_SECONDS`) và `HttpClient` tự thử lại.
+- Việc lấy trang (`<prefix>:gw:fetch:<pool>:http|render`, việc của lượt poll đi làn `…:hi` và
+  được worker lấy trước) là hàng "nhiều nhất một lần". Gateway ghi worker nào đang giữ việc nào
+  (`<prefix>:gw:inflight:<worker>`): worker rời / quá hạn báo sống thì việc nó giữ được trả về
+  backend ngay (`worker_lost`) để giao lại; kết quả gửi muộn sau đó bị bỏ. Hàng đông mà worker
+  vẫn đang lấy việc thì backend chờ tiếp từng khung `timeout + FETCH_QUEUE_GRACE_SECONDS`, tổng
+  tối đa `timeout + FETCH_QUEUE_MAX_WAIT_SECONDS` (300 s); không ai lấy việc thì thôi chờ và
+  `HttpClient` tự thử lại.
 - Rủi ro còn lại: runner treo (không báo sống) quá 60 s rồi tỉnh lại → một job chạy hai lần (ghi
   kết quả vẫn đúng nhờ gộp theo dấu vân tay); Redis mất dữ liệu (AOF cụt) → mất vài job vừa xếp
   (scheduler tự xếp lại poll / build đến hạn ở nhịp sau).
@@ -149,11 +167,29 @@ Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng tri
   vân tay nội dung hoặc khớp mờ cùng luật trên.
 - **Ở tầng DB**, index duy nhất `ux_jobs_company_fingerprint_active` chặn hai việc đang mở y hệt.
 
+## Truy vết một thao tác
+
+- Mỗi request API có `X-Request-Id` (client gửi UUID thì dùng lại, không thì sinh mới); mọi log
+  của request kèm `request_id`, lỗi 500 trả `request_id` cho người dùng báo lại. Tìm log: bảng
+  `logs`, cột `context->>'request_id'`.
+- Trang **Nhật ký thao tác** (bảng `audit_events`): ai lưu cài đặt nào (giá trị trước → sau, bí
+  mật bị che), ai bấm build / poll / import / kiểm tay / bảo trì / dừng worker, kèm `request_id`.
+  Bảng chỉ ghi thêm và **không** bị bảo trì dọn; muốn giới hạn dung lượng thì xoá tay theo
+  `occurred_at`.
+
+## Đăng nhập giao diện
+
+Đặt `UI_PASSWORD` (HTTP Basic). Một IP sai mật khẩu 20 lần (mỗi lần cách nhau dưới 5 phút) thì
+nhận 429 tới khi hết 5 phút, kể cả khi nhập đúng; đăng nhập đúng xoá bộ đếm. Bộ đếm ở Redis;
+Redis lỗi thì không chặn ai. Sau reverse proxy, uvicorn chỉ thấy IP thật khi IP của proxy nằm
+trong `FORWARDED_ALLOW_IPS` (mặc định `127.0.0.1`); không thì mọi người dùng chung một bộ đếm của
+IP proxy.
+
 ## Bảo trì
 
 Tự động mỗi giờ (`MAINTENANCE_CRON`): lượt chạy treo → `failed`, đối chiếu cột tóm tắt doanh
 nghiệp, gộp việc trùng còn sót, xoá dữ liệu cũ (`failed_pages` 7 ngày, `source_fetches` / `logs`
-30 ngày), huấn luyện từ điển nén và nén lại dần.
+30 ngày; `audit_events` giữ mãi), huấn luyện từ điển nén và nén lại dần.
 
 ```bash
 uv run jobcrawler db maintain      # như cron
@@ -164,9 +200,9 @@ uv run jobcrawler db dedup         # điền dấu vân tay + gộp việc trùn
 ## Postgres
 
 `/dev/shm` mặc định của container (64 MB) không đủ cho truy vấn / VACUUM song song trên bảng
-lớn, nên compose đặt `shm_size: 512mb`. Schema là một migration duy nhất (`0001_initial_schema`,
-dựng lại từ đầu ngày 19/10/2026); migration sau đánh số tiếp `0002`… bằng
-`uv run jobcrawler db revision -m "…"`.
+lớn, nên compose đặt `shm_size: 512mb`. Schema dựng lại từ đầu ngày 19/10/2026
+(`0001_initial_schema`), sau đó `0002_audit_events`; migration mới sinh bằng
+`task migration NAME="…"` (`uv run jobcrawler db revision -m "…"`), không sửa revision đã chạy.
 
 ## Sự cố hay gặp
 
@@ -176,8 +212,8 @@ dựng lại từ đầu ngày 19/10/2026); migration sau đánh số tiếp `00
   rồi bỏ; KYC ra `not_found` / `ambiguous`, tin cần LLM xác nhận bị hoãn (lượt `partial`, lượt sau
   chấm lại). `uv run jobcrawler llm check` để kiểm tra.
 - **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis): chạy lại từng file test.
-  Các test tích hợp dùng chung DB `jobcrawler_test` (schema bị dựng lại): không chạy hai bộ test
-  tích hợp song song.
+  Các test tích hợp dùng chung DB `jobcrawler_test` (schema bị dựng lại; tên DB bắt buộc kết thúc
+  bằng `_test`): không chạy hai bộ test tích hợp song song.
 - **Redis không lên sau khi máy hết bộ nhớ / tắt đột ngột** (log Redis: "Bad file format reading
   the append only file …incr.aof"): lệnh ghi cuối của AOF bị cắt dở. Dừng Redis, sao lưu rồi cắt
   phần hỏng, sau đó bật lại cả stack:

@@ -515,6 +515,70 @@ def gateway() -> None:
     _run(run_gateway(get_settings()))
 
 
+def _local_gateway_addr(host: str, port: int) -> str:
+    """Địa chỉ gọi gateway từ chính máy / container của nó (0.0.0.0, :: → loopback)."""
+    host = host.strip("[]")
+    if host in ("", "0.0.0.0"):
+        host = "127.0.0.1"
+    elif host == "::":
+        host = "::1"
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+
+
+@app.command("gateway-health")
+def gateway_health(
+    addr: Annotated[
+        str | None, typer.Option(help="host:port của gateway (mặc định 127.0.0.1:GATEWAY_PORT).")
+    ] = None,
+    service: Annotated[str, typer.Option(help="Service cần hỏi; trống = cả server.")] = "",
+    timeout: Annotated[float, typer.Option(help="Số giây chờ trả lời.")] = 5.0,
+    ca_cert: Annotated[
+        str | None,
+        typer.Option(help="CA (PEM) xác thực TLS; mặc định chính GATEWAY_TLS_CERT (tự ký)."),
+    ] = None,
+    server_name: Annotated[
+        str | None, typer.Option(help="Tên trong chứng chỉ TLS nếu khác host của --addr.")
+    ] = None,
+) -> None:
+    """Hỏi health gRPC (grpc.health.v1) của gateway; exit 0 khi SERVING (healthcheck Docker).
+    Dùng TLS khi đặt GATEWAY_TLS_CERT/KEY; health check không cần GATEWAY_TOKEN."""
+    from pathlib import Path
+
+    import grpc
+    from grpc_health.v1 import health_pb2, health_pb2_grpc
+
+    settings = get_settings()
+    target = addr or _local_gateway_addr(settings.gateway_host, settings.gateway_port)
+    if settings.gateway_tls_cert and settings.gateway_tls_key:
+        try:
+            root = Path(ca_cert or settings.gateway_tls_cert).read_bytes()
+        except OSError as exc:
+            typer.secho(f"Không đọc được chứng chỉ: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from None
+        options = [("grpc.ssl_target_name_override", server_name)] if server_name else []
+        credentials = grpc.ssl_channel_credentials(root_certificates=root)
+        channel = grpc.secure_channel(target, credentials, options=options)
+    else:
+        channel = grpc.insecure_channel(target)
+    with channel:
+        stub = health_pb2_grpc.HealthStub(channel)
+        try:
+            request = health_pb2.HealthCheckRequest(service=service)
+            response = stub.Check(request, timeout=timeout)  # pyright: ignore[reportAttributeAccessIssue]
+        except grpc.RpcError as exc:
+            # Lỗi thật của kênh đồng bộ cũng là grpc.Call: có code() / details().
+            call: Any = exc
+            reason = call.code().name if hasattr(call, "code") else type(exc).__name__
+            message = (call.details() or "") if hasattr(call, "details") else ""
+            typer.secho(f"{target}: {reason} {message}".rstrip(), fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from None
+    status = health_pb2.HealthCheckResponse.ServingStatus.Name(response.status)
+    if response.status != health_pb2.HealthCheckResponse.SERVING:
+        typer.secho(f"{target}: {status}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    typer.echo(f"{status} {target}")
+
+
 @app.command()
 def ui(
     host: Annotated[str, typer.Option(help="Địa chỉ lắng nghe (0.0.0.0 trong container).")] = (

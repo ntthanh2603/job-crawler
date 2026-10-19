@@ -1,0 +1,43 @@
+# Hook git (không cài sẵn). Bật trên máy: `uvx pre-commit install -t pre-commit -t commit-msg`;
+# chạy tay trên mọi file: `uvx pre-commit run --all-files`. CI vẫn là nơi kiểm cuối (`task check`).
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
+repos:
+  # Cùng bản ruff với uv.lock; đọc cấu hình [tool.ruff] trong pyproject.toml (bỏ qua mã sinh từ proto).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Chặn commit lộ token / mật khẩu / API key (.env, proxy có mật khẩu…).
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Fixture HTML của test lên tới ~750 KB; file lớn hơn 1 MB thường là nhầm (dump, build, data).
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # Sửa proto/jcproto/v1/*.proto mà chưa sinh lại mã (`task proto`) thì không cho commit.
+  - repo: local
+    hooks:
+      - id: proto-generated
+        name: proto đã sinh lại mã
+        entry: uv run python scripts/gen_proto.py --check
+        language: system
+        files: ^proto/jcproto/v1/
+        pass_filenames: false
+
+  # Conventional Commits: feat/fix/docs/refactor/test/chore/ci/perf/build/style/revert(scope)?: …
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
