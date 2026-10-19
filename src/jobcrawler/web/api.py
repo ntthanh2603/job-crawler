@@ -855,9 +855,13 @@ def _queue_job(job: dict[str, Any]) -> dict[str, Any]:
         "timeout": job.get("timeout"),
         "queued": job.get("queued"),
         "started": job.get("started"),
+        # Hẹn giờ chạy (giây epoch, 0 = chạy ngay); lượt tự chạy tiếp hẹn sau ~1 phút.
+        "scheduled": job.get("scheduled") or 0,
         "error": job.get("error"),
         "label": kwargs.get("name") or kwargs.get("source") or "",
         "company_id": kwargs.get("company_id"),
+        # Lượt chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường).
+        "continuation": kwargs.get("continuation") or 0,
     }
 
 

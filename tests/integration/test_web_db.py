@@ -28,7 +28,8 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
-from jobcrawler.services import maintenance
+from jobcrawler.schemas import CompanyIn
+from jobcrawler.services import batch, maintenance
 from jobcrawler.web.app import create_app
 
 from .test_batch_db import drop_queue
@@ -423,6 +424,27 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     assert companies_q["queued"] == 2
     assert {j["label"] for j in companies_q["jobs"]} == {f"Web mới {web.tag}", f"Web {web.tag}"}
     assert {j["function"] for j in companies_q["jobs"]} == {"process_company"}
+    assert {j["continuation"] for j in companies_q["jobs"]} == {0}
+    # Lượt tự chạy tiếp sau `partial`: hẹn giờ, hiện số thứ tự lượt chạy tiếp.
+    queue_db = Queue.from_url(web.settings.redis_url, name=web.settings.queue_name)
+    await queue_db.connect()
+    try:
+        assert await batch.enqueue_continuation(
+            queue_db,
+            CompanyIn(name=f"Web {web.tag}"),
+            UUID(web.company_id),
+            web.settings,
+            continuation=1,
+        )
+    finally:
+        await queue_db.disconnect()
+    jobs = next(
+        q
+        for q in (await web.client.get("/api/queue")).json()["queues"]
+        if q["name"] == web.settings.queue_name
+    )["jobs"]
+    continued = next(j for j in jobs if j["continuation"] == 1)
+    assert continued["scheduled"] > datetime.now(UTC).timestamp()
 
     boards = (await web.client.get("/api/boards")).json()
     assert "topcv" in {b["source"] for b in boards["boards"]}
