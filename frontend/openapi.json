@@ -1,0 +1,7577 @@
+{
+  "components": {
+    "schemas": {
+      "AliasOut": {
+        "properties": {
+          "alias": {
+            "title": "Alias",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          }
+        },
+        "required": [
+          "alias",
+          "kind"
+        ],
+        "title": "AliasOut",
+        "type": "object"
+      },
+      "AuditEventOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "changes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changes"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "resource_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Type"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor",
+          "action",
+          "resource_type",
+          "resource_id",
+          "request_id",
+          "changes",
+          "metadata"
+        ],
+        "title": "AuditEventOut",
+        "type": "object"
+      },
+      "AuditPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "title": "AuditPageOut",
+        "type": "object"
+      },
+      "BoardIndexOut": {
+        "properties": {
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          },
+          "workers": {
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "workers"
+        ],
+        "title": "BoardIndexOut",
+        "type": "object"
+      },
+      "BoardRunOut": {
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "fetched": {
+            "title": "Fetched",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "full",
+              "tail"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "new": {
+            "title": "New",
+            "type": "integer"
+          },
+          "profiles_matched": {
+            "title": "Profiles Matched",
+            "type": "integer"
+          },
+          "profiles_new": {
+            "title": "Profiles New",
+            "type": "integer"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          },
+          "urls_seen": {
+            "title": "Urls Seen",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "started_at",
+          "finished_at",
+          "status",
+          "complete",
+          "urls_seen",
+          "fetched",
+          "new",
+          "updated",
+          "unchanged",
+          "failed",
+          "removed",
+          "profiles_new",
+          "profiles_matched",
+          "error",
+          "mode"
+        ],
+        "title": "BoardRunOut",
+        "type": "object"
+      },
+      "BoardStatsOut": {
+        "properties": {
+          "active_postings": {
+            "title": "Active Postings",
+            "type": "integer"
+          },
+          "last_complete": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Complete"
+          },
+          "last_fetched": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fetched"
+          },
+          "last_finished": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Finished"
+          },
+          "last_new": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last New"
+          },
+          "last_removed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Removed"
+          },
+          "last_started": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Started"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "last_urls_seen": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Urls Seen"
+          },
+          "postings": {
+            "title": "Postings",
+            "type": "integer"
+          },
+          "profiles": {
+            "title": "Profiles",
+            "type": "integer"
+          },
+          "profiles_mapped": {
+            "title": "Profiles Mapped",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "active_postings",
+          "postings",
+          "profiles",
+          "profiles_mapped",
+          "last_status",
+          "last_started",
+          "last_finished",
+          "last_complete",
+          "last_urls_seen",
+          "last_fetched",
+          "last_new",
+          "last_removed"
+        ],
+        "title": "BoardStatsOut",
+        "type": "object"
+      },
+      "BoardsOut": {
+        "properties": {
+          "boards": {
+            "items": {
+              "$ref": "#/components/schemas/BoardStatsOut"
+            },
+            "title": "Boards",
+            "type": "array"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueStatsOut"
+          }
+        },
+        "required": [
+          "boards",
+          "queue"
+        ],
+        "title": "BoardsOut",
+        "type": "object"
+      },
+      "Body_post_eval": {
+        "properties": {
+          "companies": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Companies"
+          },
+          "include_inactive": {
+            "default": false,
+            "title": "Include Inactive",
+            "type": "boolean"
+          },
+          "jobs": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobs"
+          }
+        },
+        "title": "Body_post_eval",
+        "type": "object"
+      },
+      "Body_post_import": {
+        "properties": {
+          "enqueue": {
+            "default": false,
+            "title": "Enqueue",
+            "type": "boolean"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "companies.csv",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_import",
+        "type": "object"
+      },
+      "ChartTotalsOut": {
+        "properties": {
+          "active_jobs": {
+            "title": "Active Jobs",
+            "type": "integer"
+          },
+          "companies": {
+            "title": "Companies",
+            "type": "integer"
+          },
+          "companies_with_jobs": {
+            "title": "Companies With Jobs",
+            "type": "integer"
+          },
+          "new_jobs_7d": {
+            "title": "New Jobs 7D",
+            "type": "integer"
+          },
+          "with_salary": {
+            "title": "With Salary",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active_jobs",
+          "companies",
+          "companies_with_jobs",
+          "new_jobs_7d",
+          "with_salary"
+        ],
+        "title": "ChartTotalsOut",
+        "type": "object"
+      },
+      "ChartsOut": {
+        "description": "Phân bố trên job đang mở / doanh nghiệp (tính sẵn bằng cron); các cặp là (tên, số).",
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "jobs_by_day": {
+            "items": {
+              "$ref": "#/components/schemas/JobsDayOut"
+            },
+            "title": "Jobs By Day",
+            "type": "array"
+          },
+          "jobs_by_employment": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Employment",
+            "type": "array"
+          },
+          "jobs_by_level": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Level",
+            "type": "array"
+          },
+          "jobs_by_province": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Province",
+            "type": "array"
+          },
+          "jobs_by_source": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Source",
+            "type": "array"
+          },
+          "jobs_by_work_mode": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Work Mode",
+            "type": "array"
+          },
+          "kyc": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Kyc",
+            "type": "array"
+          },
+          "salary_bands": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Salary Bands",
+            "type": "array"
+          },
+          "top_companies": {
+            "items": {
+              "$ref": "#/components/schemas/TopCompanyOut"
+            },
+            "title": "Top Companies",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ChartTotalsOut"
+          }
+        },
+        "required": [
+          "generated_at",
+          "totals",
+          "jobs_by_day",
+          "jobs_by_source",
+          "jobs_by_province",
+          "jobs_by_level",
+          "jobs_by_employment",
+          "jobs_by_work_mode",
+          "salary_bands",
+          "kyc",
+          "top_companies"
+        ],
+        "title": "ChartsOut",
+        "type": "object"
+      },
+      "CompanyCrawlOut": {
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/PlanOut"
+            },
+            "title": "Plans",
+            "type": "array"
+          },
+          "poll_interval_seconds": {
+            "title": "Poll Interval Seconds",
+            "type": "number"
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "schedule",
+          "plans",
+          "poll_interval_seconds"
+        ],
+        "title": "CompanyCrawlOut",
+        "type": "object"
+      },
+      "CompanyDetailOut": {
+        "properties": {
+          "active_jobs": {
+            "title": "Active Jobs",
+            "type": "integer"
+          },
+          "aliases": {
+            "items": {
+              "$ref": "#/components/schemas/AliasOut"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyEntity"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "failed_pages": {
+            "items": {
+              "$ref": "#/components/schemas/FailedPageItem"
+            },
+            "title": "Failed Pages",
+            "type": "array"
+          },
+          "inactive_jobs": {
+            "title": "Inactive Jobs",
+            "type": "integer"
+          },
+          "input_website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Website"
+          },
+          "kyc_evidence": {
+            "title": "Kyc Evidence"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileOut"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "rejected_total": {
+            "title": "Rejected Total",
+            "type": "integer"
+          },
+          "runs_total": {
+            "title": "Runs Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "company",
+          "input_website",
+          "note",
+          "created_at",
+          "kyc_evidence",
+          "aliases",
+          "profiles",
+          "active_jobs",
+          "inactive_jobs",
+          "runs_total",
+          "rejected_total",
+          "failed_pages"
+        ],
+        "title": "CompanyDetailOut",
+        "type": "object"
+      },
+      "CompanyEntity": {
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_name": {
+            "title": "Input Name",
+            "type": "string"
+          },
+          "kyc_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kyc At"
+          },
+          "kyc_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kyc Confidence"
+          },
+          "kyc_evidence": {
+            "title": "Kyc Evidence"
+          },
+          "kyc_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KycStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
+          "other_domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Other Domains",
+            "type": "array"
+          },
+          "primary_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Domain"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          }
+        },
+        "required": [
+          "id",
+          "input_name",
+          "legal_name",
+          "brand_name",
+          "tax_code",
+          "primary_domain",
+          "other_domains",
+          "address",
+          "kyc_status",
+          "kyc_confidence",
+          "kyc_evidence",
+          "kyc_at"
+        ],
+        "title": "CompanyEntity",
+        "type": "object"
+      },
+      "CompanyEvalOut": {
+        "properties": {
+          "company_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "extra": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Extra",
+            "type": "array"
+          },
+          "golden": {
+            "title": "Golden",
+            "type": "integer"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "predicted": {
+            "title": "Predicted",
+            "type": "integer"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Status"
+          }
+        },
+        "required": [
+          "name",
+          "company_id",
+          "golden",
+          "predicted",
+          "matched",
+          "run_status",
+          "missing",
+          "extra",
+          "precision",
+          "recall"
+        ],
+        "title": "CompanyEvalOut",
+        "type": "object"
+      },
+      "CompanyItem": {
+        "properties": {
+          "active_jobs": {
+            "title": "Active Jobs",
+            "type": "integer"
+          },
+          "company": {
+            "$ref": "#/components/schemas/CompanyEntity"
+          },
+          "input_website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Website"
+          },
+          "last_duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Duration Ms"
+          },
+          "last_incomplete": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Last Incomplete",
+            "type": "array"
+          },
+          "last_started": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Started"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          }
+        },
+        "required": [
+          "company",
+          "input_website",
+          "last_status",
+          "last_started",
+          "last_duration_ms",
+          "last_incomplete",
+          "active_jobs"
+        ],
+        "title": "CompanyItem",
+        "type": "object"
+      },
+      "CrawlStatusOut": {
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessOut"
+          },
+          "poll_interval_seconds": {
+            "title": "Poll Interval Seconds",
+            "type": "number"
+          },
+          "polls": {
+            "$ref": "#/components/schemas/PollStatsOut"
+          },
+          "target_seconds": {
+            "title": "Target Seconds",
+            "type": "integer"
+          },
+          "windows": {
+            "$ref": "#/components/schemas/CrawlWindowsOut"
+          }
+        },
+        "required": [
+          "target_seconds",
+          "poll_interval_seconds",
+          "polls",
+          "freshness",
+          "windows"
+        ],
+        "title": "CrawlStatusOut",
+        "type": "object"
+      },
+      "CrawlWindowsOut": {
+        "properties": {
+          "build": {
+            "title": "Build",
+            "type": "string"
+          },
+          "in_build": {
+            "title": "In Build",
+            "type": "boolean"
+          },
+          "in_poll": {
+            "title": "In Poll",
+            "type": "boolean"
+          },
+          "next_build_start": {
+            "format": "date-time",
+            "title": "Next Build Start",
+            "type": "string"
+          },
+          "next_poll_start": {
+            "format": "date-time",
+            "title": "Next Poll Start",
+            "type": "string"
+          },
+          "poll": {
+            "title": "Poll",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone",
+          "build",
+          "poll",
+          "in_build",
+          "in_poll",
+          "next_build_start",
+          "next_poll_start"
+        ],
+        "title": "CrawlWindowsOut",
+        "type": "object"
+      },
+      "DrainOut": {
+        "properties": {
+          "draining": {
+            "title": "Draining",
+            "type": "boolean"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "draining"
+        ],
+        "title": "DrainOut",
+        "type": "object"
+      },
+      "EmploymentType": {
+        "enum": [
+          "full_time",
+          "part_time",
+          "contract",
+          "internship",
+          "freelance",
+          "unknown"
+        ],
+        "title": "EmploymentType",
+        "type": "string"
+      },
+      "EnqueueIn": {
+        "properties": {
+          "all": {
+            "default": false,
+            "description": "Mọi doanh nghiệp (kết hợp stale_hours).",
+            "title": "All",
+            "type": "boolean"
+          },
+          "company_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Các doanh nghiệp cần chạy.",
+            "title": "Company Ids"
+          },
+          "stale_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ.",
+            "title": "Stale Hours"
+          }
+        },
+        "title": "EnqueueIn",
+        "type": "object"
+      },
+      "EnqueueResultOut": {
+        "properties": {
+          "already_queued": {
+            "title": "Already Queued",
+            "type": "integer"
+          },
+          "enqueued": {
+            "title": "Enqueued",
+            "type": "integer"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected",
+          "enqueued",
+          "already_queued"
+        ],
+        "title": "EnqueueResultOut",
+        "type": "object"
+      },
+      "EvalReportOut": {
+        "properties": {
+          "companies": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyEvalOut"
+            },
+            "title": "Companies",
+            "type": "array"
+          },
+          "golden": {
+            "title": "Golden",
+            "type": "integer"
+          },
+          "markdown": {
+            "title": "Markdown",
+            "type": "string"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "perf": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Perf",
+            "type": "object"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "predicted": {
+            "title": "Predicted",
+            "type": "integer"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceEvalOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "target_precision": {
+            "title": "Target Precision",
+            "type": "number"
+          },
+          "target_recall": {
+            "title": "Target Recall",
+            "type": "number"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "precision",
+          "recall",
+          "golden",
+          "predicted",
+          "matched",
+          "target_precision",
+          "target_recall",
+          "perf",
+          "companies",
+          "sources",
+          "warnings",
+          "markdown"
+        ],
+        "title": "EvalReportOut",
+        "type": "object"
+      },
+      "EvalServerOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "path"
+        ],
+        "title": "EvalServerOut",
+        "type": "object"
+      },
+      "ExperienceYears": {
+        "properties": {
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "ExperienceYears",
+        "type": "object"
+      },
+      "FailedPageItem": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "source",
+          "reason",
+          "created_at"
+        ],
+        "title": "FailedPageItem",
+        "type": "object"
+      },
+      "FailedPageOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "html": {
+            "title": "Html",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "source",
+          "reason",
+          "created_at",
+          "http_status",
+          "run_id",
+          "html"
+        ],
+        "title": "FailedPageOut",
+        "type": "object"
+      },
+      "FetchOut": {
+        "properties": {
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "url",
+          "http_status",
+          "outcome",
+          "duration_ms",
+          "items",
+          "error"
+        ],
+        "title": "FetchOut",
+        "type": "object"
+      },
+      "FetchesHourOut": {
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "error": {
+            "title": "Error",
+            "type": "integer"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "ok",
+          "blocked",
+          "error"
+        ],
+        "title": "FetchesHourOut",
+        "type": "object"
+      },
+      "FreshnessOut": {
+        "description": "Doanh nghiệp đang poll và tuổi lượt poll đủ gần nhất (giây).",
+        "properties": {
+          "age_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Max"
+          },
+          "age_p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age P50"
+          },
+          "age_p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age P95"
+          },
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ScheduleState"
+            },
+            "title": "By State",
+            "type": "object"
+          },
+          "never_polled": {
+            "title": "Never Polled",
+            "type": "integer"
+          },
+          "overdue": {
+            "title": "Overdue",
+            "type": "integer"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ready",
+          "by_state",
+          "age_p50",
+          "age_p95",
+          "age_max",
+          "overdue",
+          "never_polled"
+        ],
+        "title": "FreshnessOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportOutcomeOut": {
+        "properties": {
+          "already_queued": {
+            "title": "Already Queued",
+            "type": "integer"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "enqueued": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enqueued"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "created",
+          "updated",
+          "unchanged",
+          "duplicates",
+          "errors",
+          "warnings",
+          "enqueued",
+          "already_queued"
+        ],
+        "title": "ImportOutcomeOut",
+        "type": "object"
+      },
+      "JobDetailOut": {
+        "properties": {
+          "html": {
+            "$ref": "#/components/schemas/JobHtml"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobItem"
+          },
+          "postings": {
+            "items": {
+              "$ref": "#/components/schemas/PostingOut"
+            },
+            "title": "Postings",
+            "type": "array"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "job",
+          "html",
+          "postings",
+          "review"
+        ],
+        "title": "JobDetailOut",
+        "type": "object"
+      },
+      "JobHtml": {
+        "properties": {
+          "benefits": {
+            "title": "Benefits",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "requirements": {
+            "title": "Requirements",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "requirements",
+          "benefits"
+        ],
+        "title": "JobHtml",
+        "type": "object"
+      },
+      "JobItem": {
+        "description": "`JobOut` kèm id dòng `jobs` và kết quả kiểm tay (để giao diện/API dẫn link).",
+        "properties": {
+          "apply_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Url"
+          },
+          "benefits_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benefits Md"
+          },
+          "canonical_source": {
+            "title": "Canonical Source",
+            "type": "string"
+          },
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "description_md": {
+            "title": "Description Md",
+            "type": "string"
+          },
+          "employment_type": {
+            "$ref": "#/components/schemas/EmploymentType",
+            "default": "unknown"
+          },
+          "experience_years": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExperienceYears"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "first_seen_at": {
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/JobLevel",
+            "default": "unknown"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "title": "Locations",
+            "type": "array"
+          },
+          "posted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted At"
+          },
+          "requirements_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements Md"
+          },
+          "reviewed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed"
+          },
+          "salary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Salary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Urls",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "default": "active"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_normalized": {
+            "title": "Title Normalized",
+            "type": "string"
+          },
+          "verification_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Verification Reasons",
+            "type": "array"
+          },
+          "work_mode": {
+            "$ref": "#/components/schemas/WorkMode",
+            "default": "unknown"
+          }
+        },
+        "required": [
+          "title",
+          "title_normalized",
+          "company_id",
+          "company_name",
+          "level",
+          "employment_type",
+          "work_mode",
+          "locations",
+          "salary",
+          "experience_years",
+          "description_md",
+          "requirements_md",
+          "benefits_md",
+          "skills",
+          "posted_at",
+          "expires_at",
+          "apply_url",
+          "source_urls",
+          "canonical_source",
+          "status",
+          "confidence",
+          "verification_reasons",
+          "first_seen_at",
+          "last_seen_at",
+          "id",
+          "reviewed"
+        ],
+        "title": "JobItem",
+        "type": "object"
+      },
+      "JobLevel": {
+        "enum": [
+          "intern",
+          "fresher",
+          "junior",
+          "middle",
+          "senior",
+          "lead",
+          "manager",
+          "director",
+          "unknown"
+        ],
+        "title": "JobLevel",
+        "type": "string"
+      },
+      "JobStatus": {
+        "enum": [
+          "active",
+          "expired",
+          "removed"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "JobsDayOut": {
+        "properties": {
+          "boards": {
+            "title": "Boards",
+            "type": "integer"
+          },
+          "careers": {
+            "title": "Careers",
+            "type": "integer"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "careers",
+          "boards"
+        ],
+        "title": "JobsDayOut",
+        "type": "object"
+      },
+      "KycStatus": {
+        "enum": [
+          "verified",
+          "ambiguous",
+          "not_found"
+        ],
+        "title": "KycStatus",
+        "type": "string"
+      },
+      "Location": {
+        "properties": {
+          "address_raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Raw"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          }
+        },
+        "required": [
+          "province",
+          "address_raw"
+        ],
+        "title": "Location",
+        "type": "object"
+      },
+      "LogOut": {
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ts",
+          "level",
+          "event",
+          "context"
+        ],
+        "title": "LogOut",
+        "type": "object"
+      },
+      "MeOut": {
+        "properties": {
+          "auth": {
+            "title": "Auth",
+            "type": "boolean"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "user",
+          "auth"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "MetaOut": {
+        "properties": {
+          "boards": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Boards",
+            "type": "array"
+          },
+          "employment_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Employment Types",
+            "type": "array"
+          },
+          "kyc_statuses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kyc Statuses",
+            "type": "array"
+          },
+          "levels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "provinces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Provinces",
+            "type": "array"
+          },
+          "run_statuses": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Run Statuses",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "work_modes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Work Modes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provinces",
+          "levels",
+          "employment_types",
+          "work_modes",
+          "sources",
+          "kyc_statuses",
+          "run_statuses",
+          "boards"
+        ],
+        "title": "MetaOut",
+        "type": "object"
+      },
+      "OkOut": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "OkOut",
+        "type": "object"
+      },
+      "OverviewOut": {
+        "properties": {
+          "chart": {
+            "items": {
+              "$ref": "#/components/schemas/RunsHourOut"
+            },
+            "title": "Chart",
+            "type": "array"
+          },
+          "charts": {
+            "$ref": "#/components/schemas/ChartsOut"
+          },
+          "fetch_chart": {
+            "items": {
+              "$ref": "#/components/schemas/FetchesHourOut"
+            },
+            "title": "Fetch Chart",
+            "type": "array"
+          },
+          "recent_runs": {
+            "items": {
+              "$ref": "#/components/schemas/RecentRunOut"
+            },
+            "title": "Recent Runs",
+            "type": "array"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/StatsOut"
+          }
+        },
+        "required": [
+          "stats",
+          "chart",
+          "fetch_chart",
+          "charts",
+          "recent_runs"
+        ],
+        "title": "OverviewOut",
+        "type": "object"
+      },
+      "PageOut_BoardRunOut_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BoardRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[BoardRunOut]",
+        "type": "object"
+      },
+      "PageOut_CompanyItem_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[CompanyItem]",
+        "type": "object"
+      },
+      "PageOut_FetchOut_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FetchOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[FetchOut]",
+        "type": "object"
+      },
+      "PageOut_JobItem_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[JobItem]",
+        "type": "object"
+      },
+      "PageOut_LogOut_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LogOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[LogOut]",
+        "type": "object"
+      },
+      "PageOut_PostingOut_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PostingOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[PostingOut]",
+        "type": "object"
+      },
+      "PageOut_RunOut_": {
+        "properties": {
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "default": 50,
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "pages",
+          "size",
+          "exact"
+        ],
+        "title": "PageOut[RunOut]",
+        "type": "object"
+      },
+      "PlanOut": {
+        "properties": {
+          "apis": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Apis",
+            "type": "array"
+          },
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "changed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed At"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "hubs": {
+            "title": "Hubs",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ignored": {
+            "title": "Ignored",
+            "type": "integer"
+          },
+          "jobs": {
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "listings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Listings",
+            "type": "array"
+          },
+          "llm_listing": {
+            "title": "Llm Listing",
+            "type": "boolean"
+          },
+          "polled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Polled At"
+          },
+          "rendered": {
+            "title": "Rendered",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "kind",
+          "url",
+          "status",
+          "jobs",
+          "built_at",
+          "polled_at",
+          "changed_at",
+          "failures",
+          "last_error",
+          "listings",
+          "hubs",
+          "apis",
+          "rendered",
+          "llm_listing",
+          "ignored"
+        ],
+        "title": "PlanOut",
+        "type": "object"
+      },
+      "PlanStatus": {
+        "description": "Trạng thái bộ khung một nguồn (`crawl_plans`).",
+        "enum": [
+          "active",
+          "broken",
+          "retired"
+        ],
+        "title": "PlanStatus",
+        "type": "string"
+      },
+      "PollStatsOut": {
+        "description": "Các lượt poll trong `minutes` phút gần nhất; thời gian tính bằng giây.",
+        "properties": {
+          "broken": {
+            "title": "Broken",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "integer"
+          },
+          "duration_p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration P50"
+          },
+          "duration_p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration P95"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "integer"
+          },
+          "new_jobs": {
+            "title": "New Jobs",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          },
+          "per_second": {
+            "title": "Per Second",
+            "type": "number"
+          },
+          "polls": {
+            "title": "Polls",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "window_histogram": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Window Histogram",
+            "type": "array"
+          },
+          "window_p50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window P50"
+          },
+          "window_p95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window P95"
+          },
+          "within_target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Within Target"
+          }
+        },
+        "required": [
+          "minutes",
+          "polls",
+          "ok",
+          "failed",
+          "broken",
+          "skipped",
+          "changed",
+          "new_jobs",
+          "per_second",
+          "duration_p50",
+          "duration_p95",
+          "window_p50",
+          "window_p95",
+          "within_target",
+          "window_histogram"
+        ],
+        "title": "PollStatsOut",
+        "type": "object"
+      },
+      "PostingOut": {
+        "properties": {
+          "accepted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "verification_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Verification Reasons",
+            "type": "array"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "url",
+          "title",
+          "status",
+          "accepted",
+          "confidence",
+          "verification_reasons",
+          "last_seen_at",
+          "verified_at"
+        ],
+        "title": "PostingOut",
+        "type": "object"
+      },
+      "ProfileOut": {
+        "properties": {
+          "indexed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indexed At"
+          },
+          "match_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Confidence"
+          },
+          "match_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Signal"
+          },
+          "name_on_source": {
+            "title": "Name On Source",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "source",
+          "url",
+          "name_on_source",
+          "website",
+          "tax_code",
+          "match_confidence",
+          "match_signal",
+          "indexed_at"
+        ],
+        "title": "ProfileOut",
+        "type": "object"
+      },
+      "QueueJobOut": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "continuation": {
+            "title": "Continuation",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "function": {
+            "title": "Function",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "retries": {
+            "title": "Retries",
+            "type": "integer"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
+          "started": {
+            "title": "Started",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "timeout": {
+            "title": "Timeout",
+            "type": "integer"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "enum": [
+                  "nightly",
+                  "schedule",
+                  "error",
+                  "board",
+                  "new",
+                  "manual",
+                  "continuation"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          }
+        },
+        "required": [
+          "key",
+          "function",
+          "status",
+          "attempts",
+          "retries",
+          "timeout",
+          "queued",
+          "started",
+          "scheduled",
+          "error",
+          "label",
+          "company_id",
+          "trigger",
+          "continuation"
+        ],
+        "title": "QueueJobOut",
+        "type": "object"
+      },
+      "QueueOut": {
+        "properties": {
+          "aborted": {
+            "title": "Aborted",
+            "type": "integer"
+          },
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/QueueJobOut"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "retried": {
+            "title": "Retried",
+            "type": "integer"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "workers": {
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "queued",
+          "active",
+          "scheduled",
+          "workers",
+          "complete",
+          "failed",
+          "retried",
+          "aborted",
+          "error",
+          "jobs",
+          "page",
+          "pages",
+          "total"
+        ],
+        "title": "QueueOut",
+        "type": "object"
+      },
+      "QueuePageOut": {
+        "properties": {
+          "queues": {
+            "items": {
+              "$ref": "#/components/schemas/QueueOut"
+            },
+            "title": "Queues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queues"
+        ],
+        "title": "QueuePageOut",
+        "type": "object"
+      },
+      "QueueStatsOut": {
+        "properties": {
+          "aborted": {
+            "title": "Aborted",
+            "type": "integer"
+          },
+          "active": {
+            "title": "Active",
+            "type": "integer"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "retried": {
+            "title": "Retried",
+            "type": "integer"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "integer"
+          },
+          "workers": {
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "queued",
+          "active",
+          "scheduled",
+          "workers",
+          "complete",
+          "failed",
+          "retried",
+          "aborted",
+          "error"
+        ],
+        "title": "QueueStatsOut",
+        "type": "object"
+      },
+      "QueuedOut": {
+        "properties": {
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "QueuedOut",
+        "type": "object"
+      },
+      "RecentReview": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "title",
+          "company_name",
+          "correct",
+          "note",
+          "reviewer",
+          "reviewed_at"
+        ],
+        "title": "RecentReview",
+        "type": "object"
+      },
+      "RecentRunOut": {
+        "properties": {
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "incomplete_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Incomplete Sources",
+            "type": "array"
+          },
+          "jobs_accepted": {
+            "title": "Jobs Accepted",
+            "type": "integer"
+          },
+          "jobs_closed": {
+            "title": "Jobs Closed",
+            "type": "integer"
+          },
+          "jobs_found": {
+            "title": "Jobs Found",
+            "type": "integer"
+          },
+          "jobs_new": {
+            "title": "Jobs New",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunKind"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/RunTrigger"
+          }
+        },
+        "required": [
+          "run_id",
+          "company_id",
+          "kind",
+          "trigger",
+          "started_at",
+          "finished_at",
+          "duration_ms",
+          "status",
+          "jobs_found",
+          "jobs_accepted",
+          "jobs_new",
+          "jobs_closed",
+          "incomplete_sources",
+          "error",
+          "company_name"
+        ],
+        "title": "RecentRunOut",
+        "type": "object"
+      },
+      "ReviewIn": {
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "correct"
+        ],
+        "title": "ReviewIn",
+        "type": "object"
+      },
+      "ReviewOut": {
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          }
+        },
+        "required": [
+          "correct",
+          "note",
+          "reviewer",
+          "reviewed_at"
+        ],
+        "title": "ReviewOut",
+        "type": "object"
+      },
+      "ReviewPageOut": {
+        "properties": {
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceReviewOut"
+            },
+            "title": "By Source",
+            "type": "array"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "integer"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobDetailOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/RecentReview"
+            },
+            "title": "Recent",
+            "type": "array"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "number"
+          },
+          "unreviewed_active": {
+            "title": "Unreviewed Active",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reviewed",
+          "correct",
+          "precision",
+          "target",
+          "unreviewed_active",
+          "by_source",
+          "next",
+          "recent"
+        ],
+        "title": "ReviewPageOut",
+        "type": "object"
+      },
+      "ReviewSummaryOut": {
+        "properties": {
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceReviewOut"
+            },
+            "title": "By Source",
+            "type": "array"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "unreviewed_active": {
+            "title": "Unreviewed Active",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reviewed",
+          "correct",
+          "precision",
+          "unreviewed_active",
+          "by_source"
+        ],
+        "title": "ReviewSummaryOut",
+        "type": "object"
+      },
+      "RunDetailOut": {
+        "properties": {
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCount"
+            },
+            "title": "By Source",
+            "type": "array"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "failed_pages": {
+            "items": {
+              "$ref": "#/components/schemas/FailedPageItem"
+            },
+            "title": "Failed Pages",
+            "type": "array"
+          },
+          "fetches_total": {
+            "title": "Fetches Total",
+            "type": "integer"
+          },
+          "logs_total": {
+            "title": "Logs Total",
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunOut"
+          }
+        },
+        "required": [
+          "run",
+          "company_name",
+          "by_source",
+          "fetches_total",
+          "logs_total",
+          "failed_pages"
+        ],
+        "title": "RunDetailOut",
+        "type": "object"
+      },
+      "RunKind": {
+        "description": "Loại lượt chạy một doanh nghiệp.",
+        "enum": [
+          "build",
+          "poll"
+        ],
+        "title": "RunKind",
+        "type": "string"
+      },
+      "RunOut": {
+        "properties": {
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "incomplete_sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Incomplete Sources",
+            "type": "array"
+          },
+          "jobs_accepted": {
+            "title": "Jobs Accepted",
+            "type": "integer"
+          },
+          "jobs_closed": {
+            "title": "Jobs Closed",
+            "type": "integer"
+          },
+          "jobs_found": {
+            "title": "Jobs Found",
+            "type": "integer"
+          },
+          "jobs_new": {
+            "title": "Jobs New",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunKind"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/RunTrigger"
+          }
+        },
+        "required": [
+          "run_id",
+          "company_id",
+          "kind",
+          "trigger",
+          "started_at",
+          "finished_at",
+          "duration_ms",
+          "status",
+          "jobs_found",
+          "jobs_accepted",
+          "jobs_new",
+          "jobs_closed",
+          "incomplete_sources",
+          "error"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "RunStatsOut": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "companies": {
+            "title": "Companies",
+            "type": "integer"
+          },
+          "companies_with_jobs": {
+            "title": "Companies With Jobs",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "failed_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Rate"
+          },
+          "first_started": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Started"
+          },
+          "incomplete_sources": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Incomplete Sources",
+            "type": "array"
+          },
+          "jobs_accepted": {
+            "title": "Jobs Accepted",
+            "type": "integer"
+          },
+          "jobs_found": {
+            "title": "Jobs Found",
+            "type": "integer"
+          },
+          "last_finished": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Finished"
+          },
+          "latest_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Latest By Status",
+            "type": "object"
+          },
+          "max_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Seconds"
+          },
+          "over_timeout": {
+            "title": "Over Timeout",
+            "type": "integer"
+          },
+          "p50_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Seconds"
+          },
+          "p95_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Seconds"
+          },
+          "per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Hour"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          },
+          "wait_p50_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait P50 Seconds"
+          },
+          "wait_p95_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait P95 Seconds"
+          }
+        },
+        "required": [
+          "since",
+          "runs",
+          "companies",
+          "by_status",
+          "latest_by_status",
+          "failed_rate",
+          "p50_seconds",
+          "p95_seconds",
+          "max_seconds",
+          "over_timeout",
+          "wait_p50_seconds",
+          "wait_p95_seconds",
+          "jobs_found",
+          "jobs_accepted",
+          "companies_with_jobs",
+          "first_started",
+          "last_finished",
+          "per_hour",
+          "incomplete_sources",
+          "errors"
+        ],
+        "title": "RunStatsOut",
+        "type": "object"
+      },
+      "RunTrigger": {
+        "description": "Vì sao lượt chạy được xếp.",
+        "enum": [
+          "nightly",
+          "schedule",
+          "error",
+          "board",
+          "new",
+          "manual",
+          "continuation"
+        ],
+        "title": "RunTrigger",
+        "type": "string"
+      },
+      "RunsHourOut": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "counts",
+          "total"
+        ],
+        "title": "RunsHourOut",
+        "type": "object"
+      },
+      "Salary": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "negotiable": {
+            "default": false,
+            "title": "Negotiable",
+            "type": "boolean"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SalaryPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          }
+        },
+        "required": [
+          "min",
+          "max",
+          "currency",
+          "period",
+          "negotiable",
+          "raw"
+        ],
+        "title": "Salary",
+        "type": "object"
+      },
+      "SalaryPeriod": {
+        "enum": [
+          "month",
+          "year",
+          "hour"
+        ],
+        "title": "SalaryPeriod",
+        "type": "string"
+      },
+      "ScheduleOut": {
+        "properties": {
+          "last_build_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Build At"
+          },
+          "last_build_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Build Status"
+          },
+          "last_change_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Change At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Poll At"
+          },
+          "last_poll_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Poll Ms"
+          },
+          "last_poll_ok_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Poll Ok At"
+          },
+          "next_build_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Build At"
+          },
+          "next_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Poll At"
+          },
+          "plans": {
+            "title": "Plans",
+            "type": "integer"
+          },
+          "poll_failures": {
+            "title": "Poll Failures",
+            "type": "integer"
+          },
+          "polls": {
+            "title": "Polls",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ScheduleState"
+          }
+        },
+        "required": [
+          "state",
+          "plans",
+          "next_build_at",
+          "next_poll_at",
+          "last_build_at",
+          "last_build_status",
+          "last_poll_at",
+          "last_poll_ok_at",
+          "last_poll_ms",
+          "last_change_at",
+          "poll_failures",
+          "polls",
+          "last_error"
+        ],
+        "title": "ScheduleOut",
+        "type": "object"
+      },
+      "ScheduleState": {
+        "description": "Trạng thái lịch thu thập của một doanh nghiệp (`company_schedules.state`).",
+        "enum": [
+          "new",
+          "ready",
+          "no_sources",
+          "broken",
+          "paused"
+        ],
+        "title": "ScheduleState",
+        "type": "string"
+      },
+      "SettingGroupOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SettingItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SettingSectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "title",
+          "description",
+          "sections",
+          "items"
+        ],
+        "title": "SettingGroupOut",
+        "type": "object"
+      },
+      "SettingItemOut": {
+        "properties": {
+          "default": {
+            "$ref": "#/components/schemas/SettingValue"
+          },
+          "env_is_set": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Env Is Set"
+          },
+          "env_value": {
+            "$ref": "#/components/schemas/SettingValue"
+          },
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "is_set": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Set"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "int",
+              "float",
+              "bool",
+              "str",
+              "enum",
+              "secret",
+              "list",
+              "dict",
+              "window",
+              "cron"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "live": {
+            "title": "Live",
+            "type": "boolean"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "max_exclusive": {
+            "title": "Max Exclusive",
+            "type": "boolean"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "min_exclusive": {
+            "title": "Min Exclusive",
+            "type": "boolean"
+          },
+          "nullable": {
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/SettingOptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "placeholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placeholder"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "default",
+              "env",
+              "ui"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SettingValue"
+          },
+          "value_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Type"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "help",
+          "kind",
+          "options",
+          "unit",
+          "min",
+          "max",
+          "min_exclusive",
+          "max_exclusive",
+          "nullable",
+          "placeholder",
+          "value_type",
+          "live",
+          "value",
+          "default",
+          "env_value",
+          "source",
+          "secret",
+          "is_set",
+          "env_is_set"
+        ],
+        "title": "SettingItemOut",
+        "type": "object"
+      },
+      "SettingOptionOut": {
+        "properties": {
+          "help": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "help"
+        ],
+        "title": "SettingOptionOut",
+        "type": "object"
+      },
+      "SettingSectionOut": {
+        "description": "Mục con trong nhóm: tiêu đề, giải thích ngắn, các cài đặt theo thứ tự hiển thị.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "keys"
+        ],
+        "title": "SettingSectionOut",
+        "type": "object"
+      },
+      "SettingValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "SettingsPageOut": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SettingGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "groups"
+        ],
+        "title": "SettingsPageOut",
+        "type": "object"
+      },
+      "SettingsSavedOut": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SettingGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restart Required",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "groups",
+          "restart_required"
+        ],
+        "title": "SettingsSavedOut",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "properties": {
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "SettingsUpdate",
+        "type": "object"
+      },
+      "SourceCount": {
+        "properties": {
+          "outcomes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Outcomes",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source",
+          "total",
+          "outcomes"
+        ],
+        "title": "SourceCount",
+        "type": "object"
+      },
+      "SourceEvalOut": {
+        "properties": {
+          "golden": {
+            "title": "Golden",
+            "type": "integer"
+          },
+          "matched": {
+            "title": "Matched",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "predicted": {
+            "title": "Predicted",
+            "type": "integer"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "predicted",
+          "matched",
+          "golden",
+          "precision",
+          "recall"
+        ],
+        "title": "SourceEvalOut",
+        "type": "object"
+      },
+      "SourceReviewOut": {
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "reviewed",
+          "correct",
+          "precision"
+        ],
+        "title": "SourceReviewOut",
+        "type": "object"
+      },
+      "SourceStatsOut": {
+        "properties": {
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "integer"
+          },
+          "fetches": {
+            "title": "Fetches",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "outcomes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Outcomes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "fetches",
+          "outcomes",
+          "avg_ms",
+          "cached"
+        ],
+        "title": "SourceStatsOut",
+        "type": "object"
+      },
+      "StatsOut": {
+        "properties": {
+          "boards": {
+            "items": {
+              "$ref": "#/components/schemas/BoardStatsOut"
+            },
+            "title": "Boards",
+            "type": "array"
+          },
+          "companies": {
+            "title": "Companies",
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "jobs_by_source": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Jobs By Source",
+            "type": "array"
+          },
+          "jobs_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Jobs By Status",
+            "type": "object"
+          },
+          "kyc_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Kyc Status",
+            "type": "object"
+          },
+          "queues": {
+            "items": {
+              "$ref": "#/components/schemas/QueueStatsOut"
+            },
+            "title": "Queues",
+            "type": "array"
+          },
+          "runs": {
+            "$ref": "#/components/schemas/RunStatsOut"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceStatsOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "storage": {
+            "items": {
+              "$ref": "#/components/schemas/StorageStatsOut"
+            },
+            "title": "Storage",
+            "type": "array"
+          },
+          "tables": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetOut"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "queues",
+          "companies",
+          "kyc_status",
+          "jobs_by_status",
+          "jobs_by_source",
+          "runs",
+          "sources",
+          "boards",
+          "storage",
+          "tables",
+          "targets"
+        ],
+        "title": "StatsOut",
+        "type": "object"
+      },
+      "StorageStatsOut": {
+        "properties": {
+          "by_dict": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Dict"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "original_bytes": {
+            "title": "Original Bytes",
+            "type": "integer"
+          },
+          "stored_bytes": {
+            "title": "Stored Bytes",
+            "type": "integer"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "values": {
+            "title": "Values",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "table",
+          "values",
+          "stored_bytes",
+          "original_bytes",
+          "by_dict"
+        ],
+        "title": "StorageStatsOut",
+        "type": "object"
+      },
+      "TargetOut": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "seconds",
+              "rate"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "target",
+          "ok",
+          "kind"
+        ],
+        "title": "TargetOut",
+        "type": "object"
+      },
+      "TopCompanyOut": {
+        "properties": {
+          "active_jobs": {
+            "title": "Active Jobs",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active_jobs"
+        ],
+        "title": "TopCompanyOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkMode": {
+        "enum": [
+          "onsite",
+          "hybrid",
+          "remote",
+          "unknown"
+        ],
+        "title": "WorkMode",
+        "type": "string"
+      },
+      "WorkerPoolOut": {
+        "description": "Cộng dồn các worker đang sống của một pool.",
+        "properties": {
+          "http_inflight": {
+            "title": "Http Inflight",
+            "type": "integer"
+          },
+          "http_slots": {
+            "title": "Http Slots",
+            "type": "integer"
+          },
+          "render_inflight": {
+            "title": "Render Inflight",
+            "type": "integer"
+          },
+          "render_slots": {
+            "title": "Render Slots",
+            "type": "integer"
+          },
+          "workers": {
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "workers",
+          "http_slots",
+          "render_slots",
+          "http_inflight",
+          "render_inflight"
+        ],
+        "title": "WorkerPoolOut",
+        "type": "object"
+      },
+      "WorkerStats": {
+        "properties": {
+          "bytes_in": {
+            "default": 0,
+            "title": "Bytes In",
+            "type": "integer"
+          },
+          "cpu_percent": {
+            "default": 0.0,
+            "title": "Cpu Percent",
+            "type": "number"
+          },
+          "http_done": {
+            "default": 0,
+            "title": "Http Done",
+            "type": "integer"
+          },
+          "http_failed": {
+            "default": 0,
+            "title": "Http Failed",
+            "type": "integer"
+          },
+          "http_inflight": {
+            "default": 0,
+            "title": "Http Inflight",
+            "type": "integer"
+          },
+          "proxies_alive": {
+            "default": 0,
+            "title": "Proxies Alive",
+            "type": "integer"
+          },
+          "render_disabled_reason": {
+            "default": "",
+            "title": "Render Disabled Reason",
+            "type": "string"
+          },
+          "render_done": {
+            "default": 0,
+            "title": "Render Done",
+            "type": "integer"
+          },
+          "render_failed": {
+            "default": 0,
+            "title": "Render Failed",
+            "type": "integer"
+          },
+          "render_inflight": {
+            "default": 0,
+            "title": "Render Inflight",
+            "type": "integer"
+          },
+          "render_retry_at_ms": {
+            "default": 0,
+            "title": "Render Retry At Ms",
+            "type": "integer"
+          },
+          "rss_bytes": {
+            "default": 0,
+            "title": "Rss Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "http_done",
+          "http_failed",
+          "render_done",
+          "render_failed",
+          "http_inflight",
+          "render_inflight",
+          "bytes_in",
+          "cpu_percent",
+          "rss_bytes",
+          "proxies_alive",
+          "render_disabled_reason",
+          "render_retry_at_ms"
+        ],
+        "title": "WorkerStats",
+        "type": "object"
+      },
+      "WorkerStatus": {
+        "properties": {
+          "alive": {
+            "default": false,
+            "title": "Alive",
+            "type": "boolean"
+          },
+          "completed": {
+            "default": 0,
+            "title": "Completed",
+            "type": "integer"
+          },
+          "draining": {
+            "default": false,
+            "title": "Draining",
+            "type": "boolean"
+          },
+          "dropped": {
+            "default": 0,
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "hostname": {
+            "default": "",
+            "title": "Hostname",
+            "type": "string"
+          },
+          "http_slots": {
+            "default": 0,
+            "title": "Http Slots",
+            "type": "integer"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "last_seen_ms": {
+            "default": 0,
+            "title": "Last Seen Ms",
+            "type": "integer"
+          },
+          "leased": {
+            "default": 0,
+            "title": "Leased",
+            "type": "integer"
+          },
+          "local_proxies": {
+            "default": 0,
+            "title": "Local Proxies",
+            "type": "integer"
+          },
+          "lost": {
+            "default": 0,
+            "title": "Lost",
+            "type": "integer"
+          },
+          "pool": {
+            "default": "default",
+            "title": "Pool",
+            "type": "string"
+          },
+          "registered_at_ms": {
+            "default": 0,
+            "title": "Registered At Ms",
+            "type": "integer"
+          },
+          "render_slots": {
+            "default": 0,
+            "title": "Render Slots",
+            "type": "integer"
+          },
+          "started_at_ms": {
+            "default": 0,
+            "title": "Started At Ms",
+            "type": "integer"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/WorkerStats"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          },
+          "worker_id": {
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "hostname",
+          "version",
+          "pool",
+          "http_slots",
+          "render_slots",
+          "local_proxies",
+          "labels",
+          "started_at_ms",
+          "registered_at_ms",
+          "last_seen_ms",
+          "leased",
+          "completed",
+          "dropped",
+          "lost",
+          "stats",
+          "alive",
+          "draining"
+        ],
+        "title": "WorkerStatus",
+        "type": "object"
+      },
+      "WorkersPageOut": {
+        "properties": {
+          "now_ms": {
+            "title": "Now Ms",
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/WorkersSummaryOut"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerStatus"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "workers",
+          "summary",
+          "now_ms"
+        ],
+        "title": "WorkersPageOut",
+        "type": "object"
+      },
+      "WorkersSummaryOut": {
+        "properties": {
+          "alive": {
+            "title": "Alive",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "draining": {
+            "title": "Draining",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "gone": {
+            "title": "Gone",
+            "type": "integer"
+          },
+          "http_inflight": {
+            "title": "Http Inflight",
+            "type": "integer"
+          },
+          "http_slots": {
+            "title": "Http Slots",
+            "type": "integer"
+          },
+          "pools": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkerPoolOut"
+            },
+            "title": "Pools",
+            "type": "object"
+          },
+          "render_inflight": {
+            "title": "Render Inflight",
+            "type": "integer"
+          },
+          "render_slots": {
+            "title": "Render Slots",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alive",
+          "gone",
+          "draining",
+          "pools",
+          "http_slots",
+          "render_slots",
+          "http_inflight",
+          "render_inflight",
+          "done",
+          "failed"
+        ],
+        "title": "WorkersSummaryOut",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Giao diện vận hành và API của jobcrawler.",
+    "title": "jobcrawler",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/audit": {
+      "get": {
+        "description": "Nhật ký thao tác của người vận hành, mới nhất trước. `next` = id dòng cuối (truyền vào\n`before` để lấy trang sau), `null` khi đã hết.",
+        "operationId": "get_audit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Id dòng cuối trang trước (`next`): lấy các dòng cũ hơn.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id dòng cuối trang trước (`next`): lấy các dòng cũ hơn.",
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resource Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Audit",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/audit/actions": {
+      "get": {
+        "description": "Mọi tên thao tác được ghi nhật ký (danh sách lọc).",
+        "operationId": "get_audit_actions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Audit Actions",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Audit Actions",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/boards": {
+      "get": {
+        "operationId": "get_boards",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Boards",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/boards/runs": {
+      "get": {
+        "operationId": "get_board_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "full | tail",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "full | tail",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_BoardRunOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Board Runs",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/boards/{name}/index": {
+      "post": {
+        "operationId": "post_board_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardIndexOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Board Index",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies": {
+      "get": {
+        "operationId": "get_companies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kyc",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Kyc",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Run",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "jobs",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Jobs",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_CompanyItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Companies",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/import": {
+      "post": {
+        "operationId": "post_import",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_import"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportOutcomeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Import",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}": {
+      "get": {
+        "operationId": "get_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/build": {
+      "post": {
+        "description": "Build lại bộ khung ngay (lượt đủ, tìm nguồn lại).",
+        "operationId": "post_company_build",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Company Build",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/crawl": {
+      "get": {
+        "description": "Bộ khung các nguồn (ghi ở lượt build) và lịch build / poll của doanh nghiệp.",
+        "operationId": "get_company_crawl",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyCrawlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company Crawl",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/jobs": {
+      "get": {
+        "operationId": "get_company_jobs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "active | inactive",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "description": "active | inactive",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_JobItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company Jobs",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/poll": {
+      "post": {
+        "description": "Poll ngay theo bộ khung.",
+        "operationId": "post_company_poll",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Company Poll",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/rejected": {
+      "get": {
+        "operationId": "get_company_rejected",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_PostingOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company Rejected",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/runs": {
+      "get": {
+        "operationId": "get_company_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Company Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_RunOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company Runs",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/crawl/status": {
+      "get": {
+        "description": "Độ trễ phát hiện tin mới (P50/P95 cửa sổ phát hiện của các lượt poll trong `minutes` phút\ngần nhất), độ tươi hiện tại, khung giờ build / poll.",
+        "operationId": "get_crawl_status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "minutes",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "title": "Minutes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Crawl Status",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/enqueue": {
+      "post": {
+        "operationId": "post_enqueue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnqueueIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnqueueResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Enqueue",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/eval": {
+      "post": {
+        "description": "Precision/recall trên golden set tải lên (companies.csv + jobs.csv) hoặc thư mục golden/\ntrên máy chủ.",
+        "operationId": "post_eval",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_eval"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalReportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Eval",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/eval/server": {
+      "get": {
+        "description": "Có golden set trên máy chủ (thư mục golden/) không.",
+        "operationId": "get_eval_server",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalServerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Eval Server",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/failed-pages/{page_id}": {
+      "get": {
+        "operationId": "get_failed_page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailedPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Failed Page",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/failed-pages/{page_id}/raw": {
+      "get": {
+        "operationId": "get_failed_page_raw",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Page Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Failed Page Raw",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "operationId": "get_jobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "province",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Province",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "employment_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Employment Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_mode",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Work Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "description": "active | expired | removed | all",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "description": "active | expired | removed | all",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "triệu VND",
+            "in": "query",
+            "name": "salary_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "triệu VND",
+              "title": "Salary From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "description": "no | yes | correct | wrong",
+            "in": "query",
+            "name": "reviewed",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "no | yes | correct | wrong",
+              "title": "Reviewed",
+              "type": "string"
+            }
+          },
+          {
+            "description": "new | posted | salary | expires",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "new",
+              "description": "new | posted | salary | expires",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_JobItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Jobs",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/jobs/export": {
+      "get": {
+        "operationId": "get_jobs_export",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": false,
+            "schema": {
+              "default": "csv",
+              "pattern": "^(csv|jsonl)$",
+              "title": "Fmt",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "province",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Province",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "employment_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Employment Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_mode",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Work Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "salary_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Salary From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "company_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reviewed",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Reviewed",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Jobs Export",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/review": {
+      "delete": {
+        "operationId": "delete_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Review",
+        "tags": [
+          "api"
+        ]
+      },
+      "post": {
+        "operationId": "post_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Review",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/maintenance": {
+      "post": {
+        "operationId": "post_maintenance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Post Maintenance",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "get_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Me",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/meta": {
+      "get": {
+        "description": "Giá trị cho các bộ lọc.",
+        "operationId": "get_meta",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Meta",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/overview": {
+      "get": {
+        "description": "Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,\nphần theo cửa sổ cache 60 giây).",
+        "operationId": "get_overview",
+        "parameters": [
+          {
+            "description": "Cửa sổ giờ; 0 = tất cả",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Cửa sổ giờ; 0 = tất cả",
+              "title": "Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "storage",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Storage",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Overview",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/queue": {
+      "get": {
+        "description": "Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang\nchạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang\nQUEUE_PAGE job).",
+        "operationId": "get_queue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "poll_page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Poll Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "board_page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Board Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuePageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Queue",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/review": {
+      "get": {
+        "description": "Tổng hợp precision + một job đang mở chưa kiểm (ngẫu nhiên) + các đánh giá gần nhất.",
+        "operationId": "get_review",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Skip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Review",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/review/summary": {
+      "get": {
+        "operationId": "get_review_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Review Summary",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/fetches": {
+      "get": {
+        "operationId": "get_run_fetches",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_FetchOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Fetches",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/logs": {
+      "get": {
+        "operationId": "get_run_logs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_LogOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run Logs",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "description": "Mọi cài đặt sửa được, theo nhóm: giá trị hiệu lực, mặc định, từ biến môi trường, nguồn.",
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Lưu nhiều cài đặt cùng lúc (kiểm tra tất cả trước, lỗi thì không lưu gì: 422 kèm\n`detail.errors` = tên cài đặt → thông báo). `restart_required`: các cài đặt vừa đổi chỉ có\nhiệu lực sau khi khởi động lại service.",
+        "operationId": "put_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsSavedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/{key}": {
+      "delete": {
+        "description": "Bỏ giá trị đặt ở giao diện, về giá trị biến môi trường / mặc định.",
+        "operationId": "reset_setting",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsSavedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Setting",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/stats": {
+      "get": {
+        "operationId": "get_stats",
+        "parameters": [
+          {
+            "description": "Cửa sổ giờ; 0 = tất cả",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Cửa sổ giờ; 0 = tất cả",
+              "title": "Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "storage",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Storage",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Stats",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/workers": {
+      "get": {
+        "description": "Worker lấy trang đã biết (đang sống trước, kèm worker vừa rời) và số liệu tổng.",
+        "operationId": "get_workers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkersPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Workers",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/workers/{worker_id}/drain": {
+      "delete": {
+        "description": "Huỷ yêu cầu dừng: worker nhận việc lại.",
+        "operationId": "undrain_worker",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Undrain Worker",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "description": "Yêu cầu worker dừng nhận việc mới (làm nốt việc đang chạy).",
+        "operationId": "drain_worker",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrainOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Drain Worker",
+        "tags": [
+          "settings"
+        ]
+      }
+    }
+  }
+}

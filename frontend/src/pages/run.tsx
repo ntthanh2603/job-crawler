@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, Building2, CircleAlert } from "lucide-react"
 import { Link, useParams } from "react-router"
 
@@ -25,9 +24,9 @@ import { RunTags } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { api } from "@/lib/api"
+import { getGetRunFetchesQueryOptions, getGetRunLogsQueryOptions, useGetRun } from "@/lib/gen/queries"
 import { ago, byCount, cap, companyName, dt, duration, failReason, hour, label, num, shortUrl, sourceLabel } from "@/lib/format"
-import type { Fetch, LogLine, RunDetail } from "@/lib/types"
+import type { RunDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const LEVELS: Record<string, [Tone, string]> = {
@@ -112,9 +111,9 @@ function RunProblems({ run }: { run: RunDetail["run"] }) {
 }
 
 export function RunPage() {
-  const { id } = useParams()
+  const { id = "" } = useParams()
   const [tab, setTab] = useTabParam(TABS, "fetches")
-  const query = useQuery({ queryKey: ["run", id], queryFn: () => api.get<RunDetail>(`/runs/${id}`) })
+  const query = useGetRun(id)
 
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
@@ -243,7 +242,9 @@ export function RunPage() {
           />
           <TabsContent value="fetches">
             <Section bodyClassName="p-0">
-              <PagedList<Fetch> queryKey={["run-fetches", r.run_id]} url={`/runs/${r.run_id}/fetches`} empty="Không có request nào.">
+              <PagedList
+                options={(page) => getGetRunFetchesQueryOptions(r.run_id, { page })}
+                empty="Không có request nào.">
                 {(fetches) => (
                   <Table>
                     <TableHeader>
@@ -287,7 +288,9 @@ export function RunPage() {
           </TabsContent>
           <TabsContent value="logs">
             <Section bodyClassName="p-0">
-              <PagedList<LogLine> queryKey={["run-logs", r.run_id]} url={`/runs/${r.run_id}/logs`} empty="Không có log cho lượt chạy này.">
+              <PagedList
+                options={(page) => getGetRunLogsQueryOptions(r.run_id, { page })}
+                empty="Không có log cho lượt chạy này.">
                 {(logs) => (
                   <div className="divide-y">
                     {logs.map((l, i) => {

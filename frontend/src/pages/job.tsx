@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { ExternalLinkIcon } from "lucide-react"
 import { useParams } from "react-router"
 
@@ -17,11 +16,11 @@ import {
 import { JobBody, JobFacts, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { cap, date, displayName, dt, num, pct, sourceLabel } from "@/lib/format"
-import { jobQuery } from "@/lib/queries"
+import { useGetJob } from "@/lib/gen/queries"
 
 export function JobPage() {
   const { id = "" } = useParams()
-  const query = useQuery(jobQuery(id))
+  const query = useGetJob(id)
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
   const d = query.data

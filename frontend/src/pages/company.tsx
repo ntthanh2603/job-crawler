@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { Briefcase, ExternalLinkIcon, Radar } from "lucide-react"
 import { useState, type ReactNode } from "react"
 import { Link, useParams } from "react-router"
@@ -25,11 +24,10 @@ import {
   useRowLink,
   useTabParam,
 } from "@/components/common"
-import { CompanyCrawlTab, JobDelta, RunTags, ScheduleBadge, useCrawlActions } from "@/components/crawl"
+import { CompanyCrawlTab, JobDelta, RunTags, ScheduleBadge, useCompanyCrawl, useCrawlActions } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { api } from "@/lib/api"
 import {
   ago,
   cap,
@@ -47,8 +45,14 @@ import {
   shortUrl,
   sourceLabel,
 } from "@/lib/format"
-import { companyCrawlQuery, companyRunsQuery, keys } from "@/lib/queries"
-import type { CompanyDetail, Job, Posting, Run } from "@/lib/types"
+import {
+  getGetCompanyJobsQueryOptions,
+  getGetCompanyRejectedQueryOptions,
+  getGetCompanyRunsQueryOptions,
+  useGetCompany,
+  useGetCompanyRuns,
+} from "@/lib/gen/queries"
+import type { CompanyDetail } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -94,10 +98,9 @@ function CompanyJobs({ id, active, inactive }: { id: string; active: number; ina
         />
       }
     >
-      <PagedList<Job>
+      <PagedList
         key={status}
-        queryKey={["company-jobs", id, status]}
-        url={`/companies/${id}/jobs?status=${status}`}
+        options={(page) => getGetCompanyJobsQueryOptions(id, { status, page })}
         empty={status === "active" ? "Chưa có việc làm đang mở." : "Không có việc làm đã đóng."}
       >
         {(jobs) => (
@@ -143,7 +146,9 @@ function CompanyRuns({ id }: { id: string }) {
   const rowLink = useRowLink()
   return (
     <Section bodyClassName="p-0" title="Các lượt chạy" description="Mới nhất trước · bấm một dòng để xem request và log">
-      <PagedList<Run> queryKey={keys.companyRuns(id)} url={`/companies/${id}/runs`} empty="Chưa chạy lần nào.">
+      <PagedList
+        options={(page) => getGetCompanyRunsQueryOptions(id, { page })}
+        empty="Chưa chạy lần nào.">
         {(runs) => (
           <Table>
             <TableHeader>
@@ -196,7 +201,9 @@ function CompanyRuns({ id }: { id: string }) {
 function CompanyRejected({ id }: { id: string }) {
   return (
     <Section bodyClassName="p-0" title="Tin bị loại" description="Tin không qua bước xác minh, kèm lý do · mới nhất trước">
-      <PagedList<Posting> queryKey={["company-rejected", id]} url={`/companies/${id}/rejected`} empty="Không có tin bị loại.">
+      <PagedList
+        options={(page) => getGetCompanyRejectedQueryOptions(id, { page })}
+        empty="Không có tin bị loại.">
         {(postings) => (
           <Table>
             <TableHeader>
@@ -232,14 +239,12 @@ function CompanyRejected({ id }: { id: string }) {
 export function CompanyPage() {
   const { id = "" } = useParams()
   const [tab, setTab] = useTabParam(TABS, "jobs")
-  const query = useQuery({
-    queryKey: ["company", id],
-    queryFn: () => api.get<CompanyDetail>(`/companies/${id}`),
-  })
+  // `kyc_evidence` là JSON tự do (spec: unknown): đọc theo `KycEvidence`.
+  const query = useGetCompany(id, { query: { select: (d) => d as CompanyDetail } })
   // Trang 1 các lượt chạy (cùng khoá với tab "Lượt chạy" nên chỉ tải một lần).
-  const runs = useQuery(companyRunsQuery(id, 1))
+  const runs = useGetCompanyRuns(id, { page: 1 })
   // Lịch thu thập (cùng khoá với tab "Bộ khung & lịch"): trạng thái hiện ở thẻ số liệu.
-  const crawl = useQuery(companyCrawlQuery(id))
+  const crawl = useCompanyCrawl(id)
   const { poll } = useCrawlActions(id)
 
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
@@ -263,7 +268,7 @@ export function CompanyPage() {
                 <Briefcase /> Mọi việc làm
               </Link>
             </Button>
-            <Button onClick={() => poll.mutate()} disabled={poll.isPending}>
+            <Button onClick={() => poll.mutate({ companyId: id })} disabled={poll.isPending}>
               <Radar /> {poll.isPending ? "Đang xếp hàng…" : "Poll ngay"}
             </Button>
           </>

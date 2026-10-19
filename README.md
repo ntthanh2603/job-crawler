@@ -136,6 +136,7 @@ task infra                       # chỉ Postgres + Redis
 task check                       # mọi thứ CI chạy: ruff, pyright, proto, pytest, test + build giao diện
 task test:unit                   # pytest bỏ test tích hợp
 task proto                       # sau khi sửa proto/jcproto/v1/crawl.proto
+task api                         # sau khi đổi mô hình trả về của API: spec + hook / kiểu (orval)
 task migration NAME="mô tả"      # sinh migration mới từ model
 ```
 

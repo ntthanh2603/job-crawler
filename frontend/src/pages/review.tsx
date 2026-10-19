@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { ExternalLinkIcon, PartyPopper, SkipForward } from "lucide-react"
 import { useEffect, useState } from "react"
 
@@ -20,12 +19,12 @@ import { JobBody, JobFacts, ReviewBox } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { ago, cap, displayName, num, pct, sourceLabel } from "@/lib/format"
-import { reviewQuery } from "@/lib/queries"
+import { useGetReview } from "@/lib/gen/queries"
 import { cn } from "@/lib/utils"
 
 export function ReviewPage() {
   const [skip, setSkip] = useState<string | null>(null)
-  const query = useQuery({ ...reviewQuery(skip), placeholderData: (prev) => prev })
+  const query = useGetReview({ skip }, { query: { placeholderData: (prev) => prev } })
   const d = query.data
   const next = d?.next
 

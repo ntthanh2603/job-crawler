@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Building2, Play, Upload, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
@@ -33,10 +33,16 @@ import {
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api, qs } from "@/lib/api"
 import { ago, cap, companyName, displayName, duration, num } from "@/lib/format"
-import { keys, metaQuery } from "@/lib/queries"
-import type { CompanyItem, EnqueueResult, ImportOutcome, Page } from "@/lib/types"
+import {
+  getGetCompaniesQueryKey,
+  getGetQueueQueryKey,
+  postEnqueue,
+  useGetCompanies,
+  useGetMeta,
+  usePostImport,
+} from "@/lib/gen/queries"
+import type { CompanyItem, EnqueueResult } from "@/lib/types"
 import { useUrlFilters, type FilterChanges } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
 
@@ -58,11 +64,11 @@ type EnqueueBody = { company_ids?: string[]; stale_hours?: number; all?: boolean
 function useEnqueue(onDone?: () => void) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (body: EnqueueBody) => api.post<EnqueueResult>("/enqueue", body),
+    mutationFn: (body: EnqueueBody) => postEnqueue(body),
     onSuccess: (r) => {
       toast.success(enqueueMessage(r))
-      client.invalidateQueries({ queryKey: ["companies"] })
-      client.invalidateQueries({ queryKey: keys.queueSummary })
+      client.invalidateQueries({ queryKey: getGetCompaniesQueryKey() })
+      client.invalidateQueries({ queryKey: getGetQueueQueryKey() })
       onDone?.()
     },
   })
@@ -129,16 +135,12 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
   const client = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [enqueue, setEnqueue] = useState(false)
-  const mutation = useMutation({
-    mutationFn: () => {
-      const form = new FormData()
-      form.append("file", file!)
-      form.append("enqueue", String(enqueue))
-      return api.form<ImportOutcome>("/companies/import", form)
-    },
-    onSuccess: (r) => {
-      toast.success(`Đã nạp ${num(r.rows)} dòng: ${num(r.created)} mới, ${num(r.updated)} cập nhật`)
-      client.invalidateQueries({ queryKey: ["companies"] })
+  const mutation = usePostImport({
+    mutation: {
+      onSuccess: (r) => {
+        toast.success(`Đã nạp ${num(r.rows)} dòng: ${num(r.created)} mới, ${num(r.updated)} cập nhật`)
+        client.invalidateQueries({ queryKey: getGetCompaniesQueryKey() })
+      },
     },
   })
   const r = mutation.data
@@ -168,7 +170,7 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (file) mutation.mutate()
+            if (file) mutation.mutate({ data: { file, enqueue } })
           }}
         >
           <FilePicker
@@ -292,12 +294,8 @@ export function CompaniesPage() {
   const [importOpen, setImportOpen] = useState(false)
   const rowLink = useRowLink()
 
-  const meta = useQuery(metaQuery())
-  const query = useQuery({
-    queryKey: ["companies", filters, page],
-    queryFn: () => api.get<Page<CompanyItem>>(`/companies${qs({ ...filters, page })}`),
-    placeholderData: (prev) => prev,
-  })
+  const meta = useGetMeta({ query: { staleTime: 300_000 } })
+  const query = useGetCompanies({ ...filters, page }, { query: { placeholderData: (prev) => prev } })
 
   // Đổi bộ lọc thì bỏ chọn (các dòng đã chọn không còn trên trang); chuyển trang thì giữ.
   const update = (changes: FilterChanges<keyof typeof FILTERS>) => {

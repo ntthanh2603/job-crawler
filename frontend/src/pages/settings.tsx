@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   BadgeCheck,
@@ -47,10 +47,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { api, ApiError, errorMessage } from "@/lib/api"
+import { ApiError, errorMessage } from "@/lib/api"
 import { num } from "@/lib/format"
-import { settingsQuery } from "@/lib/queries"
-import type { SettingGroup, SettingItem, SettingsSaved } from "@/lib/types"
+import { getGetSettingsQueryKey, useGetSettings, usePutSettings } from "@/lib/gen/queries"
+import type { SettingGroup, SettingItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const GROUP_ICON: Record<string, LucideIcon> = {
@@ -180,7 +180,7 @@ function GroupHeader({ group, dirty }: { group: SettingGroup; dirty: number }) {
 
 export function SettingsPage() {
   const client = useQueryClient()
-  const query = useQuery(settingsQuery())
+  const query = useGetSettings()
   const [draft, setDraft] = useState<Draft>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [group, setGroup] = useState<string>("schedule")
@@ -225,26 +225,27 @@ export function SettingsPage() {
     setTimeout(() => document.getElementById(`row-${first}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50)
   }
 
-  const save = useMutation({
-    mutationFn: (values: Record<string, unknown>) => api.put<SettingsSaved>("/settings", { values }),
-    onSuccess: (data, values) => {
-      const { restart_required, ...page } = data
-      client.setQueryData(settingsQuery().queryKey, page)
-      setDraft({})
-      setErrors({})
-      toast.success(`Đã lưu ${num(Object.keys(values).length)} thay đổi`)
-      setRestart(restart_required)
-      if (restart_required.length) topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-    },
-    onError: (e) => {
-      const fields = e instanceof ApiError ? e.fieldErrors : null
-      if (fields && Object.keys(fields).length) {
-        setErrors(fields)
-        showFirst(Object.keys(fields))
-        toast.error(`Chưa lưu: ${num(Object.keys(fields).length)} giá trị chưa hợp lệ`)
-      } else {
-        toast.error(errorMessage(e))
-      }
+  const save = usePutSettings({
+    mutation: {
+      onSuccess: (data, { data: { values } }) => {
+        const { restart_required, ...page } = data
+        client.setQueryData(getGetSettingsQueryKey(), page)
+        setDraft({})
+        setErrors({})
+        toast.success(`Đã lưu ${num(Object.keys(values).length)} thay đổi`)
+        setRestart(restart_required)
+        if (restart_required.length) topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      },
+      onError: (e) => {
+        const fields = e instanceof ApiError ? e.fieldErrors : null
+        if (fields && Object.keys(fields).length) {
+          setErrors(fields)
+          showFirst(Object.keys(fields))
+          toast.error(`Chưa lưu: ${num(Object.keys(fields).length)} giá trị chưa hợp lệ`)
+        } else {
+          toast.error(errorMessage(e))
+        }
+      },
     },
   })
 
@@ -265,7 +266,7 @@ export function SettingsPage() {
       toast.error(`Chưa lưu: ${num(Object.keys(local).length)} giá trị chưa hợp lệ`)
       return
     }
-    save.mutate(values)
+    save.mutate({ data: { values } })
   }
   const submitRef = useRef(submit)
   submitRef.current = submit

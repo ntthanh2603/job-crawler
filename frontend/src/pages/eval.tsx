@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { AlertTriangle, Download, FolderOpen, Play, Target } from "lucide-react"
 import { useState } from "react"
 
@@ -16,28 +16,21 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api } from "@/lib/api"
+import { postEval, useGetEvalServer } from "@/lib/gen/queries"
 import { cap, num, pct, sourceLabel } from "@/lib/format"
-import type { EvalReport } from "@/lib/types"
 
 export function EvalPage() {
   const [companies, setCompanies] = useState<File | null>(null)
   const [jobs, setJobs] = useState<File | null>(null)
   const [inactive, setInactive] = useState(false)
-  const server = useQuery({
-    queryKey: ["eval-server"],
-    queryFn: () => api.get<{ available: boolean; path: string }>("/eval/server"),
-  })
+  const server = useGetEvalServer()
   const run = useMutation({
-    mutationFn: (useServer: boolean) => {
-      const form = new FormData()
-      if (!useServer && companies && jobs) {
-        form.append("companies", companies)
-        form.append("jobs", jobs)
-      }
-      form.append("include_inactive", String(inactive))
-      return api.form<EvalReport>("/eval", form)
-    },
+    mutationFn: (useServer: boolean) =>
+      postEval(
+        !useServer && companies && jobs
+          ? { companies, jobs, include_inactive: inactive }
+          : { include_inactive: inactive },
+      ),
   })
   const r = run.data
 

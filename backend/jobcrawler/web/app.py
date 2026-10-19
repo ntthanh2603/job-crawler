@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import logging
 import os
 import secrets
@@ -27,6 +28,7 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import (
@@ -334,6 +336,13 @@ class GuardMiddleware:
         await self.app(scope, receive, send)
 
 
+def operation_id(route: APIRoute) -> str:
+    """`operationId` trong spec = tên hàm xử lý (`get_company_jobs`): ổn định, dễ đọc (mặc định của
+    FastAPI ghép thêm đường dẫn + method). Tên hàm trong `web/api.py`, `web/settings_api.py` không
+    được trùng nhau (test kiểm)."""
+    return route.name
+
+
 class AssetFiles(StaticFiles):
     """`/assets` của bản build: tên file có hash nội dung nên cho trình duyệt cache lâu."""
 
@@ -370,8 +379,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Giao diện vận hành và API của jobcrawler.",
         lifespan=lifespan,
         docs_url="/api/docs",
+        # Bản commit ở frontend/openapi.json (scripts/export_openapi.py), giao diện sinh kiểu từ đó.
         openapi_url="/api/openapi.json",
         redoc_url=None,
+        generate_unique_id_function=operation_id,
     )
     app.state.settings = settings
 
@@ -420,3 +431,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     return app
+
+
+def openapi_document() -> str:
+    """Spec như `/api/openapi.json`, dạng JSON khoá sắp xếp (diff gọn): bản commit ở
+    frontend/openapi.json (`scripts/export_openapi.py`). Không mở Postgres / Redis (lifespan không
+    chạy), không đọc .env: spec chỉ phụ thuộc mã."""
+    spec = create_app(Settings(_env_file=None)).openapi()  # pyright: ignore[reportCallIssue]
+    return json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True) + "\n"

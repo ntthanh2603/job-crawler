@@ -1,5 +1,5 @@
 // Lịch thu thập: nhãn loại / lý do lượt chạy, trạng thái lịch, bộ khung của doanh nghiệp.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { ChevronRight, Hammer, Radar, Waypoints } from "lucide-react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
@@ -15,9 +15,14 @@ import {
   type Tone,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
-import { api } from "@/lib/api"
 import { ago, cap, dec, duration, dt, num, shortUrl, sourceLabel } from "@/lib/format"
-import { companyCrawlQuery, keys } from "@/lib/queries"
+import {
+  getGetCompanyCrawlQueryKey,
+  getGetQueueQueryKey,
+  useGetCompanyCrawl,
+  usePostCompanyBuild,
+  usePostCompanyPoll,
+} from "@/lib/gen/queries"
 import type { CrawlPlan, CrawlSchedule, RunKind, RunTrigger, ScheduleState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -150,27 +155,34 @@ export function due(value: string | null | undefined): string {
 
 // --- bộ khung doanh nghiệp ---------------------------------------------------------------------------
 
+/** Bộ khung & lịch thu thập của doanh nghiệp (thẻ số liệu và tab "Bộ khung & lịch"), làm mới 15 giây. */
+export function useCompanyCrawl(id: string) {
+  return useGetCompanyCrawl(id, { query: { refetchInterval: 15_000 } })
+}
+
 /** Poll ngay / build lại bộ khung một doanh nghiệp. */
 export function useCrawlActions(id: string) {
   const client = useQueryClient()
   const refresh = () => {
-    client.invalidateQueries({ queryKey: keys.companyCrawl(id) })
-    client.invalidateQueries({ queryKey: keys.queueSummary })
+    client.invalidateQueries({ queryKey: getGetCompanyCrawlQueryKey(id) })
+    client.invalidateQueries({ queryKey: getGetQueueQueryKey() })
   }
-  const poll = useMutation({
-    mutationFn: () => api.post<{ queued: boolean }>(`/companies/${id}/poll`),
-    onSuccess: (r) => {
-      if (r.queued) toast.success("Đã đưa lượt poll vào hàng đợi")
-      else toast.warning("Lượt poll của doanh nghiệp này đã có trong hàng đợi")
-      refresh()
+  const poll = usePostCompanyPoll({
+    mutation: {
+      onSuccess: (r) => {
+        if (r.queued) toast.success("Đã đưa lượt poll vào hàng đợi")
+        else toast.warning("Lượt poll của doanh nghiệp này đã có trong hàng đợi")
+        refresh()
+      },
     },
   })
-  const build = useMutation({
-    mutationFn: () => api.post<{ queued: boolean }>(`/companies/${id}/build`),
-    onSuccess: (r) => {
-      if (r.queued) toast.success("Đã đưa lượt build lại bộ khung vào hàng đợi. Lượt chạy mới sẽ hiện sau ít phút.")
-      else toast.warning("Lượt build của doanh nghiệp này đã có trong hàng đợi")
-      refresh()
+  const build = usePostCompanyBuild({
+    mutation: {
+      onSuccess: (r) => {
+        if (r.queued) toast.success("Đã đưa lượt build lại bộ khung vào hàng đợi. Lượt chạy mới sẽ hiện sau ít phút.")
+        else toast.warning("Lượt build của doanh nghiệp này đã có trong hàng đợi")
+        refresh()
+      },
     },
   })
   return { poll, build }
@@ -316,7 +328,7 @@ function PlanItem({ plan: p }: { plan: CrawlPlan }) {
 
 /** Tab "Bộ khung & lịch" của trang doanh nghiệp. */
 export function CompanyCrawlTab({ id }: { id: string }) {
-  const query = useQuery(companyCrawlQuery(id))
+  const query = useCompanyCrawl(id)
   const { poll, build } = useCrawlActions(id)
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data)
@@ -338,14 +350,14 @@ export function CompanyCrawlTab({ id }: { id: string }) {
         description={`Ban ngày poll mỗi ${secondsText(interval)} theo bộ khung; bộ khung được build lại mỗi đêm hoặc ngay khi poll thấy hỏng.`}
         actions={
           <>
-            <Button size="sm" onClick={() => poll.mutate()} disabled={poll.isPending}>
+            <Button size="sm" onClick={() => poll.mutate({ companyId: id })} disabled={poll.isPending}>
               <Radar /> {poll.isPending ? "Đang xếp hàng…" : "Poll ngay"}
             </Button>
             <ConfirmButton
               title="Build lại bộ khung?"
               description="Tìm lại nguồn trên website, đọc đủ danh sách và chi tiết tin rồi ghi bộ khung mới. Lượt build mất vài phút; trong lúc đó vẫn poll theo bộ khung hiện tại."
               confirm="Build lại"
-              onConfirm={() => build.mutate()}
+              onConfirm={() => build.mutate({ companyId: id })}
               disabled={build.isPending}
             >
               <Hammer /> Build lại bộ khung

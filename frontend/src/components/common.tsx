@@ -1,5 +1,5 @@
 // Thành phần dùng chung giữa các trang.
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, type UseQueryOptions } from "@tanstack/react-query"
 import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Info, RotateCw, Search, X } from "lucide-react"
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { api, ApiError, errorMessage } from "@/lib/api"
+import { ApiError, errorMessage } from "@/lib/api"
 import { cap, label, num, reason, sourceProblem } from "@/lib/format"
 import type { Job, Page } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -635,26 +635,22 @@ export function Pager({
 }
 
 /**
- * Danh sách con lấy theo trang từ API (`url` trả `Page<T>`): tự lo trạng thái tải / lỗi / rỗng và
+ * Danh sách con lấy theo trang từ API: `options(page)` trả query options do orval sinh
+ * (`(page) => getGetRunLogsQueryOptions(runId, { page })`); tự lo trạng thái tải / lỗi / rỗng và
  * phân trang; `children` vẽ các dòng của trang hiện tại.
  */
 export function PagedList<T>({
-  queryKey,
-  url,
+  options,
   empty,
   children,
 }: {
-  queryKey: readonly unknown[]
-  url: string
+  // Kiểu lỗi / khoá khác nhau theo endpoint.
+  options: (page: number) => UseQueryOptions<Page<T>, any, Page<T>, any>
   empty: ReactNode
   children: (items: T[]) => ReactNode
 }) {
   const [page, setPage] = useState(1)
-  const query = useQuery({
-    queryKey: [...queryKey, page],
-    queryFn: () => api.get<Page<T>>(`${url}${url.includes("?") ? "&" : "?"}page=${page}`),
-    placeholderData: (prev) => prev,
-  })
+  const query = useQuery({ ...options(page), placeholderData: (prev) => prev })
   if (query.isError)
     return (
       <div className="p-5">

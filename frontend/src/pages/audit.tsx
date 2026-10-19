@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { ArrowRight, ChevronRight, History, RotateCw, X } from "lucide-react"
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react"
 
@@ -18,7 +18,6 @@ import {
 import { formatValue } from "@/components/settings/model"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api, qs } from "@/lib/api"
 import {
   actionLabel,
   actorLabel,
@@ -34,7 +33,7 @@ import {
   shortId,
 } from "@/lib/audit"
 import { ago, cap, dt, num } from "@/lib/format"
-import { settingsQuery } from "@/lib/queries"
+import { getAudit, getGetAuditQueryKey, useGetAuditActions, useGetSettings } from "@/lib/gen/queries"
 import type { AuditChange, AuditEvent, AuditPage as AuditData, SettingItem, SettingValue } from "@/lib/types"
 import { useUrlFilters } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
@@ -45,7 +44,7 @@ const LIMIT = 50
 
 /** Cài đặt theo khoá (nhãn + cách hiện giá trị) cho dòng nhật ký của trang Cài đặt. */
 function useSettingItems(enabled: boolean): Map<string, SettingItem> {
-  const query = useQuery({ ...settingsQuery(), enabled })
+  const query = useGetSettings({ query: { enabled } })
   return useMemo(
     () => new Map((query.data?.groups ?? []).flatMap((g) => g.items.map((i) => [i.key, i] as const))),
     [query.data],
@@ -212,14 +211,12 @@ export function AuditPage() {
   useEffect(() => setActor(filters.actor), [filters.actor])
   const [open, setOpen] = useState<Set<string>>(new Set())
 
-  const actions = useQuery({
-    queryKey: ["audit-actions"],
-    queryFn: () => api.get<string[]>("/audit/actions"),
-    staleTime: 300_000,
-  })
+  const actions = useGetAuditActions({ query: { staleTime: 300_000 } })
+  // Phân trang theo con trỏ `before` (id dòng cuối trang trước) nên tự dựng infinite query trên `getAudit`.
   const query = useInfiniteQuery({
-    queryKey: ["audit", filters],
-    queryFn: ({ pageParam }) => api.get<AuditData>(`/audit${qs({ limit: LIMIT, before: pageParam, ...filters })}`),
+    queryKey: getGetAuditQueryKey(filters),
+    queryFn: ({ pageParam, signal }) =>
+      getAudit({ limit: LIMIT, before: pageParam, ...filters }, signal) as Promise<AuditData>,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next,
   })

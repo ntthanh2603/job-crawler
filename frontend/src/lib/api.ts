@@ -49,7 +49,9 @@ export function errorMessage(e: unknown): string {
   return cap(String(e ?? "")) || "Đã có lỗi xảy ra"
 }
 
-export function qs(params: Record<string, string | number | boolean | null | undefined>): string {
+type QueryValue = string | number | boolean | null | undefined
+
+export function qs(params: Record<string, QueryValue>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "" || value === false) continue
@@ -59,24 +61,31 @@ export function qs(params: Record<string, string | number | boolean | null | und
   return text ? `?${text}` : ""
 }
 
-export const api = {
-  get: <T>(path: string) => fetch(`/api${path}`, { credentials: "same-origin" }).then((r) => handle<T>(r)),
-  post: <T>(path: string, body?: unknown) =>
-    fetch(`/api${path}`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }).then((r) => handle<T>(r)),
-  put: <T>(path: string, body?: unknown) =>
-    fetch(`/api${path}`, {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }).then((r) => handle<T>(r)),
-  form: <T>(path: string, form: FormData) =>
-    fetch(`/api${path}`, { method: "POST", credentials: "same-origin", body: form }).then((r) => handle<T>(r)),
-  delete: <T>(path: string) =>
-    fetch(`/api${path}`, { method: "DELETE", credentials: "same-origin" }).then((r) => handle<T>(r)),
+
+/** Lời gọi do orval sinh ra (src/lib/gen/queries.ts): dạng cấu hình kiểu axios. */
+export type RequestConfig = {
+  url: string
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  params?: Record<string, QueryValue>
+  data?: unknown
+  headers?: Record<string, string>
+  signal?: AbortSignal
+}
+
+/**
+ * Client của mọi hàm / hook sinh từ spec (`mutator` trong orval.config.ts, như `orvalClient` của
+ * open-asm): fetch cùng origin kèm cookie / đăng nhập Basic của trình duyệt; query bỏ giá trị rỗng
+ * như `qs`; body JSON, hoặc FormData để trình duyệt tự đặt `Content-Type` (boundary). Lỗi HTTP ném
+ * `ApiError` (đọc `detail` của FastAPI).
+ */
+export async function apiClient<T>({ url, method, params, data, signal }: RequestConfig): Promise<T> {
+  const form = data instanceof FormData
+  const res = await fetch(`${url}${qs(params ?? {})}`, {
+    method,
+    credentials: "same-origin",
+    signal,
+    headers: data === undefined || form ? undefined : { "Content-Type": "application/json" },
+    body: data === undefined ? undefined : form ? data : JSON.stringify(data),
+  })
+  return handle<T>(res)
 }

@@ -1,13 +1,12 @@
 // Trang tổng quan: độ trễ phát hiện tin mới (cửa sổ phát hiện của các lượt poll, độ tươi, khung giờ).
-import { useQuery } from "@tanstack/react-query"
 import { Clock3, Moon, Sun, Timer } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link } from "react-router"
 
 import { SCHEDULE_ORDER, SCHEDULE_STATES, secondsText } from "@/components/crawl"
 import { Dot, ErrorState, InfoTip, Loading, Section, StatusBadge, type Tone } from "@/components/common"
-import { api } from "@/lib/api"
 import { dec, hour, num, pct } from "@/lib/format"
+import { useGetCrawlStatus } from "@/lib/gen/queries"
 import type { CrawlStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -283,12 +282,7 @@ function Freshness({ data }: { data: CrawlStatus }) {
 
 /** Khung "Độ trễ phát hiện tin mới" của trang tổng quan. */
 export function DetectionSection({ minutes, onMinutes }: { minutes: number; onMinutes: (v: number) => void }) {
-  const query = useQuery({
-    queryKey: ["crawl-status", minutes],
-    queryFn: () => api.get<CrawlStatus>(`/crawl/status?minutes=${minutes}`),
-    refetchInterval: 30_000,
-    placeholderData: (prev) => prev,
-  })
+  const query = useGetCrawlStatus({ minutes }, { query: { refetchInterval: 30_000, placeholderData: (prev) => prev } })
   const d = query.data
   const p = d?.polls
   const target = d?.target_seconds ?? 180

@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { Briefcase, Check, ChevronDown, Download, X } from "lucide-react"
 import { useEffect, useState } from "react"
 
@@ -23,7 +22,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { qs } from "@/lib/api"
 import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
-import { jobsQuery, metaQuery } from "@/lib/queries"
+import { useGetJobs, useGetMeta } from "@/lib/gen/queries"
 import { useUrlFilters } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
 
@@ -85,9 +84,14 @@ export function JobsPage() {
   useEffect(() => setSalaryFrom(filters.salary_from), [filters.salary_from])
   const rowLink = useRowLink()
 
-  const meta = useQuery(metaQuery())
-  const query = useQuery({ ...jobsQuery(filters, page), placeholderData: (prev) => prev })
+  const meta = useGetMeta({ query: { staleTime: 300_000 } })
+  const query = useGetJobs(
+    // Bộ lọc trên URL là chuỗi; `salary_from` trống thì không gửi.
+    { ...filters, salary_from: filters.salary_from ? Number(filters.salary_from) : undefined, page },
+    { query: { placeholderData: (prev) => prev } },
+  )
 
+  // File tải về (CSV / JSONL), không phải JSON: dùng liên kết thường.
   const exportUrl = (fmt: string) => `/api/jobs/export${qs({ ...filters, fmt })}`
   const items = query.data?.items ?? []
   const filtered = isFiltered("sort")

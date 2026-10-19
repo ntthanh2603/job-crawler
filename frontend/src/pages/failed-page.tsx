@@ -1,16 +1,14 @@
-import { useQuery } from "@tanstack/react-query"
 import { Download, ExternalLinkIcon, History } from "lucide-react"
 import { Link, useParams } from "react-router"
 
 import { ErrorState, ExternalLink, Meta, PageHeader, PageLoading, Section, StatusBadge } from "@/components/common"
 import { Button } from "@/components/ui/button"
-import { api } from "@/lib/api"
+import { useGetFailedPage } from "@/lib/gen/queries"
 import { dt, failReason, num, sourceLabel } from "@/lib/format"
-import type { FailedPage } from "@/lib/types"
 
 export function FailedPagePage() {
-  const { id } = useParams()
-  const query = useQuery({ queryKey: ["failed-page", id], queryFn: () => api.get<FailedPage>(`/failed-pages/${id}`) })
+  const { id = "" } = useParams()
+  const query = useGetFailedPage(id)
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
   const p = query.data
@@ -36,7 +34,7 @@ export function FailedPagePage() {
               </a>
             </Button>
             <Button variant="outline" asChild>
-              <a href={`/api/failed-pages/${p.id}/raw`}>
+              <a href={`/api/failed-pages/${encodeURIComponent(p.id)}/raw`}>
                 <Download /> Tải HTML
               </a>
             </Button>

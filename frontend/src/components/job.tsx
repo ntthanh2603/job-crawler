@@ -7,9 +7,14 @@ import { ExternalLink, Kbd, ReasonTags, Section, StatusBadge } from "@/component
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { api } from "@/lib/api"
 import { ago, cap, date, pct, salary, shortUrl, sourceLabel } from "@/lib/format"
-import { keys } from "@/lib/queries"
+import {
+  getGetJobQueryKey,
+  getGetJobsQueryKey,
+  getGetReviewQueryKey,
+  postReview,
+  useDeleteReview,
+} from "@/lib/gen/queries"
 import type { Job, JobDetail } from "@/lib/types"
 
 /** Nội dung tin: HTML do server sinh từ markdown (markdown-it, không cho HTML thô). */
@@ -142,21 +147,22 @@ export function ReviewBox({
   useEffect(() => setNote(review?.note ?? ""), [job.id, review?.note])
 
   const save = useMutation({
-    mutationFn: (correct: boolean) => api.post(`/jobs/${job.id}/review`, { correct, note }),
+    mutationFn: (correct: boolean) => postReview(job.id, { correct, note }),
     onSuccess: (_, correct) => {
       toast.success(`Đã ghi “${job.title}”: ${correct ? "Đúng" : "Sai"}`)
-      client.invalidateQueries({ queryKey: keys.job(job.id) })
-      client.invalidateQueries({ queryKey: keys.review })
-      client.invalidateQueries({ queryKey: keys.jobs })
+      client.invalidateQueries({ queryKey: getGetJobQueryKey(job.id) })
+      client.invalidateQueries({ queryKey: getGetReviewQueryKey() })
+      client.invalidateQueries({ queryKey: getGetJobsQueryKey() })
       onDone?.()
     },
   })
-  const remove = useMutation({
-    mutationFn: () => api.delete(`/jobs/${job.id}/review`),
-    onSuccess: () => {
-      toast.success("Đã xoá đánh giá")
-      client.invalidateQueries({ queryKey: keys.job(job.id) })
-      client.invalidateQueries({ queryKey: keys.review })
+  const remove = useDeleteReview({
+    mutation: {
+      onSuccess: () => {
+        toast.success("Đã xoá đánh giá")
+        client.invalidateQueries({ queryKey: getGetJobQueryKey(job.id) })
+        client.invalidateQueries({ queryKey: getGetReviewQueryKey() })
+      },
     },
   })
 
@@ -207,7 +213,7 @@ export function ReviewBox({
         </Button>
       </div>
       {review && !onDone && (
-        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => remove.mutate()}>
+        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => remove.mutate({ jobId: job.id })}>
           Xoá đánh giá
         </Button>
       )}

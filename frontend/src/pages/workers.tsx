@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, Cpu, Globe2, MonitorPlay, Pause, Play } from "lucide-react"
 import type { ReactNode } from "react"
 import { toast } from "sonner"
@@ -18,9 +18,9 @@ import {
 } from "@/components/common"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api } from "@/lib/api"
+import { drainWorker, getGetWorkersQueryKey, undrainWorker, useGetWorkers } from "@/lib/gen/queries"
 import { ago, bytes, cap, dec, dt, num, pct } from "@/lib/format"
-import type { WorkerStatus, WorkersPage as WorkersData } from "@/lib/types"
+import type { WorkerStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** "Lần cuối báo" theo giờ máy chủ (không lệch nếu đồng hồ máy người xem sai). */
@@ -318,20 +318,14 @@ function SlotHint({ used, total }: { used: number; total: number }): ReactNode {
 
 export function WorkersPage() {
   const client = useQueryClient()
-  const query = useQuery({
-    queryKey: ["workers"],
-    queryFn: () => api.get<WorkersData>("/workers"),
-    refetchInterval: 5_000,
-    refetchOnWindowFocus: true,
-  })
+  const query = useGetWorkers({ query: { refetchInterval: 5_000, refetchOnWindowFocus: true } })
   const drain = useMutation({
     mutationFn: (w: WorkerStatus) =>
-      w.draining
-        ? api.delete<{ draining: boolean }>(`/workers/${encodeURIComponent(w.worker_id)}/drain`)
-        : api.post<{ draining: boolean }>(`/workers/${encodeURIComponent(w.worker_id)}/drain`),
+      // orval không mã hoá tham số path; id worker do worker tự đặt nên mã hoá ở đây.
+      w.draining ? undrainWorker(encodeURIComponent(w.worker_id)) : drainWorker(encodeURIComponent(w.worker_id)),
     onSuccess: (r, w) => {
       toast.success(r.draining ? `${w.worker_id} sẽ dừng nhận việc sau khi làm nốt việc đang chạy` : `${w.worker_id} nhận việc lại`)
-      client.invalidateQueries({ queryKey: ["workers"] })
+      client.invalidateQueries({ queryKey: getGetWorkersQueryKey() })
     },
   })
 

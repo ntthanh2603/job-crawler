@@ -1,4 +1,9 @@
-"""API JSON (`/api/...`, tài liệu ở `/api/docs`) cho giao diện React và script ngoài."""
+"""API JSON (`/api/...`, tài liệu ở `/api/docs`) cho giao diện React và script ngoài.
+
+Mỗi endpoint trả một mô hình Pydantic (`...Out`): spec `/api/openapi.json` (bản commit ở
+`frontend/openapi.json`, `scripts/export_openapi.py`) mô tả đúng JSON trả về, kiểu TypeScript của
+giao diện sinh từ spec đó.
+"""
 
 from __future__ import annotations
 
@@ -6,25 +11,30 @@ import dataclasses
 import math
 import tempfile
 import uuid
-from datetime import datetime
+from collections.abc import Iterable
+from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, WithJsonSchema
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.db.models import JobReview
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import (
+    API_OUTPUT,
     CompanyEntity,
     EmploymentType,
     JobLevel,
     KycStatus,
+    PlanStatus,
+    RunKind,
     RunTrigger,
+    ScheduleState,
     WorkMode,
 )
 from jobcrawler.services import audit, batch, evaluate, overview, stats
@@ -52,7 +62,26 @@ def actor_of(request: Request) -> str:
 # --- mô hình trả về ------------------------------------------------------------------------------
 
 
-class PageOut[T](BaseModel):
+class ApiOut(BaseModel):
+    """Gốc của mọi mô hình trả về: trường có mặc định vẫn luôn có trong JSON, nên spec ghi là bắt
+    buộc (kiểu sinh cho giao diện không thành `x?:`)."""
+
+    model_config = API_OUTPUT
+
+
+# Mốc thời gian: `datetime` (ISO 8601), hoặc chuỗi đã có sẵn trong JSON cache của trang tổng quan
+# (`services/overview.py` ghi bằng `str()`) — giữ nguyên chuỗi đó. Spec chỉ ghi `date-time`.
+Timestamp = Annotated[datetime | str, WithJsonSchema({"type": "string", "format": "date-time"})]
+
+
+def known_values(values: Iterable[str], *, nullable: bool = False) -> WithJsonSchema:
+    """Spec liệt kê `values` cho một trường chuỗi đọc từ Redis / JSON (không có ràng buộc ở DB như
+    các cột enum): khi chạy không kiểm, giá trị lạ (job cũ trong queue...) vẫn trả ra nguyên văn."""
+    schema: dict[str, Any] = {"type": "string", "enum": [str(v) for v in values]}
+    return WithJsonSchema({"anyOf": [schema, {"type": "null"}]} if nullable else schema)
+
+
+class PageOut[T](ApiOut):
     items: list[T]
     total: int  # đếm tối đa queries.COUNT_CAP
     page: int
@@ -72,7 +101,7 @@ def _page_out[T](page: queries.Page[Any], items: list[T]) -> PageOut[T]:
     )
 
 
-class CompanyItem(BaseModel):
+class CompanyItem(ApiOut):
     company: CompanyEntity
     input_website: str | None
     last_status: str | None
@@ -82,13 +111,14 @@ class CompanyItem(BaseModel):
     active_jobs: int
 
 
-class RunOut(BaseModel):
+class RunOut(ApiOut):
     run_id: str
     company_id: UUID
-    kind: str  # build | poll
-    trigger: str  # nightly | schedule | error | board | new | manual | continuation
-    started_at: datetime
-    finished_at: datetime | None
+    kind: RunKind
+    trigger: RunTrigger
+    # Timestamp: lượt chạy gần đây của trang tổng quan (`RecentRunOut`) đọc từ JSON cache.
+    started_at: Timestamp
+    finished_at: Timestamp | None
     duration_ms: int | None
     status: str
     jobs_found: int
@@ -99,12 +129,12 @@ class RunOut(BaseModel):
     error: str | None
 
 
-class AliasOut(BaseModel):
+class AliasOut(ApiOut):
     alias: str
     kind: str | None
 
 
-class ProfileOut(BaseModel):
+class ProfileOut(ApiOut):
     source: str
     url: str
     name_on_source: str
@@ -115,7 +145,7 @@ class ProfileOut(BaseModel):
     indexed_at: datetime | None
 
 
-class PostingOut(BaseModel):
+class PostingOut(ApiOut):
     id: UUID
     source: str
     url: str
@@ -128,7 +158,7 @@ class PostingOut(BaseModel):
     verified_at: datetime | None
 
 
-class FailedPageItem(BaseModel):
+class FailedPageItem(ApiOut):
     id: UUID
     url: str
     source: str
@@ -136,7 +166,7 @@ class FailedPageItem(BaseModel):
     created_at: datetime
 
 
-class CompanyDetailOut(BaseModel):
+class CompanyDetailOut(ApiOut):
     company: CompanyEntity
     input_website: str | None
     note: str | None
@@ -152,7 +182,7 @@ class CompanyDetailOut(BaseModel):
     failed_pages: list[FailedPageItem]
 
 
-class FetchOut(BaseModel):
+class FetchOut(ApiOut):
     source: str
     url: str
     http_status: int | None
@@ -162,20 +192,20 @@ class FetchOut(BaseModel):
     error: str | None
 
 
-class LogOut(BaseModel):
+class LogOut(ApiOut):
     ts: datetime
     level: str
     event: str
     context: dict[str, Any]
 
 
-class SourceCount(BaseModel):
+class SourceCount(ApiOut):
     source: str
     total: int
     outcomes: dict[str, int]
 
 
-class RunDetailOut(BaseModel):
+class RunDetailOut(ApiOut):
     run: RunOut
     company_name: str | None
     by_source: list[SourceCount]
@@ -191,27 +221,27 @@ class FailedPageOut(FailedPageItem):
     html: str
 
 
-class ReviewOut(BaseModel):
+class ReviewOut(ApiOut):
     correct: bool
     note: str | None
     reviewer: str | None
     reviewed_at: datetime
 
 
-class JobHtml(BaseModel):
+class JobHtml(ApiOut):
     description: str
     requirements: str
     benefits: str
 
 
-class JobDetailOut(BaseModel):
+class JobDetailOut(ApiOut):
     job: queries.JobItem
     html: JobHtml
     postings: list[PostingOut]
     review: ReviewOut | None
 
 
-class RecentReview(BaseModel):
+class RecentReview(ApiOut):
     job_id: UUID
     title: str
     company_name: str
@@ -221,14 +251,14 @@ class RecentReview(BaseModel):
     reviewed_at: datetime
 
 
-class SourceReviewOut(BaseModel):
+class SourceReviewOut(ApiOut):
     source: str
     reviewed: int
     correct: int
     precision: float | None
 
 
-class ReviewPageOut(BaseModel):
+class ReviewPageOut(ApiOut):
     reviewed: int
     correct: int
     precision: float | None
@@ -252,7 +282,7 @@ class ReviewIn(BaseModel):
     note: str | None = None
 
 
-class AuditEventOut(BaseModel):
+class AuditEventOut(ApiOut):
     id: UUID
     occurred_at: datetime
     actor: str
@@ -265,10 +295,272 @@ class AuditEventOut(BaseModel):
     metadata: dict[str, Any] | None
 
 
-class AuditPageOut(BaseModel):
+class AuditPageOut(ApiOut):
     items: list[AuditEventOut]
     # Id dòng cuối trang: truyền vào `before` để lấy trang sau; null khi đã hết.
     next: UUID | None
+
+
+class MeOut(ApiOut):
+    user: str | None
+    auth: bool  # có UI_PASSWORD (hỏi đăng nhập)
+
+
+class MetaOut(ApiOut):
+    provinces: list[str]
+    levels: list[str]
+    employment_types: list[str]
+    work_modes: list[str]
+    sources: list[str]
+    kyc_statuses: list[str]
+    run_statuses: list[str]
+    boards: list[str]
+
+
+class QueuedOut(ApiOut):
+    queued: bool  # False: đã có job cùng khoá đang chờ / chạy
+
+
+class OkOut(ApiOut):
+    ok: bool
+
+
+class ImportOutcomeOut(ApiOut):
+    # Trường của `actions.ImportOutcome` (tests/test_openapi.py kiểm khớp).
+    rows: int
+    created: int
+    updated: int
+    unchanged: int
+    duplicates: int
+    errors: list[str]
+    warnings: list[str]
+    enqueued: int | None
+    already_queued: int
+
+
+class EnqueueResultOut(ApiOut):
+    # Trường của `batch.EnqueueResult` (tests/test_openapi.py kiểm khớp).
+    selected: int
+    enqueued: int
+    already_queued: int
+
+
+class ReviewSummaryOut(ApiOut):
+    reviewed: int
+    correct: int
+    precision: float | None
+    unreviewed_active: int
+    by_source: list[SourceReviewOut]
+
+
+class EvalServerOut(ApiOut):
+    available: bool
+    path: str
+
+
+class CompanyEvalOut(ApiOut):
+    # Trường của `evaluate.CompanyEval` + precision / recall (tests/test_openapi.py kiểm khớp).
+    name: str
+    company_id: UUID | None
+    golden: int
+    predicted: int
+    matched: int
+    run_status: str | None
+    missing: list[str]
+    extra: list[str]
+    precision: float | None
+    recall: float | None
+
+
+class SourceEvalOut(ApiOut):
+    # Trường của `evaluate.SourceEval` + precision / recall (tests/test_openapi.py kiểm khớp).
+    source: str
+    predicted: int
+    matched: int
+    golden: int
+    precision: float | None
+    recall: float | None
+
+
+class EvalReportOut(ApiOut):
+    precision: float | None
+    recall: float | None
+    golden: int
+    predicted: int
+    matched: int
+    target_precision: float
+    target_recall: float
+    perf: dict[str, str]  # tên chỉ số → giá trị đã định dạng
+    companies: list[CompanyEvalOut]
+    sources: list[SourceEvalOut]
+    warnings: list[str]
+    markdown: str
+
+
+# --- số liệu (`/stats`, trang tổng quan): các dataclass trong services/stats.py ------------------
+
+
+class QueueStatsOut(ApiOut):
+    # Trường của `stats.QueueStats` (tests/test_openapi.py kiểm khớp).
+    name: str
+    queued: int
+    active: int
+    scheduled: int
+    workers: int
+    complete: int
+    failed: int
+    retried: int
+    aborted: int
+    error: str | None
+
+
+class RunStatsOut(ApiOut):
+    # Trường của `stats.RunStats` (tests/test_openapi.py kiểm khớp).
+    since: Timestamp | None
+    runs: int
+    companies: int
+    by_status: dict[str, int]
+    latest_by_status: dict[str, int]
+    failed_rate: float | None
+    p50_seconds: float | None
+    p95_seconds: float | None
+    max_seconds: float | None
+    over_timeout: int
+    wait_p50_seconds: float | None
+    wait_p95_seconds: float | None
+    jobs_found: int
+    jobs_accepted: int
+    companies_with_jobs: int
+    first_started: Timestamp | None
+    last_finished: Timestamp | None
+    per_hour: float | None
+    incomplete_sources: list[tuple[str, int]]
+    errors: list[tuple[str, int]]
+
+
+class SourceStatsOut(ApiOut):
+    # Trường của `stats.SourceStats` (tests/test_openapi.py kiểm khớp).
+    kind: str
+    fetches: int
+    outcomes: dict[str, int]
+    avg_ms: int | None
+    cached: int
+
+
+class BoardStatsOut(ApiOut):
+    # Trường của `stats.BoardStats` (tests/test_openapi.py kiểm khớp).
+    source: str
+    active_postings: int
+    postings: int
+    profiles: int
+    profiles_mapped: int
+    last_status: str | None
+    last_started: Timestamp | None
+    last_finished: Timestamp | None
+    last_complete: bool | None
+    last_urls_seen: int | None
+    last_fetched: int | None
+    last_new: int | None
+    last_removed: int | None
+
+
+class StorageStatsOut(ApiOut):
+    # Trường của `compress.StorageStats` (tests/test_openapi.py kiểm khớp).
+    kind: str
+    table: str
+    values: int
+    stored_bytes: int
+    original_bytes: int
+    by_dict: dict[int, int] | None  # id từ điển zstd → số giá trị
+
+
+class TargetOut(ApiOut):
+    # Trường của `stats.Target` (tests/test_openapi.py kiểm khớp).
+    name: str
+    value: float | None
+    target: str
+    ok: bool | None
+    kind: Literal["seconds", "rate"]
+
+
+class StatsOut(ApiOut):
+    # Trường của `stats.Stats` (tests/test_openapi.py kiểm khớp).
+    generated_at: Timestamp
+    queues: list[QueueStatsOut]
+    companies: int
+    kyc_status: dict[str, int]
+    jobs_by_status: dict[str, int]
+    jobs_by_source: list[tuple[str, int]]
+    runs: RunStatsOut
+    sources: list[SourceStatsOut]
+    boards: list[BoardStatsOut]
+    storage: list[StorageStatsOut]
+    tables: list[tuple[str, int]]  # (bảng, byte trên đĩa gồm index và TOAST)
+    targets: list[TargetOut]
+
+
+# --- trang tổng quan (`services/overview.py`, JSON cache trong Redis) -----------------------------
+
+
+class RunsHourOut(ApiOut):
+    hour: Timestamp
+    counts: dict[str, int]  # trạng thái → số lượt
+    total: int
+
+
+class FetchesHourOut(ApiOut):
+    hour: Timestamp
+    ok: int
+    blocked: int
+    error: int
+
+
+class ChartTotalsOut(ApiOut):
+    active_jobs: int
+    companies: int
+    companies_with_jobs: int
+    new_jobs_7d: int
+    with_salary: int
+
+
+class JobsDayOut(ApiOut):
+    day: date  # ngày giờ Việt Nam
+    careers: int
+    boards: int
+
+
+class TopCompanyOut(ApiOut):
+    id: UUID
+    name: str
+    active_jobs: int
+
+
+class ChartsOut(ApiOut):
+    """Phân bố trên job đang mở / doanh nghiệp (tính sẵn bằng cron); các cặp là (tên, số)."""
+
+    generated_at: Timestamp
+    totals: ChartTotalsOut
+    jobs_by_day: list[JobsDayOut]
+    jobs_by_source: list[tuple[str, int]]
+    jobs_by_province: list[tuple[str, int]]
+    jobs_by_level: list[tuple[str, int]]
+    jobs_by_employment: list[tuple[str, int]]
+    jobs_by_work_mode: list[tuple[str, int]]
+    salary_bands: list[tuple[str, int]]
+    kyc: list[tuple[str, int]]
+    top_companies: list[TopCompanyOut]
+
+
+class RecentRunOut(RunOut):
+    company_name: str
+
+
+class OverviewOut(ApiOut):
+    stats: StatsOut
+    chart: list[RunsHourOut]  # lượt chạy theo giờ, 24 giờ gần nhất
+    fetch_chart: list[FetchesHourOut]  # request theo giờ, 24 giờ gần nhất
+    charts: ChartsOut
+    recent_runs: list[RecentRunOut]
 
 
 # --- chuyển ORM → mô hình -----------------------------------------------------------------------
@@ -312,6 +604,12 @@ def _posting(p: Any) -> PostingOut:
 def _failed_item(f: Any) -> FailedPageItem:
     return FailedPageItem(
         id=f.id, url=f.url, source=f.source, reason=f.reason, created_at=f.created_at
+    )
+
+
+def _source_review(s: evaluate.SourceReview) -> SourceReviewOut:
+    return SourceReviewOut(
+        source=s.source, reviewed=s.reviewed, correct=s.correct, precision=s.precision
     )
 
 
@@ -371,26 +669,26 @@ def _job_filters(
 
 
 @router.get("/me")
-async def get_me(request: Request) -> dict[str, Any]:
+async def get_me(request: Request) -> MeOut:
     settings = request.app.state.settings
-    return {"user": user_of(request), "auth": settings.ui_password is not None}
+    return MeOut(user=user_of(request), auth=settings.ui_password is not None)
 
 
 @router.get("/meta")
-async def get_meta(request: Request) -> dict[str, Any]:
+async def get_meta(request: Request) -> MetaOut:
     """Giá trị cho các bộ lọc."""
     async with res_of(request).sessionmaker() as session:
         sources = await queries.job_sources(session)
-    return {
-        "provinces": queries.PROVINCE_NAMES,
-        "levels": queries.enum_values(JobLevel),
-        "employment_types": queries.enum_values(EmploymentType),
-        "work_modes": queries.enum_values(WorkMode),
-        "sources": sources,
-        "kyc_statuses": [s.value for s in KycStatus],
-        "run_statuses": queries.RUN_STATUSES,
-        "boards": actions.board_names(),
-    }
+    return MetaOut(
+        provinces=queries.PROVINCE_NAMES,
+        levels=queries.enum_values(JobLevel),
+        employment_types=queries.enum_values(EmploymentType),
+        work_modes=queries.enum_values(WorkMode),
+        sources=sources,
+        kyc_statuses=[s.value for s in KycStatus],
+        run_statuses=queries.RUN_STATUSES,
+        boards=actions.board_names(),
+    )
 
 
 @router.get("/overview")
@@ -398,10 +696,11 @@ async def get_overview(
     request: Request,
     hours: Annotated[float, Query(description="Cửa sổ giờ; 0 = tất cả")] = 24,
     storage: bool = False,
-) -> dict[str, Any]:
+) -> OverviewOut:
     """Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,
     phần theo cửa sổ cache 60 giây)."""
-    return await overview.build_overview(res_of(request), hours=hours or None, storage=storage)
+    payload = await overview.build_overview(res_of(request), hours=hours or None, storage=storage)
+    return OverviewOut.model_validate(payload)
 
 
 @router.get("/stats")
@@ -409,13 +708,13 @@ async def get_stats(
     request: Request,
     hours: Annotated[float, Query(description="Cửa sổ giờ; 0 = tất cả")] = 24,
     storage: bool = False,
-) -> dict[str, Any]:
+) -> StatsOut:
     st = await stats.collect_stats(res_of(request), hours=hours or None, storage=storage)
-    return dataclasses.asdict(st)
+    return StatsOut.model_validate(dataclasses.asdict(st))
 
 
 @router.post("/maintenance")
-async def post_maintenance(request: Request) -> dict[str, bool]:
+async def post_maintenance(request: Request) -> QueuedOut:
     res = res_of(request)
     queued = await actions.enqueue_maintenance(res)
     await audit.record_safely(
@@ -424,7 +723,7 @@ async def post_maintenance(request: Request) -> dict[str, bool]:
         actor=actor_of(request),
         metadata={"queued": queued},
     )
-    return {"queued": queued}
+    return QueuedOut(queued=queued)
 
 
 # --- doanh nghiệp ---------------------------------------------------------------------------------
@@ -526,7 +825,7 @@ async def post_import(
     request: Request,
     file: Annotated[UploadFile, File(description="companies.csv")],
     enqueue: Annotated[bool, Form()] = False,
-) -> dict[str, Any]:
+) -> ImportOutcomeOut:
     res = res_of(request)
     try:
         outcome = await actions.import_csv(res, await file.read(), enqueue=enqueue)
@@ -549,11 +848,11 @@ async def post_import(
             "already_queued": outcome.already_queued,
         },
     )
-    return dataclasses.asdict(outcome)
+    return ImportOutcomeOut.model_validate(dataclasses.asdict(outcome))
 
 
 @router.post("/enqueue")
-async def post_enqueue(request: Request, body: EnqueueIn) -> dict[str, int]:
+async def post_enqueue(request: Request, body: EnqueueIn) -> EnqueueResultOut:
     if body.company_ids is None and body.stale_hours is None and not body.all:
         raise HTTPException(400, "Chọn company_ids, stale_hours hoặc all")
     res = res_of(request)
@@ -575,7 +874,7 @@ async def post_enqueue(request: Request, body: EnqueueIn) -> dict[str, int]:
             "company_ids": audit.sample_ids(ids) if ids else None,
         },
     )
-    return dataclasses.asdict(result)
+    return EnqueueResultOut.model_validate(dataclasses.asdict(result))
 
 
 @router.get("/runs/{run_id}")
@@ -744,7 +1043,7 @@ async def get_job(request: Request, job_id: UUID) -> JobDetailOut:
 
 
 @router.post("/jobs/{job_id}/review")
-async def post_review(request: Request, job_id: UUID, body: ReviewIn) -> dict[str, bool]:
+async def post_review(request: Request, job_id: UUID, body: ReviewIn) -> OkOut:
     res = res_of(request)
     if not await actions.job_exists(res, job_id):
         raise HTTPException(404, "Không có job này")
@@ -767,7 +1066,7 @@ async def post_review(request: Request, job_id: UUID, body: ReviewIn) -> dict[st
             },
             metadata={"correct": body.correct},
         )
-    return {"ok": True}
+    return OkOut(ok=True)
 
 
 async def _review_state(session: AsyncSession, job_id: UUID) -> dict[str, Any]:
@@ -781,7 +1080,7 @@ async def _review_state(session: AsyncSession, job_id: UUID) -> dict[str, Any]:
 
 
 @router.delete("/jobs/{job_id}/review")
-async def delete_review(request: Request, job_id: UUID) -> dict[str, bool]:
+async def delete_review(request: Request, job_id: UUID) -> OkOut:
     async with res_of(request).sessionmaker.begin() as session:
         before = await _review_state(session, job_id)
         await evaluate.delete_review(session, job_id)
@@ -794,7 +1093,7 @@ async def delete_review(request: Request, job_id: UUID) -> dict[str, bool]:
                 resource_id=job_id,
                 changes={k: {"before": v, "after": None} for k, v in before.items()},
             )
-    return {"ok": True}
+    return OkOut(ok=True)
 
 
 # --- kiểm tay, golden set ------------------------------------------------------------------------
@@ -814,12 +1113,7 @@ async def get_review(request: Request, skip: UUID | None = None) -> ReviewPageOu
         precision=summary.precision,
         target=evaluate.TARGET_PRECISION,
         unreviewed_active=summary.unreviewed_active,
-        by_source=[
-            SourceReviewOut(
-                source=s.source, reviewed=s.reviewed, correct=s.correct, precision=s.precision
-            )
-            for s in summary.by_source
-        ],
+        by_source=[_source_review(s) for s in summary.by_source],
         next=_job_detail(detail) if detail else None,
         recent=[
             RecentReview(
@@ -837,25 +1131,23 @@ async def get_review(request: Request, skip: UUID | None = None) -> ReviewPageOu
 
 
 @router.get("/review/summary")
-async def get_review_summary(request: Request) -> dict[str, Any]:
+async def get_review_summary(request: Request) -> ReviewSummaryOut:
     async with res_of(request).sessionmaker() as session:
         summary = await evaluate.review_summary(session)
-    return {
-        "reviewed": summary.reviewed,
-        "correct": summary.correct,
-        "precision": summary.precision,
-        "unreviewed_active": summary.unreviewed_active,
-        "by_source": [
-            {**dataclasses.asdict(s), "precision": s.precision} for s in summary.by_source
-        ],
-    }
+    return ReviewSummaryOut(
+        reviewed=summary.reviewed,
+        correct=summary.correct,
+        precision=summary.precision,
+        unreviewed_active=summary.unreviewed_active,
+        by_source=[_source_review(s) for s in summary.by_source],
+    )
 
 
 @router.get("/eval/server")
-async def get_eval_server() -> dict[str, Any]:
+async def get_eval_server() -> EvalServerOut:
     """Có golden set trên máy chủ (thư mục golden/) không."""
     ok = (GOLDEN_DIR / "companies.csv").is_file() and (GOLDEN_DIR / "jobs.csv").is_file()
-    return {"available": ok, "path": str(GOLDEN_DIR)}
+    return EvalServerOut(available=ok, path=str(GOLDEN_DIR))
 
 
 @router.post("/eval")
@@ -864,7 +1156,7 @@ async def post_eval(
     companies: Annotated[UploadFile | None, File()] = None,
     jobs: Annotated[UploadFile | None, File()] = None,
     include_inactive: Annotated[bool, Form()] = False,
-) -> dict[str, Any]:
+) -> EvalReportOut:
     """Precision/recall trên golden set tải lên (companies.csv + jobs.csv) hoặc thư mục golden/
     trên máy chủ."""
     res = res_of(request)
@@ -896,65 +1188,127 @@ async def post_eval(
             "recall": report.recall,
         },
     )
-    return {
-        "precision": report.precision,
-        "recall": report.recall,
-        "golden": report.golden,
-        "predicted": report.predicted,
-        "matched": report.matched,
-        "target_precision": evaluate.TARGET_PRECISION,
-        "target_recall": evaluate.TARGET_RECALL,
-        "perf": perf,
-        "companies": [
-            {**dataclasses.asdict(c), "precision": c.precision, "recall": c.recall}
+    return EvalReportOut(
+        precision=report.precision,
+        recall=report.recall,
+        golden=report.golden,
+        predicted=report.predicted,
+        matched=report.matched,
+        target_precision=evaluate.TARGET_PRECISION,
+        target_recall=evaluate.TARGET_RECALL,
+        perf=perf,
+        companies=[
+            CompanyEvalOut(**dataclasses.asdict(c), precision=c.precision, recall=c.recall)
             for c in report.companies
         ],
-        "sources": [
-            {**dataclasses.asdict(s), "precision": s.precision, "recall": s.recall}
+        sources=[
+            SourceEvalOut(**dataclasses.asdict(s), precision=s.precision, recall=s.recall)
             for s in report.sources
         ],
-        "warnings": report.warnings,
-        "markdown": evaluate.markdown_report(report, perf=perf),
-    }
+        warnings=report.warnings,
+        markdown=evaluate.markdown_report(report, perf=perf),
+    )
 
 
 # --- trang tuyển dụng, queue ---------------------------------------------------------------------
 
 
-def _board_run(r: Any) -> dict[str, Any]:
-    return {
-        "id": r.id,
-        "source": r.source,
-        "started_at": r.started_at,
-        "finished_at": r.finished_at,
-        "status": r.status,
-        "complete": r.complete,
-        "urls_seen": r.urls_seen,
-        "fetched": r.fetched,
-        "new": r.new,
-        "updated": r.updated,
-        "unchanged": r.unchanged,
-        "failed": r.failed,
-        "removed": r.removed,
-        "profiles_new": r.profiles_new,
-        "profiles_matched": r.profiles_matched,
-        "error": r.error,
-        # full = index đủ (đêm), tail = index đuôi (ngày, chỉ tin mới nhất).
-        "mode": (r.stats or {}).get("mode", "full"),
-    }
+class BoardRunOut(ApiOut):
+    id: UUID
+    source: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    complete: bool
+    urls_seen: int
+    fetched: int
+    new: int
+    updated: int
+    unchanged: int
+    failed: int
+    removed: int
+    profiles_new: int
+    profiles_matched: int
+    error: str | None
+    # full = index đủ (đêm), tail = index đuôi (ngày, chỉ tin mới nhất).
+    mode: Annotated[str, known_values(("full", "tail"))]
+
+
+class BoardsOut(ApiOut):
+    boards: list[BoardStatsOut]
+    queue: QueueStatsOut
+
+
+class BoardIndexOut(QueuedOut):
+    workers: int  # runner đang nghe queue trang tuyển dụng
+
+
+class QueueJobOut(ApiOut):
+    key: str
+    function: str
+    status: str
+    attempts: int
+    retries: int
+    timeout: int  # giây, 0 = không giới hạn
+    queued: int  # ms epoch
+    started: int  # ms epoch
+    # Hẹn giờ chạy (giây epoch, 0 = chạy ngay); lượt tự chạy tiếp hẹn sau ~1 phút.
+    scheduled: int
+    error: str | None
+    label: str
+    company_id: str | None
+    # Vì sao job được xếp (build đêm, poll theo chu kỳ, poll lỗi → build lại...).
+    trigger: Annotated[str | None, known_values(RunTrigger, nullable=True)]
+    # Lượt chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường).
+    continuation: int
+
+
+class QueueOut(QueueStatsOut):
+    jobs: list[QueueJobOut]  # một trang (QUEUE_PAGE job): đang chạy → đang chờ → hẹn giờ
+    page: int
+    pages: int
+    total: int
+
+
+class QueuePageOut(ApiOut):
+    queues: list[QueueOut]
+
+
+def _board_run(r: Any) -> BoardRunOut:
+    return BoardRunOut(
+        id=r.id,
+        source=r.source,
+        started_at=r.started_at,
+        finished_at=r.finished_at,
+        status=r.status,
+        complete=r.complete,
+        urls_seen=r.urls_seen,
+        fetched=r.fetched,
+        new=r.new,
+        updated=r.updated,
+        unchanged=r.unchanged,
+        failed=r.failed,
+        removed=r.removed,
+        profiles_new=r.profiles_new,
+        profiles_matched=r.profiles_matched,
+        error=r.error,
+        mode=(r.stats or {}).get("mode", "full"),
+    )
 
 
 @router.get("/boards")
-async def get_boards(request: Request) -> dict[str, Any]:
+async def get_boards(request: Request) -> BoardsOut:
     async with res_of(request).sessionmaker() as session:
         board_rows = await stats.board_stats(session)
     known = {b.source for b in board_rows}
     board_rows += [stats.BoardStats(source=n) for n in actions.board_names() if n not in known]
     queue = await stats.queue_stats(res_of(request).queues.boards)
-    return {
-        "boards": [dataclasses.asdict(b) for b in board_rows],
-        "queue": dataclasses.asdict(queue),
-    }
+    return BoardsOut.model_validate(
+        {
+            "boards": [dataclasses.asdict(b) for b in board_rows],
+            "queue": dataclasses.asdict(queue),
+        }
+    )
 
 
 @router.get("/boards/runs")
@@ -962,14 +1316,14 @@ async def get_board_runs(
     request: Request,
     page: int = 1,
     mode: Annotated[str | None, Query(description="full | tail")] = None,
-) -> PageOut[dict[str, Any]]:
+) -> PageOut[BoardRunOut]:
     async with res_of(request).sessionmaker() as session:
         result = await queries.board_runs(session, page, mode=mode)
     return _page_out(result, [_board_run(r) for r in result.items])
 
 
 @router.post("/boards/{name}/index")
-async def post_board_index(request: Request, name: str) -> dict[str, Any]:
+async def post_board_index(request: Request, name: str) -> BoardIndexOut:
     res = res_of(request)
     try:
         queued = await actions.enqueue_board(res, name)
@@ -984,30 +1338,27 @@ async def post_board_index(request: Request, name: str) -> dict[str, Any]:
         metadata={"queued": queued},
     )
     queue = await stats.queue_stats(res.queues.boards)
-    return {"queued": queued, "workers": queue.workers}
+    return BoardIndexOut(queued=queued, workers=queue.workers)
 
 
-def _queue_job(job: dict[str, Any]) -> dict[str, Any]:
+def _queue_job(job: dict[str, Any]) -> QueueJobOut:
     kwargs = job.get("kwargs") or {}
-    return {
-        "key": job.get("key"),
-        "function": job.get("function"),
-        "status": job.get("status"),
-        "attempts": job.get("attempts"),
-        "retries": job.get("retries"),
-        "timeout": job.get("timeout"),
-        "queued": job.get("queued"),
-        "started": job.get("started"),
-        # Hẹn giờ chạy (giây epoch, 0 = chạy ngay); lượt tự chạy tiếp hẹn sau ~1 phút.
-        "scheduled": job.get("scheduled") or 0,
-        "error": job.get("error"),
-        "label": kwargs.get("name") or kwargs.get("source") or "",
-        "company_id": kwargs.get("company_id"),
-        # Vì sao job được xếp (build đêm, poll theo chu kỳ, poll lỗi → build lại...).
-        "trigger": kwargs.get("trigger"),
-        # Lượt chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường).
-        "continuation": kwargs.get("continuation") or 0,
-    }
+    return QueueJobOut(
+        key=job["key"],
+        function=job["function"],
+        status=job["status"],
+        attempts=job["attempts"],
+        retries=job["retries"],
+        timeout=job["timeout"],
+        queued=job["queued"],
+        started=job["started"],
+        scheduled=job.get("scheduled") or 0,
+        error=job.get("error"),
+        label=kwargs.get("name") or kwargs.get("source") or "",
+        company_id=kwargs.get("company_id"),
+        trigger=kwargs.get("trigger"),
+        continuation=kwargs.get("continuation") or 0,
+    )
 
 
 QUEUE_PAGE = 25
@@ -1016,11 +1367,11 @@ QUEUE_PAGE = 25
 @router.get("/queue")
 async def get_queue(
     request: Request, page: int = 1, poll_page: int = 1, board_page: int = 1
-) -> dict[str, Any]:
+) -> QueuePageOut:
     """Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang
     chạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang
     QUEUE_PAGE job)."""
-    out: list[dict[str, Any]] = []
+    out: list[QueueOut] = []
     queues = res_of(request).queues
     wanted_pages = ((queues.build, page), (queues.poll, poll_page), (queues.boards, board_page))
     for queue, wanted in wanted_pages:
@@ -1034,35 +1385,29 @@ async def get_queue(
         except Exception:  # Redis lỗi: vẫn trả số đếm
             jobs = []
         out.append(
-            {
-                **dataclasses.asdict(st),
-                "jobs": jobs,
-                "page": current,
-                "pages": pages,
-                "total": listed,
-            }
+            QueueOut(**dataclasses.asdict(st), jobs=jobs, page=current, pages=pages, total=listed)
         )
     # Job build / poll chỉ mang id doanh nghiệp: điền tên để hiện.
-    ids = {j["company_id"] for q in out for j in q["jobs"] if j["company_id"] and not j["label"]}
+    ids = {j.company_id for q in out for j in q.jobs if j.company_id and not j.label}
     if ids:
         async with res_of(request).sessionmaker() as session:
             names = await queries.company_names(session, ids)
         for q in out:
-            for j in q["jobs"]:
-                if not j["label"] and j["company_id"]:
-                    j["label"] = names.get(j["company_id"], "")
-    return {"queues": out}
+            for j in q.jobs:
+                if not j.label and j.company_id:
+                    j.label = names.get(j.company_id, "")
+    return QueuePageOut(queues=out)
 
 
 # --- lịch thu thập: bộ khung, poll, độ trễ phát hiện ----------------------------------------------
 
 
-class PlanOut(BaseModel):
+class PlanOut(ApiOut):
     id: UUID
     source: str
     kind: str
     url: str
-    status: str
+    status: PlanStatus
     jobs: int
     built_at: datetime
     polled_at: datetime | None
@@ -1077,8 +1422,8 @@ class PlanOut(BaseModel):
     ignored: int
 
 
-class ScheduleOut(BaseModel):
-    state: str
+class ScheduleOut(ApiOut):
+    state: ScheduleState
     plans: int
     next_build_at: datetime | None
     next_poll_at: datetime | None
@@ -1093,10 +1438,64 @@ class ScheduleOut(BaseModel):
     last_error: str | None
 
 
-class CompanyCrawlOut(BaseModel):
+class CompanyCrawlOut(ApiOut):
     schedule: ScheduleOut | None
     plans: list[PlanOut]
     poll_interval_seconds: float
+
+
+class PollStatsOut(ApiOut):
+    """Các lượt poll trong `minutes` phút gần nhất; thời gian tính bằng giây."""
+
+    # Trường của `sla.PollStats` (tests/test_openapi.py kiểm khớp).
+    minutes: int
+    polls: int
+    ok: int
+    failed: int
+    broken: int
+    skipped: int
+    changed: int
+    new_jobs: int
+    per_second: float
+    duration_p50: float | None
+    duration_p95: float | None
+    window_p50: float | None
+    window_p95: float | None
+    within_target: float | None  # tỉ lệ lượt có cửa sổ phát hiện ≤ mục tiêu (0..1)
+    # Số lượt theo ngưỡng cửa sổ (giây): 30, 60, 90, 120, 135, 150, 165, 180, 210, 240, 300, 600,
+    # 1800, 3600, +∞.
+    window_histogram: list[int]
+
+
+class FreshnessOut(ApiOut):
+    """Doanh nghiệp đang poll và tuổi lượt poll đủ gần nhất (giây)."""
+
+    # Trường của `sla.Freshness` (tests/test_openapi.py kiểm khớp).
+    ready: int
+    by_state: dict[ScheduleState, int]
+    age_p50: float | None
+    age_p95: float | None
+    age_max: float | None
+    overdue: int
+    never_polled: int
+
+
+class CrawlWindowsOut(ApiOut):
+    timezone: str
+    build: str  # khung giờ build, vd. "00:00-06:00" (giờ CRAWL_TIMEZONE)
+    poll: str
+    in_build: bool
+    in_poll: bool
+    next_build_start: datetime
+    next_poll_start: datetime
+
+
+class CrawlStatusOut(ApiOut):
+    target_seconds: int  # mục tiêu cửa sổ phát hiện
+    poll_interval_seconds: float
+    polls: PollStatsOut
+    freshness: FreshnessOut
+    windows: CrawlWindowsOut
 
 
 def _plan(p: Any) -> PlanOut:
@@ -1136,21 +1535,21 @@ async def get_company_crawl(request: Request, company_id: UUID) -> CompanyCrawlO
 
 
 @router.post("/companies/{company_id}/build")
-async def post_company_build(request: Request, company_id: UUID) -> dict[str, bool]:
+async def post_company_build(request: Request, company_id: UUID) -> QueuedOut:
     """Build lại bộ khung ngay (lượt đủ, tìm nguồn lại)."""
     res = res_of(request)
     queued = await actions.enqueue_build(res, company_id)
     await _audit_company_run(request, audit.COMPANY_BUILD, company_id, queued)
-    return {"queued": queued}
+    return QueuedOut(queued=queued)
 
 
 @router.post("/companies/{company_id}/poll")
-async def post_company_poll(request: Request, company_id: UUID) -> dict[str, bool]:
+async def post_company_poll(request: Request, company_id: UUID) -> QueuedOut:
     """Poll ngay theo bộ khung."""
     res = res_of(request)
     queued = await actions.enqueue_poll(res, company_id)
     await _audit_company_run(request, audit.COMPANY_POLL, company_id, queued)
-    return {"queued": queued}
+    return QueuedOut(queued=queued)
 
 
 async def _audit_company_run(request: Request, action: str, company_id: UUID, queued: bool) -> None:
@@ -1165,10 +1564,11 @@ async def _audit_company_run(request: Request, action: str, company_id: UUID, qu
 
 
 @router.get("/crawl/status")
-async def get_crawl_status(request: Request, minutes: int = 60) -> dict[str, Any]:
+async def get_crawl_status(request: Request, minutes: int = 60) -> CrawlStatusOut:
     """Độ trễ phát hiện tin mới (P50/P95 cửa sổ phát hiện của các lượt poll trong `minutes` phút
     gần nhất), độ tươi hiện tại, khung giờ build / poll."""
-    return await actions.crawl_status(res_of(request), minutes=max(1, min(minutes, 24 * 60)))
+    status = await actions.crawl_status(res_of(request), minutes=max(1, min(minutes, 24 * 60)))
+    return CrawlStatusOut.model_validate(status)
 
 
 # --- nhật ký thao tác -----------------------------------------------------------------------------

@@ -1,4 +1,3 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
 import { Activity, Briefcase, Building2, Database, Layers, RefreshCw, Wrench } from "lucide-react"
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router"
@@ -35,7 +34,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { api, qs } from "@/lib/api"
+import { useGetOverview, usePostMaintenance } from "@/lib/gen/queries"
 import {
   ago,
   byCount,
@@ -509,16 +508,15 @@ export function OverviewPage() {
   const [storage, setStorage] = useState(false)
   const [auto, setAuto] = useState(false)
 
-  const query = useQuery({
-    queryKey: ["overview", hours, storage],
-    queryFn: () => api.get<Overview>(`/overview${qs({ hours, storage })}`),
-    refetchInterval: auto ? 30_000 : false,
-    placeholderData: (prev) => prev,
-  })
-  const maintenance = useMutation({
-    mutationFn: () => api.post<{ queued: boolean }>("/maintenance"),
-    onSuccess: (r) =>
-      r.queued ? toast.success("Đã đưa lượt bảo trì vào hàng đợi") : toast.warning("Đang có lượt bảo trì chờ hoặc đang chạy"),
+  const query = useGetOverview(
+    { hours: Number(hours) || 0, storage },
+    { query: { refetchInterval: auto ? 30_000 : false, placeholderData: (prev) => prev } },
+  )
+  const maintenance = usePostMaintenance({
+    mutation: {
+      onSuccess: (r) =>
+        r.queued ? toast.success("Đã đưa lượt bảo trì vào hàng đợi") : toast.warning("Đang có lượt bảo trì chờ hoặc đang chạy"),
+    },
   })
 
   const setLatency = (v: number) =>

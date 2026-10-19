@@ -12,6 +12,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+# Cho mô hình cũng là JSON trả ra API (`web/api.py`): trường có mặc định luôn có trong JSON nên spec
+# OpenAPI ghi là bắt buộc. Chỉ đổi JSON schema chế độ serialization, không đổi cách kiểm dữ liệu.
+API_OUTPUT = ConfigDict(json_schema_serialization_defaults_required=True)
+
 
 class KycStatus(StrEnum):
     VERIFIED = "verified"
@@ -149,7 +153,9 @@ class CompanyIn(BaseModel):
 
 
 class CompanyEntity(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True, json_schema_serialization_defaults_required=True
+    )
 
     id: UUID
     input_name: str
@@ -244,11 +250,15 @@ class RawJob(BaseModel):
 
 
 class Location(BaseModel):
+    model_config = API_OUTPUT
+
     province: str | None = None  # một trong 34 tỉnh/thành sau sáp nhập 2025
     address_raw: str | None = None
 
 
 class Salary(BaseModel):
+    model_config = API_OUTPUT
+
     min: float | None = None
     max: float | None = None
     currency: str | None = None
@@ -258,12 +268,16 @@ class Salary(BaseModel):
 
 
 class ExperienceYears(BaseModel):
+    model_config = API_OUTPUT
+
     min: float | None = None
     max: float | None = None
 
 
 class JobOut(BaseModel):
     """Một job sau khi chuẩn hoá, xác minh và gộp trùng."""
+
+    model_config = API_OUTPUT
 
     title: str
     title_normalized: str

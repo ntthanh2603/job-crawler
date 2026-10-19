@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, Globe, RefreshCw } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -20,10 +20,15 @@ import {
 } from "@/components/common"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api } from "@/lib/api"
 import { ago, cap, dt, num, sourceLabel } from "@/lib/format"
-import { keys } from "@/lib/queries"
-import type { BoardRun, Boards } from "@/lib/types"
+import {
+  getGetBoardRunsQueryOptions,
+  getGetBoardsQueryKey,
+  getGetQueueQueryKey,
+  useGetBoards,
+  usePostBoardIndex,
+} from "@/lib/gen/queries"
+import type { BoardRun } from "@/lib/types"
 
 const MODES: Record<BoardRun["mode"], { label: string; title: string; className: string }> = {
   full: {
@@ -51,16 +56,17 @@ export function BoardsPage() {
   // Lọc lượt index theo kiểu (đủ / đuôi) trên trang đang xem.
   const [mode, setMode] = useState("")
   const client = useQueryClient()
-  const query = useQuery({ queryKey: ["boards"], queryFn: () => api.get<Boards>("/boards"), refetchInterval: 30_000 })
-  const index = useMutation({
-    mutationFn: (name: string) => api.post<{ queued: boolean; workers: number }>(`/boards/${name}/index`),
-    onSuccess: (r, name) => {
-      const board = sourceLabel(name)
-      if (!r.queued) toast.warning(`${board} đang chờ hoặc đang được index`)
-      else if (!r.workers) toast.warning(`Đã đưa ${board} vào hàng đợi nhưng chưa có worker index nào chạy`)
-      else toast.success(`Đã đưa ${board} vào hàng đợi index`)
-      client.invalidateQueries({ queryKey: ["boards"] })
-      client.invalidateQueries({ queryKey: keys.queueSummary })
+  const query = useGetBoards({ query: { refetchInterval: 30_000 } })
+  const index = usePostBoardIndex({
+    mutation: {
+      onSuccess: (r, { name }) => {
+        const board = sourceLabel(name)
+        if (!r.queued) toast.warning(`${board} đang chờ hoặc đang được index`)
+        else if (!r.workers) toast.warning(`Đã đưa ${board} vào hàng đợi nhưng chưa có worker index nào chạy`)
+        else toast.success(`Đã đưa ${board} vào hàng đợi index`)
+        client.invalidateQueries({ queryKey: getGetBoardsQueryKey() })
+        client.invalidateQueries({ queryKey: getGetQueueQueryKey() })
+      },
     },
   })
 
@@ -172,7 +178,7 @@ export function BoardsPage() {
                       <ConfirmButton
                         title={`Index ${sourceLabel(b.source)} ngay?`}
                         description="Đưa trang này vào hàng đợi index ngay, không chờ lịch định kỳ. Lượt index có thể kéo dài vài chục phút."
-                        onConfirm={() => index.mutate(b.source)}
+                        onConfirm={() => index.mutate({ name: b.source })}
                         size="xs"
                       >
                         <RefreshCw /> Index ngay
@@ -200,7 +206,7 @@ export function BoardsPage() {
             }
             bodyClassName="p-0"
           >
-            <PagedList<BoardRun> queryKey={["board-runs"]} url="/boards/runs" empty="Chưa có lượt index nào.">
+            <PagedList options={(page) => getGetBoardRunsQueryOptions({ page })} empty="Chưa có lượt index nào.">
               {(all) => {
                 const runs = mode ? all.filter((r) => (r.mode ?? "full") === mode) : all
                 if (!runs.length)

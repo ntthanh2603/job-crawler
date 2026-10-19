@@ -81,11 +81,12 @@ tasks:
       - task: lint
       - uv run pyright
       - task: proto:check
+      - task: api:check
       - task: test
       - task: ui:test
       - task: ui:build
 
-  # --- proto, DB -------------------------------------------------------------------------------
+  # --- proto, spec API, DB ---------------------------------------------------------------------
 
   proto:
     desc: Sinh lại mã Python từ proto/jcproto/v1/*.proto
@@ -96,6 +97,18 @@ tasks:
     desc: Kiểm tra mã sinh từ proto đã khớp .proto
     cmds:
       - uv run python scripts/gen_proto.py --check
+
+  api:
+    desc: Ghi lại frontend/openapi.json từ mô hình trả về của API, rồi sinh hàm + hook + kiểu bằng orval (src/lib/gen/)
+    cmds:
+      - uv run python scripts/export_openapi.py
+      - task: ui:gen-api
+
+  api:check:
+    desc: Kiểm tra frontend/openapi.json và mã orval sinh ra đã khớp (pytest / Vitest cũng kiểm)
+    cmds:
+      - uv run python scripts/export_openapi.py --check
+      - task: ui:gen-api:check
 
   migrate:
     desc: Áp migration Alembic lên DATABASE_URL
@@ -134,6 +147,18 @@ tasks:
     dir: frontend
     cmds:
       - npm run typecheck
+
+  ui:gen-api:
+    desc: Sinh src/lib/gen/queries.ts (orval) từ frontend/openapi.json (spec ghi bằng `task api`)
+    dir: frontend
+    cmds:
+      - npm run gen:api
+
+  ui:gen-api:check:
+    desc: Kiểm tra src/lib/gen/queries.ts đã khớp frontend/openapi.json
+    dir: frontend
+    cmds:
+      - npx vitest run src/lib/gen.test.ts
 
   ui:test:
     desc: Test giao diện một lượt (bỏ qua nếu chưa có script test:run)

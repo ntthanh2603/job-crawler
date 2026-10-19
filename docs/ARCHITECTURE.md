@@ -103,7 +103,8 @@ backend/jobcrawler/
   db/                  models, migration Alembic (một migration 0001), nén zstd, UUIDv7
 worker/jobworker/      config, client gRPC, fetch (curl_cffi), browser (Playwright), proxy tại worker
 proto/jcproto/v1/      crawl.proto + mã sinh sẵn (`scripts/gen_proto.py`)
-frontend/              React + shadcn/ui + Tailwind (build vào backend/jobcrawler/web/dist)
+frontend/              React + shadcn/ui + Tailwind (build vào backend/jobcrawler/web/dist);
+                       openapi.json (spec API, `scripts/export_openapi.py`) → orval → src/lib/gen/
 backend/tests, worker/tests, proto/tests
 scripts/loadtest/      seed + bench dữ liệu lớn, site giả đo độ trễ (sla_site, fake_sites, sla_report)
 ```
@@ -461,7 +462,33 @@ khẩu proxy luôn bị che.
 
 Frontend: React data router (`router.tsx`) — trang lỗi trong khung ứng dụng, nhận ra chunk cũ sau
 khi triển khai bản mới (mời tải lại); toast lỗi mặc định cho mọi mutation (`lib/query-client.ts`);
-bộ lọc trên URL qua `useUrlFilters`; khoá truy vấn dùng chung ở `lib/queries.ts`.
+bộ lọc trên URL qua `useUrlFilters`; query / mutation qua hook orval sinh (khoá query sinh cùng).
+
+Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
+
+- Mỗi endpoint JSON trả một mô hình Pydantic (`...Out`, gốc `ApiOut`; `JobOut`, `CompanyEntity`,
+  `WorkerStatus` dùng thẳng): FastAPI kiểm và tuần tự hoá theo mô hình, spec `/api/openapi.json`
+  tả đúng JSON trả về. Trường có mặc định vẫn luôn có trong JSON nên spec ghi là bắt buộc
+  (`json_schema_serialization_defaults_required`). `operationId` = tên hàm xử lý.
+- Giá trị không có ràng buộc ở DB (trigger của job trong queue, `mode` của lượt index, giá trị cài
+  đặt, JSON tự do như `kyc_evidence`, `changes`) không bị kiểm chặt: spec liệt kê các giá trị có
+  thể có, giá trị lạ vẫn trả nguyên văn. Payload trang tổng quan là JSON cache trong Redis (mốc thời
+  gian ghi bằng `str()`): mô hình giữ nguyên chuỗi đó.
+- `frontend/openapi.json` là bản commit của spec (`scripts/export_openapi.py`, khoá sắp xếp, dựng
+  app không cần Postgres / Redis). Như console/ của open-asm, **orval** (`frontend/orval.config.ts`,
+  `npm run gen:api`) sinh `src/lib/gen/queries.ts` từ spec: kiểu của mọi schema, hàm gọi từng
+  endpoint (`getJobs(params)`, `postEnqueue(body)`, tên theo `operationId`), hook React Query
+  (`useGetJobs`, `usePostEnqueue`), khoá query (`getGetJobsQueryKey()` — gọi không tham số là tiền
+  tố để invalidate mọi trang) và query options (`getGetRunLogsQueryOptions`, `PagedList` dùng).
+  Kiểu trong `src/lib/types.ts` là alias tới đó. `task api` làm cả hai bước; đổi mô hình trả về mà
+  quên thì pytest (`tests/test_openapi.py`) hoặc Vitest (`src/lib/gen.test.ts`, chạy orval vào
+  thư mục tạm rồi so) đỏ.
+- Hàm sinh ra gọi qua `apiClient` (`src/lib/api.ts`, `mutator` của orval; `httpClient: "axios"`
+  chỉ để chọn dạng sinh, gọi thật bằng fetch, không có axios): cùng origin kèm đăng nhập của trình
+  duyệt, query bỏ giá trị rỗng như `qs()`, body JSON hoặc FormData (tải file), lỗi HTTP ném
+  `ApiError` đọc `detail` của FastAPI. orval **không mã hoá tham số path**: id tự do (worker) phải
+  `encodeURIComponent` ở chỗ gọi. File tải về (CSV, trang gốc) dùng liên kết thường. JSON tự do
+  (`kyc_evidence`, `changes`) thu hẹp sang kiểu viết tay trong types.ts (`select` / `as`).
 
 ## 15. Quan sát
 
@@ -484,13 +511,17 @@ bộ lọc trên URL qua `useUrlFilters`; khoá truy vấn dùng chung ở `lib/
   bộ (+ Chromium thật nếu có).
 - **Integration** (`backend/tests/integration/`, cần `TEST_DATABASE_URL` và Redis): migration khớp
   model, vòng đời build → poll (không đổi / tin mới / tin gỡ / trang hỏng / mất tin hàng loạt),
-  gateway gRPC đầu-cuối với worker giả, index trang tuyển dụng (đủ, đuôi), API, cài đặt.
+  gateway gRPC đầu-cuối với worker giả, index trang tuyển dụng (đủ, đuôi), API, cài đặt; payload
+  các service dựng sẵn (tổng quan, độ trễ phát hiện, Cài đặt) không có trường ngoài mô hình trả về
+  (`test_api_contract_db.py`).
+- **Hợp đồng API** (`tests/test_openapi.py`): `frontend/openapi.json` khớp mã, mọi endpoint JSON có
+  mô hình trả về, mô hình chép từ dataclass của services không thiếu / thừa trường.
 - **Đo thật**: `scripts/loadtest/sla_site.py` + `sla_report.py` (độ trễ đầu-cuối trên site giả),
   `fake_sites.py` (hàng trăm site giả để thử tải poll).
 - **Frontend**: Vitest (`frontend/src/**/*.test.ts(x)`): hàm thuần (định dạng, mô hình trang Cài
-  đặt, API client, bộ lọc URL, nhật ký), trang lỗi.
+  đặt, API client, bộ lọc URL, nhật ký), trang lỗi, mã orval sinh khớp `openapi.json`.
 - `TEST_DATABASE_URL` phải là DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại); khi
   `CI` được đặt mà thiếu DB thì test tích hợp báo lỗi thay vì bỏ qua.
-- Kiểm tra mỗi thay đổi: `task check` (ruff format/check, pyright, proto, pytest, typecheck +
-  test + build frontend) — cũng là việc CI (`.github/workflows/ci.yml`) chạy mỗi lần push lên
+- Kiểm tra mỗi thay đổi: `task check` (ruff format/check, pyright, proto, spec API + kiểu sinh,
+  pytest, typecheck + test + build frontend) — cũng là việc CI (`.github/workflows/ci.yml`) chạy mỗi lần push lên
   `main`.

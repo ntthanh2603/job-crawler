@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import {
   BookOpen,
   Briefcase,
@@ -23,9 +22,8 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import { useTheme, type Theme } from "@/components/theme"
 import { Button } from "@/components/ui/button"
 import { Dialog, SheetContent } from "@/components/ui/dialog"
-import { api } from "@/lib/api"
 import { num } from "@/lib/format"
-import { queueSummaryQuery } from "@/lib/queries"
+import { useGetMe, useGetQueue } from "@/lib/gen/queries"
 import { cn } from "@/lib/utils"
 
 const GROUPS = [
@@ -116,11 +114,7 @@ function queueShortName(name: string) {
 /** Số việc trong ba hàng đợi (build, poll, trang tuyển dụng), dùng cho mục "Hàng đợi" và dòng
  * trạng thái runner. */
 function useQueueSummary() {
-  const query = useQuery({
-    ...queueSummaryQuery(),
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
-  })
+  const query = useGetQueue(undefined, { query: { refetchInterval: 15_000, refetchOnWindowFocus: true } })
   const queues = query.data?.queues ?? []
   return {
     loaded: Boolean(query.data),
@@ -134,7 +128,7 @@ function useQueueSummary() {
 }
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: string | null; auth: boolean }>("/me") })
+  const me = useGetMe()
   const queue = useQueueSummary()
   const busy = queue.active + queue.queued
   return (

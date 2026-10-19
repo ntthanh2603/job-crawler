@@ -12,7 +12,9 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 2. **Chạy `task check` trước khi commit** (đúng những gì CI chạy). Lệnh hay dùng mà chưa có thì
    thêm vào `Taskfile.yml`.
 3. **Không sửa tay mã sinh từ proto** (`proto/jcproto/v1/*_pb2*.py[i]`): sửa `crawl.proto` rồi
-   `task proto`, commit cả `.proto` lẫn mã sinh.
+   `task proto`, commit cả `.proto` lẫn mã sinh. Tương tự **spec API** (`frontend/openapi.json`,
+   `frontend/src/lib/gen/` do orval sinh): sửa mô hình trả về (`...Out` trong `web/api.py`,
+   `web/settings_api.py`) rồi `task api`, commit cả hai.
 4. **Schema chỉ đổi bằng revision Alembic mới** (`task migration NAME="mô tả"` =
    `jobcrawler db revision`), xem lại file sinh ra trước khi commit. Không sửa revision đã áp dụng.
 5. **Test không gọi mạng ngoài**: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
@@ -56,6 +58,7 @@ task typecheck        # pyright + tsc
 task test             # pytest (cả tích hợp nếu có DB test); tham số thêm sau `--`
 task test:unit        # bỏ test tích hợp
 task proto / task proto:check
+task api / task api:check   # spec OpenAPI → frontend/openapi.json → orval → src/lib/gen/
 task ui:dev / task ui:build / task ui:test
 task check            # mọi thứ CI chạy
 ```
@@ -103,3 +106,11 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
 11. **Mã sinh proto phụ thuộc bản `grpcio-tools`** trong `uv.lock`: nâng bản thì `task proto` rồi
     commit lại, không thì `proto:check` (CI) đỏ. ruff / pyright bỏ qua file `*_pb2*`.
 12. **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis): chạy lại riêng file đó.
+13. **Endpoint mới trả mô hình `...Out`** (gốc `ApiOut`), không trả `dict`: test bắt endpoint JSON
+    không có mô hình. Mô hình chép từ dataclass của services thì thêm vào `MIRRORS` trong
+    `tests/test_openapi.py`. Trường lấy từ Redis / JSON tự do (không có ràng buộc ở DB) đừng kiểm
+    bằng enum / `Literal`: giá trị lạ làm endpoint lỗi 500 — dùng `known_values(...)` để spec vẫn
+    liệt kê giá trị.
+14. **Giao diện gọi API qua hàm / hook orval sinh** (`@/lib/gen/queries`, như open-asm), không
+    `fetch` tay. orval không mã hoá tham số path: id tự do phải `encodeURIComponent`.
+    openapi-typescript / hey-api không chạy được với TypeScript 7 (cần API compiler của TS 5).

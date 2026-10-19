@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, Layers } from "lucide-react"
 import { useState } from "react"
 
@@ -17,9 +16,9 @@ import {
 } from "@/components/common"
 import { RunTags } from "@/components/crawl"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api, qs } from "@/lib/api"
+import { useGetQueue } from "@/lib/gen/queries"
 import { ago, cap, hour, num, sourceLabel } from "@/lib/format"
-import type { QueueJob, QueuePage as QueueData, QueueStats } from "@/lib/types"
+import type { QueueJob, QueueStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const FUNCTIONS: Record<string, string> = {
@@ -209,12 +208,7 @@ function JobList({ jobs, now }: { jobs: QueueJob[]; now: number }) {
 export function QueuePage() {
   // Mỗi hàng đợi một trang riêng (API: `page` build, `poll_page` poll, `board_page` trang tuyển dụng).
   const [pages, setPages] = useState<Record<PageParam, number>>({ page: 1, poll_page: 1, board_page: 1 })
-  const query = useQuery({
-    queryKey: ["queue", pages],
-    queryFn: () => api.get<QueueData>(`/queue${qs(pages)}`),
-    refetchInterval: 5_000,
-    placeholderData: (prev) => prev,
-  })
+  const query = useGetQueue(pages, { query: { refetchInterval: 5_000, placeholderData: (prev) => prev } })
   const now = query.dataUpdatedAt || Date.now()
 
   return (

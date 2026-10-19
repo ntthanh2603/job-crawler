@@ -22,7 +22,7 @@ import json
 import time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 
 DEFAULT_POOL = "default"
@@ -69,7 +69,14 @@ class Keys:
         return f"{self.base}:reply:{client_id}"
 
 
+# `GET /api/workers` trả nguyên hai mô hình này: trường có mặc định luôn có trong JSON, spec OpenAPI
+# ghi là bắt buộc (`web/settings_api.py`).
+API_OUTPUT = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
 class WorkerStats(BaseModel):
+    model_config = API_OUTPUT
+
     http_done: int = 0
     http_failed: int = 0
     render_done: int = 0
@@ -87,6 +94,8 @@ class WorkerStats(BaseModel):
 
 
 class WorkerStatus(BaseModel):
+    model_config = API_OUTPUT
+
     worker_id: str
     hostname: str = ""
     version: str = ""
