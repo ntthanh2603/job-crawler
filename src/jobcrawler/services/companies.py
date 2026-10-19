@@ -49,8 +49,10 @@ KYC_SOURCE = "kyc"
 # Có tin hoãn xác minh (LLM chưa kịp chấm) trong lượt chạy.
 VERIFY_SOURCE = "verify"
 # Phần cuối trước timeout SAQ dành cho việc lưu (không chạy LLM nữa). Đủ rộng để DB chậm lúc tải
-# cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed).
-SAVE_MARGIN_SECONDS = 8.0
+# cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed, không lưu được gì): chạy cả danh sách
+# (30 doanh nghiệp song song) thì lưu một doanh nghiệp có thể mất hơn 8 giây. Tin LLM chưa kịp chấm
+# được hoãn sang lượt sau nên dừng LLM sớm không làm mất tin.
+SAVE_MARGIN_SECONDS = 20.0
 
 
 @dataclass(slots=True)
