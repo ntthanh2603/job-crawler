@@ -9,7 +9,7 @@ hành nằm ở đây.
 | Dịch vụ | Việc | Số bản |
 |---|---|---|
 | `postgres` | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres)) | 1 |
-| `redis` | hàng đợi SAQ, cache tổng quan, khoá phân tán | 1 |
+| `redis` | hàng đợi job (Redis Streams — [Hàng đợi](#hàng-đợi-redis-streams)), cache, khoá phân tán | 1 |
 | `migrate` | `jobcrawler db upgrade` mỗi lần `up` (không có việc thì thoát) | — |
 | `worker` | `process_company`, cron bảo trì (mỗi giờ), cron số liệu tổng quan (5 phút) | `WORKER_REPLICAS` |
 | `indexer` | index tăng dần các trang tuyển dụng (cron mỗi 5 giờ + nút "Index ngay") | `INDEXER_REPLICAS` |
@@ -88,6 +88,72 @@ xong trong một lượt. Hệ thống đi tiếp qua nhiều lượt thay vì b
   profile vẫn chạy được ở mức vài request mỗi doanh nghiệp.
 - **API careers toàn cầu** (vd. Shopee trả tin mọi quốc gia, xếp Việt Nam trước): mỗi nguồn dừng ở
   `SOURCE_MAX_JOBS` (500), nơi làm đọc từ danh mục mã của trang nếu có.
+
+## Hàng đợi (Redis Streams)
+
+Từ 19/10/2026 job (`process_company`, `index_board`, cron) đi qua Redis Streams
+(`QUEUE_BACKEND=streams`, mặc định; mã ở `src/jobcrawler/streamqueue.py`). SAQ vẫn còn để quay lại
+(`QUEUE_BACKEND=saq`) và sẽ gỡ khi Streams chạy ổn một thời gian.
+
+- **Chia tải.** Mỗi queue (`jobcrawler`, `jobcrawler-boards`) là một stream `sq:<queue>:stream` với
+  consumer group `workers`; mỗi process worker là một consumer, chỉ đọc (`XREADGROUP`) khi còn slot
+  rảnh (`WORKER_CONCURRENCY` mỗi replica). Việc dồn trong stream, worker nào rảnh thì nhận — không
+  worker nào ôm việc trong khi worker khác ngồi không.
+- **Giữ nguyên cách dùng cũ.** Khoá job (một doanh nghiệp chỉ một job chờ/chạy), job hẹn giờ (lượt
+  chạy tiếp sau `partial`, cron) nằm ở sorted set và vào stream khi tới giờ, timeout cứng
+  `COMPANY_TIMEOUT_SECONDS`, chạy tối đa `COMPANY_JOB_RETRIES` lần. Trang Hàng đợi đọc cùng số
+  liệu như trước (đang chạy / chờ / hẹn giờ / worker).
+- **Worker chết** (OOM, kill, máy treo): worker sống báo mỗi 10 s và làm mới các entry nó đang giữ;
+  entry nào im quá `QUEUE_RECLAIM_SECONDS` (60 s) bị worker khác thu hồi (`XAUTOCLAIM`) và chạy lại
+  — với SAQ phải chờ hết timeout của job (180 s) cộng một vòng quét (60 s). Job `active` mà entry
+  đã mất khỏi PEL (AOF cụt) cũng được thu hồi theo cùng ngưỡng.
+- **Dừng êm** (`docker compose stop`, deploy): worker ngừng nhận việc, chờ 2 s, huỷ job đang chạy
+  (lượt chạy vẫn được ghi `failed` / `cancelled`) và xếp lại ngay, không tính vào số lần chạy.
+- **Đo thời gian chờ.** `company_runs.queued_at` (migration 0008) là lúc job sẵn sàng chạy (lúc xếp
+  hàng, hoặc giờ hẹn với lượt chạy tiếp); `jobcrawler stats` in "chờ trong hàng đợi p50 · p95".
+
+Đổi loại hàng đợi (đã làm 19/10 SAQ → Streams; quay lại thì đổi `streams` ↔ `saq`):
+
+```bash
+docker compose build
+docker compose stop worker indexer             # job đang chạy được xếp lại trong queue cũ
+uv run jobcrawler queue move --to streams      # chép job chờ / hẹn giờ sang Streams, xoá bên SAQ
+docker compose up -d                           # API + worker + indexer chạy QUEUE_BACKEND mới
+```
+
+`queue move` từ chối khi còn worker sống ở một trong hai loại (thông tin worker hết hạn sau ≤ 1
+phút). API, CLI và worker phải cùng `QUEUE_BACKEND`: lệch nhau thì job xếp vào một bên, worker đọc
+bên kia, trang Hàng đợi hiện 0 worker.
+
+Rủi ro còn lại:
+
+- **Chạy trùng.** Worker treo (không báo sống) quá 60 s mà sau đó tỉnh lại thì job của nó đã được
+  chạy ở nơi khác: hai lượt cùng doanh nghiệp. Ghi kết quả vẫn đúng (gộp theo dấu vân tay), chỉ tốn
+  thêm request / lượt LLM. Lượt index trang tuyển dụng (dài hàng giờ) cũng dựa vào báo sống này.
+- **Redis mất dữ liệu** (AOF cụt như sự cố dưới): có thể mất vài job vừa xếp hoặc job chạy lại
+  thêm một lần. Xếp lại doanh nghiệp cũ bằng `jobcrawler enqueue --stale-hours 24`.
+- **Bộ nhớ Redis.** Entry bị xoá ngay khi job xong; job đã xong giữ 10 phút. 10.000 job chờ ≈ vài
+  MB. Consumer của worker đã chết bị xoá khỏi group sau 10 phút.
+- **Không làm nhanh hơn việc thu thập.** Đổi hàng đợi không đổi thời gian một lượt chạy hay độ trễ
+  tin mới: giới hạn là LLM (~50 lượt/phút), số slot và giới hạn request tới từng website.
+
+### Số đo SAQ → Streams (19/10/2026)
+
+Chỉ phần hàng đợi, job giả, cùng Redis trong Docker Desktop, 3 process worker × 10 slot như compose
+(`uv run python scripts/loadtest/queue_bench.py`):
+
+| | SAQ | Redis Streams |
+|---|---|---|
+| Xếp 10.000 job | 2,3 s | 2,7 s |
+| 3.000 job rỗng: thông lượng | 1.372 job/s | 1.773 job/s |
+| … chờ từ lúc xếp tới lúc chạy, p50 / p95 | 0,44 / 0,92 s | 0,29 / 0,36 s |
+| 600 job × 0,5 s trên 30 slot (lý tưởng 10 s) | 10,5 s (+5,3 %) | 10,3 s (+3,4 %) |
+| Giết một worker đang giữ 10 job (timeout 180 s): 10 job chạy lại xong sau | 292 s | 91 s |
+
+Đợt chạy thật trên SAQ (19/10 03:17 UTC, 206 doanh nghiệp, `queued_at` mới có): 236 lượt trong
+611 s (1.392 lượt/giờ), một lượt p50 12 s / p95 166 s, chờ trong hàng đợi p50 41 s / p95 189 s /
+tối đa 218 s. Hàng đợi chỉ thêm dưới 1 s vào thời gian chờ đó; phần còn lại là chờ slot (30 slot
+cho 206 doanh nghiệp) và giờ hẹn của lượt chạy tiếp.
 
 ## Chịu dữ liệu lớn
 
