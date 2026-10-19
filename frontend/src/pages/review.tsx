@@ -7,8 +7,8 @@ import {
   ErrorState,
   JobTags,
   Kbd,
-  Loading,
   PageHeader,
+  PageLoading,
   ReasonTags,
   Section,
   StatCard,
@@ -16,12 +16,13 @@ import {
   StatusBadge,
   TextLink,
 } from "@/components/common"
-import { JobBody, ReviewBox } from "@/components/job"
+import { JobBody, JobFacts, ReviewBox } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
-import { ago, cap, date, displayName, num, pct, provinces, salary, sourceLabel } from "@/lib/format"
+import { ago, cap, displayName, num, pct, sourceLabel } from "@/lib/format"
 import type { ReviewPage as ReviewData } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 export function ReviewPage() {
   const [skip, setSkip] = useState<string | null>(null)
@@ -49,15 +50,15 @@ export function ReviewPage() {
         title="Kiểm tay"
         description="Đánh dấu từng việc làm đúng hay sai để đo precision khi chưa có golden set. Việc làm được chọn ngẫu nhiên trong các tin đang mở chưa kiểm."
       />
-      {query.isError && <ErrorState error={query.error} />}
-      {!d && query.isLoading && <Loading rows={8} />}
+      {query.isError && !d && <ErrorState error={query.error} onRetry={() => query.refetch()} />}
+      {!d && query.isLoading && <PageLoading />}
       {d && (
         <div className="space-y-6">
           <StatGrid className="sm:grid-cols-3">
             <StatCard
               label="Precision"
               value={pct(d.precision)}
-              hint={`Mục tiêu ≥ ${pct(d.target, 0)}`}
+              hint={`Mục tiêu ≥ ${pct(d.target, 0)}${d.reviewed ? "" : " · cần kiểm vài chục việc để có số"}`}
               status={
                 d.precision === null
                   ? undefined
@@ -66,67 +67,75 @@ export function ReviewPage() {
                     : { tone: "bad", text: "Chưa đạt" }
               }
             />
-            <StatCard label="Đã kiểm" value={num(d.reviewed)} hint={`${num(d.correct)} đúng · ${num(d.reviewed - d.correct)} sai`} />
+            <StatCard
+              label="Đã kiểm"
+              value={num(d.reviewed)}
+              hint={`${num(d.correct)} đúng · ${num(d.reviewed - d.correct)} sai`}
+            />
             <StatCard label="Chưa kiểm" value={num(d.unreviewed_active)} hint="Việc làm đang mở" />
           </StatGrid>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             {next ? (
-              <Section
-                title={
-                  <TextLink to={`/jobs/${next.job.id}`} className="text-base">
-                    {cap(next.job.title)}
-                  </TextLink>
-                }
-                actions={
-                  <Button variant="outline" size="sm" onClick={() => setSkip(next.job.id)} disabled={query.isFetching}>
-                    <SkipForward /> Bỏ qua
-                    <Kbd>N</Kbd>
-                  </Button>
-                }
-                bodyClassName="space-y-5"
-              >
-                <div className="space-y-2 text-sm">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <TextLink to={`/companies/${next.job.company_id}`} className="font-medium">
-                      {displayName(next.job.company_name)}
+              <div className={cn("min-w-0 space-y-4 transition-opacity", query.isFetching && "opacity-60")}>
+                <Section bodyClassName="space-y-4">
+                  <div className="space-y-2">
+                    <TextLink to={`/jobs/${next.job.id}`} className="text-lg leading-snug font-semibold">
+                      {cap(next.job.title)}
                     </TextLink>
-                    {provinces(next.job) !== "–" && <span className="text-muted-foreground">· {provinces(next.job)}</span>}
-                    <span className="text-muted-foreground">
-                      · {salary(next.job.salary) === "–" ? "Chưa rõ lương" : salary(next.job.salary)}
-                    </span>
-                    <JobTags job={next.job} />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <TextLink to={`/companies/${next.job.company_id}`} className="font-medium">
+                        {displayName(next.job.company_name)}
+                      </TextLink>
+                      <JobTags job={next.job} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+                      <span>Nguồn {sourceLabel(next.job.canonical_source)}</span>
+                      <span>· Tin cậy {pct(next.job.confidence, 0)}</span>
+                      <ReasonTags reasons={next.job.verification_reasons} hideSource />
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
-                    <span>Nguồn {sourceLabel(next.job.canonical_source)}</span>
-                    <span>· Đăng {date(next.job.posted_at)}</span>
-                    <span>· Hạn {date(next.job.expires_at)}</span>
-                    <span>· Tin cậy {pct(next.job.confidence, 0)}</span>
-                    <ReasonTags reasons={next.job.verification_reasons} />
-                  </div>
-                  <div className="flex flex-wrap gap-2 pt-1">
+                  <div className="flex flex-wrap gap-2">
                     {next.postings.map((p) => (
-                      <Button key={p.id} variant="outline" size="xs" asChild>
+                      <Button key={p.id} variant="outline" size="sm" asChild>
                         <a href={p.url} target="_blank" rel="noopener noreferrer">
                           Mở trên {sourceLabel(p.source)} <ExternalLinkIcon />
                         </a>
                       </Button>
                     ))}
                   </div>
-                </div>
-                <ReviewBox detail={next} shortcuts onDone={() => setSkip(null)} />
-                <div className="rounded-lg border bg-muted/25 px-5 py-4">
-                  <div className="mb-3 text-meta font-medium text-muted-foreground">Nội dung tin</div>
+                </Section>
+                <JobFacts job={next.job} />
+                <Section title="Nội dung tin" bodyClassName="px-5 py-5 sm:px-6">
                   <JobBody detail={next} />
-                </div>
-              </Section>
+                </Section>
+              </div>
             ) : (
               <Section>
-                <Empty icon={<PartyPopper />}>Đã kiểm hết các việc làm đang mở.</Empty>
+                <Empty icon={<PartyPopper />} title="Đã kiểm hết">
+                  Không còn việc làm đang mở nào chưa kiểm.
+                </Empty>
               </Section>
             )}
 
             <aside className="space-y-4">
+              {next && (
+                <div className="xl:sticky xl:top-6">
+                  <Section
+                    title="Đánh giá"
+                    actions={
+                      <Button variant="ghost" size="sm" onClick={() => setSkip(next.job.id)} disabled={query.isFetching}>
+                        <SkipForward /> Bỏ qua <Kbd>N</Kbd>
+                      </Button>
+                    }
+                  >
+                    <ReviewBox detail={next} shortcuts onDone={() => setSkip(null)} />
+                    <p className="mt-3 text-meta text-muted-foreground">
+                      Phím tắt: <Kbd>D</Kbd> đúng · <Kbd>S</Kbd> sai · <Kbd>N</Kbd> bỏ qua.
+                    </p>
+                  </Section>
+                </div>
+              )}
               <Section title="Theo nguồn" bodyClassName="p-0">
                 {d.by_source.length ? (
                   <Table>
@@ -141,14 +150,14 @@ export function ReviewPage() {
                       {d.by_source.map((s) => (
                         <TableRow key={s.source}>
                           <TableCell>{sourceLabel(s.source)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{s.reviewed}</TableCell>
-                          <TableCell className="text-right tabular-nums">{pct(s.precision)}</TableCell>
+                          <TableCell className="text-right tabular-nums">{num(s.reviewed)}</TableCell>
+                          <TableCell className="text-right font-medium tabular-nums">{pct(s.precision)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 ) : (
-                  <Empty>Chưa kiểm việc làm nào.</Empty>
+                  <Empty className="py-10">Chưa kiểm việc làm nào.</Empty>
                 )}
               </Section>
               <Section
@@ -162,10 +171,10 @@ export function ReviewPage() {
                 {d.recent.length ? (
                   <ul className="space-y-3 text-sm">
                     {d.recent.map((r) => (
-                      <li key={r.job_id} className="space-y-0.5">
+                      <li key={r.job_id} className="space-y-1">
                         <div className="flex items-start gap-2">
                           <StatusBadge value={r.correct ? "correct" : "wrong"} />
-                          <TextLink to={`/jobs/${r.job_id}`} className="min-w-0 leading-5">
+                          <TextLink to={`/jobs/${r.job_id}`} className="min-w-0 pt-0.5 leading-5">
                             {cap(r.title)}
                           </TextLink>
                         </div>

@@ -2,87 +2,82 @@ import { useQuery } from "@tanstack/react-query"
 import { ExternalLinkIcon } from "lucide-react"
 import { useParams } from "react-router"
 
-import { ErrorState, JobTags, Loading, Meta, PageHeader, ReasonTags, Section, StatusBadge, Tag, TextLink } from "@/components/common"
-import { JobBody, PostingsTable, ReviewSection } from "@/components/job"
+import {
+  ErrorState,
+  JobTags,
+  Meta,
+  PageHeader,
+  PageLoading,
+  ReasonTags,
+  Section,
+  StatusBadge,
+  Tag,
+  TextLink,
+} from "@/components/common"
+import { JobBody, JobFacts, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
-import { cap, date, displayName, dt, pct, salary, sourceLabel } from "@/lib/format"
+import { cap, date, displayName, dt, num, pct, sourceLabel } from "@/lib/format"
 import type { JobDetail } from "@/lib/types"
 
 export function JobPage() {
   const { id } = useParams()
   const query = useQuery({ queryKey: ["job", id], queryFn: () => api.get<JobDetail>(`/jobs/${id}`) })
-  if (query.isError) return <ErrorState error={query.error} />
-  if (!query.data) return <Loading rows={10} />
+  if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
+  if (!query.data) return <PageLoading />
   const d = query.data
   const j = d.job
-  const exp = j.experience_years
 
   return (
     <>
       <PageHeader
-        crumbs={[{ to: "/jobs", label: "Việc làm" }]}
+        crumbs={[
+          { to: "/jobs", label: "Việc làm" },
+          { to: `/companies/${j.company_id}`, label: displayName(j.company_name) },
+        ]}
         title={cap(j.title)}
-        description={
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <TextLink to={`/companies/${j.company_id}`} className="font-medium text-foreground">
-              {displayName(j.company_name)}
-            </TextLink>
-            <StatusBadge value={j.status} />
-            <JobTags job={j} />
-          </span>
-        }
         actions={
           j.apply_url && (
-            <Button size="sm" asChild>
+            <Button asChild>
               <a href={j.apply_url} target="_blank" rel="noopener noreferrer">
                 Trang ứng tuyển <ExternalLinkIcon />
               </a>
             </Button>
           )
         }
-      />
+      >
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm">
+          <TextLink to={`/companies/${j.company_id}`} className="font-medium text-foreground">
+            {displayName(j.company_name)}
+          </TextLink>
+          <StatusBadge value={j.status} />
+          {d.review && (
+            <StatusBadge value={d.review.correct ? "correct" : "wrong"} text={d.review.correct ? "Kiểm tay: đúng" : "Kiểm tay: sai"} />
+          )}
+          <JobTags job={j} />
+        </div>
+      </PageHeader>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-6">
-          <Section title="Mô tả công việc" bodyClassName="px-5 py-5">
+          <JobFacts job={j} />
+          <Section title="Mô tả công việc" bodyClassName="px-5 py-5 sm:px-6">
             <JobBody detail={d} />
           </Section>
-          <Section title="Tin theo nguồn" description={`${d.postings.length} tin được gộp thành việc làm này`} bodyClassName="p-0">
+          <Section
+            title="Tin theo nguồn"
+            description={`${num(d.postings.length)} tin được gộp thành việc làm này`}
+            bodyClassName="p-0"
+          >
             <PostingsTable detail={d} />
           </Section>
         </div>
         <aside>
           <div className="space-y-4 xl:sticky xl:top-6">
             <ReviewSection detail={d} />
-            <Section title="Thông tin">
+            <Section title="Chi tiết">
               <Meta
                 items={[
-                  [
-                    "Nơi làm",
-                    j.locations.length ? (
-                      <div className="space-y-1">
-                        {j.locations.map((l, i) => (
-                          <div key={i}>
-                            {l.province || "–"}
-                            {l.address_raw && l.address_raw !== l.province && (
-                              <div className="text-meta text-muted-foreground">{cap(l.address_raw)}</div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      "Chưa rõ"
-                    ),
-                  ],
-                  [
-                    "Lương",
-                    <>
-                      {salary(j.salary)}
-                      {j.salary?.raw && <div className="text-meta text-muted-foreground">{cap(j.salary.raw)}</div>}
-                    </>,
-                  ],
-                  ["Kinh nghiệm", exp ? `${exp.min ?? "?"}–${exp.max ?? "?"} năm` : "Không ghi"],
                   [
                     "Kỹ năng",
                     j.skills.length ? (
@@ -96,13 +91,14 @@ export function JobPage() {
                     ),
                   ],
                   ["Ngày đăng", date(j.posted_at)],
-                  ["Hạn nộp", date(j.expires_at)],
                   ["Nguồn chính", sourceLabel(j.canonical_source)],
                   [
                     "Độ tin cậy",
                     <div className="space-y-1.5">
-                      <span className="tabular-nums">{pct(j.confidence, 0)}</span>
-                      <ReasonTags reasons={j.verification_reasons} />
+                      <span className="font-medium tabular-nums">{pct(j.confidence, 0)}</span>
+                      <div>
+                        <ReasonTags reasons={j.verification_reasons} />
+                      </div>
                     </div>,
                   ],
                   ["Thấy lần đầu", dt(j.first_seen_at)],

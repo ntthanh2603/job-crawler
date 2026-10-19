@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Check, X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Banknote, CalendarClock, Check, GraduationCap, MapPin, X } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { ExternalLink, Kbd, ReasonTags, Section, StatusBadge } from "@/components/common"
@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
-import { ago, cap, pct, sourceLabel } from "@/lib/format"
-import type { JobDetail } from "@/lib/types"
+import { ago, cap, date, pct, salary, shortUrl, sourceLabel } from "@/lib/format"
+import type { Job, JobDetail } from "@/lib/types"
 
 /** Nội dung tin: HTML do server sinh từ markdown (markdown-it, không cho HTML thô). */
 export function JobBody({ detail }: { detail: JobDetail }) {
@@ -33,8 +33,60 @@ export function JobBody({ detail }: { detail: JobDetail }) {
   )
 }
 
+function Fact({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 gap-3 bg-card px-4 py-3.5 sm:px-5">
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-primary/8 text-brand dark:bg-primary/15 [&_svg]:size-4 [&_svg]:stroke-[1.75]">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <div className="text-meta text-muted-foreground">{label}</div>
+        <div className="text-sm font-medium break-words">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Dải thông tin chính của việc làm: nơi làm, lương, kinh nghiệm, hạn nộp. */
+export function JobFacts({ job }: { job: Job }) {
+  const exp = job.experience_years
+  const places = [...new Set(job.locations.map((l) => l.province).filter(Boolean))]
+  const address = job.locations.find((l) => l.address_raw && l.address_raw !== l.province)?.address_raw
+  return (
+    <div className="grid gap-px overflow-hidden rounded-xl border bg-border shadow-card sm:grid-cols-2 2xl:grid-cols-4">
+      <Fact icon={<MapPin />} label="Nơi làm">
+        {places.length ? places.join(", ") : <span className="text-muted-foreground">Chưa rõ</span>}
+        {address && (
+          <div className="line-clamp-2 text-meta font-normal text-muted-foreground" title={cap(address)}>
+            {cap(address)}
+          </div>
+        )}
+      </Fact>
+      <Fact icon={<Banknote />} label="Lương">
+        {salary(job.salary) === "–" ? <span className="text-muted-foreground">Không ghi</span> : salary(job.salary)}
+      </Fact>
+      <Fact icon={<GraduationCap />} label="Kinh nghiệm">
+        {exp && (exp.min !== null || exp.max !== null) ? (
+          exp.min !== null && exp.max !== null ? (
+            exp.min === exp.max ? `${exp.min} năm` : `${exp.min}–${exp.max} năm`
+          ) : exp.min !== null ? (
+            `Từ ${exp.min} năm`
+          ) : (
+            `Tới ${exp.max} năm`
+          )
+        ) : (
+          <span className="text-muted-foreground">Không ghi</span>
+        )}
+      </Fact>
+      <Fact icon={<CalendarClock />} label="Hạn nộp">
+        {job.expires_at ? date(job.expires_at) : <span className="text-muted-foreground">Không ghi</span>}
+        {job.posted_at && <div className="text-meta font-normal text-muted-foreground">Đăng {date(job.posted_at)}</div>}
+      </Fact>
+    </div>
+  )
+}
+
 export function PostingsTable({ detail }: { detail: JobDetail }) {
-  // Ba cột (nguồn + đường dẫn, trạng thái + lần thấy cuối, xác minh) để vừa khung ~550px.
   return (
     <Table>
       <TableHeader>
@@ -47,10 +99,10 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
       <TableBody>
         {detail.postings.map((p) => (
           <TableRow key={p.id}>
-            <TableCell className="max-w-64">
+            <TableCell className="max-w-72">
               <div className="text-sm font-medium">{sourceLabel(p.source)}</div>
               <ExternalLink href={p.url} className="block truncate text-meta" title={p.url}>
-                {p.url.replace(/^https?:\/\/(www\.)?/, "")}
+                {shortUrl(p.url)}
               </ExternalLink>
             </TableCell>
             <TableCell className="text-meta">
@@ -58,11 +110,12 @@ export function PostingsTable({ detail }: { detail: JobDetail }) {
               <div className="mt-1 text-muted-foreground">Thấy {ago(p.last_seen_at)}</div>
             </TableCell>
             <TableCell className="text-meta whitespace-normal">
-              <div className="flex flex-wrap items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {p.accepted === true && <StatusBadge value="ok" text="Nhận" />}
                 {p.accepted === false && <StatusBadge value="failed" text="Loại" />}
+                {p.accepted === null && <StatusBadge value="queued" text="Chưa chấm" />}
                 {p.confidence !== null && <span className="text-muted-foreground tabular-nums">{pct(p.confidence, 0)}</span>}
-                <ReasonTags reasons={p.verification_reasons} />
+                <ReasonTags reasons={p.verification_reasons} hideSource />
               </div>
             </TableCell>
           </TableRow>
@@ -96,7 +149,7 @@ export function ReviewBox({
       client.invalidateQueries({ queryKey: ["jobs"] })
       onDone?.()
     },
-    onError: (e) => toast.error(cap(String(e))),
+    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const remove = useMutation({
     mutationFn: () => api.delete(`/jobs/${job.id}/review`),
@@ -105,6 +158,7 @@ export function ReviewBox({
       client.invalidateQueries({ queryKey: ["job", job.id] })
       client.invalidateQueries({ queryKey: ["review"] })
     },
+    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   useEffect(() => {
@@ -139,7 +193,7 @@ export function ReviewBox({
         placeholder="Ghi chú khi sai: tin cũ, nhầm doanh nghiệp, tiêu đề sai…"
         className="min-h-16 bg-background"
       />
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Button
           className="bg-success text-white hover:bg-success/90 dark:text-background"
           onClick={() => save.mutate(true)}
@@ -152,19 +206,19 @@ export function ReviewBox({
           <X /> Sai
           {shortcuts && <Kbd>S</Kbd>}
         </Button>
-        {review && !onDone && (
-          <Button variant="ghost" size="sm" className="self-center" onClick={() => remove.mutate()}>
-            Xoá đánh giá
-          </Button>
-        )}
       </div>
+      {review && !onDone && (
+        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => remove.mutate()}>
+          Xoá đánh giá
+        </Button>
+      )}
     </div>
   )
 }
 
 export function ReviewSection({ detail }: { detail: JobDetail }) {
   return (
-    <Section title="Kiểm tay">
+    <Section title="Kiểm tay" description="Dùng để đo precision khi chưa có golden set">
       <ReviewBox detail={detail} />
     </Section>
   )

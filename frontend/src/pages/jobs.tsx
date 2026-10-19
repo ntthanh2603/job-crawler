@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Check, Download, X } from "lucide-react"
+import { Briefcase, Check, ChevronDown, Download, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router"
 
@@ -17,12 +17,15 @@ import {
   Section,
   StatusBadge,
   TextLink,
+  useRowLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
 import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
 import type { Job, Meta, Page } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const KEYS = [
   "q",
@@ -52,6 +55,27 @@ const SORTS = [
   ["expires", "Sắp hết hạn"],
 ] as const
 
+/** Giá trị trống: gạch mờ thay vì "–" đậm lặp lại cả cột. */
+function Muted({ value }: { value: string }) {
+  return value === "–" ? <span className="text-muted-foreground/60">–</span> : <>{value}</>
+}
+
+function Reviewed({ value }: { value: boolean | null }) {
+  if (value === true)
+    return (
+      <span title="Đã kiểm tay: đúng" className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-success/15 text-success-ink">
+        <Check className="size-3" aria-label="Đã kiểm: đúng" />
+      </span>
+    )
+  if (value === false)
+    return (
+      <span title="Đã kiểm tay: sai" className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-destructive/12 text-danger-ink">
+        <X className="size-3" aria-label="Đã kiểm: sai" />
+      </span>
+    )
+  return null
+}
+
 export function JobsPage() {
   const [params, setParams] = useSearchParams()
   const filters: Record<string, string> = Object.fromEntries(KEYS.map((k) => [k, params.get(k) ?? ""]))
@@ -62,6 +86,7 @@ export function JobsPage() {
   const [salaryFrom, setSalaryFrom] = useState(filters.salary_from)
   useEffect(() => setSearch(filters.q), [filters.q])
   useEffect(() => setSalaryFrom(filters.salary_from), [filters.salary_from])
+  const rowLink = useRowLink()
 
   const meta = useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: 300_000 })
   const query = useQuery({
@@ -83,25 +108,37 @@ export function JobsPage() {
 
   const exportUrl = (fmt: string) => `/api/jobs/export${qs({ ...filters, fmt })}`
   const items = query.data?.items ?? []
+  const filtered = [...params.keys()].some((k) => k !== "page" && k !== "sort")
 
   return (
     <>
       <PageHeader
         title="Việc làm"
-        description={query.data ? `${num(query.data.total)} việc làm khớp bộ lọc` : "Đang tải danh sách…"}
+        description={
+          query.data
+            ? `${num(query.data.total)}${query.data.exact ? "" : "+"} việc làm${filtered ? " khớp bộ lọc" : " đang mở"}`
+            : "Đang tải danh sách…"
+        }
         actions={
-          <>
-            <Button variant="outline" size="sm" asChild>
-              <a href={exportUrl("csv")}>
-                <Download /> Tải CSV
-              </a>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href={exportUrl("jsonl")}>
-                <Download /> Tải JSONL
-              </a>
-            </Button>
-          </>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download /> Xuất dữ liệu <ChevronDown className="opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuItem asChild>
+                <a href={exportUrl("csv")}>
+                  <Download /> CSV <span className="ml-auto text-meta text-muted-foreground">mở bằng Excel</span>
+                </a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href={exportUrl("jsonl")}>
+                  <Download /> JSONL <span className="ml-auto text-meta text-muted-foreground">đủ mọi trường</span>
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
 
@@ -109,14 +146,23 @@ export function JobsPage() {
         <FilterBar
           search={
             <SearchBox
-              className="sm:w-72"
               value={search}
               onChange={setSearch}
-              onSubmit={() => update({ q: search.trim(), salary_from: salaryFrom })}
+              onSubmit={(v) => update({ q: (v ?? search).trim(), salary_from: salaryFrom })}
               placeholder="Tìm vị trí hoặc doanh nghiệp"
             />
           }
+          end={
+            <FilterSelect label="Sắp xếp" value={filters.sort} onChange={(v) => update({ sort: v })} options={SORTS} all={null} />
+          }
         >
+          <FilterSelect label="Trạng thái" value={filters.status} onChange={(v) => update({ status: v })} options={STATUSES} all={null} />
+          <FilterSelect
+            label="Tỉnh/thành"
+            value={filters.province}
+            onChange={(v) => update({ province: v })}
+            options={meta.data?.provinces ?? []}
+          />
           <NumberChip
             prefix="Lương từ"
             suffix="triệu"
@@ -124,12 +170,6 @@ export function JobsPage() {
             onChange={setSalaryFrom}
             onCommit={() => salaryFrom !== filters.salary_from && update({ salary_from: salaryFrom })}
             placeholder="–"
-          />
-          <FilterSelect
-            label="Tỉnh/thành"
-            value={filters.province}
-            onChange={(v) => update({ province: v })}
-            options={meta.data?.provinces ?? []}
           />
           <FilterSelect label="Cấp bậc" value={filters.level} onChange={(v) => update({ level: v })} options={meta.data?.levels ?? []} />
           <FilterSelect
@@ -157,25 +197,27 @@ export function JobsPage() {
             onChange={(v) => update({ reviewed: v })}
             options={["no", "yes", "correct", "wrong"]}
           />
-          <FilterSelect label="Trạng thái" value={filters.status} onChange={(v) => update({ status: v })} options={STATUSES} all={null} />
-          <FilterSelect label="Sắp xếp" value={filters.sort} onChange={(v) => update({ sort: v })} options={SORTS} all={null} />
           {filters.company_id && (
-            <span className="inline-flex h-8 items-center gap-1 rounded-md border border-primary/40 bg-accent/40 pr-1 pl-2.5 text-sm">
-              <TextLink to={`/companies/${filters.company_id}`}>Doanh nghiệp #{filters.company_id}</TextLink>
+            <span className="inline-flex h-9 items-center gap-1 rounded-md border border-primary/50 bg-primary/6 pr-1 pl-3 text-sm dark:bg-primary/12">
+              <span className="text-muted-foreground">Doanh nghiệp</span>
+              <TextLink to={`/companies/${filters.company_id}`} className="max-w-48 truncate font-medium">
+                {items[0]?.company_id === filters.company_id ? displayName(items[0].company_name) : "đã chọn"}
+              </TextLink>
               <Button variant="ghost" size="icon-xs" aria-label="Bỏ lọc theo doanh nghiệp" onClick={() => update({ company_id: "" })}>
                 <X />
               </Button>
             </span>
           )}
-          {params.toString() && (
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setParams({})}>
-              Xoá bộ lọc
+          {filtered && (
+            <Button variant="ghost" className="text-muted-foreground" onClick={() => setParams({})}>
+              <X /> Xoá bộ lọc
             </Button>
           )}
         </FilterBar>
+
         {query.isError && (
           <div className="p-5">
-            <ErrorState error={query.error} />
+            <ErrorState error={query.error} onRetry={() => query.refetch()} />
           </div>
         )}
         {query.isLoading && (
@@ -185,55 +227,100 @@ export function JobsPage() {
         )}
         {query.data &&
           (items.length ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Vị trí</TableHead>
-                  <TableHead>Nơi làm</TableHead>
-                  <TableHead>Lương</TableHead>
-                  <TableHead>Nguồn</TableHead>
-                  <TableHead>Hạn nộp</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <div className={cn("transition-opacity", query.isPlaceholderData && "opacity-60")}>
+              {/* Màn hình hẹp: mỗi việc một thẻ. */}
+              <ul className="divide-y md:hidden">
                 {items.map((j) => (
-                  <TableRow key={j.id}>
-                    <TableCell className="max-w-[30rem] min-w-64 whitespace-normal">
-                      <div className="flex items-start gap-1.5">
-                        <TextLink to={`/jobs/${j.id}`} className="font-medium">
-                          {cap(j.title)}
-                        </TextLink>
-                        {j.reviewed === true && <Check className="mt-0.5 size-4 shrink-0 text-success" aria-label="Đã kiểm: đúng" />}
-                        {j.reviewed === false && <X className="mt-0.5 size-4 shrink-0 text-destructive" aria-label="Đã kiểm: sai" />}
-                      </div>
-                      <TextLink to={`/companies/${j.company_id}`} className="mt-0.5 block text-meta text-muted-foreground">
-                        {displayName(j.company_name)}
+                  <li key={j.id} {...rowLink(`/jobs/${j.id}`, "space-y-1.5 px-4 py-3.5")}>
+                    <div className="flex items-start gap-1.5">
+                      <TextLink to={`/jobs/${j.id}`} className="font-medium">
+                        {cap(j.title)}
                       </TextLink>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        {j.status !== "active" && <StatusBadge value={j.status} />}
-                        <JobTags job={j} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="max-w-44 min-w-28 text-meta whitespace-normal">{provinces(j)}</TableCell>
-                    <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
-                    <TableCell className="text-meta">
-                      {sourceLabel(j.canonical_source)}
-                      {j.source_urls.length > 1 && <span className="text-muted-foreground"> +{j.source_urls.length - 1}</span>}
-                    </TableCell>
-                    <TableCell className="text-meta whitespace-nowrap tabular-nums">
-                      <div>{date(j.expires_at)}</div>
-                      {j.posted_at && <div className="text-muted-foreground">Đăng {date(j.posted_at)}</div>}
-                    </TableCell>
-                  </TableRow>
+                      <Reviewed value={j.reviewed} />
+                    </div>
+                    <div className="text-meta text-muted-foreground">{displayName(j.company_name)}</div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-meta">
+                      {provinces(j) !== "–" && <span>{provinces(j)}</span>}
+                      {salary(j.salary) !== "–" && <span className="font-medium">{salary(j.salary)}</span>}
+                      <span className="text-muted-foreground">{sourceLabel(j.canonical_source)}</span>
+                      {j.expires_at && <span className="text-muted-foreground">Hạn {date(j.expires_at)}</span>}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {j.status !== "active" && <StatusBadge value={j.status} />}
+                      <JobTags job={j} />
+                    </div>
+                  </li>
                 ))}
-              </TableBody>
-            </Table>
+              </ul>
+
+              <Table className="max-md:hidden">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Vị trí</TableHead>
+                    <TableHead>Nơi làm</TableHead>
+                    <TableHead>Lương</TableHead>
+                    <TableHead>Nguồn</TableHead>
+                    <TableHead>Hạn nộp</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((j) => (
+                    <TableRow key={j.id} {...rowLink(`/jobs/${j.id}`)}>
+                      <TableCell className="max-w-[32rem] min-w-72 whitespace-normal">
+                        <div className="flex items-start gap-1.5">
+                          <TextLink to={`/jobs/${j.id}`} className="font-medium">
+                            {cap(j.title)}
+                          </TextLink>
+                          <Reviewed value={j.reviewed} />
+                        </div>
+                        <TextLink to={`/companies/${j.company_id}`} className="mt-0.5 block text-meta text-muted-foreground">
+                          {displayName(j.company_name)}
+                        </TextLink>
+                        {(j.status !== "active" || j.level !== "unknown" || j.employment_type !== "unknown" || j.work_mode !== "unknown") && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                            {j.status !== "active" && <StatusBadge value={j.status} />}
+                            <JobTags job={j} />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-44 min-w-28 text-meta whitespace-normal">
+                        <Muted value={provinces(j)} />
+                      </TableCell>
+                      <TableCell className="text-meta font-medium whitespace-nowrap">
+                        <Muted value={salary(j.salary)} />
+                      </TableCell>
+                      <TableCell className="text-meta">
+                        {sourceLabel(j.canonical_source)}
+                        {j.source_urls.length > 1 && (
+                          <span className="text-muted-foreground" title={`${j.source_urls.length} nguồn cùng đăng`}>
+                            {" "}
+                            +{j.source_urls.length - 1}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-meta whitespace-nowrap tabular-nums">
+                        <Muted value={date(j.expires_at)} />
+                        {j.posted_at && <div className="text-muted-foreground">Đăng {date(j.posted_at)}</div>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           ) : (
-            <Empty>Không có việc làm nào khớp bộ lọc.</Empty>
+            <Empty
+              icon={<Briefcase />}
+              title="Không có việc làm nào khớp bộ lọc"
+              action={
+                filtered && (
+                  <Button variant="outline" size="sm" onClick={() => setParams({})}>
+                    Xoá bộ lọc
+                  </Button>
+                )
+              }
+            />
           ))}
-        {query.data && (
-          <Pager {...query.data} onPage={(p) => update({ page: p })} />
-        )}
+        {query.data && <Pager {...query.data} onPage={(p) => update({ page: p })} />}
       </Section>
     </>
   )
