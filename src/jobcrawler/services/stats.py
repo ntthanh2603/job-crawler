@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from saq import Queue
 from sqlalchemy import Float, Select, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +19,7 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
-from jobcrawler.queues import queue_from_url
+from jobcrawler.queues import JobQueue, make_queue
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import FetchOutcome, JobStatus, RunStatus
 
@@ -37,7 +36,7 @@ class QueueStats:
     active: int = 0
     scheduled: int = 0
     workers: int = 0
-    # Cộng dồn từ các worker đang sống (SAQ tự đếm).
+    # Cộng dồn từ các worker đang sống (mỗi worker tự đếm từ lúc khởi động).
     complete: int = 0
     failed: int = 0
     retried: int = 0
@@ -58,6 +57,9 @@ class RunStats:
     p95_seconds: float | None = None
     max_seconds: float | None = None
     over_timeout: int = 0  # lượt dài hơn timeout cứng
+    # Chờ trong hàng đợi (`started_at - queued_at`), chỉ lượt chạy từ queue.
+    wait_p50_seconds: float | None = None
+    wait_p95_seconds: float | None = None
     jobs_found: int = 0
     jobs_accepted: int = 0
     companies_with_jobs: int = 0
@@ -125,7 +127,7 @@ class Stats:
     targets: list[Target]
 
 
-async def queue_stats(queue: Queue) -> QueueStats:
+async def queue_stats(queue: JobQueue) -> QueueStats:
     st = QueueStats(name=queue.name)
     try:
         info = await queue.info()
@@ -193,6 +195,18 @@ async def run_stats(
         st.per_hour = round(done / hours, 1) if hours > 0 else None
     over = select(func.count()).where(finished, CompanyRun.duration_ms > timeout_seconds * 1000)
     st.over_timeout = int(await session.scalar(_window(over, since)) or 0)
+    wait = cast(func.extract("epoch", CompanyRun.started_at - CompanyRun.queued_at), Float)
+    st.wait_p50_seconds, st.wait_p95_seconds = (
+        await session.execute(
+            _window(
+                select(
+                    func.percentile_cont(0.5).within_group(wait),
+                    func.percentile_cont(0.95).within_group(wait),
+                ).where(CompanyRun.queued_at.is_not(None)),
+                since,
+            )
+        )
+    ).one()
 
     # Lượt mới nhất (đã xong) của mỗi doanh nghiệp trong cửa sổ.
     latest = (
@@ -343,7 +357,7 @@ def targets(runs: RunStats) -> list[Target]:
 async def collect_stats(res: Resources, *, hours: float | None = 24, storage: bool = True) -> Stats:
     now = datetime.now(UTC)
     since = now - timedelta(hours=hours) if hours else None
-    board_queue = queue_from_url(res.settings.redis_url, res.settings.board_queue_name)
+    board_queue = make_queue(res.settings, res.settings.board_queue_name)
     await board_queue.connect()
     try:
         queues = [await queue_stats(res.queue), await queue_stats(board_queue)]

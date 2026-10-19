@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from pydantic import SecretStr
-from saq import Queue
 
 from jobcrawler.config import Settings
 from jobcrawler.db.models import (
@@ -28,11 +27,10 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
+from jobcrawler.queues import drop_queue, make_queue
 from jobcrawler.schemas import CompanyIn
 from jobcrawler.services import batch, maintenance
 from jobcrawler.web.app import create_app
-
-from .test_batch_db import drop_queue
 
 pytestmark = pytest.mark.integration
 
@@ -426,7 +424,7 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     assert {j["function"] for j in companies_q["jobs"]} == {"process_company"}
     assert {j["continuation"] for j in companies_q["jobs"]} == {0}
     # Lượt tự chạy tiếp sau `partial`: hẹn giờ, hiện số thứ tự lượt chạy tiếp.
-    queue_db = Queue.from_url(web.settings.redis_url, name=web.settings.queue_name)
+    queue_db = make_queue(web.settings, web.settings.queue_name)
     await queue_db.connect()
     try:
         assert await batch.enqueue_continuation(
@@ -455,9 +453,12 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     assert indexed == {"queued": True, "workers": 0}
     assert (await web.client.post("/api/boards/topcv/index")).json()["queued"] is False
     assert (await web.client.post("/api/boards/khong-co/index")).status_code == 404
-    job = await Queue.from_url(web.settings.redis_url, name=web.settings.board_queue_name).job(
-        "board:topcv"
-    )
+    board_queue = make_queue(web.settings, web.settings.board_queue_name)
+    await board_queue.connect()
+    try:
+        job = await board_queue.job("board:topcv")
+    finally:
+        await board_queue.disconnect()
     assert job is not None
     assert job.function == "index_board"
 

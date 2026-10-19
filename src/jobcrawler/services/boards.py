@@ -305,7 +305,7 @@ async def rerun_companies_with_new_jobs(
     """Sau một lượt index: xếp `process_company` cho doanh nghiệp có profile trên `source` vừa
     có tin mới (hoặc vừa được map) từ `since`, nếu lượt chạy gần nhất cũ hơn
     BOARD_RERUN_MIN_HOURS giờ. Trả số job đã xếp."""
-    from jobcrawler.queues import queue_from_url
+    from jobcrawler.queues import make_queue
     from jobcrawler.services import batch
 
     s = res.settings
@@ -338,7 +338,7 @@ async def rerun_companies_with_new_jobs(
         )
     if not companies:
         return 0
-    queue = queue_from_url(s.redis_url, s.queue_name)
+    queue = make_queue(s, s.queue_name)
     await queue.connect()
     try:
         result = await batch.enqueue_companies(queue, companies, s)

@@ -28,9 +28,11 @@ app = typer.Typer(
 db_app = typer.Typer(help="Schema Postgres (Alembic).", no_args_is_help=True)
 proxies_app = typer.Typer(help="Proxy pool.", no_args_is_help=True)
 llm_app = typer.Typer(help="LLM (vLLM + Qwen).", no_args_is_help=True)
+queue_app = typer.Typer(help="Hàng đợi job (Redis Streams hoặc SAQ).", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(proxies_app, name="proxies")
 app.add_typer(llm_app, name="llm")
+app.add_typer(queue_app, name="queue")
 
 
 @app.callback()
@@ -419,8 +421,8 @@ def worker(
         ),
     ] = False,
 ) -> None:
-    """Chạy worker SAQ: mặc định xử lý `process_company` + cron bảo trì; `--boards` chạy lượt
-    index trang tuyển dụng."""
+    """Chạy worker (hàng đợi theo QUEUE_BACKEND): mặc định xử lý `process_company` + cron bảo trì;
+    `--boards` chạy lượt index trang tuyển dụng."""
     from jobcrawler.entrypoints.worker import run_worker
 
     _run(run_worker(get_settings(), "boards" if boards_role else "companies"))
@@ -760,6 +762,8 @@ def _stats_lines(st: Any) -> list[str]:
         + f" · có job: {runs.companies_with_jobs}",
         f"  thời gian: p50 {fmt_s(runs.p50_seconds)} · p95 {fmt_s(runs.p95_seconds)}"
         f" · max {fmt_s(runs.max_seconds)} · quá timeout {runs.over_timeout}",
+        f"  chờ trong hàng đợi: p50 {fmt_s(runs.wait_p50_seconds)}"
+        f" · p95 {fmt_s(runs.wait_p95_seconds)}",
         f"  job tìm thấy {runs.jobs_found} · nhận {runs.jobs_accepted}",
     ]
     if runs.incomplete_sources:
@@ -1011,6 +1015,68 @@ def fetch(
         typer.echo(result.text[:show])
     if not result.ok:
         raise typer.Exit(1)
+
+
+@queue_app.command("move")
+def queue_move(
+    to: Annotated[
+        str, typer.Option("--to", help="Loại hàng đợi nhận job: streams hoặc saq.")
+    ] = "streams",
+) -> None:
+    """Chuyển job đang chờ / hẹn giờ của queue doanh nghiệp và queue trang tuyển dụng sang loại
+    hàng đợi `--to` (giữ khoá, tham số, giờ hẹn; job cron do worker tự xếp lại), rồi xoá bên cũ.
+
+    Dừng mọi worker trước (`docker compose stop worker indexer`), đổi QUEUE_BACKEND, chạy lệnh
+    này rồi mới khởi động lại worker."""
+    from jobcrawler.queues import drop_queue, make_queue, move_jobs
+
+    if to not in ("streams", "saq"):
+        typer.secho("--to phải là streams hoặc saq.", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    target = "streams" if to == "streams" else "saq"
+    source = "saq" if target == "streams" else "streams"
+    settings = get_settings()
+
+    async def go() -> list[str]:
+        lines: list[str] = []
+        for name in (settings.queue_name, settings.board_queue_name):
+            src = make_queue(settings.model_copy(update={"queue_backend": source}), name)
+            dst = make_queue(settings.model_copy(update={"queue_backend": target}), name)
+            await src.connect()
+            await dst.connect()
+            try:
+                busy = {
+                    b: len((await q.info())["workers"]) for b, q in ((source, src), (target, dst))
+                }
+                if any(busy.values()):
+                    raise RuntimeError(
+                        f"queue {name} còn worker đang chạy ({busy}); dừng worker rồi chạy lại"
+                        " (thông tin worker hết hạn sau ≤ 1 phút)"
+                    )
+                moved, existed = await move_jobs(src, dst)
+            finally:
+                await src.disconnect()
+                await dst.disconnect()
+            dropped = await drop_queue(settings.redis_url, name, (source,))
+            lines.append(
+                f"{name}: chuyển {moved} job {source} → {target}"
+                f" ({existed} đã có bên {target}), xoá {dropped} khoá {source}"
+            )
+        return lines
+
+    try:
+        lines = _run(go())
+    except RuntimeError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    for line in lines:
+        typer.echo(line)
+    if settings.queue_backend != target:
+        typer.secho(
+            f"Lưu ý: QUEUE_BACKEND đang là {settings.queue_backend}; đặt QUEUE_BACKEND={target}"
+            " cho API, CLI và worker.",
+            fg=typer.colors.YELLOW,
+        )
 
 
 def main() -> None:

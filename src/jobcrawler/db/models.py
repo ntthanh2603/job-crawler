@@ -404,6 +404,8 @@ class CompanyRun(Base):
 
     run_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    # Lúc job sẵn sàng chạy (xếp hàng / tới giờ hẹn); `started_at - queued_at` = thời gian chờ.
+    queued_at: Mapped[datetime | None]
     started_at: Mapped[datetime]
     finished_at: Mapped[datetime | None]
     duration_ms: Mapped[int | None]

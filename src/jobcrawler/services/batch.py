@@ -15,7 +15,6 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
-from saq import Queue
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,6 +25,7 @@ from jobcrawler.logging import get_logger
 from jobcrawler.net.urls import parse_domain_input
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.company_facts import valid_tax_code
+from jobcrawler.queues import JobQueue
 from jobcrawler.schemas import CompanyIn, RunStatus
 from jobcrawler.text import normalize_company_name, strip_accents
 
@@ -300,7 +300,7 @@ async def select_companies(
 
 
 def job_key(company: Company) -> str:
-    """Khoá job SAQ: một doanh nghiệp chỉ có một job đang chờ/chạy. Thêm MST để hai pháp nhân
+    """Khoá job: một doanh nghiệp chỉ có một job đang chờ/chạy. Thêm MST để hai pháp nhân
     trùng tên chuẩn hoá ("Công ty TNHH ABC" và "Công ty CP ABC") không chặn nhau."""
     key = f"company:{normalize_company_name(company.input_name)}"
     return f"{key}:{company.tax_code}" if company.tax_code else key
@@ -321,7 +321,7 @@ def job_kwargs(company: Company | CompanyIn, company_id: UUID | None = None) -> 
             "note": company.note,
         }
     return {
-        "company_id": str(company.id),  # tham số job SAQ là JSON
+        "company_id": str(company.id),  # tham số job là JSON
         "name": company.input_name,
         "tax_code": company.tax_code,
         "website": company.input_website,
@@ -330,7 +330,7 @@ def job_kwargs(company: Company | CompanyIn, company_id: UUID | None = None) -> 
 
 
 async def enqueue_continuation(
-    queue: Queue,
+    queue: JobQueue,
     company_in: CompanyIn,
     company_id: UUID,
     settings: Settings,
@@ -353,7 +353,7 @@ async def enqueue_continuation(
 
 
 async def enqueue_companies(
-    queue: Queue, companies: Sequence[Company], settings: Settings
+    queue: JobQueue, companies: Sequence[Company], settings: Settings
 ) -> EnqueueResult:
     """Mỗi doanh nghiệp một job `process_company` (timeout cứng COMPANY_TIMEOUT_SECONDS, chạy
     lại tối đa COMPANY_JOB_RETRIES lần khi worker chết)."""

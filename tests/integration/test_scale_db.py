@@ -1,4 +1,5 @@
-"""M6 trên Postgres + Redis thật, không gọi mạng: enqueue → worker SAQ (concurrency 10) →
+"""M6 trên Postgres + Redis thật, không gọi mạng: enqueue → worker (concurrency 10, cả Redis Streams
+và SAQ) →
 deadline/partial/timeout cứng → stats → eval → chạy lại idempotent → bảo trì."""
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from saq import Queue, Worker
+from saq import Worker
 from sqlalchemy import func, select, text
 
 from jobcrawler.config import Settings
@@ -22,12 +23,12 @@ from jobcrawler.db.models import CompanyRun, FailedPage, Job, Log, SourceFetch
 from jobcrawler.entrypoints import worker as worker_mod
 from jobcrawler.fakes import FakeFetcher
 from jobcrawler.net.http import FetchResult
+from jobcrawler.queues import drop_queue, make_queue
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn, FetchOutcome, RunStatus
 from jobcrawler.services import batch, companies, evaluate, maintenance, stats
 from jobcrawler.sources import boards
-
-from .test_batch_db import drop_queue
+from jobcrawler.streamqueue import StreamQueue, StreamWorker
 
 pytestmark = pytest.mark.integration
 
@@ -83,13 +84,14 @@ class Scale:
     hang_id: UUID
 
 
-@pytest.fixture
+@pytest.fixture(params=["streams", "saq"])
 async def scale(
-    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest, integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[Scale]:
     tag = uuid4().hex[:6]
     settings = integration_settings.model_copy(
         update={
+            "queue_backend": request.param,
             "queue_name": f"jobcrawler-test-{tag}",
             "redis_prefix": f"jc-test-{tag}",
             "llm_base_url": None,
@@ -110,7 +112,7 @@ async def scale(
     for i, site in enumerate(sites):
         fetcher.add(lever_api(site), json.dumps(postings(site, i)), content_type="application/json")
 
-    # Doanh nghiệp "treo": bước sau thu thập kẹt quá timeout cứng của SAQ.
+    # Doanh nghiệp "treo": bước sau thu thập kẹt quá timeout cứng của job.
     original = companies.process_jobs
 
     async def process_jobs(res: Resources, company: Any, raws: Any, **kwargs: Any) -> Any:
@@ -156,17 +158,27 @@ async def finished_runs(sc: Scale) -> int:
 
 
 async def run_worker_until(sc: Scale, expected_runs: int, *, limit: float = 90) -> float:
-    """Chạy worker SAQ thật (như `jobcrawler worker`) tới khi đủ số lượt chạy đã xong."""
-    queue = Queue.from_url(sc.settings.redis_url, name=sc.settings.queue_name)
-    w = Worker(
-        queue,
-        functions=[worker_mod.process_company],
-        concurrency=sc.settings.worker_concurrency,
-        cancellation_hard_deadline_s=worker_mod.CANCEL_GRACE_SECONDS,
-        dequeue_timeout=1,
-    )
-    w.context["settings"] = sc.settings  # pyright: ignore[reportGeneralTypeIssues]
-    w.context["resources"] = sc.res  # pyright: ignore[reportGeneralTypeIssues]
+    """Chạy worker thật (như `jobcrawler worker`, theo QUEUE_BACKEND) tới khi đủ số lượt chạy
+    đã xong."""
+    queue = make_queue(sc.settings, sc.settings.queue_name)
+    w: Any
+    if isinstance(queue, StreamQueue):
+        w = StreamWorker(
+            queue,
+            functions=[worker_mod.process_company],
+            concurrency=sc.settings.worker_concurrency,
+            cancellation_hard_deadline_s=worker_mod.CANCEL_GRACE_SECONDS,
+        )
+    else:
+        w = Worker(
+            queue,
+            functions=[worker_mod.process_company],
+            concurrency=sc.settings.worker_concurrency,
+            cancellation_hard_deadline_s=worker_mod.CANCEL_GRACE_SECONDS,
+            dequeue_timeout=1,
+        )
+    w.context["settings"] = sc.settings
+    w.context["resources"] = sc.res
     await queue.connect()
     started = time.monotonic()
     task = asyncio.create_task(w.start())
@@ -175,13 +187,16 @@ async def run_worker_until(sc: Scale, expected_runs: int, *, limit: float = 90) 
             assert time.monotonic() - started < limit, "worker chạy quá lâu"
             assert not task.done(), task
             await asyncio.sleep(0.5)
-        # Chờ queue rỗng (job đã ghi xong kết quả SAQ).
+        # Chờ queue rỗng (job đã ghi xong kết quả vào hàng đợi).
         while (info := await queue.info())["queued"] or info["active"]:
             assert time.monotonic() - started < limit
             await asyncio.sleep(0.2)
         return time.monotonic() - started
     finally:
-        await w.stop()
+        stopped = w.stop()
+        if asyncio.iscoroutine(stopped):
+            await stopped
+        await asyncio.wait({task}, timeout=20)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await queue.disconnect()
@@ -228,7 +243,7 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
             assert run.status == RunStatus.OK.value, run.error
             assert (run.jobs_found, run.jobs_accepted) == (2, 2)
     hang = by_company[sc.hang_id]
-    assert [r.status for r in hang] == [RunStatus.FAILED.value] * 2  # SAQ chạy lại một lần
+    assert [r.status for r in hang] == [RunStatus.FAILED.value] * 2  # chạy lại một lần
     assert all(r.error == "cancelled" for r in hang)
     assert all((r.duration_ms or 0) <= TIMEOUT * 1000 + 1000 for r in hang)
 
@@ -254,6 +269,10 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
     assert st.runs >= N + 2
     assert st.p95_seconds is not None
     assert st.p95_seconds <= TIMEOUT + 1
+    # Lượt chạy từ queue ghi lúc job sẵn sàng: đo được thời gian chờ (10 slot, 31 doanh nghiệp).
+    assert all(r.queued_at is not None and r.queued_at <= r.started_at for r in runs)
+    assert st.wait_p95_seconds is not None
+    assert 0 <= st.wait_p95_seconds < 30
     assert st.latest_by_status.get(RunStatus.PARTIAL.value, 0) >= len(SLOW)
     assert st.failed_rate is not None
     assert st.failed_rate > 0

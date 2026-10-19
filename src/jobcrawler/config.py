@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=10, ge=1)
     db_max_overflow: int = Field(default=10, ge=0)
     queue_name: str = "jobcrawler"
+    # Hàng đợi job: Redis Streams (consumer group) hoặc SAQ (để quay lại, xem docs/OPERATIONS.md).
+    # API, CLI và worker phải dùng cùng một loại.
+    queue_backend: Literal["streams", "saq"] = "streams"
+    # Streams: job của worker không còn báo sống chừng này giây thì worker khác thu hồi, chạy lại.
+    queue_reclaim_seconds: float = Field(default=60, ge=5)
 
     # LLM: vLLM self-host (OpenAI-compatible). Để trống thì mọi bước dùng LLM bị tắt.
     llm_base_url: str | None = None

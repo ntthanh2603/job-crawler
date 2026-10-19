@@ -126,9 +126,9 @@ uv run jobcrawler db maintain                    # như cron mỗi giờ (dọn 
 - `import` chấp nhận UTF-8 (có BOM), dấu phân cách `,` `;` tab, tiêu đề tiếng Việt ("Tên doanh
   nghiệp", "MST"); MST bị Excel làm mất số 0 đầu được sửa lại; dòng trùng (cùng tên chuẩn hoá +
   MST) bỏ. Chạy lại không tạo trùng (khớp MST rồi tên chuẩn hoá).
-- `enqueue`: mỗi doanh nghiệp một job `process_company` (khoá `company:<tên chuẩn hoá>[:MST]`,
-  timeout cứng `COMPANY_TIMEOUT_SECONDS`, chạy lại tối đa `COMPANY_JOB_RETRIES` lần khi worker
-  chết). Job cùng doanh nghiệp đang chờ/chạy thì bỏ qua; `--stale-hours N` chỉ lấy doanh nghiệp
+- `enqueue`: mỗi doanh nghiệp một job `process_company` trên hàng đợi Redis Streams (khoá
+  `company:<tên chuẩn hoá>[:MST]`, timeout cứng `COMPANY_TIMEOUT_SECONDS`, chạy lại tối đa
+  `COMPANY_JOB_RETRIES` lần khi quá timeout hoặc worker chết). Job cùng doanh nghiệp đang chờ/chạy thì bỏ qua; `--stale-hours N` chỉ lấy doanh nghiệp
   chưa có lượt chạy xong (ok/partial/ambiguous) trong N giờ.
 - Compose: `worker` (mặc định 3 replica × `WORKER_CONCURRENCY` 10 = 30 doanh nghiệp song song,
   cron bảo trì) và `indexer` (`worker --boards`, queue `BOARD_QUEUE_NAME`: lượt index trang tuyển

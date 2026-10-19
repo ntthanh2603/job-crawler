@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from redis.asyncio import Redis
 from saq import Queue, Worker
 from saq.job import Status
 from saq.types import Context
@@ -17,6 +16,7 @@ from sqlalchemy import select
 
 from jobcrawler.config import Settings
 from jobcrawler.db.models import Company, CompanyAlias, CompanyRun
+from jobcrawler.queues import JobQueue, drop_queue, make_queue, queue_from_url
 from jobcrawler.resources import open_resources
 from jobcrawler.schemas import CompanyIn, RunStatus
 from jobcrawler.services import batch
@@ -24,21 +24,25 @@ from jobcrawler.services import batch
 pytestmark = pytest.mark.integration
 
 
-async def drop_queue(redis_url: str, name: str) -> None:
-    redis = Redis.from_url(redis_url)
+@pytest.fixture(params=["streams", "saq"])
+async def queue(
+    request: pytest.FixtureRequest, integration_settings: Settings
+) -> AsyncIterator[JobQueue]:
+    """Queue rỗng tên ngẫu nhiên, mỗi loại hàng đợi một lần."""
+    name = f"jobcrawler-test-{uuid4().hex[:8]}"
+    q = make_queue(integration_settings.model_copy(update={"queue_backend": request.param}), name)
+    await q.connect()
     try:
-        for pattern in (f"saq:{name}:*", f"saq:job:{name}:*"):
-            keys = [k async for k in redis.scan_iter(match=pattern, count=1000)]
-            for i in range(0, len(keys), 1000):
-                await redis.delete(*keys[i : i + 1000])
+        yield q
     finally:
-        await redis.aclose()
+        await q.disconnect()
+        await drop_queue(integration_settings.redis_url, name)
 
 
 @pytest.fixture
-async def queue(integration_settings: Settings) -> AsyncIterator[Queue]:
+async def saq_queue(integration_settings: Settings) -> AsyncIterator[Queue]:
     name = f"jobcrawler-test-{uuid4().hex[:8]}"
-    q = Queue.from_url(integration_settings.redis_url, name=name)
+    q = queue_from_url(integration_settings.redis_url, name)
     await q.connect()
     try:
         yield q
@@ -136,7 +140,7 @@ async def test_select_stale_companies(integration_settings: Settings) -> None:
             assert [x.id for x in limited] == [a, b]
 
 
-async def test_enqueue_dedupes_by_key(integration_settings: Settings, queue: Queue) -> None:
+async def test_enqueue_dedupes_by_key(integration_settings: Settings, queue: JobQueue) -> None:
     tag = uuid4().hex[:6]
     settings = integration_settings.model_copy(
         update={"company_timeout_seconds": 180, "company_job_retries": 2}
@@ -165,7 +169,7 @@ async def test_enqueue_dedupes_by_key(integration_settings: Settings, queue: Que
     assert batch.job_kwargs(companies[0])["website"] == "a.vn"
 
 
-async def test_enqueue_ten_thousand(integration_settings: Settings, queue: Queue) -> None:
+async def test_enqueue_ten_thousand(integration_settings: Settings, queue: JobQueue) -> None:
     """10.000 doanh nghiệp vào queue trong vài giây (không cần ghi DB)."""
     companies = [Company(id=i, input_name=f"Doanh nghiệp số {i}") for i in range(10_000)]
     started = time.monotonic()
@@ -176,7 +180,7 @@ async def test_enqueue_ten_thousand(integration_settings: Settings, queue: Queue
     assert elapsed < 60, elapsed
 
 
-async def test_saq_retries_timed_out_job_once(integration_settings: Settings, queue: Queue) -> None:
+async def test_saq_retries_timed_out_job_once(saq_queue: Queue) -> None:
     """Job quá timeout cứng bị huỷ và chạy lại tối đa COMPANY_JOB_RETRIES lần (ở đây 2 lần)."""
     attempts: list[int] = []
 
@@ -184,6 +188,7 @@ async def test_saq_retries_timed_out_job_once(integration_settings: Settings, qu
         attempts.append(ctx["job"].attempts)  # pyright: ignore[reportTypedDictNotRequiredAccess]
         await asyncio.sleep(5)
 
+    queue = saq_queue
     worker: Worker[Context] = Worker(
         queue,
         functions=[("process_company", slow)],

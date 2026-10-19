@@ -30,7 +30,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from jobcrawler.config import Settings, get_settings
 from jobcrawler.logging import configure_logging, get_logger
-from jobcrawler.queues import queue_from_url
+from jobcrawler.queues import make_queue
 from jobcrawler.resources import open_resources
 from jobcrawler.web import api
 
@@ -108,8 +108,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     # uvicorn --reload chạy app ở process con: cấu hình log lại ở đây.
     configure_logging(settings)
-    company_queue = queue_from_url(settings.redis_url, settings.queue_name)
-    board_queue = queue_from_url(settings.redis_url, settings.board_queue_name)
+    company_queue = make_queue(settings, settings.queue_name)
+    board_queue = make_queue(settings, settings.board_queue_name)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

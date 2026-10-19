@@ -447,12 +447,16 @@ def _display_name(company: Company) -> str:
 
 
 async def process_company(
-    res: Resources, company_in: CompanyIn, *, company_id: UUID | None = None
+    res: Resources,
+    company_in: CompanyIn,
+    *,
+    company_id: UUID | None = None,
+    queued_at: datetime | None = None,
 ) -> CompanyResult:
     """Chạy toàn bộ pipeline cho một doanh nghiệp và ghi `company_runs`, kể cả khi lỗi.
 
     `company_id`: doanh nghiệp đã `import` (job từ `enqueue`) — dùng đúng bản ghi đó thay vì
-    tra theo tên."""
+    tra theo tên. `queued_at`: lúc job sẵn sàng chạy (để đo thời gian chờ trong hàng đợi)."""
     run_id = uuid7()
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
@@ -465,6 +469,7 @@ async def process_company(
                 CompanyRun(
                     run_id=run_id,
                     company_id=resolved.company.id,
+                    queued_at=queued_at,
                     started_at=started_at,
                     status=RunStatus.RUNNING.value,
                 )
@@ -484,7 +489,7 @@ async def process_company(
 
         with structlog.contextvars.bound_contextvars(company_id=state.company.id):
             log.info("company.start", tax_code=company_in.tax_code, website=company_in.website)
-            # Giá trị khi bị huỷ (timeout SAQ, Ctrl+C): CancelledError không phải Exception.
+            # Giá trị khi bị huỷ (timeout job, Ctrl+C): CancelledError không phải Exception.
             outcome = PipelineOutcome(status=RunStatus.FAILED, error="cancelled")
             # Ghi cả khi pipeline lỗi/bị huỷ giữa chừng.
             records: list[FetchRecord] = []

@@ -10,12 +10,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
-from saq import Queue
 from sqlalchemy import select
 
 from jobcrawler.db.models import Job
 from jobcrawler.entrypoints.worker import board_job_timeout
 from jobcrawler.pipeline.store import job_to_out
+from jobcrawler.queues import JobQueue
 from jobcrawler.resources import Resources
 from jobcrawler.services import batch
 from jobcrawler.services.export import CSV_COLUMNS, csv_row
@@ -85,7 +85,7 @@ def board_names() -> list[str]:
     return list(boards.registry())
 
 
-async def enqueue_board(res: Resources, board_queue: Queue, name: str) -> bool:
+async def enqueue_board(res: Resources, board_queue: JobQueue, name: str) -> bool:
     """Đưa một trang tuyển dụng vào queue index (cần `jobcrawler worker --boards` đang chạy).
     False nếu trang đó đang chờ/đang index."""
     if name not in boards.registry():

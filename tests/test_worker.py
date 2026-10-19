@@ -1,22 +1,32 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, cast
+from types import SimpleNamespace
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import pytest
+from saq import Worker
 
 from jobcrawler.config import Settings
 from jobcrawler.entrypoints import worker
 from jobcrawler.schemas import CompanyResult, RunStatus
 from jobcrawler.services import companies
+from jobcrawler.streamqueue import StreamWorker
 
 
-def test_company_worker_runs_companies_maintenance_and_overview(clean_env: None) -> None:
+@pytest.mark.parametrize("backend", ["streams", "saq"])
+def test_company_worker_runs_companies_maintenance_and_overview(
+    clean_env: None, backend: Literal["streams", "saq"]
+) -> None:
     settings = Settings(
-        worker_concurrency=7, maintenance_cron="5 * * * *", overview_cron="*/3 * * * *"
+        queue_backend=backend,
+        worker_concurrency=7,
+        maintenance_cron="5 * * * *",
+        overview_cron="*/3 * * * *",
     )
     w = worker.build_worker(settings)
+    assert isinstance(w, StreamWorker if backend == "streams" else Worker)
     assert set(w.functions) == {"process_company", "maintenance_cron", "overview_cron"}
     assert w.queue.name == "jobcrawler"
     assert w.concurrency == 7
@@ -27,9 +37,15 @@ def test_company_worker_runs_companies_maintenance_and_overview(clean_env: None)
     assert overview.unique
 
 
-def test_board_worker_has_own_queue_and_index_cron(clean_env: None) -> None:
+@pytest.mark.parametrize("backend", ["streams", "saq"])
+def test_board_worker_has_own_queue_and_index_cron(
+    clean_env: None, backend: Literal["streams", "saq"]
+) -> None:
     settings = Settings(
-        board_index_cron="0 */4 * * *", board_index_budget_seconds=600, board_worker_concurrency=3
+        queue_backend=backend,
+        board_index_cron="0 */4 * * *",
+        board_index_budget_seconds=600,
+        board_worker_concurrency=3,
     )
     w = worker.build_worker(settings, "boards")
     assert set(w.functions) == {"index_board", "index_boards_cron"}
@@ -80,7 +96,9 @@ async def test_partial_run_enqueues_a_continuation(
     continuation: int,
     queued: bool,
 ) -> None:
-    async def fake_process(res: Any, company_in: Any, *, company_id: Any) -> CompanyResult:
+    async def fake_process(
+        res: Any, company_in: Any, *, company_id: Any, queued_at: Any
+    ) -> CompanyResult:
         return _result(status)
 
     monkeypatch.setattr(companies, "process_company", fake_process)
@@ -102,3 +120,12 @@ async def test_partial_run_enqueues_a_continuation(
     assert kwargs["company_id"] == str(UUID(int=2))
     assert kwargs["website"] == "acme.vn"
     assert kwargs["scheduled"] >= datetime.now(UTC).timestamp() + 50
+
+
+def test_job_ready_at_uses_schedule_when_later() -> None:
+    job = SimpleNamespace(queued=1_760_000_000_000, scheduled=0)
+    assert worker.job_ready_at(job) == datetime.fromtimestamp(1_760_000_000, UTC)
+    # Lượt chạy tiếp hẹn sau 60 s: thời gian chờ tính từ giờ hẹn.
+    job.scheduled = 1_760_000_060
+    assert worker.job_ready_at(job) == datetime.fromtimestamp(1_760_000_060, UTC)
+    assert worker.job_ready_at(None) is None

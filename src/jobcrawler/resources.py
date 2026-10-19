@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 
 from curl_cffi.utils import CurlCffiWarning
 from redis.asyncio import Redis
-from saq import Queue
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -25,7 +24,7 @@ from jobcrawler.net.http import CurlTransport, HttpClient, HttpConfig
 from jobcrawler.net.kv import KeyValueStore, RedisKV
 from jobcrawler.net.proxy_pool import Proxy, ProxyPool, load_proxies
 from jobcrawler.net.ratelimit import RedisRateLimiter
-from jobcrawler.queues import queue_from_url
+from jobcrawler.queues import JobQueue, make_queue
 
 log = jlog.get_logger(__name__)
 
@@ -44,7 +43,7 @@ class Resources:
     engine: AsyncEngine
     sessionmaker: async_sessionmaker[AsyncSession]
     redis: Redis
-    queue: Queue
+    queue: JobQueue
     llm: LLMClient  # `llm.enabled` False khi chưa cấu hình LLM_BASE_URL/LLM_MODEL
     http: HttpClient
     proxies: ProxyPool
@@ -76,13 +75,13 @@ async def _close_sink(sink: jlog.PgLogSink) -> None:
 async def open_resources(
     settings: Settings | None = None,
     *,
-    queue: Queue | None = None,
+    queue: JobQueue | None = None,
     db_logs: bool = True,
 ) -> AsyncIterator[Resources]:
-    """Mở DB, Redis, SAQ queue, LLM client, HTTP client (proxy pool, rate limit, robots,
+    """Mở DB, Redis, queue job, LLM client, HTTP client (proxy pool, rate limit, robots,
     cache) và browser (khởi động lười).
 
-    `queue`: dùng queue có sẵn (worker SAQ tự quản lý kết nối của queue này).
+    `queue`: dùng queue có sẵn (worker tự quản lý kết nối của queue này).
     `db_logs`: gắn sink ghi log vào bảng `logs`.
     """
     settings = settings or get_settings()
@@ -119,7 +118,7 @@ async def open_resources(
             raise ResourceUnavailableError(f"Không kết nối được Redis ({where}): {exc}") from exc
 
         if queue is None:
-            queue = queue_from_url(settings.redis_url, settings.queue_name)
+            queue = make_queue(settings, settings.queue_name)
             await queue.connect()
             stack.push_async_callback(queue.disconnect)
 

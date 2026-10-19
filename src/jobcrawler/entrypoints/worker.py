@@ -1,4 +1,8 @@
-"""Cấu hình worker SAQ: functions, cron jobs, startup/shutdown dùng `open_resources`.
+"""Cấu hình worker: functions, cron jobs, startup/shutdown dùng `open_resources`.
+
+Hàng đợi theo QUEUE_BACKEND: `streams` (`streamqueue.StreamWorker`, mặc định) hoặc `saq`. Hàm job
+nhận cùng `ctx` ở cả hai loại: `worker` (`.queue`, `.concurrency`), `job` (`.attempts`, `.queued`,
+`.scheduled`), cộng `settings`, `resources`.
 
 Hai vai trò, mỗi vai một queue:
 - `companies` (`jobcrawler worker`): job `process_company` (≤ COMPANY_TIMEOUT_SECONDS), cron
@@ -19,9 +23,10 @@ from uuid import UUID
 from saq import CronJob, Worker
 from saq.types import Context
 
+from jobcrawler import streamqueue
 from jobcrawler.config import Settings
 from jobcrawler.logging import get_logger
-from jobcrawler.queues import queue_from_url
+from jobcrawler.queues import make_queue, queue_from_url
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import CompanyIn, RunStatus
 from jobcrawler.services import batch, boards, companies, maintenance, overview
@@ -63,6 +68,15 @@ def _as_uuid(value: object) -> UUID | None:
         return None
 
 
+def job_ready_at(job: Any) -> datetime | None:
+    """Lúc job sẵn sàng chạy: lúc xếp hàng (ms epoch), hoặc giờ hẹn (giây epoch) nếu muộn hơn —
+    lượt chạy tiếp hẹn sau ~1 phút không tính phút đó là thời gian chờ."""
+    queued = getattr(job, "queued", 0) or 0
+    if not queued:
+        return None
+    return datetime.fromtimestamp(max(queued / 1000, getattr(job, "scheduled", 0) or 0), UTC)
+
+
 async def process_company(
     ctx: WorkerContext,
     *,
@@ -76,7 +90,9 @@ async def process_company(
     """`continuation`: số lượt chạy tiếp liền trước (lượt `partial` tự xếp lượt sau)."""
     res = ctx["resources"]
     company_in = CompanyIn(name=name, tax_code=tax_code, website=website, note=note)
-    result = await companies.process_company(res, company_in, company_id=_as_uuid(company_id))
+    result = await companies.process_company(
+        res, company_in, company_id=_as_uuid(company_id), queued_at=job_ready_at(ctx.get("job"))
+    )
     if result.status is RunStatus.PARTIAL and continuation < res.settings.company_max_continuations:
         # Chạm giới hạn / hết giờ / tin chờ LLM: lượt sau dùng lại phần đã tải và đi tiếp.
         queued = await batch.enqueue_continuation(
@@ -147,13 +163,14 @@ MAINTENANCE_TIMEOUT = 3600
 CANCEL_GRACE_SECONDS = 10.0
 
 
-def cron_jobs(settings: Settings, role: WorkerRole = "companies") -> list[CronJob[WorkerContext]]:
-    # Cron SAQ có khoá duy nhất theo hàm: nhiều replica cũng chỉ một lần mỗi mốc.
+def cron_jobs(settings: Settings, role: WorkerRole = "companies") -> list[Any]:
+    # Cron có khoá duy nhất theo hàm: nhiều replica cũng chỉ một lần mỗi mốc.
+    cron = CronJob if settings.queue_backend == "saq" else streamqueue.CronJob
     if role == "boards":
-        return [CronJob(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
+        return [cron(index_boards_cron, cron=settings.board_index_cron, timeout=60)]
     return [
-        CronJob(maintenance_cron, cron=settings.maintenance_cron, timeout=MAINTENANCE_TIMEOUT),
-        CronJob(overview_cron, cron=settings.overview_cron, timeout=300),
+        cron(maintenance_cron, cron=settings.maintenance_cron, timeout=MAINTENANCE_TIMEOUT),
+        cron(overview_cron, cron=settings.overview_cron, timeout=300),
     ]
 
 
@@ -161,21 +178,36 @@ def queue_name(settings: Settings, role: WorkerRole = "companies") -> str:
     return settings.board_queue_name if role == "boards" else settings.queue_name
 
 
-def build_worker(settings: Settings, role: WorkerRole = "companies") -> Worker[WorkerContext]:
-    queue = queue_from_url(settings.redis_url, queue_name(settings, role))
+def build_worker(
+    settings: Settings, role: WorkerRole = "companies"
+) -> Worker[WorkerContext] | streamqueue.StreamWorker:
     boards_role = role == "boards"
-    worker: Worker[WorkerContext] = Worker(
-        queue,
-        functions=[index_board] if boards_role else [process_company],
-        concurrency=settings.board_worker_concurrency
-        if boards_role
-        else settings.worker_concurrency,
-        cron_jobs=cron_jobs(settings, role),
-        # Job bị huỷ (timeout cứng, worker dừng) còn chừng này giây để ghi `company_runs`.
-        cancellation_hard_deadline_s=CANCEL_GRACE_SECONDS,
-        startup=startup,
-        shutdown=shutdown,
-    )
+    functions: list[Any] = [index_board] if boards_role else [process_company]
+    concurrency = settings.board_worker_concurrency if boards_role else settings.worker_concurrency
+    worker: Worker[WorkerContext] | streamqueue.StreamWorker
+    if settings.queue_backend == "saq":
+        worker = Worker(
+            queue_from_url(settings.redis_url, queue_name(settings, role)),
+            functions=functions,
+            concurrency=concurrency,
+            cron_jobs=cron_jobs(settings, role),
+            # Job bị huỷ (timeout cứng, worker dừng) còn chừng này giây để ghi `company_runs`.
+            cancellation_hard_deadline_s=CANCEL_GRACE_SECONDS,
+            startup=startup,
+            shutdown=shutdown,
+        )
+    else:
+        queue = make_queue(settings, queue_name(settings, role))
+        assert isinstance(queue, streamqueue.StreamQueue)
+        worker = streamqueue.StreamWorker(
+            queue,
+            functions=functions,
+            concurrency=concurrency,
+            cron_jobs=cron_jobs(settings, role),
+            cancellation_hard_deadline_s=CANCEL_GRACE_SECONDS,
+            startup=startup,
+            shutdown=shutdown,
+        )
     worker.context["settings"] = settings
     return worker
 

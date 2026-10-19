@@ -270,9 +270,7 @@ async def test_refetch_without_profile_link_keeps_job_on_profile(
 async def test_index_run_enqueues_companies_with_new_jobs(
     integration_settings: Settings,
 ) -> None:
-    from saq import Queue
-
-    from .test_batch_db import drop_queue
+    from jobcrawler.queues import drop_queue, make_queue
 
     name = f"jobcrawler-test-{uuid4().hex[:8]}"
     settings = settings_for(integration_settings).model_copy(update={"queue_name": name})
@@ -280,7 +278,7 @@ async def test_index_run_enqueues_companies_with_new_jobs(
         company_id = await reset(res)
         started = datetime.now(UTC)
         await indexer(res, fake_site(JOBS)).run()  # ACME (profile 7) có 2 tin mới
-        queue = Queue.from_url(settings.redis_url, name=name)
+        queue = make_queue(settings, name)
         await queue.connect()
         try:
             # Doanh nghiệp vừa chạy (trong BOARD_RERUN_MIN_HOURS) thì không xếp lại.

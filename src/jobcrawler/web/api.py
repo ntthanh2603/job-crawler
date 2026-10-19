@@ -14,8 +14,8 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from saq import Queue
 
+from jobcrawler.queues import JobQueue
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import CompanyEntity, EmploymentType, JobLevel, KycStatus, WorkMode
 from jobcrawler.services import batch, evaluate, overview, stats
@@ -31,7 +31,7 @@ def res_of(request: Request) -> Resources:
     return request.app.state.res
 
 
-def board_queue_of(request: Request) -> Queue:
+def board_queue_of(request: Request) -> JobQueue:
     return request.app.state.board_queue
 
 
@@ -871,11 +871,11 @@ QUEUE_PAGE = 25
 @router.get("/queue")
 async def get_queue(request: Request, page: int = 1, board_page: int = 1) -> dict[str, Any]:
     """Hai queue (doanh nghiệp, trang tuyển dụng): số job, worker, và một trang các job đang
-    chạy / đang chờ của mỗi queue (`page`, `board_page`; mỗi trang QUEUE_PAGE job)."""
+    chạy / đang chờ / hẹn giờ của mỗi queue (`page`, `board_page`; mỗi trang QUEUE_PAGE job)."""
     out: list[dict[str, Any]] = []
     for queue, wanted in ((res_of(request).queue, page), (board_queue_of(request), board_page)):
         st = await stats.queue_stats(queue)
-        listed = st.queued + st.active
+        listed = st.queued + st.active + st.scheduled
         pages = max(1, math.ceil(listed / QUEUE_PAGE))
         current = min(max(1, wanted), pages)
         try:
