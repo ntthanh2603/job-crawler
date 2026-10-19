@@ -1,0 +1,53 @@
+[project]
+name = "jobcrawler"
+version = "0.2.0"
+description = "Backend thu thập tin tuyển dụng cho ~10.000 doanh nghiệp: API, gRPC gateway, runner, scheduler"
+readme = "../README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    # Lịch cron của hàng đợi Redis Streams (streamqueue.CronJob).
+    "croniter>=6.2.4",
+    "datasketch>=1.6",
+    "extruct>=0.18.0",
+    # API cho giao diện web (`jobcrawler ui`, React ở frontend/): FastAPI, uvicorn, upload, markdown.
+    "fastapi>=0.143.3",
+    "ftfy>=6.3",
+    # Gateway cho worker lấy trang (`jobcrawler gateway`).
+    "grpcio>=1.84.0",
+    "grpcio-health-checking>=1.84.0",
+    # Gọi thẳng API bên ngoài (SERP) từ backend, không qua worker.
+    "httpx>=0.28.1",
+    "jobcrawler-proto",
+    "markdown-it-py>=4.2.0",
+    "markdownify>=1.2.3",
+    "openai>=3.31.0",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16.0",
+    "python-multipart>=0.0.32",
+    "rapidfuzz>=3.10",
+    "redis>=7.4.1",
+    "selectolax>=1.0.0",
+    "sqlalchemy[asyncio]>=2.0.40",
+    "structlog>=26.1.0",
+    "typer>=0.27.3",
+    # Múi giờ (Asia/Ho_Chi_Minh) cho khung giờ build/poll; Windows không có sẵn tzdata.
+    "tzdata>=2026.1",
+    "uvicorn>=0.54.0",
+    # Nén cột lớn trong Postgres bằng zstd + từ điển (Python 3.12 chưa có zstd trong stdlib).
+    "zstandard>=0.25.0",
+]
+
+[project.scripts]
+jobcrawler = "jobcrawler.entrypoints.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.uv.sources]
+jobcrawler-proto = { workspace = true }

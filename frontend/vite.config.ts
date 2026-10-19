@@ -18,7 +18,7 @@ export default defineConfig({
   },
   build: {
     // FastAPI phục vụ bản build từ trong package Python.
-    outDir: path.resolve(import.meta.dirname, "../src/jobcrawler/web/dist"),
+    outDir: path.resolve(import.meta.dirname, "../backend/jobcrawler/web/dist"),
     emptyOutDir: true,
     // Công cụ nội bộ: chunk chung (React, Radix, React Query) ~500 KB là chấp nhận được.
     chunkSizeWarningLimit: 700,

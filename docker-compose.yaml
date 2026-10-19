@@ -1,5 +1,25 @@
 name: jobcrawler
 
+# Một máy chạy đủ hệ thống (dev / quy mô nhỏ). Triển khai nhiều máy và quy mô 10.000 doanh
+# nghiệp: docs/DEPLOY.md (worker ở máy khác dùng deploy/worker.compose.yaml).
+
+x-backend: &backend
+  image: jobcrawler-backend:latest
+  env_file:
+    - path: .env
+      required: false
+  environment: &backend_env
+    # Ghi đè URL trong .env (vốn trỏ localhost cho CLI trên host) bằng hostname nội bộ.
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
+    REDIS_URL: redis://redis:6379/0
+  depends_on: &backend_deps
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  init: true
+  restart: unless-stopped
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -9,8 +29,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-jobcrawler}
     ports:
       - "${POSTGRES_PORT:-15432}:5432"
-    # /dev/shm mặc định của Docker (64 MB) không đủ cho truy vấn / VACUUM song song khi bảng lớn
-    # ("could not resize shared memory segment … No space left on device").
+    # /dev/shm mặc định của Docker (64 MB) không đủ cho truy vấn / VACUUM song song khi bảng lớn.
     shm_size: 512mb
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -25,7 +44,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    # Hàng đợi (Redis Streams) + rate limit + cache: AOF mỗi giây, tự viết lại khi phình.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "${REDIS_PORT:-16379}:6379"
     volumes:
@@ -37,53 +57,22 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Chạy một lần `jobcrawler db upgrade` để worker không khởi động trên schema cũ.
+  # Chạy một lần `jobcrawler db upgrade` để các process không khởi động trên schema cũ.
   migrate:
-    build: .
-    image: jobcrawler:latest
+    <<: *backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     command: ["jobcrawler", "db", "upgrade"]
-    env_file: &env_file
-      - path: .env
-        required: false
-    environment: &app_env
-      # Ghi đè URL trong .env (vốn trỏ localhost cho CLI trên host) bằng hostname nội bộ.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
-      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
-  # Doanh nghiệp (`process_company`) + cron bảo trì mỗi giờ. Mỗi replica WORKER_CONCURRENCY
-  # doanh nghiệp song song (mặc định 3 × 10 = 30). Dừng container: job đang chạy được SAQ chạy
-  # lại ở replica khác.
-  worker:
-    image: jobcrawler:latest
-    command: ["jobcrawler", "worker"]
-    env_file: *env_file
-    environment: *app_env
-    depends_on: &worker_deps
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    volumes: &worker_volumes
-      # config/proxies.txt (PROXIES_FILE mặc định). Mount cả thư mục: thiếu file vẫn chạy được.
-      - ./config:/app/config:ro
-    deploy:
-      replicas: ${WORKER_REPLICAS:-3}
-    init: true
-    shm_size: 1gb
-    restart: unless-stopped
-
-  # Giao diện web + API JSON (React build sẵn trong image). Chỉ mở ở 127.0.0.1; đặt UI_PASSWORD
-  # trong .env nếu mở ra ngoài.
+  # Giao diện web + API JSON. Chỉ mở ở 127.0.0.1; đặt UI_PASSWORD trong .env nếu mở ra ngoài.
   api:
-    image: jobcrawler:latest
+    <<: *backend
     command: ["jobcrawler", "ui", "--host", "0.0.0.0", "--port", "8000"]
-    env_file: *env_file
-    environment: *app_env
-    depends_on: *worker_deps
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     healthcheck:
@@ -91,19 +80,63 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
-  # Index trang tuyển dụng (cron BOARD_INDEX_CRON → mỗi trang một job dài hàng giờ) ở queue
-  # riêng, không chiếm chỗ của doanh nghiệp. Một replica là đủ (mỗi trang có khoá riêng).
-  indexer:
-    image: jobcrawler:latest
-    command: ["jobcrawler", "worker", "--boards"]
-    env_file: *env_file
-    environment: *app_env
-    depends_on: *worker_deps
-    volumes: *worker_volumes
+  # Gateway gRPC cho worker lấy trang. Worker ở máy khác nối vào GATEWAY_PUBLISH (mặc định chỉ
+  # 127.0.0.1); mở ra ngoài thì đặt GATEWAY_TOKEN (và TLS, xem docs/DEPLOY.md).
+  gateway:
+    <<: *backend
+    command: ["jobcrawler", "gateway"]
+    ports:
+      - "${GATEWAY_PUBLISH:-127.0.0.1:50051}:50051"
+
+  # Xếp lịch build đêm / poll ngày. Nhiều replica được (một replica giữ khoá làm việc).
+  scheduler:
+    <<: *backend
+    command: ["jobcrawler", "scheduler"]
+
+  # Runner poll: lượt nhẹ theo bộ khung, cần nhanh (mỗi replica RUNNER_POLL_CONCURRENCY lượt).
+  runner-poll:
+    <<: *backend
+    command: ["jobcrawler", "runner", "--role", "poll"]
     deploy:
-      replicas: ${INDEXER_REPLICAS:-1}
+      replicas: ${RUNNER_POLL_REPLICAS:-2}
+
+  # Runner build: lượt đủ (đêm, khi poll lỗi, doanh nghiệp mới) + cron bảo trì / số liệu.
+  runner-build:
+    <<: *backend
+    command: ["jobcrawler", "runner", "--role", "build"]
+    deploy:
+      replicas: ${RUNNER_BUILD_REPLICAS:-2}
+
+  # Runner trang tuyển dụng: index đủ ban đêm, index đuôi mỗi 2 phút ban ngày.
+  runner-boards:
+    <<: *backend
+    command: ["jobcrawler", "runner", "--role", "boards"]
+    deploy:
+      replicas: ${RUNNER_BOARDS_REPLICAS:-1}
+
+  # Worker lấy trang (curl_cffi + Chromium). Proxy riêng của worker: config/worker-proxies.txt
+  # (WORKER_PROXIES_FILE) hoặc WORKER_PROXIES trong .env.
+  worker:
+    image: jobcrawler-worker:latest
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    command: ["jobworker", "run"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GATEWAY_ADDR: gateway:50051
+      WORKER_POOL: ${WORKER_POOL:-default}
+      WORKER_PROXIES_FILE: ${WORKER_PROXIES_FILE:-/app/config/worker-proxies.txt}
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      gateway:
+        condition: service_started
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
     init: true
     shm_size: 1gb
     restart: unless-stopped

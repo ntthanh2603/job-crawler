@@ -1,0 +1,42 @@
+# Worker lấy trang chạy ở máy riêng (gần proxy / IP sạch), nối về gateway của backend qua gRPC.
+#
+#   docker compose -f deploy/worker.compose.yaml --env-file deploy/worker.env up -d
+#
+# worker.env (ví dụ):
+#   GATEWAY_ADDR=crawl-gw.example.com:50051
+#   GATEWAY_TOKEN=<token giống GATEWAY_TOKEN của backend>
+#   GATEWAY_TLS=true
+#   WORKER_POOL=residential          # khớp FETCH_ROUTES của backend nếu muốn định tuyến domain
+#   WORKER_REPLICAS=4
+#   WORKER_HTTP_SLOTS=32
+#   WORKER_RENDER_SLOTS=2            # 0 = máy không chạy Chromium
+#   WORKER_PROXIES_FILE=/app/config/worker-proxies.txt
+#
+# Image: build từ gốc repo (`docker build -f worker/Dockerfile -t jobcrawler-worker .`) rồi đẩy
+# lên registry, hoặc build ngay trên máy worker.
+name: jobcrawler-worker
+
+services:
+  worker:
+    image: ${WORKER_IMAGE:-jobcrawler-worker:latest}
+    command: ["jobworker", "run"]
+    environment:
+      GATEWAY_ADDR: ${GATEWAY_ADDR:?đặt GATEWAY_ADDR}
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
+      GATEWAY_TLS: ${GATEWAY_TLS:-false}
+      WORKER_POOL: ${WORKER_POOL:-default}
+      WORKER_HTTP_SLOTS: ${WORKER_HTTP_SLOTS:-32}
+      WORKER_RENDER_SLOTS: ${WORKER_RENDER_SLOTS:-2}
+      WORKER_PROXIES_FILE: ${WORKER_PROXIES_FILE:-/app/config/worker-proxies.txt}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    volumes:
+      - ../config:/app/config:ro
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          # ~300 MB mỗi trang Chromium + ~200 MB nền: 2 slot render ≈ 1 GB.
+          memory: ${WORKER_MEMORY:-1536m}
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped

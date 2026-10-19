@@ -1,0 +1,30 @@
+[project]
+name = "jobworker"
+version = "0.2.0"
+description = "Worker lấy trang cho jobcrawler: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "curl-cffi>=0.16",
+    "grpcio>=1.84.0",
+    "jobcrawler-proto",
+    # Khớp đúng tag image mcr.microsoft.com/playwright/python trong worker/Dockerfile.
+    "playwright==1.63.0",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16.0",
+    "structlog>=26.1.0",
+    "typer>=0.27.3",
+    "zstandard>=0.25.0",
+]
+
+[project.scripts]
+jobworker = "jobworker.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.uv.sources]
+jobcrawler-proto = { workspace = true }

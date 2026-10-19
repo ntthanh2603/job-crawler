@@ -1,0 +1,173 @@
+// Hợp đồng giữa backend (gateway) và worker lấy trang.
+//
+// Worker là client: đăng ký (Register), xin việc (Lease, long-poll), trả kết quả (Complete), báo
+// sống (Heartbeat), rời đi (Leave). Việc nằm trong Redis Streams phía backend: mỗi pool hai stream
+// (http, render), consumer group `workers`, mỗi worker là một consumer. Gateway không giữ trạng
+// thái nên chạy được nhiều replica sau một load balancer HTTP/2.
+//
+// Một việc là MỘT request (HTTP qua curl_cffi, hoặc mở trang bằng Chromium). Toàn bộ logic thu
+// thập (robots, rate limit, retry, nhận diện trang chặn, parse) ở backend; worker chỉ tải trang qua
+// proxy và trả về nguyên văn.
+//
+// Sinh lại mã Python: `uv run python scripts/gen_proto.py`.
+
+syntax = "proto3";
+
+package jobcrawler.crawl.v1;
+
+service CrawlGateway {
+  // Worker khởi động (hoặc gateway báo không biết worker này): nhận cấu hình hiện hành.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Xin tối đa `http_slots` việc HTTP và `render_slots` việc render, chờ tối đa `wait_ms` nếu chưa
+  // có việc. Trả về ngay khi có ít nhất một việc.
+  rpc Lease(LeaseRequest) returns (LeaseResponse);
+  // Trả kết quả (có thể gộp nhiều việc một lần gọi).
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  // Báo sống kèm số liệu; nhận phiên bản cấu hình và lệnh dừng (drain).
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Worker dừng hẳn (sau khi trả hết việc đang làm).
+  rpc Leave(LeaveRequest) returns (LeaveResponse);
+}
+
+enum TaskKind {
+  TASK_KIND_UNSPECIFIED = 0;
+  TASK_KIND_HTTP = 1;    // curl_cffi impersonate Chrome
+  TASK_KIND_RENDER = 2;  // Chromium (Playwright)
+}
+
+// Lỗi truyền tải (không có phản hồi HTTP). Có phản hồi (kể cả 4xx/5xx) thì NONE + `status`.
+enum ErrorKind {
+  ERROR_KIND_NONE = 0;
+  ERROR_KIND_TIMEOUT = 1;
+  ERROR_KIND_PROXY = 2;      // lỗi do proxy (kết nối tới proxy, proxy từ chối)
+  ERROR_KIND_CONNECT = 3;    // DNS, từ chối kết nối, TLS
+  ERROR_KIND_OTHER = 4;
+  ERROR_KIND_EXPIRED = 5;    // quá `deadline_ms` trước khi chạy: không tải
+  ERROR_KIND_TOO_LARGE = 6;  // body vượt `max_body_bytes`
+  ERROR_KIND_UNSUPPORTED = 7; // worker không làm được loại việc này (vd. render khi không có Chromium)
+}
+
+message WorkerInfo {
+  string worker_id = 1;          // duy nhất mỗi process: <hostname>-<8 ký tự ngẫu nhiên>
+  string hostname = 2;
+  string version = 3;            // phiên bản gói jobworker
+  string pool = 4;               // nhóm worker, mặc định "default" (định tuyến theo domain ở backend)
+  int32 http_slots = 5;          // request HTTP cùng lúc tối đa
+  int32 render_slots = 6;        // trang Chromium cùng lúc tối đa (0 = không render)
+  int32 local_proxies = 7;       // số proxy cấu hình tại worker
+  map<string, string> labels = 8; // nhãn tự do (vùng, nhà cung cấp proxy...)
+  int64 started_at_ms = 9;
+}
+
+// Cấu hình gateway đẩy xuống worker (sửa ở trang Cài đặt). Trường 0 / rỗng = giữ cấu hình của worker.
+message WorkerConfig {
+  int64 version = 1;
+  int32 http_slots = 2;
+  int32 render_slots = 3;
+  string impersonate = 4;          // curl_cffi impersonate, vd. "chrome"
+  int32 max_body_bytes = 5;
+  int32 heartbeat_seconds = 6;
+  int32 lease_wait_ms = 7;
+  bool use_local_proxies = 8;      // worker dùng proxy của mình khi việc không chỉ định proxy
+}
+
+message FetchTask {
+  string task_id = 1;
+  TaskKind kind = 2;
+  string method = 3;               // HTTP: GET, POST...; render: luôn GET
+  string url = 4;
+  map<string, string> headers = 5;
+  bytes body = 6;                  // body request đã mã hoá (form / JSON)
+  string proxy = 7;                // proxy do backend chỉ định (URL đầy đủ); rỗng = worker tự chọn
+  string proxy_id = 8;             // id của proxy trên (để ghi nhận)
+  double timeout_seconds = 9;
+  bool allow_redirects = 10;
+  string wait_until = 11;          // render: commit | domcontentloaded | load | networkidle
+  bool capture_json = 12;          // render: giữ phản hồi JSON (XHR/fetch) trang gọi
+  int64 deadline_ms = 13;          // epoch ms: quá mốc này backend đã thôi chờ, worker bỏ qua việc
+  string source = 14;              // nguồn gọi (để log), vd. "careers:www.vng.com.vn"
+  bool direct = 15;                // đi thẳng, không dùng proxy tại worker
+}
+
+message CapturedJson {
+  string url = 1;
+  string method = 2;
+  int32 status = 3;
+  bytes body = 4;
+  string request_json = 5;         // body JSON của request (API tìm kiếm dạng POST), chuỗi JSON
+}
+
+message FetchResult {
+  string task_id = 1;
+  int32 status = 2;                // mã HTTP; 0 khi lỗi truyền tải
+  string final_url = 3;            // URL cuối sau redirect
+  map<string, string> headers = 4; // khoá viết thường
+  bytes body = 5;
+  bool body_zstd = 6;              // body nén zstd (một frame)
+  repeated CapturedJson captured = 7;
+  ErrorKind error_kind = 8;
+  string error = 9;
+  string proxy_id = 10;            // proxy đã dùng; proxy tại worker: "w:<id>"
+  int32 duration_ms = 11;
+  string worker_id = 12;
+}
+
+message RegisterRequest {
+  WorkerInfo info = 1;
+}
+
+message RegisterResponse {
+  WorkerConfig config = 1;
+}
+
+message LeaseRequest {
+  string worker_id = 1;
+  int32 http_slots = 2;            // số việc HTTP nhận thêm được ngay
+  int32 render_slots = 3;          // số việc render nhận thêm được ngay
+  int32 wait_ms = 4;               // chờ tối đa khi chưa có việc
+}
+
+message LeaseResponse {
+  repeated FetchTask tasks = 1;
+  int64 config_version = 2;        // khác bản worker đang dùng → gọi Register lấy cấu hình mới
+  bool drain = 3;                  // dừng nhận việc, làm nốt rồi Leave
+}
+
+message CompleteRequest {
+  string worker_id = 1;
+  repeated FetchResult results = 2;
+}
+
+message CompleteResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;               // backend đã thôi chờ (quá hạn) hoặc không rõ việc
+}
+
+message WorkerStats {
+  int64 http_done = 1;
+  int64 http_failed = 2;           // lỗi truyền tải (không tính 4xx/5xx)
+  int64 render_done = 3;
+  int64 render_failed = 4;
+  int32 http_inflight = 5;
+  int32 render_inflight = 6;
+  int64 bytes_in = 7;
+  double cpu_percent = 8;
+  int64 rss_bytes = 9;
+  int32 proxies_alive = 10;        // proxy tại worker đang dùng được
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  WorkerStats stats = 2;
+}
+
+message HeartbeatResponse {
+  int64 config_version = 1;
+  bool drain = 2;
+}
+
+message LeaveRequest {
+  string worker_id = 1;
+}
+
+message LeaveResponse {}

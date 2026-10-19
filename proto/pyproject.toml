@@ -1,0 +1,17 @@
+[project]
+name = "jobcrawler-proto"
+version = "0.2.0"
+description = "Hợp đồng gRPC giữa backend (gateway) và worker lấy trang của jobcrawler"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "grpcio>=1.84.0",
+    "protobuf>=6.31",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "jcproto"
