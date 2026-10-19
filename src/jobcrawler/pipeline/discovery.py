@@ -1,10 +1,11 @@
 """Tìm nguồn tin trên website doanh nghiệp: trang careers và bảng tin ATS (cache 7 ngày).
 
-Thứ tự: link trên trang chủ (chữ/đường dẫn có từ khoá tuyển dụng) → sitemap.xml → các đường
-dẫn phổ biến → subdomain careers./tuyendung./jobs. Nhiều link ứng viên thì LLM chọn trong danh
-sách (chỉ trả số thứ tự). Mỗi trang ứng viên được mở để xác nhận (có tin, JSON-LD, hoặc nhúng
-ATS); chưa xác nhận thì đi tiếp tối đa `MAX_HOPS` bước nhảy tính từ trang chủ. Không có vòng
-lặp agent: mọi bước đều có giới hạn cố định.
+Thứ tự: link trên trang chủ (chữ/đường dẫn có từ khoá tuyển dụng) → sitemap.xml → subdomain
+careers./tuyendung./jobs. → các đường dẫn phổ biến. Trang chủ thử cùng lúc domain trần và `www.`.
+Nhiều link ứng viên thì LLM chọn trong danh sách (chỉ trả số thứ tự). Mỗi trang ứng viên được
+mở để xác nhận (có tin, JSON-LD, JSON của trang SPA, hoặc nhúng ATS); chưa xác nhận thì đi tiếp
+tối đa `MAX_HOPS` bước nhảy tính từ trang chủ. Không có vòng lặp agent: mọi bước đều có giới hạn
+cố định.
 """
 
 from __future__ import annotations

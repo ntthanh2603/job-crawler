@@ -2,7 +2,8 @@
 
 Hai tin cùng cụm khi thoả cả ba điều kiện:
 
-1. `title_normalized` giống nhau (rapidfuzz `token_set_ratio` ≥ 90);
+1. `title_normalized` giống nhau (rapidfuzz `token_set_ratio` ≥ 90) và không lệch nhau ở từ chỉ
+   cấp bậc ("Java Developer" / "Senior Java Developer" là hai việc);
 2. có chung ít nhất một tỉnh/thành (tin không rõ địa điểm thì không chặn);
 3. JD giống nhau (MinHash Jaccard ≥ 0.8 trên 3-gram từ) hoặc cùng `apply_url` (nguồn không ghi
    thì lấy URL tin: hai bản bóc khác nhau của cùng một trang luôn gộp).
