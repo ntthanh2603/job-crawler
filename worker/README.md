@@ -56,11 +56,24 @@ mã 0.
 | `LOG_LEVEL` | `INFO` | `DEBUG` in từng việc (`worker.task_done`) |
 | `LOG_FORMAT` | `console` | `json`: mỗi dòng một event |
 
-Gateway có thể ghi đè lúc chạy (trang Cài đặt của backend → `WorkerConfig`): số slot HTTP/render,
-`impersonate`, giới hạn body, chu kỳ heartbeat, thời gian long-poll, có dùng proxy tại worker hay
-không. Giá trị 0 / trống giữ cấu hình của worker. Riêng `WORKER_RENDER_SLOTS=0` là tắt hẳn:
-gateway không bật render lên được. Máy không có Chromium (chưa `playwright install chromium`) thì
-việc render đầu tiên trả `ERROR_KIND_UNSUPPORTED` và worker tự tắt render.
+Gateway điều chỉnh lúc chạy (trang Cài đặt của backend → `WorkerConfig`): số slot HTTP/render là
+**trần** — worker dùng `min(số của gateway, WORKER_HTTP_SLOTS / WORKER_RENDER_SLOTS)`, nên gateway
+chỉ hạ được số slot của máy lớn, không nâng máy nhỏ lên. `impersonate`, giới hạn body, chu kỳ
+heartbeat, thời gian long-poll, có dùng proxy tại worker hay không thì gateway ghi đè. Giá trị 0 /
+trống giữ cấu hình của worker. Riêng `WORKER_RENDER_SLOTS=0` là tắt hẳn: gateway không bật render
+lên được.
+
+Không mở được Chromium (thiếu RAM, Chromium chết rồi mở lại không được...): việc render đó trả lỗi,
+worker tạm tắt render (đăng ký lại với 0 slot render để backend không gửi việc render tới) trong
+30 s, 60 s, 120 s... tối đa 10 phút theo số lần lỗi liên tiếp, hết hạn thì đăng ký lại với đủ slot
+và thử mở lại; mở được thì đếm lại từ đầu. Máy không có Chromium (chưa `playwright install
+chromium`) thì việc render đầu tiên trả `ERROR_KIND_UNSUPPORTED` và worker tắt render hẳn. Trang
+Workers hiện lý do và giờ thử lại (`WorkerStats.render_disabled_reason` / `render_retry_at_ms`).
+
+Gateway ghi lại việc worker đang giữ: kết quả của việc worker không còn giữ bị bỏ (`dropped`).
+Worker rời (`Leave`) khi còn việc chưa trả, hoặc quá `GATEWAY_WORKER_TTL_SECONDS` không báo sống,
+thì việc của nó được trả về backend ngay (`ERROR_KIND_WORKER_LOST`) để backend gửi lại cho worker
+khác; kết quả tới muộn của worker đó bị bỏ.
 
 Cấu hình đẩy xuống từ backend nằm ở các biến `GATEWAY_HTTP_SLOTS`, `GATEWAY_RENDER_SLOTS`,
 `GATEWAY_IMPERSONATE`… của backend (hoặc trang Cài đặt), không trùng tên với biến `WORKER_*` ở đây,
@@ -107,7 +120,9 @@ nếu domain trong pool cần Chromium.
 - Gateway mở ra ngoài mạng nội bộ thì luôn đặt `GATEWAY_TOKEN` (cùng giá trị ở backend và worker).
 - Mã hoá: `GATEWAY_TLS=true` (gateway có `GATEWAY_TLS_CERT`/`GATEWAY_TLS_KEY`, hoặc đứng sau reverse
   proxy HTTP/2 có TLS). Chứng chỉ tự ký: đưa CA cho worker qua `GATEWAY_CA_CERT`.
-- Token và mật khẩu proxy không bao giờ được ghi log.
+- Token và mật khẩu proxy không bao giờ được ghi log: mọi dòng log (kể cả traceback, log của
+  grpc / asyncio) che mật khẩu trong URL (`http://user:***@host`), token `Bearer`, tham số bí
+  mật trong query string và giá trị của khoá như `password`, `token`, `authorization`, `cookie`.
 
 ## Phát triển
 

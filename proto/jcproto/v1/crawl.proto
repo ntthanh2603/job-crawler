@@ -2,8 +2,10 @@
 //
 // Worker là client: đăng ký (Register), xin việc (Lease, long-poll), trả kết quả (Complete), báo
 // sống (Heartbeat), rời đi (Leave). Việc nằm trong Redis Streams phía backend: mỗi pool hai stream
-// (http, render), consumer group `workers`, mỗi worker là một consumer. Gateway không giữ trạng
-// thái nên chạy được nhiều replica sau một load balancer HTTP/2.
+// (http, render) cộng một stream ưu tiên cho mỗi loại (`:hi`), consumer group `workers`, mỗi worker
+// là một consumer. Gateway ghi việc worker đang giữ vào Redis (chỉ nhận kết quả của việc worker còn
+// giữ; worker rời / chết thì trả ERROR_KIND_WORKER_LOST cho backend ngay). Gateway không giữ trạng
+// thái trong process nên chạy được nhiều replica sau một load balancer HTTP/2.
 //
 // Một việc là MỘT request (HTTP qua curl_cffi, hoặc mở trang bằng Chromium). Toàn bộ logic thu
 // thập (robots, rate limit, retry, nhận diện trang chặn, parse) ở backend; worker chỉ tải trang qua
@@ -45,6 +47,9 @@ enum ErrorKind {
   ERROR_KIND_EXPIRED = 5;    // quá `deadline_ms` trước khi chạy: không tải
   ERROR_KIND_TOO_LARGE = 6;  // body vượt `max_body_bytes`
   ERROR_KIND_UNSUPPORTED = 7; // worker không làm được loại việc này (vd. render khi không có Chromium)
+  // Chỉ gateway đặt: worker giữ việc đã rời / quá hạn báo sống trước khi trả kết quả. Backend thử
+  // lại ngay thay vì chờ hết hạn.
+  ERROR_KIND_WORKER_LOST = 8;
 }
 
 message WorkerInfo {
@@ -62,8 +67,8 @@ message WorkerInfo {
 // Cấu hình gateway đẩy xuống worker (sửa ở trang Cài đặt). Trường 0 / rỗng = giữ cấu hình của worker.
 message WorkerConfig {
   int64 version = 1;
-  int32 http_slots = 2;
-  int32 render_slots = 3;
+  int32 http_slots = 2;            // trần: worker dùng min(giá trị này, slot của worker)
+  int32 render_slots = 3;          // trần như http_slots; worker không render (0) thì vẫn 0
   string impersonate = 4;          // curl_cffi impersonate, vd. "chrome"
   int32 max_body_bytes = 5;
   int32 heartbeat_seconds = 6;
@@ -87,6 +92,8 @@ message FetchTask {
   int64 deadline_ms = 13;          // epoch ms: quá mốc này backend đã thôi chờ, worker bỏ qua việc
   string source = 14;              // nguồn gọi (để log), vd. "careers:www.vng.com.vn"
   bool direct = 15;                // đi thẳng, không dùng proxy tại worker
+  // > 0: việc ưu tiên (poll ban ngày), nằm ở stream `<stream>:hi`, gateway giao trước việc thường.
+  int32 priority = 16;
 }
 
 message CapturedJson {
@@ -154,6 +161,8 @@ message WorkerStats {
   double cpu_percent = 8;
   int64 rss_bytes = 9;
   int32 proxies_alive = 10;        // proxy tại worker đang dùng được
+  string render_disabled_reason = 11; // render đang tắt vì lỗi Chromium (rỗng = render được)
+  int64 render_retry_at_ms = 12;   // epoch ms worker thử mở lại Chromium; 0 = tắt hẳn / không tắt
 }
 
 message HeartbeatRequest {

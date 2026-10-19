@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -156,3 +157,113 @@ def test_exception_logs_are_cheap_and_hide_locals(
     assert "boom" in err
     assert "mat-khau-proxy-123" not in err
     assert "╭" not in err  # không phải traceback Rich (tô màu từng frame, chậm hàng giây)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("http://user:p%40ss@1.2.3.4:8080", "http://user:***@1.2.3.4:8080"),
+        ("redis://:mat-khau@redis:6379/0", "redis://:***@redis:6379/0"),
+        (
+            "postgresql+asyncpg://jc:se@cr@et@db:5432/jc lỗi",
+            "postgresql+asyncpg://jc:***@db:5432/jc lỗi",
+        ),
+        ("proxy 'socks5h://u:p@h:1080' lỗi", "proxy 'socks5h://u:***@h:1080' lỗi"),
+        ("Authorization: Bearer abc.DEF-123_x=", "Authorization: Bearer ***"),
+        ("bearer   sk-xyz", "bearer   ***"),
+        (
+            "GET https://serpapi.com/search?q=a&api_key=XYZ&num=10",
+            "GET https://serpapi.com/search?q=a&api_key=***&num=10",
+        ),
+        ("https://x.vn/?key=AIza&access_token=t1#f", "https://x.vn/?key=***&access_token=***#f"),
+        # Không có gì để che: giữ nguyên.
+        ("http://1.2.3.4:8080/a@b", "http://1.2.3.4:8080/a@b"),
+        (
+            "liên hệ a@b.vn, https://acme.vn:443/jobs?page=2",
+            "liên hệ a@b.vn, https://acme.vn:443/jobs?page=2",
+        ),
+        ("company.done", "company.done"),
+    ],
+)
+def test_redact_text(text: str, expected: str) -> None:
+    assert jlog.redact_text(text) == expected
+
+
+def test_redact_secrets_masks_keys_and_nested_values_without_mutating() -> None:
+    headers = {"Authorization": "Basic YWRtaW46cHc=", "Accept": "text/html"}
+    plain = {"a": {"b": [1, "x"]}}
+    event: dict[str, Any] = {
+        "event": "fetch http://u:pw@proxy:8080",
+        "password": "mat-khau",
+        "api_key": "sk-123",
+        "SERP_API_KEY": "abc",
+        "session_token": b"raw",
+        "headers": headers,
+        "urls": ["http://a:b@c.vn", ("x", "Bearer tok")],
+        "plain": plain,
+        "prompt_tokens": 120,
+        "has_password": True,
+        "token": None,
+        "ratio": 0.5,
+        "error": ValueError("kết nối http://u:pw@h:1 lỗi"),
+        "_record": "http://u:pw@h",  # metadata của logging: không đụng
+    }
+    out = jlog.redact_secrets(None, "info", event)
+    assert out is event
+    assert out["event"] == "fetch http://u:***@proxy:8080"
+    assert out["password"] == out["api_key"] == out["SERP_API_KEY"] == out["session_token"] == "***"
+    assert out["headers"] == {"Authorization": "***", "Accept": "text/html"}
+    assert headers["Authorization"] == "Basic YWRtaW46cHc="  # dict của bên gọi không bị sửa
+    assert out["urls"] == ["http://a:***@c.vn", ("x", "Bearer ***")]
+    assert out["plain"] is plain  # không có gì để che: không sao chép
+    assert (out["prompt_tokens"], out["has_password"], out["token"], out["ratio"]) == (
+        120,
+        True,
+        None,
+        0.5,
+    )
+    assert out["error"] == "ValueError: kết nối http://u:***@h:1 lỗi"
+    assert out["_record"] == "http://u:pw@h"
+
+
+def test_redact_secrets_bounds_depth() -> None:
+    loop: list[Any] = ["http://u:pw@h"]
+    loop.append(loop)  # tự tham chiếu: không đệ quy vô hạn
+    deep: Any = "http://u:pw@h"
+    for _ in range(20):
+        deep = {"x": deep}
+    out = jlog.redact_secrets(None, "info", {"event": "x", "loop": loop, "deep": deep})
+    assert out["loop"][0] == "http://u:***@h"
+    assert out["deep"] is deep  # quá độ sâu giới hạn: giữ nguyên, không tốn thời gian
+
+
+@pytest.mark.usefixtures("clean_env")
+@pytest.mark.parametrize("fmt", ["console", "json"])
+async def test_secrets_never_reach_stderr_or_sink(
+    fmt: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    jlog.configure_logging(Settings(_env_file=None, log_format=fmt))  # pyright: ignore[reportCallIssue]
+    writer = FakeWriter()
+    sink = jlog.PgLogSink(writer, interval=60)
+    sink.start()
+    jlog.attach_sink(sink)
+    try:
+        log = jlog.get_logger("test")
+        log.warning("proxy.error", proxy="http://user:pw-proxy-1@1.2.3.4:8080", password="pw-ui-2")
+        try:
+            raise ConnectionError("không nối được socks5://u:pw-exc-3@h:1080")
+        except ConnectionError:
+            log.exception("fetch.error", headers={"Authorization": "Bearer pw-token-4"})
+    finally:
+        jlog.detach_sink(sink)
+        await sink.close()
+    err = capsys.readouterr().err
+    stored = " ".join(row[5] for row in writer.rows)
+    for text in (err, stored):
+        assert "pw-" not in text
+        assert "http://user:***@1.2.3.4:8080" in text
+        assert "socks5://u:***@h:1080" in text  # thông điệp lỗi trong traceback
+    assert json.loads(writer.rows[0][5]) == {
+        "proxy": "http://user:***@1.2.3.4:8080",
+        "password": "***",
+    }

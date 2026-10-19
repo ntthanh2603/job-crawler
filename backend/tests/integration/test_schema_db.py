@@ -1,5 +1,5 @@
-"""Migration duy nhất (0001) trên Postgres thật: khớp models, hàm `uuid_v7()`, cột nén lưu
-`EXTERNAL`."""
+"""Migration (0001 schema ban đầu, 0002 nhật ký thao tác) trên Postgres thật: khớp models, hàm
+`uuid_v7()`, cột nén lưu `EXTERNAL`."""
 
 from __future__ import annotations
 

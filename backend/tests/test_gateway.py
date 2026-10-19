@@ -1,8 +1,9 @@
 """Gateway / hàng việc lấy trang, phần không cần Redis: mã hoá request, đọc kết quả của worker,
-định tuyến, cấu hình worker, task_id, token."""
+định tuyến, cấu hình worker, task_id, token, mức ưu tiên, khoá Redis."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, cast
 
@@ -14,10 +15,13 @@ from jobcrawler.config import Settings
 from jobcrawler.gateway.dispatch import (
     NoWorkerError,
     choose_pool,
+    fetch_priority,
     make_client_id,
     match_route,
     parse_task_id,
+    priority_fetches,
 )
+from jobcrawler.gateway.registry import Keys
 from jobcrawler.gateway.remote import (
     RemoteRenderer,
     RemoteTransport,
@@ -143,6 +147,7 @@ def test_result_captured_json() -> None:
         (crawl_pb2.ERROR_KIND_EXPIRED, "other", "expired: boom"),
         (crawl_pb2.ERROR_KIND_TOO_LARGE, "other", "too_large: boom"),
         (crawl_pb2.ERROR_KIND_UNSUPPORTED, "other", "unsupported: boom"),
+        (crawl_pb2.ERROR_KIND_WORKER_LOST, "other", "worker_lost: boom"),
     ],
 )
 def test_result_error_kinds(error_kind: int, kind: str, text: str) -> None:
@@ -167,13 +172,13 @@ def test_result_without_status_is_error() -> None:
 class FakeClient:
     max_body_bytes = 10 * 1024 * 1024
 
-    def __init__(self, result: crawl_pb2.FetchResult | None = None) -> None:
+    def __init__(self, *results: crawl_pb2.FetchResult) -> None:
         self.tasks: list[crawl_pb2.FetchTask] = []
-        self.result = result or crawl_pb2.FetchResult(status=200, body=b"ok")
+        self.results = list(results) or [crawl_pb2.FetchResult(status=200, body=b"ok")]
 
     async def submit(self, task: crawl_pb2.FetchTask) -> crawl_pb2.FetchResult:
-        self.tasks.append(task)
-        return self.result
+        self.tasks.append(crawl_pb2.FetchTask.FromString(task.SerializeToString()))
+        return self.results.pop(0) if len(self.results) > 1 else self.results[0]
 
 
 async def test_remote_transport_builds_http_task() -> None:
@@ -238,6 +243,58 @@ async def test_remote_transport_raises_worker_errors() -> None:
         )
     assert info.value.kind == "proxy"
     assert info.value.proxy_fault
+
+
+LOST = crawl_pb2.FetchResult(
+    error_kind=crawl_pb2.ERROR_KIND_WORKER_LOST, error="worker đã rời", worker_id="w1"
+)
+
+
+async def test_remote_resubmits_once_when_worker_is_lost() -> None:
+    client = FakeClient(LOST, crawl_pb2.FetchResult(status=200, body=b"<div/>"))
+    raw = await RemoteRenderer(cast(Any, client)).render(
+        URL, proxy=None, timeout=30, wait_until="load"
+    )
+    assert raw.content == b"<div/>"
+    assert [t.url for t in client.tasks] == [URL, URL]
+
+    # Mất worker lần nữa: lỗi "other" (HttpClient.fetch thử lại), không tính lỗi cho proxy.
+    client = FakeClient(LOST)
+    with pytest.raises(TransportError) as info:
+        await RemoteTransport(cast(Any, client)).request(
+            "GET", URL, headers={}, proxy=None, timeout=5, allow_redirects=True
+        )
+    assert len(client.tasks) == 2
+    assert info.value.kind == "other"
+    assert str(info.value).startswith("worker_lost:")
+    assert not info.value.proxy_fault
+
+
+# --- mức ưu tiên, khoá Redis ---------------------------------------------------------------------
+
+
+async def test_priority_fetches_scope_is_inherited_by_child_tasks() -> None:
+    assert fetch_priority.get() == 0
+    with priority_fetches():
+        assert fetch_priority.get() == 1
+        child = asyncio.ensure_future(asyncio.sleep(0, result=fetch_priority.get()))
+        with priority_fetches(2):
+            assert fetch_priority.get() == 2
+        assert fetch_priority.get() == 1
+    assert fetch_priority.get() == 0
+    assert await child == 1
+    with pytest.raises(RuntimeError), priority_fetches():
+        raise RuntimeError
+    assert fetch_priority.get() == 0
+
+
+def test_stream_keys() -> None:
+    keys = Keys("jc")
+    assert keys.stream("default", "http") == "jc:gw:fetch:default:http"
+    assert keys.stream("vn", "render", high=True) == "jc:gw:fetch:vn:render:hi"
+    assert keys.streams("vn", "http") == ("jc:gw:fetch:vn:http:hi", "jc:gw:fetch:vn:http")
+    assert keys.inflight("w-1") == "jc:gw:inflight:w-1"
+    assert keys.progress("vn", "http") == "jc:gw:progress:vn:http"
 
 
 # --- định tuyến ----------------------------------------------------------------------------------
@@ -326,6 +383,13 @@ def test_worker_config_from_settings() -> None:
     assert config.use_local_proxies
     assert not worker_config(_settings(proxy_mode="central")).use_local_proxies
     assert not worker_config(_settings(proxy_mode="off")).use_local_proxies
+
+
+def test_queue_max_wait_must_exceed_grace() -> None:
+    assert _settings().fetch_queue_max_wait_seconds == 300
+    with pytest.raises(ValueError, match="FETCH_QUEUE_MAX_WAIT_SECONDS"):
+        _settings(fetch_queue_grace_seconds=30, fetch_queue_max_wait_seconds=30)
+    assert _settings(fetch_queue_grace_seconds=5, fetch_queue_max_wait_seconds=6)
 
 
 def test_worker_config_version_is_stable() -> None:

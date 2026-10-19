@@ -23,6 +23,7 @@ class ErrorKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ERROR_KIND_EXPIRED: _ClassVar[ErrorKind]
     ERROR_KIND_TOO_LARGE: _ClassVar[ErrorKind]
     ERROR_KIND_UNSUPPORTED: _ClassVar[ErrorKind]
+    ERROR_KIND_WORKER_LOST: _ClassVar[ErrorKind]
 TASK_KIND_UNSPECIFIED: TaskKind
 TASK_KIND_HTTP: TaskKind
 TASK_KIND_RENDER: TaskKind
@@ -34,6 +35,7 @@ ERROR_KIND_OTHER: ErrorKind
 ERROR_KIND_EXPIRED: ErrorKind
 ERROR_KIND_TOO_LARGE: ErrorKind
 ERROR_KIND_UNSUPPORTED: ErrorKind
+ERROR_KIND_WORKER_LOST: ErrorKind
 
 class WorkerInfo(_message.Message):
     __slots__ = ("worker_id", "hostname", "version", "pool", "http_slots", "render_slots", "local_proxies", "labels", "started_at_ms")
@@ -85,7 +87,7 @@ class WorkerConfig(_message.Message):
     def __init__(self, version: _Optional[int] = ..., http_slots: _Optional[int] = ..., render_slots: _Optional[int] = ..., impersonate: _Optional[str] = ..., max_body_bytes: _Optional[int] = ..., heartbeat_seconds: _Optional[int] = ..., lease_wait_ms: _Optional[int] = ..., use_local_proxies: _Optional[bool] = ...) -> None: ...
 
 class FetchTask(_message.Message):
-    __slots__ = ("task_id", "kind", "method", "url", "headers", "body", "proxy", "proxy_id", "timeout_seconds", "allow_redirects", "wait_until", "capture_json", "deadline_ms", "source", "direct")
+    __slots__ = ("task_id", "kind", "method", "url", "headers", "body", "proxy", "proxy_id", "timeout_seconds", "allow_redirects", "wait_until", "capture_json", "deadline_ms", "source", "direct", "priority")
     class HeadersEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -108,6 +110,7 @@ class FetchTask(_message.Message):
     DEADLINE_MS_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     DIRECT_FIELD_NUMBER: _ClassVar[int]
+    PRIORITY_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     kind: TaskKind
     method: str
@@ -123,7 +126,8 @@ class FetchTask(_message.Message):
     deadline_ms: int
     source: str
     direct: bool
-    def __init__(self, task_id: _Optional[str] = ..., kind: _Optional[_Union[TaskKind, str]] = ..., method: _Optional[str] = ..., url: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., body: _Optional[bytes] = ..., proxy: _Optional[str] = ..., proxy_id: _Optional[str] = ..., timeout_seconds: _Optional[float] = ..., allow_redirects: _Optional[bool] = ..., wait_until: _Optional[str] = ..., capture_json: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., source: _Optional[str] = ..., direct: _Optional[bool] = ...) -> None: ...
+    priority: int
+    def __init__(self, task_id: _Optional[str] = ..., kind: _Optional[_Union[TaskKind, str]] = ..., method: _Optional[str] = ..., url: _Optional[str] = ..., headers: _Optional[_Mapping[str, str]] = ..., body: _Optional[bytes] = ..., proxy: _Optional[str] = ..., proxy_id: _Optional[str] = ..., timeout_seconds: _Optional[float] = ..., allow_redirects: _Optional[bool] = ..., wait_until: _Optional[str] = ..., capture_json: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., source: _Optional[str] = ..., direct: _Optional[bool] = ..., priority: _Optional[int] = ...) -> None: ...
 
 class CapturedJson(_message.Message):
     __slots__ = ("url", "method", "status", "body", "request_json")
@@ -225,7 +229,7 @@ class CompleteResponse(_message.Message):
     def __init__(self, accepted: _Optional[int] = ..., dropped: _Optional[int] = ...) -> None: ...
 
 class WorkerStats(_message.Message):
-    __slots__ = ("http_done", "http_failed", "render_done", "render_failed", "http_inflight", "render_inflight", "bytes_in", "cpu_percent", "rss_bytes", "proxies_alive")
+    __slots__ = ("http_done", "http_failed", "render_done", "render_failed", "http_inflight", "render_inflight", "bytes_in", "cpu_percent", "rss_bytes", "proxies_alive", "render_disabled_reason", "render_retry_at_ms")
     HTTP_DONE_FIELD_NUMBER: _ClassVar[int]
     HTTP_FAILED_FIELD_NUMBER: _ClassVar[int]
     RENDER_DONE_FIELD_NUMBER: _ClassVar[int]
@@ -236,6 +240,8 @@ class WorkerStats(_message.Message):
     CPU_PERCENT_FIELD_NUMBER: _ClassVar[int]
     RSS_BYTES_FIELD_NUMBER: _ClassVar[int]
     PROXIES_ALIVE_FIELD_NUMBER: _ClassVar[int]
+    RENDER_DISABLED_REASON_FIELD_NUMBER: _ClassVar[int]
+    RENDER_RETRY_AT_MS_FIELD_NUMBER: _ClassVar[int]
     http_done: int
     http_failed: int
     render_done: int
@@ -246,7 +252,9 @@ class WorkerStats(_message.Message):
     cpu_percent: float
     rss_bytes: int
     proxies_alive: int
-    def __init__(self, http_done: _Optional[int] = ..., http_failed: _Optional[int] = ..., render_done: _Optional[int] = ..., render_failed: _Optional[int] = ..., http_inflight: _Optional[int] = ..., render_inflight: _Optional[int] = ..., bytes_in: _Optional[int] = ..., cpu_percent: _Optional[float] = ..., rss_bytes: _Optional[int] = ..., proxies_alive: _Optional[int] = ...) -> None: ...
+    render_disabled_reason: str
+    render_retry_at_ms: int
+    def __init__(self, http_done: _Optional[int] = ..., http_failed: _Optional[int] = ..., render_done: _Optional[int] = ..., render_failed: _Optional[int] = ..., http_inflight: _Optional[int] = ..., render_inflight: _Optional[int] = ..., bytes_in: _Optional[int] = ..., cpu_percent: _Optional[float] = ..., rss_bytes: _Optional[int] = ..., proxies_alive: _Optional[int] = ..., render_disabled_reason: _Optional[str] = ..., render_retry_at_ms: _Optional[int] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
     __slots__ = ("worker_id", "stats")

@@ -1,7 +1,7 @@
 """Cấu hình worker, đọc từ biến môi trường và file `.env` (xem worker/README.md).
 
-Gateway ghi đè một phần lúc chạy (`WorkerConfig` trả về từ Register): xem
-`jobworker.client.RuntimeConfig`.
+Gateway điều chỉnh một phần lúc chạy (`WorkerConfig` trả về từ Register; số slot là trần, không
+nâng được quá số của worker): xem `jobworker.client.RuntimeConfig`.
 """
 
 from __future__ import annotations

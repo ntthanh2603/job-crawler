@@ -525,6 +525,39 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = _updated_at()
 
 
+class AuditEvent(Base):
+    """Nhật ký thao tác của người vận hành (giao diện / API: lưu cài đặt, đưa việc vào queue,
+    import, kiểm tay...), ghi qua `services/audit.py`.
+
+    Chỉ ghi thêm: không có đường sửa / xoá trong code, bảo trì định kỳ không dọn bảng này. Id
+    UUIDv7 tăng theo thời gian nên trang danh sách phân trang theo `id` giảm dần."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_occurred_at", "occurred_at"),
+        Index(
+            "ix_audit_events_resource_type_resource_id_occurred_at",
+            "resource_type",
+            "resource_id",
+            "occurred_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _pk()
+    occurred_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    actor: Mapped[str]  # tài khoản đăng nhập giao diện; `system` / `anonymous` khi không có
+    action: Mapped[str]  # tên có chấm, ổn định: `settings.update`, `company.build`...
+    resource_type: Mapped[str | None]
+    resource_id: Mapped[str | None]
+    # Id request HTTP (middleware gắn vào contextvars của structlog), để nối với log.
+    request_id: Mapped[str | None]
+    # {key: {"before": ..., "after": ...}}; bí mật đã che (`app_settings.MASK`).
+    changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Thông tin nhỏ kèm theo (số đếm, cách kích hoạt, tên...). `metadata` là tên dành riêng của
+    # SQLAlchemy nên thuộc tính tên `meta`.
+    meta: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+
+
 class SourceFetch(Base):
     """Mỗi lần gọi một nguồn. `run_id`/`company_id` để trống với lượt index trang tuyển dụng."""
 

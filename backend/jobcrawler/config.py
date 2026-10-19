@@ -37,8 +37,10 @@ class Settings(BaseSettings):
     )
 
     # Kết nối. Mặc định khớp docker-compose.yaml khi chạy CLI trên máy host.
-    database_url: str = "postgresql+asyncpg://jobcrawler:jobcrawler@localhost:15432/jobcrawler"
-    redis_url: str = "redis://localhost:16379/0"
+    # 127.0.0.1 chứ không localhost: compose chỉ mở cổng ở IPv4 loopback, và trên Windows localhost
+    # thử ::1 trước (mỗi kết nối mới chờ thêm ~2 s).
+    database_url: str = "postgresql+asyncpg://jobcrawler:jobcrawler@127.0.0.1:15432/jobcrawler"
+    redis_url: str = "redis://127.0.0.1:16379/0"
     db_pool_size: int = Field(default=10, ge=1)
     db_max_overflow: int = Field(default=10, ge=0)
 
@@ -135,6 +137,10 @@ class Settings(BaseSettings):
     gateway_tls_key: Path | None = None
     # Backend chờ thêm chừng này giây ngoài timeout request cho việc xếp hàng tới worker.
     fetch_queue_grace_seconds: float = Field(default=30, ge=0)
+    # Hết khung chờ (timeout + FETCH_QUEUE_GRACE_SECONDS) mà hàng việc vẫn đang được worker lấy
+    # (chỉ là đông) thì chờ tiếp từng khung, tổng tối đa timeout + chừng này giây (cũng là hạn
+    # `deadline_ms` của việc). Phải lớn hơn FETCH_QUEUE_GRACE_SECONDS.
+    fetch_queue_max_wait_seconds: float = Field(default=300, gt=0)
     # Stream việc lấy trang giữ tối đa chừng này entry (việc cũ hơn đã quá hạn).
     fetch_stream_maxlen: int = Field(default=100_000, ge=1000)
     fetch_max_body_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
@@ -309,6 +315,11 @@ class Settings(BaseSettings):
             )
         for name in ("build_window", "poll_window"):
             parse_window(getattr(self, name), name.upper())
+        if self.fetch_queue_max_wait_seconds <= self.fetch_queue_grace_seconds:
+            raise ValueError(
+                "FETCH_QUEUE_MAX_WAIT_SECONDS phải lớn hơn FETCH_QUEUE_GRACE_SECONDS "
+                f"({self.fetch_queue_max_wait_seconds} <= {self.fetch_queue_grace_seconds})"
+            )
         if self.company_deadline_seconds >= self.company_timeout_seconds:
             raise ValueError(
                 "COMPANY_DEADLINE_SECONDS phải nhỏ hơn COMPANY_TIMEOUT_SECONDS "

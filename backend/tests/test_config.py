@@ -12,7 +12,7 @@ def test_defaults_match_compose() -> None:
     s = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
     assert s.database_url.startswith("postgresql+asyncpg://")
     assert ":15432/" in s.database_url
-    assert s.redis_url == "redis://localhost:16379/0"
+    assert s.redis_url == "redis://127.0.0.1:16379/0"
     assert (s.runner_build_concurrency, s.runner_poll_concurrency) == (10, 50)
     assert s.queue_names == ("jobcrawler-build", "jobcrawler-poll", "jobcrawler-boards")
     assert (s.build_window, s.poll_window, s.poll_interval_seconds) == (

@@ -28,6 +28,7 @@ from jobcrawler.gateway.dispatch import (
     FetchClient,
     NoReplyError,
     NoWorkerError,
+    priority_fetches,
     push_results,
 )
 from jobcrawler.gateway.remote import RemoteRenderer, RemoteTransport
@@ -185,6 +186,17 @@ class FakeWorker:
         self.config = resp.config
         return resp.config
 
+    async def complete(self, *results: crawl_pb2.FetchResult) -> crawl_pb2.CompleteResponse:
+        return await self.complete_stub.Complete(
+            crawl_pb2.CompleteRequest(worker_id=self.worker_id, results=results),
+            metadata=self.metadata,
+        )
+
+    async def leave(self) -> None:
+        await self.stub.Leave(
+            crawl_pb2.LeaveRequest(worker_id=self.worker_id), metadata=self.metadata
+        )
+
     async def lease(self, wait_ms: int = 200, **kw: Any) -> crawl_pb2.LeaseResponse:
         request = crawl_pb2.LeaseRequest(
             worker_id=kw.pop("worker_id", self.worker_id),
@@ -284,16 +296,21 @@ async def test_fetch_through_worker(redis: Redis, prefix: str) -> None:
     assert all(t.task_id.startswith(f"{client.client_id}.") for t in worker.tasks)
     assert all(t.deadline_ms > time.time() * 1000 for t in worker.tasks)
     assert not any(t.direct or t.proxy for t in worker.tasks)
+    assert not any(t.priority for t in worker.tasks)  # không phải lượt poll: stream thường
     assert client.stats() == {
         "submitted": 3,
         "completed": 3,
         "timeouts": 0,
         "no_worker": 0,
         "discarded": 0,
+        "extended": 0,
         "inflight": 0,
     }
     assert status is not None
     assert (status.leased, status.completed, status.labels) == (3, 3, {"region": "vn"})
+    assert (status.dropped, status.lost) == (0, 0)
+    # Kết quả đã nhận thì worker không còn giữ việc.
+    assert not await redis.exists(registry.Keys(prefix).inflight(worker.worker_id))
 
 
 async def test_render_with_captured_json_and_zstd(redis: Redis, prefix: str) -> None:
@@ -378,6 +395,7 @@ async def test_timeout_when_no_worker_replies(redis: Redis, prefix: str) -> None
             await client.submit(http_task("https://slow.example.vn/", timeout=0.3))
         assert 0.7 <= time.monotonic() - t0 < 3
         assert info.value.kind == "timeout"
+        await wait_len(redis, registry.Keys(prefix).stream("default", "http"), 0)
         result = await http_client(client).fetch(
             "https://slow.example.vn/", check_robots=False, retries=0, timeout=0.3
         )
@@ -443,21 +461,51 @@ async def test_lease_waits_then_returns_new_task(redis: Redis, prefix: str) -> N
     assert (result.status, result.body) == (200, HTML.encode())
 
 
-async def test_complete_drops_malformed_task_ids(redis: Redis, prefix: str) -> None:
+async def queue_task(redis: Redis, keys: registry.Keys, task_id: str, **kw: Any) -> None:
+    task = http_task(f"https://x.example.vn/{task_id}")
+    task.task_id = task_id
+    task.deadline_ms = kw.pop("deadline_ms", int(time.time() * 1000) + 60_000)
+    await redis.xadd(keys.stream("default", "http", **kw), {"t": task.SerializeToString()})
+
+
+async def replies(redis: Redis, keys: registry.Keys, client_id: str) -> list[Any]:
+    raw = await redis.lrange(keys.reply(client_id), 0, -1)  # pyright: ignore[reportGeneralTypeIssues]
+    return [crawl_pb2.FetchResult.FromString(b) for b in raw]
+
+
+async def test_complete_accepts_only_tasks_the_worker_holds(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
-        resp = await worker.complete_stub.Complete(
-            crawl_pb2.CompleteRequest(
-                worker_id=worker.worker_id,
-                results=[
-                    crawl_pb2.FetchResult(task_id="c-1.1", status=200),
-                    crawl_pb2.FetchResult(task_id="bad", status=200),
-                ],
-            )
+    keys = registry.Keys(prefix)
+    async with (
+        gateway(redis, settings) as gw,
+        FakeWorker(gw.port, serve=False) as worker,
+        FakeWorker(gw.port, serve=False) as other,
+    ):
+        await queue_task(redis, keys, "c-1.1")
+        [task] = (await worker.lease(wait_ms=0)).tasks
+        held = await redis.hgetall(keys.inflight(worker.worker_id))  # pyright: ignore[reportGeneralTypeIssues]
+        assert held == {b"c-1.1": str(task.deadline_ms).encode()}
+        ttl = await redis.pttl(keys.inflight(worker.worker_id))
+        assert task.deadline_ms - time.time() * 1000 < ttl <= task.deadline_ms + 130_000
+
+        # Worker khác trả kết quả cho việc nó không giữ: bỏ.
+        resp = await other.complete(crawl_pb2.FetchResult(task_id="c-1.1", status=500))
+        assert (resp.accepted, resp.dropped) == (0, 1)
+        resp = await worker.complete(
+            crawl_pb2.FetchResult(task_id="c-1.1", status=200),
+            crawl_pb2.FetchResult(task_id="bad", status=200),
+            crawl_pb2.FetchResult(task_id="c-1.2", status=200),  # chưa từng giao
         )
-        assert (resp.accepted, resp.dropped) == (1, 1)
-        replies = registry.Keys(prefix).reply("c-1")
-        assert await redis.llen(replies) == 1  # pyright: ignore[reportGeneralTypeIssues]
+        assert (resp.accepted, resp.dropped) == (1, 2)
+        # Trả lần hai (Complete thử lại): việc không còn giữ, bỏ.
+        resp = await worker.complete(crawl_pb2.FetchResult(task_id="c-1.1", status=200))
+        assert (resp.accepted, resp.dropped) == (0, 1)
+        [result] = await replies(redis, keys, "c-1")
+        assert result.status == 200
+        assert not await redis.exists(keys.inflight(worker.worker_id))
+        status = await registry.load_worker(redis, keys, worker.worker_id)
+        assert status is not None
+        assert (status.leased, status.completed, status.dropped) == (1, 1, 2)
 
 
 # --- vòng đời worker -----------------------------------------------------------------------------
@@ -517,12 +565,29 @@ async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
     keys = registry.Keys(prefix)
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
-        await worker.lease(wait_ms=0)  # tạo consumer
+        now = int(time.time() * 1000)
+        await queue_task(redis, keys, "c-1.1", high=True)
+        await queue_task(redis, keys, "c-1.2")
+        # Việc đã quá hạn khi worker mất: backend thôi chờ rồi, không trả.
+        await queue_task(redis, keys, "c-1.3", deadline_ms=now + 1500)
+        assert len((await worker.lease(wait_ms=0)).tasks) == 3  # tạo consumer, giữ 3 việc
+        await asyncio.sleep(1.6)
         await redis.zadd(keys.workers, {worker.worker_id: int(time.time() * 1000) - 1})
         assert await gw.servicer.prune() == [worker.worker_id]
         assert await registry.live_pools(redis, keys) == {}
-        consumers = await redis.xinfo_consumers(keys.stream("default", "http"), "workers")
-        assert consumers == []
+        for stream in (*keys.streams("default", "http"), *keys.streams("default", "render")):
+            assert await redis.xinfo_consumers(stream, "workers") == []
+        lost = await replies(redis, keys, "c-1")
+        assert sorted(r.task_id for r in lost) == ["c-1.1", "c-1.2"]
+        assert all(r.error_kind == crawl_pb2.ERROR_KIND_WORKER_LOST for r in lost)
+        assert all(r.worker_id == worker.worker_id for r in lost)
+        assert not await redis.exists(keys.inflight(worker.worker_id))
+        # Worker thật ra còn sống, trả kết quả muộn: bỏ (backend đã thử lại).
+        resp = await worker.complete(crawl_pb2.FetchResult(task_id="c-1.1", status=200))
+        assert (resp.accepted, resp.dropped) == (0, 1)
+        status = await registry.load_worker(redis, keys, worker.worker_id)
+        assert status is not None
+        assert (status.lost, status.dropped) == (2, 1)
         with pytest.raises(grpc.aio.AioRpcError) as info:
             await worker.lease(wait_ms=0)
         assert info.value.code() == grpc.StatusCode.NOT_FOUND
@@ -600,6 +665,165 @@ async def test_token_auth(redis: Redis, prefix: str) -> None:
             health_stub: Any = health_pb2_grpc.HealthStub(channel)
             check = await health_stub.Check(health_pb2.HealthCheckRequest(service=""))
     assert check.status == health_pb2.HealthCheckResponse.SERVING
+
+
+# --- việc worker đang giữ, hàng ưu tiên, thời gian chờ -------------------------------------------
+
+
+async def wait_len(redis: Redis, stream: str, n: int) -> None:
+    for _ in range(200):
+        if await redis.xlen(stream) == n:
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail(f"{stream}: {await redis.xlen(stream)} entry, chờ {n}")
+
+
+async def test_worker_leaving_returns_held_tasks_for_retry(redis: Redis, prefix: str) -> None:
+    settings = make_settings(prefix)
+    async with (
+        gateway(redis, settings) as gw,
+        FakeWorker(gw.port, serve=False) as lost,
+        fetch_client(redis, settings) as client,
+    ):
+        pending = asyncio.ensure_future(client.submit(http_task("https://a.example.vn/1", 30)))
+        [task] = (await lost.lease(wait_ms=3000)).tasks
+        t0 = time.monotonic()
+        await lost.leave()  # rời khi chưa trả kết quả
+        result = await asyncio.wait_for(pending, 5)
+        assert time.monotonic() - t0 < 2  # không chờ hết 30 s + grace
+        assert (result.task_id, result.error_kind, result.worker_id) == (
+            task.task_id,
+            crawl_pb2.ERROR_KIND_WORKER_LOST,
+            lost.worker_id,
+        )
+
+        # Qua HttpClient (không retry): RemoteTransport gửi lại ngay, worker khác làm.
+        await lost.register()
+        fetch = asyncio.ensure_future(
+            http_client(client).fetch("https://a.example.vn/2", check_robots=False, retries=0)
+        )
+        [task] = (await lost.lease(wait_ms=3000)).tasks
+        async with FakeWorker(gw.port) as rescuer:
+            await lost.leave()
+            page = await asyncio.wait_for(fetch, 10)
+        assert page.ok, page.error
+        assert [t.url for t in rescuer.tasks] == ["https://a.example.vn/2"]
+        resp = await lost.complete(ok_result(task))  # tới muộn: bỏ
+        assert (resp.accepted, resp.dropped) == (0, 1)
+    assert client.stats()["discarded"] == 0
+
+
+async def test_priority_tasks_are_leased_first(redis: Redis, prefix: str) -> None:
+    settings = make_settings(prefix)
+    keys = registry.Keys(prefix)
+    hi, normal = keys.streams("default", "http")
+    async with (
+        gateway(redis, settings) as gw,
+        FakeWorker(gw.port, serve=False) as worker,
+        fetch_client(redis, settings) as client,
+    ):
+        builds = [
+            asyncio.ensure_future(client.submit(http_task(f"https://b.example.vn/{i}")))
+            for i in range(3)
+        ]
+        await wait_len(redis, normal, 3)
+        with priority_fetches():  # task con thừa hưởng mức ưu tiên
+            polls = [
+                asyncio.ensure_future(client.submit(http_task(f"https://p.example.vn/{i}")))
+                for i in range(2)
+            ]
+        await wait_len(redis, hi, 2)
+        first = (await worker.lease(wait_ms=0, http_slots=3, render_slots=0)).tasks
+        assert sorted(t.url for t in first[:2]) == [
+            "https://p.example.vn/0",
+            "https://p.example.vn/1",
+        ]
+        assert first[2].url.startswith("https://b.example.vn/")
+        assert [t.priority for t in first] == [1, 1, 0]
+        rest = (await worker.lease(wait_ms=0)).tasks
+        assert len(rest) == 2
+        assert all(t.url.startswith("https://b.example.vn/") for t in rest)
+
+        # Đang chờ (long-poll) thì việc ưu tiên mới tới cũng được giao ngay.
+        lease = asyncio.ensure_future(worker.lease(wait_ms=3000))
+        await asyncio.sleep(0.2)
+        with priority_fetches():
+            late = asyncio.ensure_future(client.submit(http_task("https://p.example.vn/late")))
+        [urgent] = (await asyncio.wait_for(lease, 2)).tasks
+        assert (urgent.url, urgent.priority) == ("https://p.example.vn/late", 1)
+
+        await worker.complete(*(ok_result(t) for t in (*first, *rest, urgent)))
+        results = await asyncio.gather(*builds, *polls, late)
+    assert all(r.status == 200 for r in results)
+    assert await redis.get(keys.progress("default", "http")) == b"6"
+
+
+async def test_queue_wait_extends_while_queue_moves(redis: Redis, prefix: str) -> None:
+    # Khung chờ 0.2 + 0.5 s; worker lấy một việc mỗi ~0.2 s nên việc cuối phải chờ ~1.5 s.
+    settings = make_settings(prefix, fetch_queue_grace_seconds=0.5, fetch_queue_max_wait_seconds=5)
+    async with (
+        gateway(redis, settings) as gw,
+        FakeWorker(gw.port, serve=False) as worker,
+        fetch_client(redis, settings) as client,
+    ):
+        t0 = time.time() * 1000
+        pending = [
+            asyncio.ensure_future(client.submit(http_task(f"https://q.example.vn/{i}", 0.2)))
+            for i in range(7)
+        ]
+        leased: list[crawl_pb2.FetchTask] = []
+        while len(leased) < 7:
+            resp = await worker.lease(wait_ms=500, http_slots=1, render_slots=0)
+            leased.extend(resp.tasks)
+            if resp.tasks:
+                await worker.complete(*(ok_result(t) for t in resp.tasks))
+            await asyncio.sleep(0.2)
+        results = await asyncio.gather(*pending)
+    assert all(r.status == 200 for r in results)
+    stats = client.stats()
+    assert stats["timeouts"] == 0
+    assert stats["extended"] >= 1
+    # Hạn của việc = lúc gửi + timeout + FETCH_QUEUE_MAX_WAIT_SECONDS.
+    assert all(t0 + 5000 <= t.deadline_ms <= t0 + 6200 for t in leased)
+
+
+async def test_queue_wait_stops_at_max_wait_and_unqueues(redis: Redis, prefix: str) -> None:
+    settings = make_settings(
+        prefix, fetch_queue_grace_seconds=0.3, fetch_queue_max_wait_seconds=1.0
+    )
+    stream = registry.Keys(prefix).stream("default", "http")
+    async with (
+        gateway(redis, settings) as gw,
+        FakeWorker(gw.port, serve=False) as worker,
+        fetch_client(redis, settings) as client,
+    ):
+        ahead = [
+            asyncio.ensure_future(client.submit(http_task(f"https://h.example.vn/{i}", 5)))
+            for i in range(12)
+        ]
+        await wait_len(redis, stream, 12)
+        t0 = time.monotonic()
+        late = asyncio.ensure_future(client.submit(http_task("https://h.example.vn/late", 0.2)))
+        await wait_len(redis, stream, 13)
+        leased: list[crawl_pb2.FetchTask] = []
+        # Hàng việc chạy (một việc mỗi ~0.2 s) nhưng không tới lượt `late` trước 0.2 + 1.0 s.
+        while not late.done():
+            leased.extend((await worker.lease(wait_ms=0, http_slots=1, render_slots=0)).tasks)
+            await asyncio.sleep(0.2)
+        with pytest.raises(NoReplyError):
+            await late
+        assert 1.1 <= time.monotonic() - t0 < 2.5
+        # Thôi chờ thì việc bị xoá khỏi stream: không worker nào tải thừa.
+        await wait_len(redis, stream, 12 - len(leased))
+        leased.extend((await worker.lease(wait_ms=0, http_slots=20, render_slots=0)).tasks)
+        assert len(leased) == 12
+        assert "https://h.example.vn/late" not in {t.url for t in leased}
+        await worker.complete(*(ok_result(t) for t in leased))
+        results = await asyncio.gather(*ahead)
+    assert all(r.status == 200 for r in results)
+    stats = client.stats()
+    assert (stats["timeouts"], stats["completed"]) == (1, 12)
+    assert stats["extended"] >= 1
 
 
 async def test_fetch_client_close_fails_pending_tasks(redis: Redis, prefix: str) -> None:

@@ -24,7 +24,7 @@ from jobcrawler.gateway.registry import (
 )
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources
-from jobcrawler.services import app_settings
+from jobcrawler.services import app_settings, audit
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
@@ -40,8 +40,10 @@ def _base(request: Request) -> Settings:
     return request.app.state.settings
 
 
-def _user(request: Request) -> str | None:
-    return getattr(request.state, "user", None)
+def _user(request: Request) -> str:
+    """Người thao tác (tên đăng nhập do `GuardMiddleware` gắn, không có thì `anonymous`): ghi
+    vào `app_settings.updated_by` và nhật ký thao tác."""
+    return audit.actor_of(getattr(request.state, "user", None))
 
 
 # --- cài đặt -------------------------------------------------------------------------------------
@@ -149,12 +151,23 @@ async def get_workers(request: Request) -> dict[str, Any]:
 async def _set_drain(request: Request, worker_id: str, *, drain: bool) -> dict[str, Any]:
     res = _res(request)
     keys = Keys(res.settings.redis_prefix)
-    known = await load_worker(res.redis, keys, worker_id) is not None
+    worker = await load_worker(res.redis, keys, worker_id)
     # Huỷ yêu cầu dừng vẫn được khi worker đã rời hẳn nhưng còn trong danh sách dừng.
-    if not known and (drain or not await is_draining(res.redis, keys, worker_id)):
+    if worker is None and (drain or not await is_draining(res.redis, keys, worker_id)):
         raise HTTPException(404, "Không có worker này")
     await request_drain(res.redis, keys, worker_id, drain=drain)
-    log.info("worker.drain", worker_id=worker_id, drain=drain, user=_user(request))
+    user = _user(request)
+    log.info("worker.drain", worker_id=worker_id, drain=drain, user=user)
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.WORKER_DRAIN if drain else audit.WORKER_UNDRAIN,
+        actor=user,
+        resource_type="worker",
+        resource_id=worker_id,
+        metadata={"hostname": worker.hostname, "pool": worker.pool}
+        if worker is not None
+        else {"gone": True},
+    )
     return {"worker_id": worker_id, "draining": drain}
 
 

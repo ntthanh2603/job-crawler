@@ -9,6 +9,10 @@
   UNAUTHENTICATED → log lỗi, thử lại mỗi phút.
 - `drain` (từ gateway) hoặc SIGTERM/Ctrl-C → thôi xin việc, chờ việc đang chạy tối đa
   WORKER_SHUTDOWN_GRACE_SECONDS (kết quả vẫn được Complete), Leave rồi thoát.
+- Không mở được Chromium → tạm tắt render (Register lại với render_slots = 0) trong
+  min(30 s · 2^(n−1), 10 phút) với n là số lần lỗi liên tiếp, hết hạn thì Register lại với đủ slot
+  render và thử lại; mở được thì n về 0. Máy chưa cài Chromium thì tắt hẳn. Trạng thái báo trong
+  `WorkerStats.render_disabled_reason` / `render_retry_at_ms`.
 """
 
 from __future__ import annotations
@@ -53,6 +57,9 @@ BACKOFF_CAP_SECONDS = 30.0
 AUTH_RETRY_SECONDS = 60.0
 # Chặn cứng: việc chạy quá timeout của nó chừng này giây thì huỷ (phòng curl/Chromium treo).
 TASK_GUARD_SECONDS = 30.0
+# Không mở được Chromium: tạm tắt render 30 s, 60 s, 120 s... tối đa 10 phút.
+RENDER_BACKOFF_BASE_SECONDS = 30.0
+RENDER_BACKOFF_CAP_SECONDS = 600.0
 
 REREGISTER_CODES = frozenset({grpc.StatusCode.NOT_FOUND, grpc.StatusCode.FAILED_PRECONDITION})
 AUTH_CODES = frozenset({grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.PERMISSION_DENIED})
@@ -108,6 +115,17 @@ async def wait_any(timeout: float, *events: asyncio.Event) -> None:
             waiter.cancel()
 
 
+def render_backoff(failures: int) -> float:
+    """Giây tạm tắt render sau `failures` lần liên tiếp không mở được Chromium."""
+    delay = RENDER_BACKOFF_BASE_SECONDS * 2 ** min(max(0, failures - 1), 30)
+    return min(RENDER_BACKOFF_CAP_SECONDS, delay)
+
+
+def _cap(remote: int, local: int) -> int:
+    """Số slot gateway đẩy xuống là trần (> 0), không phải giá trị ghi đè."""
+    return min(remote, local) if remote > 0 else local
+
+
 class Backoff:
     """0.5 s, 1 s, 2 s... tối đa 30 s, nhân ngẫu nhiên 1–1.5 để các worker không dồn cùng lúc."""
 
@@ -129,7 +147,7 @@ class Backoff:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
-    """Cấu hình đang áp dụng: của worker, ghi đè bởi `WorkerConfig` gateway trả về."""
+    """Cấu hình đang áp dụng: của worker, kết hợp `WorkerConfig` gateway trả về."""
 
     http_slots: int
     render_slots: int
@@ -153,11 +171,12 @@ class RuntimeConfig:
         )
 
     def merge(self, cfg: crawl_pb2.WorkerConfig) -> RuntimeConfig:
-        """Trường 0 / rỗng giữ cấu hình của worker (`self` là cấu hình gốc của worker). Worker đặt
-        WORKER_RENDER_SLOTS=0 thì gateway không bật render được."""
+        """`self` là cấu hình gốc của worker. Số slot của gateway là trần: min(gateway, worker), để
+        máy nhỏ không bị nâng lên bằng máy lớn nhất; WORKER_RENDER_SLOTS=0 thì luôn 0. Các trường
+        khác: gateway ghi đè. Trường 0 / rỗng giữ cấu hình của worker."""
         return RuntimeConfig(
-            http_slots=cfg.http_slots or self.http_slots,
-            render_slots=(cfg.render_slots or self.render_slots) if self.render_slots else 0,
+            http_slots=_cap(cfg.http_slots, self.http_slots),
+            render_slots=_cap(cfg.render_slots, self.render_slots),
             impersonate=cfg.impersonate or self.impersonate,
             max_body_bytes=cfg.max_body_bytes or self.max_body_bytes,
             heartbeat_seconds=float(cfg.heartbeat_seconds or self.heartbeat_seconds),
@@ -242,7 +261,13 @@ class Worker:
                 max_pages=self.local.render_slots,
                 max_body_bytes=self.config.max_body_bytes,
             )
-        self._render_ok = self.browser is not None
+        # Render tắt hẳn (máy chưa cài Chromium) / tạm tắt tới `_render_retry_at` (monotonic) sau
+        # `_render_failures` lần liên tiếp không mở được Chromium.
+        self._render_off = False
+        self._render_failures = 0
+        self._render_retry_at = 0.0
+        self._render_reason = ""
+        self._render_timer: asyncio.TimerHandle | None = None
         self._channel = channel or open_channel(settings)
         self._stub = crawl_pb2_grpc.CrawlGatewayStub(self._channel)
         self._metadata = auth_metadata(settings)
@@ -413,8 +438,60 @@ class Worker:
             log.info("worker.config_changed", old=self.config.version, new=version)
             self._need_register = True
 
+    def _render_paused(self) -> float:
+        """Số giây còn tạm tắt render (0 = không tạm tắt)."""
+        return max(0.0, self._render_retry_at - time.monotonic())
+
     def _render_capacity(self) -> int:
-        return self.config.render_slots if self._render_ok else 0
+        if self.browser is None or self._render_off or self._render_paused():
+            return 0
+        return self.config.render_slots
+
+    def _render_failed(self, exc: BrowserUnavailableError) -> crawl_pb2.ErrorKind:
+        """Không mở được Chromium: tắt hẳn (chưa cài) hoặc tạm tắt theo backoff; Register lại để
+        gateway thấy render_slots = 0. Trả ErrorKind cho kết quả của việc."""
+        if exc.permanent:
+            if not self._render_off:
+                log.error("worker.browser_unavailable", error=str(exc), permanent=True)
+                self._render_off = True
+                self._render_reason = f"không có Chromium: {exc}"
+                self._need_register = True
+                self._wake.set()
+            return crawl_pb2.ERROR_KIND_UNSUPPORTED
+        # Nhiều việc render cùng chờ mở Chromium: chỉ lần lỗi đầu của đợt tính vào backoff.
+        if not self._render_paused():
+            self._render_failures += 1
+            delay = render_backoff(self._render_failures)
+            self._render_retry_at = time.monotonic() + delay
+            self._render_reason = f"không mở được Chromium: {exc}"
+            log.error(
+                "worker.browser_unavailable",
+                error=str(exc),
+                failures=self._render_failures,
+                retry_in=delay,
+            )
+            self._need_register = True
+            self._wake.set()
+            if self._render_timer is not None:
+                self._render_timer.cancel()
+            self._render_timer = asyncio.get_running_loop().call_later(delay, self._render_retry)
+        return crawl_pb2.ERROR_KIND_OTHER
+
+    def _render_retry(self) -> None:
+        """Hết hạn tạm tắt: Register lại với đủ slot render, việc render sau mở lại Chromium."""
+        self._render_timer = None
+        if self._halt.is_set() or self._render_off:
+            return
+        log.info("worker.render_retry", failures=self._render_failures)
+        self._need_register = True
+        self._wake.set()
+
+    def _render_succeeded(self) -> None:
+        if self._render_failures:
+            log.info("worker.browser_recovered", failures=self._render_failures)
+        self._render_failures = 0
+        self._render_retry_at = 0.0
+        self._render_reason = ""
 
     async def _free_slots(self) -> tuple[int, int]:
         """Số slot HTTP / render còn trống; chờ tới khi có ít nhất một (hoặc dừng)."""
@@ -509,8 +586,13 @@ class Worker:
             return fail(crawl_pb2.ERROR_KIND_EXPIRED, "quá hạn trước khi tải")
         if task.kind not in (crawl_pb2.TASK_KIND_HTTP, crawl_pb2.TASK_KIND_RENDER):
             return fail(crawl_pb2.ERROR_KIND_UNSUPPORTED, f"loại việc không hỗ trợ: {task.kind}")
-        if render and (self.browser is None or not self._render_ok):
+        if render and (self.browser is None or self._render_off):
             return fail(crawl_pb2.ERROR_KIND_UNSUPPORTED, "worker không render (không có Chromium)")
+        if render and (paused := self._render_paused()):
+            return fail(
+                crawl_pb2.ERROR_KIND_OTHER,
+                f"render tạm tắt ({self._render_reason}), thử lại sau {paused:.0f} s",
+            )
         proxy_url, proxy_id, local = self._pick_proxy(task, browser=render)
         if render and proxy_url and not browser_compatible(proxy_url):
             return fail(
@@ -523,6 +605,8 @@ class Worker:
                     result = await self.browser.execute(
                         task, proxy=proxy_url or None, proxy_id=proxy_id
                     )
+                    if self.browser.started:  # Chromium mở được (trang có lỗi hay không)
+                        self._render_succeeded()
                 else:
                     result = await self.http.execute(
                         task, proxy=proxy_url or None, proxy_id=proxy_id
@@ -531,11 +615,7 @@ class Worker:
             result = fail(crawl_pb2.ERROR_KIND_TIMEOUT, "quá thời gian chờ (worker huỷ)")
             result.proxy_id = proxy_id
         except BrowserUnavailableError as exc:
-            if self._render_ok:
-                log.error("worker.browser_unavailable", error=str(exc))
-                self._render_ok = False
-                self._need_register = True  # báo gateway render_slots = 0
-            return fail(crawl_pb2.ERROR_KIND_UNSUPPORTED, f"không mở được Chromium: {exc}")
+            return fail(self._render_failed(exc), f"không mở được Chromium: {exc}")
         self._report_proxy(local, task, result)
         return result
 
@@ -648,6 +728,8 @@ class Worker:
 
     def stats(self) -> crawl_pb2.WorkerStats:
         bytes_in = self.http.bytes_in + (self.browser.bytes_in if self.browser else 0)
+        paused = self._render_paused()
+        reason = self._render_reason if self._render_off or paused else ""
         return crawl_pb2.WorkerStats(
             http_done=self.counters.http_done,
             http_failed=self.counters.http_failed,
@@ -659,6 +741,8 @@ class Worker:
             cpu_percent=self._cpu.percent(),
             rss_bytes=rss_bytes(),
             proxies_alive=self.proxies.alive(),
+            render_disabled_reason=reason[:500],
+            render_retry_at_ms=now_ms() + int(paused * 1000) if paused else 0,
         )
 
     async def _heartbeat_loop(self) -> None:
@@ -698,6 +782,9 @@ class Worker:
     # --- dừng -------------------------------------------------------------------------------
 
     async def _shutdown(self, completer: asyncio.Task[None], heartbeat: asyncio.Task[None]) -> None:
+        if self._render_timer is not None:
+            self._render_timer.cancel()
+            self._render_timer = None
         if self._tasks:
             grace = self.settings.worker_shutdown_grace_seconds
             log.info("worker.finishing", inflight=len(self._tasks), grace_seconds=grace)

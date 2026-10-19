@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -57,7 +58,12 @@ _TRACKERS = (
 
 
 class BrowserUnavailableError(RuntimeError):
-    """Không khởi động được Chromium (chưa `playwright install chromium`, thiếu thư viện...)."""
+    """Không khởi động được Chromium. `permanent`: máy chưa cài Chromium (chưa `playwright install
+    chromium`), thử lại vô ích; còn lại (thiếu RAM, Chromium chết khi mở lại...) thử lại sau."""
+
+    def __init__(self, message: str, *, permanent: bool = False) -> None:
+        super().__init__(message)
+        self.permanent = permanent
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +184,22 @@ class BrowserManager:
                     self._browser = await self._playwright.chromium.launch(headless=self._headless)
                     self.user_agent = await self._detect_user_agent(self._browser)
                 except PlaywrightError as exc:
-                    raise BrowserUnavailableError(str(exc).splitlines()[0]) from exc
+                    raise BrowserUnavailableError(
+                        str(exc).splitlines()[0], permanent=self._not_installed(exc)
+                    ) from exc
                 log.info("worker.browser_started", user_agent=self.user_agent)
             return self._browser
+
+    def _not_installed(self, exc: PlaywrightError) -> bool:
+        """Lỗi mở Chromium là do máy chưa cài Chromium của Playwright."""
+        if "Executable doesn't exist" in str(exc):
+            return True
+        if self._playwright is None:
+            return False
+        try:
+            return not os.path.exists(self._playwright.chromium.executable_path)
+        except Exception:
+            return False
 
     @staticmethod
     async def _detect_user_agent(browser: Browser) -> str:
@@ -249,7 +268,8 @@ class BrowserManager:
     async def execute(
         self, task: crawl_pb2.FetchTask, *, proxy: str | None = None, proxy_id: str = ""
     ) -> crawl_pb2.FetchResult:
-        """Một việc render → `FetchResult`. `BrowserUnavailableError` để caller tắt render."""
+        """Một việc render → `FetchResult`. `BrowserUnavailableError` để caller tắt render (hẳn
+        hoặc tạm thời)."""
         started = time.monotonic()
         timeout = task_timeout(task)
         if timeout <= 0:

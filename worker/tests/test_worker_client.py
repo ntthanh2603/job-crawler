@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import grpc
 import pytest
@@ -18,8 +19,9 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
 )
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
-from jobworker import __version__
-from jobworker.client import Backoff, RuntimeConfig, Worker
+from jobworker import __version__, client
+from jobworker.browser import BrowserUnavailableError
+from jobworker.client import Backoff, RuntimeConfig, Worker, render_backoff
 from jobworker.proxies import LocalProxyPool, parse_proxy_line
 from jobworker.results import now_ms
 
@@ -258,6 +260,115 @@ async def test_gateway_down_then_up(web: WebServer) -> None:
         await server.stop(0)
 
 
+# --- Chromium lỗi: tạm tắt render rồi thử lại -----------------------------------------------------
+
+
+class FlakyBrowser:
+    """BrowserManager giả: `fail` lần đầu không mở được Chromium, sau đó render được."""
+
+    def __init__(self, fail: int, *, permanent: bool = False) -> None:
+        self.fail = fail
+        self.permanent = permanent
+        self.calls = 0
+        self.bytes_in = 0
+        self.started = False
+
+    def set_limits(self, *, max_pages: int, max_body_bytes: int) -> None:
+        pass
+
+    async def execute(
+        self, task: crawl_pb2.FetchTask, *, proxy: str | None = None, proxy_id: str = ""
+    ) -> crawl_pb2.FetchResult:
+        self.calls += 1
+        if self.calls <= self.fail:
+            raise BrowserUnavailableError("Target closed", permanent=self.permanent)
+        self.started = True
+        return crawl_pb2.FetchResult(task_id=task.task_id, status=200, body=b"<div/>")
+
+    async def close(self) -> None:
+        pass
+
+
+def registered_render_slots(gw: FakeGateway) -> list[int]:
+    return [r.info.render_slots for r in gw.registers]
+
+
+async def test_render_backoff_then_recovers(
+    gateway: Gateway, web: WebServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(client, "RENDER_BACKOFF_BASE_SECONDS", 0.6)
+    gw, port = gateway
+    gw.config.heartbeat_seconds = 1
+    browser = FlakyBrowser(fail=1)
+    worker = Worker(make_settings(port, worker_render_slots=2), browser=cast(Any, browser))
+    gw.add(render_task("r1", web.url("/spa")))
+    run = RunningWorker(worker)
+    try:
+        [failed] = await gw.wait_results(1)
+        assert failed.error_kind == crawl_pb2.ERROR_KIND_OTHER
+        assert "Chromium" in failed.error
+        # Register lại với 0 slot render trong lúc tạm tắt.
+        await gw.wait_for(lambda: registered_render_slots(gw)[-1:] == [0])
+        stats = worker.stats()
+        assert stats.render_disabled_reason == "không mở được Chromium: Target closed"
+        assert stats.render_retry_at_ms > now_ms()
+        await gw.wait_for(lambda: gw.leases[-1].render_slots == 0)  # không xin việc render
+        # Hết hạn: Register lại với đủ slot render, việc render chạy được, backoff về 0.
+        await gw.wait_for(lambda: registered_render_slots(gw) == [2, 0, 2], timeout=5)
+        gw.add(render_task("r2", web.url("/spa")))
+        await gw.wait_results(2)
+        assert gw.result("r2").status == 200
+        await gw.wait_for(lambda: any(h.stats.render_done == 1 for h in gw.heartbeats), timeout=5)
+    finally:
+        await run.stop()
+    stats = worker.stats()
+    assert (stats.render_disabled_reason, stats.render_retry_at_ms) == ("", 0)
+    assert browser.calls == 2
+    assert worker._render_failures == 0  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_render_without_chromium_installed_stays_off(
+    gateway: Gateway, web: WebServer
+) -> None:
+    gw, port = gateway
+    browser = FlakyBrowser(fail=99, permanent=True)
+    worker = Worker(make_settings(port, worker_render_slots=1), browser=cast(Any, browser))
+    gw.add(render_task("r1", web.url("/spa")))
+    run = RunningWorker(worker)
+    try:
+        [result] = await gw.wait_results(1)
+        await gw.wait_for(lambda: registered_render_slots(gw) == [1, 0])
+        gw.add(render_task("r2", web.url("/spa"), source="force"))  # ép giao dù xin 0
+        await gw.wait_results(2)
+    finally:
+        await run.stop()
+    assert result.error_kind == crawl_pb2.ERROR_KIND_UNSUPPORTED
+    assert gw.result("r2").error_kind == crawl_pb2.ERROR_KIND_UNSUPPORTED
+    assert browser.calls == 1  # không thử mở lại
+    assert registered_render_slots(gw) == [1, 0]
+    stats = worker.stats()
+    assert stats.render_disabled_reason.startswith("không có Chromium")
+    assert stats.render_retry_at_ms == 0
+
+
+def test_missing_chromium_is_permanent() -> None:
+    from playwright.async_api import Error as PlaywrightError
+
+    from jobworker.browser import BrowserManager
+
+    manager = BrowserManager(worker_id="w1", max_pages=1)
+    missing = PlaywrightError("BrowserType.launch: Executable doesn't exist at /ms-playwright/x")
+    assert manager._not_installed(missing)  # pyright: ignore[reportPrivateUsage]
+    crashed = PlaywrightError("BrowserType.launch: Target page, context or browser has been closed")
+    assert not manager._not_installed(crashed)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_render_backoff_grows_and_caps() -> None:
+    assert [render_backoff(n) for n in range(1, 7)] == [30, 60, 120, 240, 480, 600]
+    assert render_backoff(100) == 600
+    assert render_backoff(0) == 30
+
+
 # --- chọn proxy ----------------------------------------------------------------------------------
 
 
@@ -356,11 +467,15 @@ async def test_local_proxies_disabled_by_gateway(
 def test_runtime_config_merge() -> None:
     local = RuntimeConfig.local(make_settings(1, worker_render_slots=2))
     merged = local.merge(crawl_pb2.WorkerConfig(version=7, render_slots=5, impersonate="chrome131"))
-    assert merged.http_slots == 4
-    assert merged.render_slots == 5
+    assert merged.http_slots == 4  # 0 = giữ cấu hình của worker
+    assert merged.render_slots == 2  # gateway là trần, không nâng máy nhỏ lên
     assert merged.impersonate == "chrome131"
     assert merged.version == 7
     assert merged.use_local_proxies is False
+    lowered = local.merge(crawl_pb2.WorkerConfig(http_slots=3, render_slots=1))
+    assert (lowered.http_slots, lowered.render_slots) == (3, 1)
+    raised = local.merge(crawl_pb2.WorkerConfig(http_slots=64))
+    assert raised.http_slots == 4
     # Worker không có Chromium: gateway không bật render được.
     no_render = RuntimeConfig.local(make_settings(1, worker_render_slots=0))
     assert no_render.merge(crawl_pb2.WorkerConfig(render_slots=3)).render_slots == 0

@@ -38,6 +38,7 @@ from jobcrawler.config import Settings, parse_window
 from jobcrawler.db.models import AppSetting
 from jobcrawler.logging import get_logger
 from jobcrawler.net.proxy_pool import ProxyParseError, parse_proxy_line
+from jobcrawler.services import audit
 
 log = get_logger(__name__)
 
@@ -532,15 +533,17 @@ GROUPS: tuple[Group, ...] = (
             "gateway_http_slots",
             "int",
             "Slot HTTP mỗi worker",
-            "Số request HTTP mỗi worker chạy cùng lúc. 0 = giữ cấu hình riêng của từng worker.",
+            "Mức trần số request HTTP mỗi worker chạy cùng lúc: worker dùng số nhỏ hơn giữa giá "
+            "trị này và cấu hình riêng của nó (máy nhỏ không bị đẩy lên). 0 = giữ cấu hình của "
+            "worker.",
             unit="request",
         ),
         _s(
             "gateway_render_slots",
             "int",
             "Slot render mỗi worker",
-            "Số trang trình duyệt (render JavaScript) mỗi worker mở cùng lúc. 0 = giữ cấu hình "
-            "riêng của từng worker.",
+            "Mức trần số trang trình duyệt (render JavaScript) mỗi worker mở cùng lúc: worker dùng "
+            "số nhỏ hơn giữa giá trị này và cấu hình riêng của nó. 0 = giữ cấu hình của worker.",
             unit="trang",
         ),
         _s(
@@ -580,6 +583,16 @@ GROUPS: tuple[Group, ...] = (
             "Thời gian chờ xếp hàng tới worker",
             "Backend chờ thêm chừng này giây (ngoài timeout của request) cho việc xếp hàng tới "
             "worker trước khi coi là hết giờ.",
+            unit="giây",
+            live=False,
+        ),
+        _s(
+            "fetch_queue_max_wait_seconds",
+            "float",
+            "Chờ xếp hàng tối đa khi hàng đông",
+            "Hết thời gian chờ xếp hàng mà worker vẫn đang lấy việc trong hàng (chỉ là đông, không "
+            "phải hỏng) thì backend chờ tiếp, tổng tối đa timeout của request + chừng này giây. "
+            "Phải lớn hơn thời gian chờ xếp hàng tới worker.",
             unit="giây",
             live=False,
         ),
@@ -1349,6 +1362,7 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "Gateway",
             "gateway_worker_ttl_seconds",
             "fetch_queue_grace_seconds",
+            "fetch_queue_max_wait_seconds",
             "fetch_max_body_bytes",
         ),
         _sec("Định tuyến", "fetch_routes"),
@@ -1779,13 +1793,32 @@ async def save(
 ) -> Settings:
     """Kiểm tra (`prepare`) rồi lưu mọi thay đổi trong một transaction; lỗi → `SettingsError`,
     không lưu gì. Có thay đổi thì tăng version + PUBLISH để process khác nạp lại. Trả Settings
-    hiệu lực mới."""
-    prepared = prepare(base, await load_overrides(sessionmaker), changes)
+    hiệu lực mới.
+
+    Nhật ký (`audit_events`, cùng transaction): mỗi lần lưu có thay đổi thật ghi một dòng,
+    `actor` = `user`. `changes` = {key: {"before", "after"}} — giá trị hiệu lực trước / sau (về
+    giá trị env / mặc định thì `after` là giá trị đó), che như trang Cài đặt: bí mật thành `MASK`
+    khi có đặt, `None` khi không; proxy ẩn mật khẩu (`audit_changes`). `action` =
+    `settings.reset` khi mọi key đổi đều là về env / mặc định, còn lại `settings.update`;
+    `metadata.reset` liệt kê các key về env / mặc định (khi có)."""
+    current = await load_overrides(sessionmaker)
+    prepared = prepare(base, current, changes)
     upserts, resets, effective = prepared.upserts, prepared.resets, prepared.after
     if not upserts and not resets:
         return effective
     changed = 0
     async with sessionmaker.begin() as session:
+        diff = audit_changes(current, prepared)
+        if diff:
+            reset = sorted(k for k in diff if k in resets)
+            await audit.record(
+                session,
+                action=audit.SETTINGS_RESET if len(reset) == len(diff) else audit.SETTINGS_UPDATE,
+                actor=user,
+                resource_type="settings",
+                changes=diff,
+                metadata={"reset": reset} if reset else None,
+            )
         if resets:
             result = await session.execute(delete(AppSetting).where(AppSetting.key.in_(resets)))
             changed += result.rowcount or 0  # pyright: ignore[reportAttributeAccessIssue]
@@ -1814,6 +1847,31 @@ async def save(
             reset=sorted(resets),
         )
     return effective
+
+
+def _audit_value(spec: SettingSpec, value: Any) -> Any:
+    if spec.kind == "secret":
+        return MASK if _secret_set(spec, value) else None
+    return _display(spec, value)
+
+
+def audit_changes(current: Mapping[str, Any], prepared: Prepared) -> dict[str, dict[str, Any]]:
+    """Thay đổi ghi nhật ký của một lần lưu: key → {"before", "after"} (giá trị hiệu lực, đã che
+    — không bao giờ có giá trị bí mật). Bỏ qua key lưu lại đúng giá trị đang lưu và key về env /
+    mặc định khi vốn không có dòng `app_settings`."""
+    out: dict[str, dict[str, Any]] = {}
+    for key in sorted(prepared.upserts.keys() | prepared.resets):
+        if key in prepared.resets:
+            if key not in current:
+                continue
+        elif key in current and current[key] == _jsonable(key, prepared.upserts[key]):
+            continue
+        spec = SPEC_BY_KEY[key]
+        out[key] = {
+            "before": _audit_value(spec, getattr(prepared.before, key)),
+            "after": _audit_value(spec, getattr(prepared.after, key)),
+        }
+    return out
 
 
 # --- hiển thị ------------------------------------------------------------------------------------

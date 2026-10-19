@@ -3,6 +3,11 @@
 Một request = một `FetchTask`. Proxy: backend chỉ định (PROXY_MODE=central, hoặc kiểm tra proxy)
 thì ghi vào `task.proxy`; không thì worker tự chọn proxy của mình (PROXY_MODE=worker) hoặc đi
 thẳng (`direct`, PROXY_MODE=off).
+
+Worker giữ việc mà rời / chết (`ERROR_KIND_WORKER_LOST`, gateway báo): gửi lại ngay
+LOST_RESUBMITS lần (cả việc render, vốn không được `HttpClient` thử lại); vẫn mất thì là
+`TransportError("other", "worker_lost: ...")`, `HttpClient.fetch` thử lại như lỗi kết nối nhưng
+không tính lỗi cho proxy.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import zstandard
 
 from jcproto.v1 import crawl_pb2
 from jobcrawler.gateway.dispatch import FetchClient
+from jobcrawler.logging import get_logger
 from jobcrawler.net.http import (
     CapturedJson,
     RawResponse,
@@ -25,12 +31,15 @@ from jobcrawler.net.http import (
 )
 from jobcrawler.net.proxy_pool import Proxy, ProxyParseError, parse_proxy_line
 
+log = get_logger(__name__)
+
 _ERROR_KINDS: dict[int, TransportErrorKind] = {
     crawl_pb2.ERROR_KIND_TIMEOUT: "timeout",
     crawl_pb2.ERROR_KIND_PROXY: "proxy",
     crawl_pb2.ERROR_KIND_CONNECT: "connect",
 }
 MIN_BODY_LIMIT = 64 * 1024 * 1024
+LOST_RESUBMITS = 1
 
 
 def encode_body(
@@ -141,6 +150,12 @@ class _Remote:
     async def _run(self, task: crawl_pb2.FetchTask) -> RawResponse:
         task.direct = self.direct and not task.proxy
         result = await self.client.submit(task)
+        for _ in range(LOST_RESUBMITS):
+            if result.error_kind != crawl_pb2.ERROR_KIND_WORKER_LOST:
+                break
+            # Việc chưa chạy xong ở worker đã mất: gửi lại (task_id, deadline mới) ngay.
+            log.info("fetch.worker_lost", url=task.url, worker_id=result.worker_id)
+            result = await self.client.submit(task)
         return to_raw_response(result, task.url, max_body=self._max_body)
 
 

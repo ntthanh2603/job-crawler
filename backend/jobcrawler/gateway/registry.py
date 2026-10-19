@@ -6,8 +6,14 @@ Khoá Redis (tiền tố `<REDIS_PREFIX>:gw`):
   TTL = hạn báo sống × 10 để trang Workers vẫn thấy worker vừa rời một lúc.
 - `drain`: set worker_id được yêu cầu dừng nhận việc (làm nốt rồi rời).
 - `config`: JSON cấu hình đẩy xuống worker kèm `version` (đổi ở trang Cài đặt → version mới).
-- `count:<id>`: hash `leased` / `completed` (HINCRBY: Lease và Complete chạy song song, nhiều
-  gateway), cùng TTL với `worker:<id>`; `load_worker` / `list_workers` ghép vào `WorkerStatus`.
+- `count:<id>`: hash `leased` / `completed` / `dropped` / `lost` (HINCRBY: Lease và Complete chạy
+  song song, nhiều gateway), cùng TTL với `worker:<id>`; `load_worker` / `list_workers` ghép vào
+  `WorkerStatus`.
+- `inflight:<id>`: hash task_id → deadline_ms của việc worker đang giữ (Lease ghi, Complete xoá;
+  worker rời / quá hạn báo sống thì gateway trả `ERROR_KIND_WORKER_LOST` cho từng việc còn lại).
+- `fetch:<pool>:<kind>[:hi]`: stream việc lấy trang (`:hi`: việc ưu tiên, giao trước).
+- `progress:<pool>:<kind>`: số entry gateway đã lấy khỏi stream của pool / loại việc (INCRBY mỗi
+  Lease); backend thấy số này tăng thì hàng việc còn chạy, chờ tiếp.
 """
 
 from __future__ import annotations
@@ -42,9 +48,21 @@ class Keys:
         """Hash số việc gateway đã giao (`leased`) / nhận kết quả (`completed`) của worker."""
         return f"{self.base}:count:{worker_id}"
 
-    def stream(self, pool: str, kind: str) -> str:
-        """Stream việc lấy trang của một pool; `kind`: `http` | `render`."""
-        return f"{self.base}:fetch:{pool}:{kind}"
+    def stream(self, pool: str, kind: str, *, high: bool = False) -> str:
+        """Stream việc lấy trang của một pool; `kind`: `http` | `render`; `high`: stream ưu tiên."""
+        return f"{self.base}:fetch:{pool}:{kind}" + (":hi" if high else "")
+
+    def streams(self, pool: str, kind: str) -> tuple[str, str]:
+        """(stream ưu tiên, stream thường) của một pool / loại việc, theo thứ tự giao."""
+        return self.stream(pool, kind, high=True), self.stream(pool, kind)
+
+    def inflight(self, worker_id: str) -> str:
+        """Hash task_id → deadline_ms của việc worker đang giữ."""
+        return f"{self.base}:inflight:{worker_id}"
+
+    def progress(self, pool: str, kind: str) -> str:
+        """Bộ đếm entry đã lấy khỏi stream của pool / loại việc (cả stream ưu tiên)."""
+        return f"{self.base}:progress:{pool}:{kind}"
 
     def reply(self, client_id: str) -> str:
         """List kết quả trả về một process backend (client_id) đang chờ."""
@@ -62,6 +80,10 @@ class WorkerStats(BaseModel):
     cpu_percent: float = 0.0
     rss_bytes: int = 0
     proxies_alive: int = 0
+    # Render tạm tắt vì lỗi Chromium (rỗng = render được); worker thử lại lúc `render_retry_at_ms`
+    # (0 = tắt hẳn, vd. máy chưa cài Chromium).
+    render_disabled_reason: str = ""
+    render_retry_at_ms: int = 0
 
 
 class WorkerStatus(BaseModel):
@@ -76,9 +98,12 @@ class WorkerStatus(BaseModel):
     started_at_ms: int = 0
     registered_at_ms: int = 0
     last_seen_ms: int = 0
-    # Số việc gateway đã giao / nhận kết quả (đếm phía gateway).
+    # Số việc gateway đã giao / nhận kết quả (đếm phía gateway); `dropped`: kết quả bị bỏ vì
+    # worker không còn giữ việc; `lost`: việc trả về backend khi worker rời / quá hạn báo sống.
     leased: int = 0
     completed: int = 0
+    dropped: int = 0
+    lost: int = 0
     stats: WorkerStats = Field(default_factory=WorkerStats)
     alive: bool = False
     draining: bool = False
@@ -105,33 +130,42 @@ async def touch_worker(redis: Redis, keys: Keys, worker_id: str, *, ttl: float) 
         await pipe.execute()
 
 
+COUNT_FIELDS = ("leased", "completed", "dropped", "lost")
+
+
 async def add_counts(
-    redis: Redis, keys: Keys, worker_id: str, *, ttl: float, leased: int = 0, completed: int = 0
+    redis: Redis,
+    keys: Keys,
+    worker_id: str,
+    *,
+    ttl: float,
+    leased: int = 0,
+    completed: int = 0,
+    dropped: int = 0,
+    lost: int = 0,
 ) -> None:
-    """Cộng số việc đã giao / đã nhận kết quả của worker."""
+    """Cộng số việc đã giao / đã nhận kết quả / kết quả bị bỏ / việc mất của worker."""
     key = keys.counts(worker_id)
+    values = {"leased": leased, "completed": completed, "dropped": dropped, "lost": lost}
     async with redis.pipeline(transaction=False) as pipe:
-        if leased:
-            pipe.hincrby(key, "leased", leased)
-        if completed:
-            pipe.hincrby(key, "completed", completed)
+        for name, value in values.items():
+            if value:
+                pipe.hincrby(key, name, value)
         pipe.pexpire(key, int(ttl * 10_000))
         await pipe.execute()
 
 
 def _with_counts(status: WorkerStatus, counts: list[Any]) -> WorkerStatus:
-    leased, completed = counts
-    if leased is not None:
-        status.leased = int(leased)
-    if completed is not None:
-        status.completed = int(completed)
+    for name, value in zip(COUNT_FIELDS, counts, strict=True):
+        if value is not None:
+            setattr(status, name, int(value))
     return status
 
 
 async def load_worker(redis: Redis, keys: Keys, worker_id: str) -> WorkerStatus | None:
     async with redis.pipeline(transaction=False) as pipe:
         pipe.get(keys.worker(worker_id))
-        pipe.hmget(keys.counts(worker_id), ["leased", "completed"])
+        pipe.hmget(keys.counts(worker_id), list(COUNT_FIELDS))
         raw, counts = await pipe.execute()
     if raw is None:
         return None
@@ -165,7 +199,7 @@ async def list_workers(
     raws = await redis.mget([keys.worker(w) for w in ids])
     async with redis.pipeline(transaction=False) as pipe:
         for worker_id in ids:
-            pipe.hmget(keys.counts(worker_id), ["leased", "completed"])
+            pipe.hmget(keys.counts(worker_id), list(COUNT_FIELDS))
         counts = await pipe.execute()
     out: list[WorkerStatus] = []
     for worker_id, raw, count in zip(ids, raws, counts, strict=True):

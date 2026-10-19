@@ -59,6 +59,25 @@ def test_parse_rejects_invalid(line: str) -> None:
         parse_proxy_line(line)
 
 
+@pytest.mark.parametrize(
+    ("line", "shown"),
+    [
+        ("http://user:mat-khau@1.2.3.4:abc", "http://user:***@1.2.3.4:abc"),
+        ("socks5://user:mat-khau@:1080", "socks5://user:***@:1080"),
+        ("http://tokenmat-khau@1.2.3.4:x", "http://***@1.2.3.4:x"),
+        ("1.2.3.4:abc:user:mat-khau", "http://user:***@1.2.3.4:abc"),
+        ("1.2.3.4:3128:user", "1.2.3.4:3128:***"),
+        ("1.2.3.4:3128:user:mat-khau:x", "1.2.3.4:3128:***"),
+    ],
+)
+def test_parse_error_masks_credentials(line: str, shown: str) -> None:
+    # Thông báo lỗi được log (proxy.invalid_line): không được chứa mật khẩu proxy.
+    with pytest.raises(ProxyParseError) as info:
+        parse_proxy_line(line)
+    assert "mat-khau" not in str(info.value)
+    assert repr(shown) in str(info.value)
+
+
 def test_id_is_stable_and_hides_credentials() -> None:
     a, b = _p("http://u:secret@1.2.3.4:8080"), _p("http://u:secret@1.2.3.4:8080")
     assert a.id == b.id

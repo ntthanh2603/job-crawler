@@ -46,6 +46,7 @@ from jobcrawler.db.models import (
     FailedPage,
     JobPosting,
 )
+from jobcrawler.gateway.dispatch import priority_fetches
 from jobcrawler.logging import get_logger
 from jobcrawler.pipeline import store
 from jobcrawler.pipeline.collect import CollectResult, SourceReport, collect
@@ -383,7 +384,11 @@ async def poll_company(
         if not held:
             outcome.error = "doanh nghiệp đang được build"
             return outcome
-        with structlog.contextvars.bound_contextvars(company_id=str(company_id), poll=True):
+        # Việc lấy trang của lượt poll đi stream ưu tiên: không xếp sau việc build (SLA phát hiện).
+        with (
+            structlog.contextvars.bound_contextvars(company_id=str(company_id), poll=True),
+            priority_fetches(),
+        ):
             try:
                 outcome = await _poll(res, company_id, trigger, queued_at, started_at, t0)
             except Exception as exc:

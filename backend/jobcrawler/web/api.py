@@ -14,10 +14,20 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from jobcrawler.db.models import JobReview
 from jobcrawler.resources import Resources
-from jobcrawler.schemas import CompanyEntity, EmploymentType, JobLevel, KycStatus, WorkMode
-from jobcrawler.services import batch, evaluate, overview, stats
+from jobcrawler.schemas import (
+    CompanyEntity,
+    EmploymentType,
+    JobLevel,
+    KycStatus,
+    RunTrigger,
+    WorkMode,
+)
+from jobcrawler.services import audit, batch, evaluate, overview, stats
 from jobcrawler.web import actions, queries
 from jobcrawler.web.markdown import to_html
 
@@ -32,6 +42,11 @@ def res_of(request: Request) -> Resources:
 
 def user_of(request: Request) -> str | None:
     return getattr(request.state, "user", None)
+
+
+def actor_of(request: Request) -> str:
+    """Người thao tác ghi vào nhật ký (`services/audit.py`)."""
+    return audit.actor_of(user_of(request))
 
 
 # --- mô hình trả về ------------------------------------------------------------------------------
@@ -237,6 +252,25 @@ class ReviewIn(BaseModel):
     note: str | None = None
 
 
+class AuditEventOut(BaseModel):
+    id: UUID
+    occurred_at: datetime
+    actor: str
+    action: str  # tên có chấm: `settings.update`, `company.build`... (GET /api/audit/actions)
+    resource_type: str | None
+    resource_id: str | None
+    request_id: str | None
+    # {key: {"before": ..., "after": ...}}; bí mật đã che.
+    changes: dict[str, Any] | None
+    metadata: dict[str, Any] | None
+
+
+class AuditPageOut(BaseModel):
+    items: list[AuditEventOut]
+    # Id dòng cuối trang: truyền vào `before` để lấy trang sau; null khi đã hết.
+    next: UUID | None
+
+
 # --- chuyển ORM → mô hình -----------------------------------------------------------------------
 
 
@@ -382,7 +416,15 @@ async def get_stats(
 
 @router.post("/maintenance")
 async def post_maintenance(request: Request) -> dict[str, bool]:
-    return {"queued": await actions.enqueue_maintenance(res_of(request))}
+    res = res_of(request)
+    queued = await actions.enqueue_maintenance(res)
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.MAINTENANCE_RUN,
+        actor=actor_of(request),
+        metadata={"queued": queued},
+    )
+    return {"queued": queued}
 
 
 # --- doanh nghiệp ---------------------------------------------------------------------------------
@@ -485,10 +527,28 @@ async def post_import(
     file: Annotated[UploadFile, File(description="companies.csv")],
     enqueue: Annotated[bool, Form()] = False,
 ) -> dict[str, Any]:
+    res = res_of(request)
     try:
-        outcome = await actions.import_csv(res_of(request), await file.read(), enqueue=enqueue)
+        outcome = await actions.import_csv(res, await file.read(), enqueue=enqueue)
     except batch.CsvFormatError as exc:
         raise HTTPException(400, str(exc)) from None
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.COMPANIES_IMPORT,
+        actor=actor_of(request),
+        metadata={
+            "filename": file.filename,
+            "rows": outcome.rows,
+            "created": outcome.created,
+            "updated": outcome.updated,
+            "unchanged": outcome.unchanged,
+            "duplicates": outcome.duplicates,
+            "errors": len(outcome.errors),
+            "enqueue": enqueue,
+            "enqueued": outcome.enqueued,
+            "already_queued": outcome.already_queued,
+        },
+    )
     return dataclasses.asdict(outcome)
 
 
@@ -496,8 +556,24 @@ async def post_import(
 async def post_enqueue(request: Request, body: EnqueueIn) -> dict[str, int]:
     if body.company_ids is None and body.stale_hours is None and not body.all:
         raise HTTPException(400, "Chọn company_ids, stale_hours hoặc all")
+    res = res_of(request)
     result = await actions.enqueue_companies(
-        res_of(request), company_ids=body.company_ids, stale_hours=body.stale_hours
+        res, company_ids=body.company_ids, stale_hours=body.stale_hours
+    )
+    ids = body.company_ids or []
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.COMPANIES_ENQUEUE,
+        actor=actor_of(request),
+        # Một doanh nghiệp: gắn vào doanh nghiệp đó để lịch sử của nó có dòng này.
+        resource_type="company" if len(ids) == 1 else None,
+        resource_id=ids[0] if len(ids) == 1 else None,
+        metadata={
+            **dataclasses.asdict(result),
+            "all": body.company_ids is None,
+            "stale_hours": body.stale_hours,
+            "company_ids": audit.sample_ids(ids) if ids else None,
+        },
     )
     return dataclasses.asdict(result)
 
@@ -673,16 +749,51 @@ async def post_review(request: Request, job_id: UUID, body: ReviewIn) -> dict[st
     if not await actions.job_exists(res, job_id):
         raise HTTPException(404, "Không có job này")
     async with res.sessionmaker.begin() as session:
+        before = await _review_state(session, job_id)
         await evaluate.record_review(
             session, job_id, correct=body.correct, note=body.note, reviewer=user_of(request)
         )
+        after = {"correct": body.correct, "note": (body.note or "").strip() or None}
+        await audit.record(
+            session,
+            action=audit.JOB_REVIEW,
+            actor=actor_of(request),
+            resource_type="job",
+            resource_id=job_id,
+            changes={
+                k: {"before": before.get(k), "after": v}
+                for k, v in after.items()
+                if before.get(k) != v
+            },
+            metadata={"correct": body.correct},
+        )
     return {"ok": True}
+
+
+async def _review_state(session: AsyncSession, job_id: UUID) -> dict[str, Any]:
+    """Đánh giá đang lưu của job ({} khi chưa kiểm), làm giá trị `before` của nhật ký."""
+    row = (
+        await session.execute(
+            select(JobReview.correct, JobReview.note).where(JobReview.job_id == job_id)
+        )
+    ).first()
+    return {"correct": row.correct, "note": row.note} if row else {}
 
 
 @router.delete("/jobs/{job_id}/review")
 async def delete_review(request: Request, job_id: UUID) -> dict[str, bool]:
     async with res_of(request).sessionmaker.begin() as session:
+        before = await _review_state(session, job_id)
         await evaluate.delete_review(session, job_id)
+        if before:
+            await audit.record(
+                session,
+                action=audit.JOB_UNREVIEW,
+                actor=actor_of(request),
+                resource_type="job",
+                resource_id=job_id,
+                changes={k: {"before": v, "after": None} for k, v in before.items()},
+            )
     return {"ok": True}
 
 
@@ -757,9 +868,11 @@ async def post_eval(
     """Precision/recall trên golden set tải lên (companies.csv + jobs.csv) hoặc thư mục golden/
     trên máy chủ."""
     res = res_of(request)
+    uploaded = False
     with tempfile.TemporaryDirectory() as tmp:
         directory = GOLDEN_DIR
         if companies is not None and companies.filename and jobs is not None and jobs.filename:
+            uploaded = True
             directory = Path(tmp)
             (directory / "companies.csv").write_bytes(await companies.read())
             (directory / "jobs.csv").write_bytes(await jobs.read())
@@ -771,6 +884,18 @@ async def post_eval(
     ids = [c.company_id for c in report.companies if c.company_id is not None]
     async with res.sessionmaker() as session:
         perf = await evaluate.latest_run_perf(session, ids)
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.EVAL_RUN,
+        actor=actor_of(request),
+        metadata={
+            "golden": "upload" if uploaded else "server",
+            "include_inactive": include_inactive,
+            "companies": len(report.companies),
+            "precision": report.precision,
+            "recall": report.recall,
+        },
+    )
     return {
         "precision": report.precision,
         "recall": report.recall,
@@ -845,11 +970,20 @@ async def get_board_runs(
 
 @router.post("/boards/{name}/index")
 async def post_board_index(request: Request, name: str) -> dict[str, Any]:
+    res = res_of(request)
     try:
-        queued = await actions.enqueue_board(res_of(request), name)
+        queued = await actions.enqueue_board(res, name)
     except KeyError:
         raise HTTPException(404, "Không có trang này") from None
-    queue = await stats.queue_stats(res_of(request).queues.boards)
+    await audit.record_safely(
+        res.sessionmaker,
+        action=audit.BOARD_INDEX,
+        actor=actor_of(request),
+        resource_type="board",
+        resource_id=name,
+        metadata={"queued": queued},
+    )
+    queue = await stats.queue_stats(res.queues.boards)
     return {"queued": queued, "workers": queue.workers}
 
 
@@ -1004,13 +1138,30 @@ async def get_company_crawl(request: Request, company_id: UUID) -> CompanyCrawlO
 @router.post("/companies/{company_id}/build")
 async def post_company_build(request: Request, company_id: UUID) -> dict[str, bool]:
     """Build lại bộ khung ngay (lượt đủ, tìm nguồn lại)."""
-    return {"queued": await actions.enqueue_build(res_of(request), company_id)}
+    res = res_of(request)
+    queued = await actions.enqueue_build(res, company_id)
+    await _audit_company_run(request, audit.COMPANY_BUILD, company_id, queued)
+    return {"queued": queued}
 
 
 @router.post("/companies/{company_id}/poll")
 async def post_company_poll(request: Request, company_id: UUID) -> dict[str, bool]:
     """Poll ngay theo bộ khung."""
-    return {"queued": await actions.enqueue_poll(res_of(request), company_id)}
+    res = res_of(request)
+    queued = await actions.enqueue_poll(res, company_id)
+    await _audit_company_run(request, audit.COMPANY_POLL, company_id, queued)
+    return {"queued": queued}
+
+
+async def _audit_company_run(request: Request, action: str, company_id: UUID, queued: bool) -> None:
+    await audit.record_safely(
+        res_of(request).sessionmaker,
+        action=action,
+        actor=actor_of(request),
+        resource_type="company",
+        resource_id=company_id,
+        metadata={"queued": queued, "trigger": RunTrigger.MANUAL.value},
+    )
 
 
 @router.get("/crawl/status")
@@ -1018,3 +1169,55 @@ async def get_crawl_status(request: Request, minutes: int = 60) -> dict[str, Any
     """Độ trễ phát hiện tin mới (P50/P95 cửa sổ phát hiện của các lượt poll trong `minutes` phút
     gần nhất), độ tươi hiện tại, khung giờ build / poll."""
     return await actions.crawl_status(res_of(request), minutes=max(1, min(minutes, 24 * 60)))
+
+
+# --- nhật ký thao tác -----------------------------------------------------------------------------
+
+
+@router.get("/audit")
+async def get_audit(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=audit.MAX_LIMIT)] = 50,
+    before: Annotated[
+        UUID | None, Query(description="Id dòng cuối trang trước (`next`): lấy các dòng cũ hơn.")
+    ] = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    actor: str | None = None,
+) -> AuditPageOut:
+    """Nhật ký thao tác của người vận hành, mới nhất trước. `next` = id dòng cuối (truyền vào
+    `before` để lấy trang sau), `null` khi đã hết."""
+    async with res_of(request).sessionmaker() as session:
+        events, next_id = await audit.list_events(
+            session,
+            limit=limit,
+            before=before,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            actor=actor,
+        )
+    return AuditPageOut(
+        items=[
+            AuditEventOut(
+                id=e.id,
+                occurred_at=e.occurred_at,
+                actor=e.actor,
+                action=e.action,
+                resource_type=e.resource_type,
+                resource_id=e.resource_id,
+                request_id=e.request_id,
+                changes=e.changes,
+                metadata=e.meta,
+            )
+            for e in events
+        ],
+        next=next_id,
+    )
+
+
+@router.get("/audit/actions")
+async def get_audit_actions() -> list[str]:
+    """Mọi tên thao tác được ghi nhật ký (danh sách lọc)."""
+    return sorted(audit.ACTIONS)

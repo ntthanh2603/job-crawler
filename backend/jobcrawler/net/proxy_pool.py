@@ -76,6 +76,21 @@ def _proxy_id(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()[:10]
 
 
+def _masked(line: str) -> str:
+    """Dòng proxy để đưa vào thông báo lỗi (được log): che phần có thể là mật khẩu."""
+    if "://" in line:
+        scheme, _, rest = line.partition("://")
+        credentials, at, host = rest.rpartition("@")
+        if not at:
+            return line
+        user, colon, _ = credentials.partition(":")
+        # Không có `:` thì cả phần trước `@` có thể là token (proxy xác thực bằng username).
+        return f"{scheme}://{user}:***@{host}" if colon else f"{scheme}://***@{host}"
+    parts = line.split(":")
+    # `host:port:user:pass` viết sai số phần: giữ host:port, che phần còn lại.
+    return ":".join([*parts[:2], "***"]) if len(parts) > 2 else line
+
+
 def parse_proxy_line(line: str) -> Proxy | None:
     """Một dòng của proxies.txt → `Proxy`. Dòng trống hoặc `#` trả None.
 
@@ -92,16 +107,16 @@ def parse_proxy_line(line: str) -> Proxy | None:
             host, port, user, password = parts
             line = f"http://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}"
         else:
-            raise ProxyParseError(f"không hiểu định dạng proxy: {line!r}")
+            raise ProxyParseError(f"không hiểu định dạng proxy: {_masked(line)!r}")
     parts = urlsplit(line)
     if parts.scheme not in SCHEMES:
         raise ProxyParseError(f"scheme proxy không hỗ trợ: {parts.scheme!r}")
     try:
         port = parts.port
     except ValueError as exc:
-        raise ProxyParseError(f"port không hợp lệ: {line!r}") from exc
+        raise ProxyParseError(f"port không hợp lệ: {_masked(line)!r}") from exc
     if not parts.hostname or port is None:
-        raise ProxyParseError(f"thiếu host hoặc port: {line!r}")
+        raise ProxyParseError(f"thiếu host hoặc port: {_masked(line)!r}")
     url = f"{parts.scheme}://{parts.netloc}"
     return Proxy(id=_proxy_id(url), url=url)
 

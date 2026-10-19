@@ -1,8 +1,12 @@
 """Gateway gRPC `CrawlGateway` cho worker lấy trang (`jobcrawler gateway`).
 
-Không giữ trạng thái: worker nằm trong registry (Redis), việc trong Redis Streams (`dispatch`),
-kết quả LPUSH về list của process backend ghi trong `task_id`. Nhiều replica (cổng / máy khác
-nhau, cùng Redis) chạy song song được; worker gọi replica nào cũng được.
+Không giữ trạng thái trong process: worker nằm trong registry (Redis), việc trong Redis Streams
+(`dispatch`), việc worker đang giữ trong hash `inflight:<worker>`, kết quả LPUSH về list của process
+backend ghi trong `task_id`. Nhiều replica (cổng / máy khác nhau, cùng Redis) chạy song song được;
+worker gọi replica nào cũng được.
+
+Complete chỉ nhận kết quả của việc worker còn giữ. Worker rời (Leave) hoặc quá hạn báo sống (prune)
+thì việc nó còn giữ được trả về backend ngay với `ERROR_KIND_WORKER_LOST` để backend thử lại.
 
 Cấu hình đẩy xuống worker lấy từ `settings_provider` mỗi CONFIG_CACHE_SECONDS (đổi ở trang Cài
 đặt thì worker nhận ở lần Lease / Heartbeat sau qua `config_version`).
@@ -30,11 +34,11 @@ from redis.exceptions import RedisError
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobcrawler.config import Settings
 from jobcrawler.gateway.dispatch import (
-    KINDS,
+    complete_results,
     delete_consumer,
-    ensure_group,
+    ensure_groups,
     lease_tasks,
-    push_results,
+    release_worker,
 )
 from jobcrawler.gateway.registry import (
     DEFAULT_POOL,
@@ -235,8 +239,7 @@ class CrawlGateway:
             started_at_ms=info.started_at_ms,
             registered_at_ms=_now_ms(),
         )
-        for kind in KINDS:
-            await ensure_group(self.redis, self.keys.stream(pool, kind))
+        await ensure_groups(self.redis, self.keys, pool)
         await save_worker(self.redis, self.keys, status, ttl=settings.gateway_worker_ttl_seconds)
         log.info(
             "gateway.register",
@@ -292,14 +295,23 @@ class CrawlGateway:
     async def Complete(
         self, request: crawl_pb2.CompleteRequest, context: grpc.aio.ServicerContext
     ) -> crawl_pb2.CompleteResponse:
-        accepted, dropped = await push_results(self.redis, self.keys, request.results)
-        if accepted and request.worker_id:
+        worker_id = request.worker_id
+        accepted, malformed, stale = await complete_results(
+            self.redis, self.keys, worker_id, request.results
+        )
+        if (accepted or stale) and worker_id:
             ttl = self.settings().gateway_worker_ttl_seconds
-            await add_counts(self.redis, self.keys, request.worker_id, ttl=ttl, completed=accepted)
-        if dropped:
-            log.warning("gateway.bad_results", worker_id=request.worker_id, dropped=dropped)
-        log.debug("gateway.complete", worker_id=request.worker_id, accepted=accepted)
-        return crawl_pb2.CompleteResponse(accepted=accepted, dropped=dropped)
+            await add_counts(
+                self.redis, self.keys, worker_id, ttl=ttl, completed=accepted, dropped=stale
+            )
+        if malformed:
+            log.warning("gateway.bad_results", worker_id=worker_id, dropped=malformed)
+        if stale:
+            # Việc đã trả `worker_lost` cho backend (worker từng quá hạn báo sống) hoặc không phải
+            # của worker này: backend đã / sẽ thử lại, kết quả này bỏ.
+            log.debug("gateway.stale_results", worker_id=worker_id, dropped=stale)
+        log.debug("gateway.complete", worker_id=worker_id, accepted=accepted)
+        return crawl_pb2.CompleteResponse(accepted=accepted, dropped=malformed + stale)
 
     @_redis_guard
     async def Heartbeat(
@@ -326,14 +338,25 @@ class CrawlGateway:
         worker_id = request.worker_id
         raw = await self.redis.get(self.keys.worker(worker_id))
         await remove_worker(self.redis, self.keys, worker_id)
+        lost = await self._release(worker_id, reason="leave")
         if raw is not None:
             pool = json.loads(raw).get("pool") or DEFAULT_POOL
             await delete_consumer(self.redis, self.keys, pool, worker_id)
-        log.info("gateway.leave", worker_id=worker_id)
+        log.info("gateway.leave", worker_id=worker_id, lost=lost)
         return crawl_pb2.LeaveResponse()
 
+    async def _release(self, worker_id: str, *, reason: str) -> int:
+        """Trả `worker_lost` cho việc worker còn giữ (backend thử lại ngay); đếm vào `lost`."""
+        lost = await release_worker(self.redis, self.keys, worker_id)
+        if lost:
+            ttl = self.settings().gateway_worker_ttl_seconds
+            await add_counts(self.redis, self.keys, worker_id, ttl=ttl, lost=lost)
+            log.warning("gateway.worker_lost", worker_id=worker_id, tasks=lost, reason=reason)
+        return lost
+
     async def prune(self) -> list[str]:
-        """Bỏ worker quá hạn báo sống (và consumer của nó trong stream). Trả id đã bỏ."""
+        """Bỏ worker quá hạn báo sống (consumer của nó trong stream, việc nó còn giữ). Trả id đã
+        bỏ."""
         expired = await expired_workers(self.redis, self.keys)
         if not expired:
             return []
@@ -341,6 +364,7 @@ class CrawlGateway:
         for worker_id, raw in zip(expired, raws, strict=True):
             pool = (json.loads(raw).get("pool") if raw else None) or DEFAULT_POOL
             await delete_consumer(self.redis, self.keys, pool, worker_id)
+            await self._release(worker_id, reason="expired")
         await prune(self.redis, self.keys)
         log.info("gateway.prune", workers=expired)
         return expired
