@@ -1,229 +1,159 @@
 # Vận hành
 
 Ghi chú để hệ thống tự chạy ổn định: dịch vụ nào chạy gì, giới hạn đang đặt, cách chịu dữ liệu
-lớn, và những việc cần làm khi đổi cấu hình. Giao diện web chỉ hiện **trạng thái**; mọi lưu ý vận
-hành nằm ở đây.
+lớn, và những việc cần làm khi đổi cấu hình. Giao diện web chỉ hiện **trạng thái** và cho sửa cài
+đặt; mọi lưu ý vận hành nằm ở đây. Triển khai nhiều máy và quy mô 10.000 doanh nghiệp:
+[DEPLOY.md](DEPLOY.md).
 
-## Dịch vụ (docker compose)
+## Dịch vụ (docker compose, một máy)
 
-| Dịch vụ | Việc | Số bản |
-|---|---|---|
-| `postgres` | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres)) | 1 |
-| `redis` | hàng đợi job (Redis Streams — [Hàng đợi](#hàng-đợi-redis-streams)), cache, khoá phân tán | 1 |
-| `migrate` | `jobcrawler db upgrade` mỗi lần `up` (không có việc thì thoát) | — |
-| `worker` | `process_company`, cron bảo trì (mỗi giờ), cron số liệu tổng quan (5 phút) | `WORKER_REPLICAS` |
-| `indexer` | index tăng dần các trang tuyển dụng (cron mỗi 5 giờ + nút "Index ngay") | `INDEXER_REPLICAS` |
-| `api` | API + giao diện React, `127.0.0.1:${API_PORT:-8000}` | 1 |
+| Dịch vụ         | Việc                                                                              | Số bản                   |
+| --------------- | --------------------------------------------------------------------------------- | ------------------------ |
+| `postgres`      | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres))                           | 1                        |
+| `redis`         | hàng đợi (Redis Streams), việc lấy trang của worker, cache, khoá, số đo, cài đặt  | 1                        |
+| `migrate`       | `jobcrawler db upgrade` mỗi lần `up` (không có việc thì thoát)                    | —                        |
+| `api`           | API + giao diện React, `127.0.0.1:${API_PORT:-8000}`                              | 1                        |
+| `gateway`       | gRPC cho worker, `${GATEWAY_PUBLISH:-127.0.0.1:50051}`                            | 1                        |
+| `scheduler`     | xếp build đêm / poll ngày mỗi giây (một bản giữ khoá làm việc)                    | 1                        |
+| `runner-poll`   | `poll_company` (50 lượt song song mỗi bản)                                        | `RUNNER_POLL_REPLICAS`   |
+| `runner-build`  | `build_company` (10 mỗi bản), cron bảo trì, cron số liệu tổng quan                | `RUNNER_BUILD_REPLICAS`  |
+| `runner-boards` | index trang tuyển dụng: đủ (00:30), đuôi (mỗi 2 phút, 6h–23h)                     | `RUNNER_BOARDS_REPLICAS` |
+| `worker`        | lấy trang (curl_cffi + Chromium) qua proxy của worker                             | `WORKER_REPLICAS`        |
 
-Đổi mã nguồn: `docker compose build && docker compose up -d` (migration chạy tự động).
+Đổi mã nguồn: `docker compose build && docker compose up -d` (migration chạy tự động). Image
+backend (`backend/Dockerfile`) không có Chromium; image worker (`worker/Dockerfile`) có. Cả hai
+build từ thư mục gốc repo và luôn cài lại gói của workspace (cache của uv cho gói cục bộ chỉ theo
+`pyproject.toml`, không ép thì image có thể mang mã cũ).
 
-## Index trang tuyển dụng — đang chạy KHÔNG proxy
+## Lịch thu thập
 
-Indexer đang bật (`INDEXER_REPLICAS=1` trong `.env`). Chưa có `config/proxies.txt` nên mọi request
-đi thẳng từ một IP, vì vậy `.env` đặt giới hạn thận trọng:
+- **Doanh nghiệp mới** (vừa `import` / nạp ở giao diện): build ngay, bất kể giờ.
+- **Build đêm** trong `BUILD_WINDOW` (00:00–06:00 theo `CRAWL_TIMEZONE`): mỗi doanh nghiệp một lần,
+  rải đều theo pha cố định; tìm nguồn lại từ đầu (`BUILD_REFRESH_DISCOVERY`).
+- **Poll ngày** trong `POLL_WINDOW` (06:00–24:00) mỗi `POLL_INTERVAL_SECONDS` (150 s) ±
+  `POLL_JITTER_SECONDS`. Poll lỗi → build lại ngay; build lại vẫn hỏng → thử lại sau 2 giờ, doanh
+  nghiệp ở trạng thái "Bộ khung hỏng" (tab "Bộ khung & lịch" ghi lý do).
+- **Trang tuyển dụng có tin mới** → poll ngay doanh nghiệp có profile đó (không chờ chu kỳ).
+- Ngoài khung poll không có poll; tin đăng giữa đêm được lượt build đêm thấy.
 
-```env
-BOARD_CONCURRENCY=2          # mặc định 4 — số request song song tới MỘT trang
-BOARD_MAX_JOBS_PER_RUN=1000  # mặc định 20.000 — số trang chi tiết tải mỗi lượt
+Đổi khung giờ / chu kỳ ở trang Cài đặt có hiệu lực trong vài giây (scheduler đọc lại mỗi nhịp).
+Cron (`BOARD_INDEX_CRON`, `BOARD_TAIL_CRON`, `MAINTENANCE_CRON`) đọc theo `CRAWL_TIMEZONE` và cần
+khởi động lại runner tương ứng.
+
+## Độ trễ phát hiện tin mới
+
+Trang Tổng quan → "Độ trễ phát hiện tin mới" (API `/api/crawl/status`):
+
+- **Cửa sổ phát hiện** của mỗi lượt poll đủ = lúc xong − lúc bắt đầu lượt poll đủ trước: tin đăng
+  ngay sau lượt trước bắt đầu sẽ được thấy muộn nhất lúc này. P95 phải ≤ 180 s.
+- **Độ tươi** = tuổi lượt poll đủ gần nhất của từng doanh nghiệp đang poll (ảnh chụp lúc này).
+- P95 vượt mục tiêu thường do: hàng đợi poll dồn (thêm `runner-poll` hoặc worker), lượt poll dài
+  (site phân trang dài → `POLL_MAX_LISTING_PAGES`, rate limit theo domain), doanh nghiệp đang build
+  (poll bị bỏ qua trong lúc build), worker thiếu (trang Workers: slot đang dùng sát tổng).
+
+Đo đầu-cuối trên site giả (không phụ thuộc site thật có đăng tin):
+
+```bash
+uv run python scripts/loadtest/sla_site.py --port 8765 --every 75 --count 16 --out sla.jsonl
+# nạp doanh nghiệp website http://host.docker.internal:8765/ (từ container), chờ build xong
+uv run python scripts/loadtest/sla_report.py sla.jsonl
 ```
 
-Mỗi lượt vẫn tôn trọng `robots.txt` (kể cả `Crawl-delay`), lùi lại khi gặp 429 và dừng khi bị
-chặn (CAPTCHA / 403 liên tiếp). Với giới hạn này mỗi trang chỉ được index
-dần (1.000 tin mới / đổi mỗi 5 giờ), nên các trang lớn (TopCV ~45 nghìn tin) cần nhiều lượt mới đủ.
+## Bộ khung và poll — khi nào đóng việc
 
-**Khi có proxy:** tạo `config/proxies.txt` theo mẫu `config/proxies.example.txt` (`PROXY_ENABLED=true`
-đã bật sẵn), xoá hai dòng `BOARD_*` trên (về mặc định), rồi `docker compose up -d`. Theo dõi tỉ lệ "Bị chặn" ở biểu đồ
-"Request 24 giờ qua" trên trang Tổng quan.
+- Poll chỉ đóng việc khi nguồn **đọc trọn** (mọi trang danh sách / API trong bộ khung, không lỗi,
+  không bị cắt) và tin vắng mặt không phải tin "gián tiếp" (chỉ thấy qua trang tin khác hoặc qua
+  feed không phân trang kiểu "việc làm nổi bật", có thể xoay vòng).
+- **Mất tin hàng loạt** (≥ 30% tin, ≥ 3 tin, nguồn ≥ 5 tin) trong một lượt: không đóng, đếm như lỗi;
+  lặp 3 lượt (`POLL_MAX_FAILURES`) thì build lại — lượt build đọc đủ mới đóng đúng việc đã gỡ.
+- `POLL_MAX_LISTING_PAGES` > 0: poll chỉ đọc N trang danh sách đầu (rẻ hơn với site phân trang dài,
+  hợp với site xếp tin mới lên đầu); khi đó tin đã gỡ chỉ được đóng ở lượt build đêm.
+- `POLL_MAX_DETAIL_PAGES` (10): số trang tin mới mở tối đa mỗi nguồn mỗi lượt poll; phần còn lại mở
+  ở lượt sau (lượt bị cắt không đóng việc).
+- Poll không cập nhật `last_seen_at` của tin còn thấy (tránh ghi hàng chục dòng mỗi lượt); lượt
+  build đêm cập nhật. Độ tươi của doanh nghiệp xem ở `company_schedules.last_poll_ok_at`.
 
-**Tắt hẳn:** `INDEXER_REPLICAS=0` rồi `docker compose up -d`.
+## Worker lấy trang
 
-## Thu thập đủ việc của một doanh nghiệp
+- Trang **Workers**: worker đang sống, pool, slot HTTP / render đang dùng, proxy tại worker, việc
+  xong / lỗi, CPU / RAM; "Dừng nhận việc" để worker làm nốt rồi thoát (với restart policy, nó lên
+  lại với id mới — dùng khi thay proxy / nâng cấp).
+- Không có worker nào → mọi request lỗi `no_worker` ngay (lượt chạy ghi lỗi, poll đếm lỗi); có
+  worker trở lại thì tự chạy tiếp.
+- Cấu hình đẩy xuống mọi worker (slot, impersonate, heartbeat…) sửa ở trang Cài đặt → nhóm
+  "Worker lấy trang"; worker nhận trong ≤ 5 s.
+- Mở gateway ra ngoài mạng nội bộ: đặt `GATEWAY_TOKEN` (worker gửi cùng token) và TLS
+  (`GATEWAY_TLS_CERT/KEY`, hoặc đặt sau reverse proxy có TLS hỗ trợ HTTP/2).
 
-Một lượt `process_company` có `COMPANY_DEADLINE_SECONDS` (165 giây), nên doanh nghiệp lớn không
-xong trong một lượt. Hệ thống đi tiếp qua nhiều lượt thay vì bỏ dở:
+## Cài đặt sửa ở giao diện
 
-- **Lượt bị cắt là `partial`, không đóng việc cũ.** Nguồn chạm giới hạn (trang chi tiết, trang
-  danh sách, trang API, trình duyệt, `SOURCE_MAX_JOBS`), trang lỗi tạm (timeout, 5xx), tìm nguồn
-  lỗi, hay còn tin chờ LLM chấm (`verify`) đều ghi vào `incomplete_sources`; chỉ lượt đủ nguồn mới
-  đánh `removed` các việc không còn thấy.
-- **Tự chạy tiếp.** Lượt `partial` tự xếp lượt sau (`COMPANY_MAX_CONTINUATIONS`, mặc định 2, cách
-  `COMPANY_CONTINUATION_DELAY_SECONDS` = 60 giây). Lượt sau dùng lại chi tiết tin website/ATS đã
-  tải trong `JOB_REUSE_DAYS` (3 ngày) và cache HTTP (1 giờ) nên đi tiếp tới tin chưa tải; giới
-  hạn `SOURCE_MAX_DETAIL_PAGES` chỉ tính trang tải thật. Dữ liệu trước khi có cơ chế này chưa có
-  `fetched_at` nên được tải lại một lần.
-- **Tin LLM chưa kịp chấm** được hoãn (`DEFERRED`), không bị loại: việc cũ giữ nguyên, lượt sau
-  chấm tiếp (câu trả lời có cache). Không cấu hình LLM thì tin nghi ngờ vẫn bị loại như trước.
-- **Trang tuyển dụng song song với website.** Profile trên trang tuyển dụng được thu thập ngay
-  khi lượt chạy bắt đầu, không chờ bước tìm nguồn trên website.
-- **Trang careers dựng bằng JavaScript (SPA).** Khi mở bằng trình duyệt, hệ thống giữ các phản
-  hồi JSON trang gọi (tối đa 30 phản hồi, 2 MB mỗi cái) và đọc tin từ đó cùng JSON nhúng
-  (`__NEXT_DATA__`), rồi đọc tiếp các trang sau của API (`SOURCE_MAX_API_PAGES`, mặc định 20) chỉ
-  với header `Accept`, không cookie. Trang danh mục / theo tỉnh dẫn tới tin (vd. Thế Giới Di Động)
-  được đi tiếp, không tính vào giới hạn trang chi tiết (tối đa `SOURCE_MAX_SUB_LISTINGS` = 60).
+Trang Cài đặt ghi đè giá trị từ `.env` (bảng `app_settings`). Mỗi lần lưu tăng phiên bản trên Redis;
+mọi process (api, gateway, scheduler, runner) nạp lại trong ≤ 5 s. Mục ghi "Cần khởi động lại" chỉ
+có hiệu lực khi khởi động lại process dùng nó (endpoint LLM, cấu hình HTTP, proxy chung, cron, số
+job song song của runner). "Khôi phục" xoá giá trị ghi đè, về giá trị trong `.env` / mặc định. Các
+mục kết nối (DB, Redis, cổng, token, mật khẩu giao diện) chỉ đặt bằng `.env`.
 
-### Trang tuyển dụng
+## Index trang tuyển dụng
 
-- **Index chưa đủ thì đọc trực tiếp trang profile.** Profile chỉ được coi là "index còn mới" khi
-  lượt index đọc đủ danh sách và không còn tin chưa tải của profile đó. Với giới hạn
-  `BOARD_MAX_JOBS_PER_RUN=1000` hiện tại (chưa có proxy) phần lớn profile của TopCV, JobsGO,
-  CareerViet, VietnamWorks chưa đủ, nên `process_company` đọc danh sách tin trên trang profile
-  (đủ các trang), dùng lại tin đã index và chỉ tải tin còn thiếu.
-- **Sau mỗi lượt index**, doanh nghiệp có profile vừa có tin mới (hoặc vừa map) được xếp chạy lại
-  nếu lượt gần nhất cũ hơn `BOARD_RERUN_MIN_HOURS` (6 giờ). Tắt: `BOARD_RERUN_COMPANIES=false`.
-- **Khớp tên profile** dùng khoá riêng (`company_match_key`: mở rộng "TMCP", bỏ phần trong ngoặc,
-  phần chi nhánh, đuôi "Việt Nam"/"Group"). Sau khi cập nhật mã nguồn, chạy một lần để tính lại
-  khoá cho dữ liệu cũ và map lại profile chưa map (có thể gọi LLM nhiều ở lần đầu):
-
-  ```bash
-  uv run jobcrawler index-boards --rematch
-  ```
-- **Doanh nghiệp KYC không tìm thấy website** vẫn dùng profile có tên trùng hẳn tên doanh nghiệp
-  (đủ riêng, khớp bằng rule); doanh nghiệp KYC mơ hồ chỉ dùng profile khớp MST/website. Tắt:
-  `BOARD_NAME_PROFILES_WITHOUT_KYC=false`.
-
-### Giới hạn còn lại
-
-- **TopCV** chặn bằng Cloudflare khi đi thẳng (mỗi lượt index chỉ tải được ~20 tin), **CareerLink**
-  hiện CAPTCHA sau vài chục request: cần proxy (mục trên) mới index đủ. Đọc trực tiếp trang
-  profile vẫn chạy được ở mức vài request mỗi doanh nghiệp.
-- **API careers toàn cầu** (vd. Shopee trả tin mọi quốc gia, xếp Việt Nam trước): mỗi nguồn dừng ở
-  `SOURCE_MAX_JOBS` (500), nơi làm đọc từ danh mục mã của trang nếu có.
+- **Đủ** (đêm): đọc toàn bộ danh sách, tải tin mới / đổi / lâu chưa tải, đánh dấu tin gỡ, map
+  profile. Giới hạn `BOARD_MAX_JOBS_PER_RUN`, `BOARD_INDEX_BUDGET_SECONDS`, `BOARD_CONCURRENCY`.
+- **Đuôi** (ngày, mỗi 2 phút): 1–4 request mỗi trang tới phần mới nhất, chỉ tải tin chưa từng
+  thấy. Độ tươi bị giới hạn bởi tần suất trang tự làm mới danh sách (sitemap TopCV / JobsGO ~1 giờ;
+  CareerViet, ITviec, VietnamWorks, CareerLink, Vieclam24h, 123job gần như tức thời).
+- Chưa có proxy cho trang tuyển dụng: TopCV chặn bằng Cloudflare khi đi thẳng, CareerLink hiện
+  CAPTCHA sau vài chục request. Dùng pool worker riêng có proxy dân cư cho các domain này
+  (`FETCH_ROUTES={"topcv.vn": "residential", "careerlink.vn": "residential"}`).
+- Sau khi đổi luật so tên: `uv run jobcrawler index-boards --rematch`.
 
 ## Hàng đợi (Redis Streams)
 
-Từ 19/10/2026 job (`process_company`, `index_board`, cron) đi qua Redis Streams
-(`QUEUE_BACKEND=streams`, mặc định; mã ở `src/jobcrawler/streamqueue.py`). SAQ vẫn còn để quay lại
-(`QUEUE_BACKEND=saq`) và sẽ gỡ khi Streams chạy ổn một thời gian.
-
-- **Chia tải.** Mỗi queue (`jobcrawler`, `jobcrawler-boards`) là một stream `sq:<queue>:stream` với
-  consumer group `workers`; mỗi process worker là một consumer, chỉ đọc (`XREADGROUP`) khi còn slot
-  rảnh (`WORKER_CONCURRENCY` mỗi replica). Việc dồn trong stream, worker nào rảnh thì nhận — không
-  worker nào ôm việc trong khi worker khác ngồi không.
-- **Giữ nguyên cách dùng cũ.** Khoá job (một doanh nghiệp chỉ một job chờ/chạy), job hẹn giờ (lượt
-  chạy tiếp sau `partial`, cron) nằm ở sorted set và vào stream khi tới giờ, timeout cứng
-  `COMPANY_TIMEOUT_SECONDS`, chạy tối đa `COMPANY_JOB_RETRIES` lần. Trang Hàng đợi đọc cùng số
-  liệu như trước (đang chạy / chờ / hẹn giờ / worker).
-- **Worker chết** (OOM, kill, máy treo): worker sống báo mỗi 10 s và làm mới các entry nó đang giữ;
-  entry nào im quá `QUEUE_RECLAIM_SECONDS` (60 s) bị worker khác thu hồi (`XAUTOCLAIM`) và chạy lại
-  — với SAQ phải chờ hết timeout của job (180 s) cộng một vòng quét (60 s). Job `active` mà entry
-  đã mất khỏi PEL (AOF cụt) cũng được thu hồi theo cùng ngưỡng.
-- **Dừng êm** (`docker compose stop`, deploy): worker ngừng nhận việc, chờ 2 s, huỷ job đang chạy
-  (lượt chạy vẫn được ghi `failed` / `cancelled`) và xếp lại ngay, không tính vào số lần chạy.
-- **Đo thời gian chờ.** `company_runs.queued_at` (migration 0008) là lúc job sẵn sàng chạy (lúc xếp
-  hàng, hoặc giờ hẹn với lượt chạy tiếp); `jobcrawler stats` in "chờ trong hàng đợi p50 · p95".
-
-Đổi loại hàng đợi (đã làm 19/10 SAQ → Streams; quay lại thì đổi `streams` ↔ `saq`):
-
-```bash
-docker compose build
-docker compose stop worker indexer             # job đang chạy được xếp lại trong queue cũ
-uv run jobcrawler queue move --to streams      # chép job chờ / hẹn giờ sang Streams, xoá bên SAQ
-docker compose up -d                           # API + worker + indexer chạy QUEUE_BACKEND mới
-```
-
-`queue move` từ chối khi còn worker sống ở một trong hai loại (thông tin worker hết hạn sau ≤ 1
-phút). API, CLI và worker phải cùng `QUEUE_BACKEND`: lệch nhau thì job xếp vào một bên, worker đọc
-bên kia, trang Hàng đợi hiện 0 worker.
-
-Rủi ro còn lại:
-
-- **Chạy trùng.** Worker treo (không báo sống) quá 60 s mà sau đó tỉnh lại thì job của nó đã được
-  chạy ở nơi khác: hai lượt cùng doanh nghiệp. Ghi kết quả vẫn đúng (gộp theo dấu vân tay), chỉ tốn
-  thêm request / lượt LLM. Lượt index trang tuyển dụng (dài hàng giờ) cũng dựa vào báo sống này.
-- **Redis mất dữ liệu** (AOF cụt như sự cố dưới): có thể mất vài job vừa xếp hoặc job chạy lại
-  thêm một lần. Xếp lại doanh nghiệp cũ bằng `jobcrawler enqueue --stale-hours 24`.
-- **Bộ nhớ Redis.** Entry bị xoá ngay khi job xong; job đã xong giữ 10 phút. 10.000 job chờ ≈ vài
-  MB. Consumer của worker đã chết bị xoá khỏi group sau 10 phút.
-- **Không làm nhanh hơn việc thu thập.** Đổi hàng đợi không đổi thời gian một lượt chạy hay độ trễ
-  tin mới: giới hạn là LLM (~50 lượt/phút), số slot và giới hạn request tới từng website.
-
-### Số đo SAQ → Streams (19/10/2026)
-
-Chỉ phần hàng đợi, job giả, cùng Redis trong Docker Desktop, 3 process worker × 10 slot như compose
-(`uv run python scripts/loadtest/queue_bench.py`):
-
-| | SAQ | Redis Streams |
-|---|---|---|
-| Xếp 10.000 job | 2,3 s | 2,7 s |
-| 3.000 job rỗng: thông lượng | 1.372 job/s | 1.773 job/s |
-| … chờ từ lúc xếp tới lúc chạy, p50 / p95 | 0,44 / 0,92 s | 0,29 / 0,36 s |
-| 600 job × 0,5 s trên 30 slot (lý tưởng 10 s) | 10,5 s (+5,3 %) | 10,3 s (+3,4 %) |
-| Giết một worker đang giữ 10 job (timeout 180 s): 10 job chạy lại xong sau | 292 s | 91 s |
-
-Đợt chạy thật trên SAQ (19/10 03:17 UTC, 206 doanh nghiệp, `queued_at` mới có): 236 lượt trong
-611 s (1.392 lượt/giờ), một lượt p50 12 s / p95 166 s, chờ trong hàng đợi p50 41 s / p95 189 s /
-tối đa 218 s. Hàng đợi chỉ thêm dưới 1 s vào thời gian chờ đó; phần còn lại là chờ slot (30 slot
-cho 206 doanh nghiệp) và giờ hẹn của lượt chạy tiếp.
+- Ba queue: `jobcrawler-build`, `jobcrawler-poll`, `jobcrawler-boards` (stream `sq:<queue>:stream`,
+  consumer group `workers`, mỗi runner một consumer, chỉ đọc khi còn slot rảnh). Trang Hàng đợi hiện
+  đang chạy / chờ / hẹn giờ, lý do xếp (đêm / chu kỳ / bộ khung hỏng / trang tuyển dụng / thủ công).
+- Khoá job theo doanh nghiệp: một doanh nghiệp chỉ có một build và một poll đang chờ / chạy; build
+  và poll của cùng doanh nghiệp không chạy chồng (khoá Redis, poll gặp build thì bỏ qua lượt đó).
+- **Runner chết** (OOM, kill): runner sống báo mỗi 10 s; entry im quá `QUEUE_RECLAIM_SECONDS` (60 s)
+  bị runner khác thu hồi và chạy lại. **Dừng êm** (deploy): runner ngừng nhận việc, chờ 2 s, huỷ
+  job đang chạy và xếp lại ngay (không tính vào số lần chạy).
+- Việc lấy trang (`<prefix>:gw:fetch:<pool>:http|render`) là hàng "nhiều nhất một lần": worker chết
+  giữa chừng thì backend hết chờ (`timeout + FETCH_QUEUE_GRACE_SECONDS`) và `HttpClient` tự thử lại.
+- Rủi ro còn lại: runner treo (không báo sống) quá 60 s rồi tỉnh lại → một job chạy hai lần (ghi
+  kết quả vẫn đúng nhờ gộp theo dấu vân tay); Redis mất dữ liệu (AOF cụt) → mất vài job vừa xếp
+  (scheduler tự xếp lại poll / build đến hạn ở nhịp sau).
 
 ## Chịu dữ liệu lớn
 
 Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng triệu việc làm.
 
-- **ID dạng UUIDv7** (migration 0007): khoá chính mọi bảng là UUID gồm 48 bit thời gian + phần
-  ngẫu nhiên, sinh ở ứng dụng (`db/ids.py`, tăng chặt trong một process) hoặc bằng `uuid_v7()` của
-  DB khi insert SQL thô. Sinh được ở mọi worker không cần hỏi DB, không lộ số lượng dòng, vẫn tăng
-  theo thời gian nên index ghi nối đuôi như bigint và `ORDER BY id` theo thứ tự tạo. Dữ liệu trước
-  0007 được đổi tất định (giữ thứ tự và quan hệ); `jobcrawler db downgrade 0006` đổi ngược về đúng
-  id số cũ. Link cũ dạng `/companies/123` báo "không tìm thấy". Riêng `compression_dicts.id` vẫn
-  là số: đó là mã từ điển ghi trong từng giá trị nén.
-- **Không trang nào tải cả bảng.** Mọi danh sách phân trang ở server (50 dòng/trang): việc làm,
-  doanh nghiệp, việc làm / lượt chạy / tin bị loại của một doanh nghiệp, request / log của một lượt
-  chạy, lịch sử index, hàng đợi (25 việc/trang mỗi hàng đợi).
-- **Đếm có giới hạn.** `COUNT(*)` trên bảng lớn có lọc rất tốn: server đếm tối đa 10.000 dòng
-  (`queries.COUNT_CAP`), giao diện hiện "10.000+" và chỉ cho đi tới trang 200 — muốn xem tiếp thì
-  lọc hẹp lại.
-- **Index theo đúng truy vấn** (migration 0006): mỗi kiểu sắp xếp việc làm có index
-  `(status, khoá sắp xếp, id)`; lọc nguồn theo biểu thức `split_part(canonical_source, ':', 1)`;
-  tỉnh/thành bằng GIN `jsonb_path_ops`; tìm tiêu đề / tên doanh nghiệp bằng GIN trigram; BRIN theo
-  thời gian cho biểu đồ.
-- **Không truy vấn con theo từng dòng.** Lượt chạy mới nhất và số việc đang mở ghi sẵn trên
-  `companies` (`last_run_*`, `active_jobs`) — cập nhật khi lượt chạy bắt đầu / kết thúc và sau mỗi
-  lần lưu việc làm; bảo trì mỗi giờ đối chiếu lại (`refresh_company_summaries`). Tìm doanh nghiệp
-  qua cột sinh `search_text` + bảng tên gọi khác, hai nhánh index hợp bằng `UNION`.
-- **Tổng quan không quét lại mỗi lần mở.** Phân bố trên toàn bộ việc làm (nguồn, tỉnh, cấp bậc,
-  lương, KYC…) do cron `overview_cron` tính mỗi 5 phút, lưu Redis; phần theo cửa sổ thời gian chỉ
-  đọc dòng trong cửa sổ và cache 60 giây. Khoá Redis có tiền tố tên queue để môi trường / test khác
-  không đọc nhầm của nhau.
+- **ID dạng UUIDv7**: khoá chính mọi bảng là UUID gồm 48 bit thời gian + phần ngẫu nhiên, sinh ở
+  ứng dụng (`db/ids.py`) hoặc bằng `uuid_v7()` của DB khi insert SQL thô. Riêng
+  `compression_dicts.id` là số (mã từ điển ghi trong từng giá trị nén).
+- **Không trang nào tải cả bảng.** Mọi danh sách phân trang ở server; đếm có giới hạn (10.000+).
+- **Index theo đúng truy vấn**: mỗi kiểu sắp xếp việc làm có index `(status, khoá sắp xếp, id)`;
+  GIN trigram cho tìm tên; BRIN theo thời gian; `company_schedules` index một phần cho
+  `next_poll_at` của doanh nghiệp đang poll.
+- **Lịch cập nhật nhiều**: `company_schedules` cập nhật mỗi lượt poll (10.000 doanh nghiệp ≈ 67
+  dòng/giây) nên tách khỏi `companies`, fillfactor 70 (cập nhật HOT) và autovacuum dày hơn.
+- **Lượt poll không đổi gì không ghi `company_runs` / `source_fetches`** — chỉ lượt có tin mới /
+  tin gỡ / lỗi mới ghi; số đo poll nằm ở Redis (histogram theo phút, giữ 3 ngày).
+- **Tổng quan không quét lại mỗi lần mở**: phân bố do cron tính mỗi 5 phút, lưu Redis.
 
-### Số đo (dữ liệu giả lập)
-
-`scripts/loadtest/seed.py` tạo DB `jobcrawler_load` với 100 nghìn doanh nghiệp, 1 triệu việc làm,
-1 triệu lượt chạy, 2 triệu request, 1 triệu tin nguồn (id UUIDv7); `scripts/loadtest/bench.py
---prepare` đo (máy dev, Postgres trong Docker Desktop, 18/10/2026 — sau khi đổi id sang UUID; số
-đo với id bigint hôm trước tương đương):
-
-| Truy vấn | Thời gian |
-|---|---|
-| Việc làm: mặc định / trang 150 / sắp theo lương / sắp hết hạn | 10 / 19 / 23 / 9 ms |
-| Việc làm: tìm "kế toán" (khớp 10% bảng) / tìm tên doanh nghiệp | 188 / 24 ms |
-| Việc làm: lọc tỉnh / nguồn + cấp bậc | 199 / 247 ms |
-| Doanh nghiệp: mặc định / tìm tên / tìm MST / lọc lượt cuối | 4 / 23 / 9 / 6 ms |
-| Trang doanh nghiệp + các tab, trang lượt chạy | 2–8 ms |
-| Tổng quan: lượt chạy / request theo giờ, thống kê 24 giờ | 15–107 ms |
-| Tổng quan: phân bố (chạy nền bằng cron, người xem không chờ) | 2,5 s |
-
-Chạy lại sau khi đổi truy vấn: `uv run python scripts/loadtest/seed.py` (≈ 8 phút) rồi
-`uv run python scripts/loadtest/bench.py --prepare`. Truy vấn nào > 300 ms được liệt kê cuối.
+Đo truy vấn trên dữ liệu giả lập 100 nghìn doanh nghiệp / 1 triệu việc làm:
+`uv run python scripts/loadtest/seed.py` rồi `uv run python scripts/loadtest/bench.py --prepare`.
 
 ## Không có việc làm trùng
 
-- **Trong một lượt chạy**, các tin cùng việc được gộp thành một (`pipeline/dedup.py`): cùng tiêu
-  đề, cùng nơi làm, JD giống nhau; tin cùng nguồn không ghi nơi làm mà tiêu đề + JD gần như y hệt
-  là tin đăng lại với mã mới (MISA `/tuyen-dung/5883` và `/5920`) → một việc.
-- **Với việc đã lưu**, tin mới được gắn vào việc đang mở cùng dấu vân tay nội dung (tiêu đề + nơi
-  làm + JD), hoặc khớp mờ cùng luật trên, thay vì tạo việc mới.
-- **Ở tầng DB**, index duy nhất `ux_jobs_company_fingerprint_active` chặn hai việc đang mở y hệt
-  trong một doanh nghiệp (kể cả khi hai đường ghi chạy song song).
-- Dữ liệu cũ: `jobcrawler db dedup` điền dấu vân tay và gộp việc trùng (việc cũ nhất giữ lại, tin
-  của việc trùng chuyển sang); bảo trì mỗi giờ cũng làm việc này cho dòng chưa có dấu vân tay.
+- **Trong một lượt**, các tin cùng việc được gộp (`pipeline/dedup.py`): cùng tiêu đề, cùng nơi làm,
+  JD giống nhau; tin cùng nguồn đăng lại với mã mới → một việc.
+- **Với việc đã lưu** (cả lượt poll chỉ xử lý tin mới), tin mới được gắn vào việc đang mở cùng dấu
+  vân tay nội dung hoặc khớp mờ cùng luật trên.
+- **Ở tầng DB**, index duy nhất `ux_jobs_company_fingerprint_active` chặn hai việc đang mở y hệt.
 
 ## Bảo trì
 
 Tự động mỗi giờ (`MAINTENANCE_CRON`): lượt chạy treo → `failed`, đối chiếu cột tóm tắt doanh
 nghiệp, gộp việc trùng còn sót, xoá dữ liệu cũ (`failed_pages` 7 ngày, `source_fetches` / `logs`
 30 ngày), huấn luyện từ điển nén và nén lại dần.
-
-Chạy tay khi cần:
 
 ```bash
 uv run jobcrawler db maintain      # như cron
@@ -234,19 +164,23 @@ uv run jobcrawler db dedup         # điền dấu vân tay + gộp việc trùn
 ## Postgres
 
 `/dev/shm` mặc định của container (64 MB) không đủ cho truy vấn / VACUUM song song trên bảng
-lớn ("could not resize shared memory segment … No space left on device"), nên compose đặt
-`shm_size: 512mb`. Thay đổi này cần tạo lại container: `docker compose up -d postgres`.
+lớn, nên compose đặt `shm_size: 512mb`. Schema là một migration duy nhất (`0001_initial_schema`,
+dựng lại từ đầu ngày 19/10/2026); migration sau đánh số tiếp `0002`… bằng
+`uv run jobcrawler db revision -m "…"`.
 
 ## Sự cố hay gặp
 
-- **Docker Desktop tắt** (máy ngủ / cập nhật): cả Postgres, Redis, API và worker dừng. Mở lại
-  Docker Desktop; các container có `restart: unless-stopped` tự lên.
-- **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis `localhost:16379`), hay
-  gặp ngay sau khi Docker Desktop khởi động lại: chạy lại từng file test là qua.
+- **Docker Desktop tắt** (máy ngủ / cập nhật): mọi container dừng; mở lại Docker Desktop, các
+  container có `restart: unless-stopped` tự lên. Worker tự nối lại gateway (lùi tới 30 s).
+- **LLM trả lỗi** (vd. 503 "Gateway control plane unavailable"): mỗi lời gọi tốn ~4 s (2 lần thử)
+  rồi bỏ; KYC ra `not_found` / `ambiguous`, tin cần LLM xác nhận bị hoãn (lượt `partial`, lượt sau
+  chấm lại). `uv run jobcrawler llm check` để kiểm tra.
+- **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis): chạy lại từng file test.
+  Các test tích hợp dùng chung DB `jobcrawler_test` (schema bị dựng lại): không chạy hai bộ test
+  tích hợp song song.
 - **Redis không lên sau khi máy hết bộ nhớ / tắt đột ngột** (log Redis: "Bad file format reading
-  the append only file …incr.aof"; `api`, `worker`, `indexer` khởi động lại liên tục vì không nối
-  được Redis): lệnh ghi cuối của AOF bị cắt dở. Dừng Redis, sao lưu rồi cắt phần hỏng (chỉ mất
-  lệnh ghi dở cuối cùng), sau đó bật lại cả stack:
+  the append only file …incr.aof"): lệnh ghi cuối của AOF bị cắt dở. Dừng Redis, sao lưu rồi cắt
+  phần hỏng, sau đó bật lại cả stack:
 
   ```bash
   docker compose stop redis
@@ -255,6 +189,3 @@ lớn ("could not resize shared memory segment … No space left on device"), n�
      cd /data/appendonlydir && echo y | redis-check-aof --fix appendonly.aof.manifest'
   docker compose up -d
   ```
-
-  Lần gặp 19/10/2026 chỉ cắt 152 byte; bản sao lưu nằm trong volume `redisdata`
-  (`/data/aof-backup-20261019-022229`), xoá khi Redis chạy ổn.

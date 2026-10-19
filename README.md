@@ -1,179 +1,127 @@
 # job-crawler
 
 Thu thập tin tuyển dụng đang mở cho ~10.000 doanh nghiệp (chủ yếu tại Việt Nam) từ trang careers,
-ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu PostgreSQL.
+ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu PostgreSQL. Mục tiêu độ tươi: tin
+mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban ngày).
 
-Đặc tả và milestone: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md). Tiến độ từng milestone ghi
-trong commit message. Kiến trúc (process, luồng dữ liệu, từng tầng):
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Vận hành (dịch vụ, giới hạn khi chưa có proxy, quy mô dữ liệu, chống trùng, bảo trì):
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
+- Kiến trúc (process, luồng dữ liệu, bộ khung build/poll, gateway gRPC, worker):
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Triển khai và quy mô 10.000 doanh nghiệp: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Vận hành (dịch vụ, giới hạn, bảo trì, sự cố): [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- Đặc tả gốc: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md); tiến độ ghi trong commit message.
 
-## Chạy nhanh
+## Cấu trúc repo
+
+| Thư mục     | Gói                | Việc                                                                                     |
+| ----------- | ------------------ | ---------------------------------------------------------------------------------------- |
+| `backend/`  | `jobcrawler`       | API + giao diện, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, DB   |
+| `worker/`   | `jobworker`        | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng |
+| `proto/`    | `jobcrawler-proto` | hợp đồng gRPC (`jcproto/v1/crawl.proto` + mã sinh sẵn)                                   |
+| `frontend/` |                    | React + shadcn/ui + Tailwind                                                             |
+| `deploy/`   |                    | compose cho máy backend và máy worker riêng                                              |
+
+Workspace uv: `uv sync` cài cả ba gói vào `.venv` cùng công cụ dev.
+
+## Cách hệ thống chạy
+
+- **Ban đêm** (`BUILD_WINDOW`, mặc định 00:00–06:00 giờ Việt Nam) mỗi doanh nghiệp được build một
+  lần, rải đều trong khung: KYC, tìm nguồn trên website, đọc đủ danh sách + trang tin, xác minh,
+  gộp, lưu, và ghi **bộ khung** của từng nguồn (trang danh sách, API của trang SPA, trang phải mở
+  bằng trình duyệt…).
+- **Ban ngày** (`POLL_WINDOW`, 06:00–24:00) mỗi doanh nghiệp được poll mỗi 150 giây: chỉ đọc đúng
+  các trang / API trong bộ khung, chỉ mở trang của tin mới. Poll lỗi (trang chính hỏng, cấu trúc
+  đổi, lỗi lặp lại) thì build lại bộ khung ngay.
+- Doanh nghiệp mới nạp được build ngay, không chờ đêm.
+- Trang tuyển dụng: index đủ ban đêm, index đuôi (tin mới nhất) mỗi 2 phút ban ngày, rồi poll ngay
+  doanh nghiệp có tin mới.
+- Mọi request tới website đi qua **worker** (chạy ở máy nào cũng được, kèm proxy riêng); backend
+  quyết định robots, rate limit, retry, nhận diện trang chặn.
+
+## Chạy nhanh (một máy)
 
 Cần [uv](https://docs.astral.sh/uv/) và Docker.
 
 ```bash
-cp .env.example .env                              # điền LLM_*, SERP_* khi có
-cp config/proxies.example.txt config/proxies.txt  # điền proxy; không có thì đi thẳng
+cp .env.example .env                 # điền LLM_*, SERP_* khi có
 uv sync
-docker compose up -d          # postgres, redis, migrate, worker ×3, indexer, api (giao diện)
-uv run jobcrawler db upgrade  # migrate cũng tự chạy trong compose
-uv run jobcrawler run "Test"
+docker compose build                 # image backend (không Chromium) + image worker (Chromium)
+docker compose up -d                 # postgres, redis, migrate, api, gateway, scheduler, runner ×3 vai, worker
+uv run jobcrawler import companies.csv   # nạp doanh nghiệp: được build ngay rồi poll theo lịch
 ```
 
-Postgres và Redis mở ra host ở cổng 15432 và 16379 (đổi bằng `POSTGRES_PORT`, `REDIS_PORT`).
-Worker đọc proxy từ `./config` (mount read-only vào container).
+Giao diện: http://127.0.0.1:8000. Postgres / Redis mở ra host ở cổng 15432 / 16379, gateway gRPC ở
+`127.0.0.1:50051` (`GATEWAY_PUBLISH`).
 
-Không dùng proxy: đặt `PROXY_ENABLED=false` trong `.env` (áp dụng cho cả worker), hoặc thêm
-`--no-proxy` cho một lệnh CLI, ví dụ `uv run jobcrawler --no-proxy run "Test"`.
-
-## KYC doanh nghiệp
+Chạy backend trên máy (dev) cũng cần ít nhất một worker để lấy trang:
 
 ```bash
-uv run jobcrawler kyc "Vinamilk"                          # cần SERP_API_KEY nếu chỉ có tên
-uv run jobcrawler kyc "MoMo" --website momo.vn --json
-uv run jobcrawler kyc "Công ty CP Sữa Việt Nam" --tax-code 0300588569 --refresh
+docker compose up -d postgres redis
+uv run jobcrawler db upgrade
+uv run jobcrawler gateway            # cửa sổ 1
+uv run jobworker run                 # cửa sổ 2 (GATEWAY_ADDR=localhost:50051)
+uv run jobcrawler runner             # cửa sổ 3: cả ba vai build / poll / boards
+uv run jobcrawler scheduler          # cửa sổ 4
+uv run jobcrawler ui                 # cửa sổ 5
 ```
 
-Tra cache `company_aliases` (MST → tên chuẩn hoá khớp chính xác → trigram, chỉ doanh nghiệp đã
-`verified`); KYC còn hạn (30 ngày) thì dùng luôn. Không có thì lấy ứng viên từ SERP (website,
-trang tra cứu MST) và website (chân trang, JSON-LD: tên pháp lý, MST, địa chỉ), LLM chọn kèm
-trích đoạn; rule kiểm lại trích đoạn và tín hiệu khớp mạnh (cùng MST, cùng domain đầu vào, website
-tự ghi đúng tên...). Bằng chứng yếu → `ambiguous`, chỉ thu job từ domain khớp mạnh. Kết quả điền
-`companies.primary_domain` để `run` tìm nguồn trên website đó. Thiếu `SERP_API_KEY` thì bỏ qua
-bước tìm kiếm (cảnh báo `kyc.serp_disabled`).
-
-## Job từ website doanh nghiệp
+## Worker và proxy
 
 ```bash
-uv run jobcrawler site base.vn                 # tìm trang careers/ATS rồi liệt kê job
-uv run jobcrawler site momo.vn --discover-only --steps
-uv run jobcrawler site https://jobs.lever.co/acme --json
-uv run jobcrawler run "Base" --website base.vn # chạy pipeline, ghi company_runs + source_fetches
+docker compose -f deploy/worker.compose.yaml --env-file deploy/worker.env up -d   # máy worker riêng
+uv run jobworker check               # thử kết nối gateway và từng proxy tại worker
 ```
 
-Tìm nguồn: link trên trang chủ → sitemap.xml → đường dẫn phổ biến → subdomain careers./tuyendung.;
-nhiều ứng viên thì LLM chọn trong danh sách. Kết quả cache 7 ngày trên Redis (`--refresh` bỏ qua).
-ATS có adapter: Greenhouse, Lever, Ashby, Workable, Workday, BambooHR, Recruitee, Teamtailor
-(SmartRecruiters chỉ nhận diện: robots.txt cấm API). Trang careers khác: JSON-LD → parser chung →
-LLM; mở bằng Chromium khi HTML không có danh sách tin. Trang SPA: đọc tin từ JSON nhúng
-(`__NEXT_DATA__`) và từ API trang gọi khi render, rồi đọc tiếp các trang sau của API; trang danh
-mục / theo tỉnh được đi tiếp tới tin. Doanh nghiệp nhiều tin được thu qua nhiều lượt (lượt
-`partial` tự chạy tiếp, dùng lại tin đã tải): xem [docs/OPERATIONS.md](docs/OPERATIONS.md#thu-thập-đủ-việc-của-một-doanh-nghiệp).
+- `PROXY_MODE=worker` (mặc định): mỗi worker dùng proxy của mình (`WORKER_PROXIES` /
+  `WORKER_PROXIES_FILE`, định dạng như `config/proxies.example.txt`), gắn theo domain, nghỉ khi lỗi.
+- `PROXY_MODE=central`: backend chọn proxy từ danh sách chung (trang Cài đặt hoặc `PROXIES_FILE`).
+- `PROXY_MODE=off` / `jobcrawler --no-proxy …`: không proxy.
+- `WORKER_POOL` + `FETCH_ROUTES` (backend): định tuyến domain về nhóm worker riêng (vd. trang tuyển
+  dụng qua proxy dân cư).
 
-## Index trang tuyển dụng
+Chi tiết biến môi trường: [worker/README.md](worker/README.md).
 
-```bash
-uv run jobcrawler index-boards --list                      # các trang và trạng thái
-uv run jobcrawler index-boards --source itviec             # index tăng dần một trang
-uv run jobcrawler index-boards --max-jobs 50 --budget-minutes 10   # chạy thử mọi trang
-uv run jobcrawler index-boards --map-only                  # map lại profile ↔ doanh nghiệp
-uv run jobcrawler index-boards --rematch                   # tính lại khoá tên rồi map lại (sau nâng cấp)
-```
-
-Worker chạy cron `BOARD_INDEX_CRON` (mặc định mỗi 5 giờ), mỗi trang một job `index_board`.
-Mỗi lượt đọc danh sách tin (sitemap kèm `lastmod`, trang danh sách, API của trang hoặc RSS), chỉ
-tải trang chi tiết của tin mới / đã đổi / lâu chưa tải (gửi kèm ETag), lưu `job_postings` và
-`source_profiles`, đánh dấu tin vắng 2 lượt là gỡ, rồi map profile có tên gần với doanh nghiệp
-đầu vào (MST → website → tên; mơ hồ thì LLM). `process_company` lấy tin từ index của profile đã
-map khi index đủ tin của profile đó và chưa cũ hơn `BOARD_STALE_HOURS`; không thì đọc danh sách
-tin trên trang profile (đủ các trang), dùng lại tin đã index và chỉ tải tin còn thiếu. Doanh
-nghiệp có profile vừa có tin mới được xếp chạy lại sau lượt index.
-Giới hạn đang đặt khi chưa có proxy và cách nới: [docs/OPERATIONS.md](docs/OPERATIONS.md#index-trang-tuyển-dụng--đang-chạy-không-proxy).
-
-| Trang | Danh sách | Ghi chú |
-|---|---|---|
-| TopCV | sitemap (~45 nghìn tin) | profile: website trong Organization JSON-LD |
-| CareerLink | trang danh sách (~34 nghìn) | hiện CAPTCHA nếu đi nhanh: 1 request / 5 giây |
-| JobsGO | sitemap (~28 nghìn) | MST trong mô tả profile |
-| CareerViet | sitemap (~19,5 nghìn) | website trong JSON-LD tin, MST trong dữ liệu profile |
-| VietnamWorks | API tìm kiếm của trang (~9,8 nghìn) | chi tiết từ payload React |
-| Glints | sitemap, không có lastmod (~5,7 nghìn) | |
-| TopDev | sitemap (~2,6 nghìn) | |
-| Vieclam24h | trang danh sách (chỉ ~1 nghìn tin mới nhất) | website + MST trong dữ liệu trang tin |
-| ITviec | sitemap, lastmod vô dụng (~650) | |
-| 123job | RSS + trang danh sách | |
-
-## Chuẩn hoá, xác minh, gộp, export
-
-```bash
-uv run jobcrawler run "KiotViet" --website kiotviet.vn   # in job đã làm sạch (--json: CompanyResult)
-uv run jobcrawler export --format jsonl --out out/        # out/jobs.jsonl, mỗi dòng một JobOut
-uv run jobcrawler export --format csv --out out/ --company KiotViet --company 0101234567 [--all]  # tên, MST hoặc id
-```
-
-Sau bước thu thập, `process_company` chuẩn hoá từng tin (HTML → markdown sạch, ftfy, bỏ
-boilerplate; lương; 34 tỉnh/thành sau sáp nhập 2025, tên cũ → mới; cấp bậc/loại hình/hình thức
-bằng rule rồi LLM kèm trích đoạn bằng chứng; ngày về UTC; ẩn SĐT/email cá nhân/tên người liên
-hệ), xác minh (`EXPIRED`, `EMPTY_JD`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_SIGNALS`,
-`NOT_A_JOB`, `SPAM_REPOST`; tin còn nghi ngờ do LLM chấm, nhận khi `confidence ≥
-VERIFY_MIN_CONFIDENCE`), gộp trùng (tiêu đề + nơi làm + MinHash JD / cùng link ứng tuyển; bản
-chuẩn ATS/careers > trang tuyển dụng JD đầy đủ > mới nhất) rồi upsert `job_postings` (kèm lý do
-nhận/loại) và `jobs`. Câu trả lời LLM được cache trên Redis theo nội dung tin. `export` mặc định
-chỉ xuất job đang mở; `--all` gồm cả job đã hết hạn / đã gỡ.
-
-## Chạy cả danh sách (10.000 doanh nghiệp)
+## Lệnh thường dùng
 
 ```bash
 uv run jobcrawler import companies.csv           # cột name (bắt buộc), tax_code, website, note
-uv run jobcrawler enqueue --all                  # hoặc --file companies.csv, --stale-hours 24
-uv run jobcrawler stats [--hours 24] [--json]    # queue, p50/p95, failed, nguồn, trang, nén
-uv run jobcrawler eval golden/                   # precision/recall; chưa có golden: 50 job mẫu
-uv run jobcrawler db maintain                    # như cron mỗi giờ (dọn dữ liệu cũ, nén lại)
+uv run jobcrawler enqueue --all                  # build lại ngay (thường không cần: lịch tự chạy)
+uv run jobcrawler build <company_id>             # build một doanh nghiệp trong process này
+uv run jobcrawler poll <company_id> [--json]     # poll một doanh nghiệp theo bộ khung
+uv run jobcrawler run "KiotViet" --website kiotviet.vn   # chạy đủ pipeline cho một tên (debug)
+uv run jobcrawler kyc "Vinamilk" [--refresh]     # chỉ KYC
+uv run jobcrawler site base.vn [--discover-only --steps]  # tìm nguồn + liệt kê tin một website
+uv run jobcrawler index-boards [--source topcv] [--tail]  # index trang tuyển dụng (đủ / đuôi)
+uv run jobcrawler queue info                     # số job chờ / chạy / hẹn giờ của 3 hàng đợi
+uv run jobcrawler stats [--hours 24] [--json]
+uv run jobcrawler export --format jsonl --out out/
+uv run jobcrawler eval golden/
+uv run jobcrawler db maintain                    # như cron mỗi giờ
+uv run jobcrawler llm check | proxies check | fetch <url> [--render]
 ```
 
-- `import` chấp nhận UTF-8 (có BOM), dấu phân cách `,` `;` tab, tiêu đề tiếng Việt ("Tên doanh
-  nghiệp", "MST"); MST bị Excel làm mất số 0 đầu được sửa lại; dòng trùng (cùng tên chuẩn hoá +
-  MST) bỏ. Chạy lại không tạo trùng (khớp MST rồi tên chuẩn hoá).
-- `enqueue`: mỗi doanh nghiệp một job `process_company` trên hàng đợi Redis Streams (khoá
-  `company:<tên chuẩn hoá>[:MST]`, timeout cứng `COMPANY_TIMEOUT_SECONDS`, chạy lại tối đa
-  `COMPANY_JOB_RETRIES` lần khi quá timeout hoặc worker chết). Job cùng doanh nghiệp đang chờ/chạy thì bỏ qua; `--stale-hours N` chỉ lấy doanh nghiệp
-  chưa có lượt chạy xong (ok/partial/ambiguous) trong N giờ.
-- Compose: `worker` (mặc định 3 replica × `WORKER_CONCURRENCY` 10 = 30 doanh nghiệp song song,
-  cron bảo trì) và `indexer` (`worker --boards`, queue `BOARD_QUEUE_NAME`: lượt index trang tuyển
-  dụng không chiếm chỗ của doanh nghiệp). Ở mốc `COMPANY_DEADLINE_SECONDS` (165 s) các nguồn chưa
-  xong bị huỷ, kết quả lưu với trạng thái `partial` kèm `incomplete_sources`.
-- `eval golden/`: `golden/companies.csv` + `golden/jobs.csv` (cột `company`, `url` và/hoặc
-  `title`); báo cáo ghi ở `out/eval/`. Chưa có golden set: in 50 job ngẫu nhiên và ghi CSV có cột
-  `dung` để điền, rồi `jobcrawler eval --reviewed out/eval/sample-....csv` ra precision.
+`import` chấp nhận UTF-8 (có BOM), dấu phân cách `,` `;` tab, tiêu đề tiếng Việt ("Tên doanh
+nghiệp", "MST"); MST bị Excel làm mất số 0 đầu được sửa lại; chạy lại không tạo trùng.
 
-Dữ liệu lớn được nén zstd trước khi lưu: `job_postings.raw`, `jobs.description_md /
-requirements_md / benefits_md`, `failed_pages.html_zstd` là bytea (đọc qua ORM như bình thường;
-định dạng ở `src/jobcrawler/db/compress.py`). Lượt bảo trì huấn luyện từ điển zstd trên chính dữ
-liệu khi đủ mẫu (nén ~4–6 lần thay vì ~1,8 lần của Postgres) rồi nén lại dần dữ liệu cũ.
-`source_fetches`, `logs` giữ 30 ngày, `failed_pages` 7 ngày.
+## Nguồn
+
+- **ATS**: Greenhouse, Lever, Ashby, Workable, Workday, BambooHR, Recruitee, Teamtailor.
+- **Trang careers**: JSON-LD → parser chung → LLM; trang SPA đọc từ JSON nhúng và API trang gọi
+  (bộ khung giữ API để poll gọi thẳng, không mở trình duyệt).
+- **Trang tuyển dụng**: TopCV, CareerLink, JobsGO, CareerViet, VietnamWorks, Glints, TopDev,
+  Vieclam24h, ITviec, 123job — map profile nhà tuyển dụng ↔ doanh nghiệp (MST → website → tên; mơ hồ
+  thì LLM).
 
 ## Giao diện web
 
-React + shadcn/ui + Tailwind (thư mục `frontend/`), gọi API JSON của FastAPI (`/api/...`, tài
-liệu ở `/api/docs`). Trang: Tổng quan (p95, tỉ lệ failed, biểu đồ lượt chạy, nguồn, nén), Doanh
-nghiệp (lọc, nạp CSV, chạy theo lựa chọn / doanh nghiệp cũ / tất cả, chi tiết KYC, profile, lượt
-chạy, tin bị loại), Lượt chạy (request, log, trang parse lỗi), Job (lọc theo tỉnh, cấp bậc, lương,
-nguồn; tải CSV/JSONL), Kiểm tay (đánh dấu đúng/sai, phím D/S/N, precision theo nguồn), Golden set
-(tải companies.csv + jobs.csv → precision/recall), Trang tuyển dụng, Queue.
+Tổng quan (độ trễ phát hiện tin mới P50/P95, độ tươi, lượt chạy), Hàng đợi, Trang tuyển dụng,
+Doanh nghiệp (bộ khung & lịch, Poll ngay / Build lại), Việc làm, Kiểm tay, Golden set, **Workers**
+(worker đang kết nối, slot, proxy), **Cài đặt** (lịch, runner, worker, proxy, HTTP, nguồn, trang
+tuyển dụng, LLM/SERP, xác minh, bảo trì — đổi ở giao diện có hiệu lực trong vài giây, mục nào cần
+khởi động lại được ghi rõ). Đặt `UI_PASSWORD` để hỏi đăng nhập.
 
 ```bash
-docker compose up -d api                 # http://127.0.0.1:8000 (image đã build sẵn giao diện)
-```
-
-Chạy trên máy (dev):
-
-```bash
-cd frontend && npm install && npm run build   # bản build vào src/jobcrawler/web/dist
-uv run jobcrawler ui                           # http://127.0.0.1:8000
-cd frontend && npm run dev                     # sửa giao diện: http://localhost:5173 (gọi API cổng 8000)
-```
-
-Đặt `UI_PASSWORD` (và `UI_USERNAME`) để hỏi đăng nhập (HTTP Basic); API chặn request ghi đến từ
-site khác.
-
-## Kiểm tra hạ tầng
-
-```bash
-uv run jobcrawler proxies check     # gọi thử qua từng proxy, cập nhật trạng thái pool
-uv run jobcrawler llm check         # gọi thử LLM với structured output
-uv run jobcrawler fetch https://example.com/ [--render]   # fetch qua toàn bộ tầng mạng
+cd frontend && npm install && npm run build   # bản build vào backend/jobcrawler/web/dist
+cd frontend && npm run dev                    # sửa giao diện: http://localhost:5173 (gọi API cổng 8000)
 ```
 
 ## Phát triển
@@ -181,8 +129,10 @@ uv run jobcrawler fetch https://example.com/ [--render]   # fetch qua toàn bộ
 ```bash
 uv run ruff format . && uv run ruff check .
 uv run pyright
-uv run pytest                 # test tích hợp cần TEST_DATABASE_URL (có sẵn trong .env.example)
-uv run jobcrawler db revision -m "mô tả"   # sinh migration mới từ model
+uv run pytest                                 # tích hợp cần TEST_DATABASE_URL + Redis (xem .env.example)
+uv run python scripts/gen_proto.py            # sau khi sửa proto/jcproto/v1/crawl.proto
+uv run jobcrawler db revision -m "mô tả"      # sinh migration mới từ model
 ```
 
-Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng `FakeChatClient`.
+Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng `FakeChatClient`,
+worker dùng gateway giả + server HTTP cục bộ.
