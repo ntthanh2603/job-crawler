@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Download, FolderOpen, Play } from "lucide-react"
+import { AlertTriangle, Download, FolderOpen, Play, Target } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -10,15 +10,15 @@ import {
   Section,
   StatCard,
   StatGrid,
+  StatusBadge,
   TextLink,
 } from "@/components/common"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
-import { cap, label, pct, sourceLabel } from "@/lib/format"
+import { cap, num, pct, sourceLabel } from "@/lib/format"
 import type { EvalReport } from "@/lib/types"
 
 export function EvalPage() {
@@ -67,53 +67,63 @@ export function EvalPage() {
         }
       />
 
-      <Section title="Chạy đánh giá" className="mb-6" bodyClassName="space-y-4">
-        <div className="flex flex-wrap items-end gap-4">
+      <Section
+        title="Chạy đánh giá"
+        description="Tải lên hai file CSV của golden set rồi bấm Đánh giá"
+        className="mb-6"
+        bodyClassName="space-y-5"
+      >
+        <div className="grid gap-4 md:grid-cols-2">
           <FilePicker
             file={companies}
             onChange={setCompanies}
             title="Chọn companies.csv"
             hint="Danh sách doanh nghiệp trong golden set"
-            className="w-64"
           />
-          <FilePicker
-            file={jobs}
-            onChange={setJobs}
-            title="Chọn jobs.csv"
-            hint="Các việc làm đúng của từng doanh nghiệp"
-            className="w-64"
-          />
-          <div className="flex items-center gap-2 pb-2">
+          <FilePicker file={jobs} onChange={setJobs} title="Chọn jobs.csv" hint="Các việc làm đúng của từng doanh nghiệp" />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="flex items-center gap-2.5">
             <Checkbox id="inactive" checked={inactive} onCheckedChange={(v) => setInactive(v === true)} />
             <Label htmlFor="inactive" className="font-normal">
               So cả việc đã hết hạn hoặc đã gỡ
             </Label>
           </div>
-          <Button onClick={() => run.mutate(false)} disabled={!companies || !jobs || run.isPending}>
-            <Play /> {run.isPending ? "Đang đánh giá…" : "Đánh giá"}
-          </Button>
-          {server.data?.available && (
-            <Button variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending}>
-              <FolderOpen /> Dùng thư mục {server.data.path}/ trên máy chủ
+          <div className="flex flex-wrap gap-2 sm:ml-auto">
+            {server.data?.available && (
+              <Button variant="outline" onClick={() => run.mutate(true)} disabled={run.isPending}>
+                <FolderOpen /> Dùng thư mục {server.data.path}/ trên máy chủ
+              </Button>
+            )}
+            <Button onClick={() => run.mutate(false)} disabled={!companies || !jobs || run.isPending}>
+              <Play /> {run.isPending ? "Đang đánh giá…" : "Đánh giá"}
             </Button>
-          )}
+          </div>
         </div>
-        <p className="max-w-3xl text-meta leading-relaxed text-muted-foreground">
-          File <code>companies.csv</code> giống file đầu vào (name, tax_code, website). File <code>jobs.csv</code> gồm cột{" "}
-          <code>company</code> (tên hoặc MST) và <code>url</code> hoặc <code>title</code> của các việc làm đúng. Hai việc khớp
-          nhau khi URL trùng hoặc tiêu đề giống nhau từ 90% trở lên. Chưa có golden set thì dùng trang{" "}
+        <div className="rounded-lg bg-muted/50 px-4 py-3 text-meta leading-relaxed text-muted-foreground">
+          File <code className="font-mono text-foreground">companies.csv</code> giống file đầu vào (name, tax_code, website).
+          File <code className="font-mono text-foreground">jobs.csv</code> gồm cột <code className="font-mono text-foreground">company</code>{" "}
+          (tên hoặc MST) và <code className="font-mono text-foreground">url</code> hoặc{" "}
+          <code className="font-mono text-foreground">title</code> của các việc làm đúng. Hai việc khớp nhau khi URL trùng hoặc
+          tiêu đề giống nhau từ 90% trở lên. Chưa có golden set thì dùng trang{" "}
           <TextLink to="/review" className="text-brand">
             Kiểm tay
           </TextLink>
           .
-        </p>
+        </div>
       </Section>
 
-      {!r && !run.isPending && <Empty>Tải golden set lên để xem precision và recall.</Empty>}
+      {!r && !run.isPending && (
+        <Section>
+          <Empty icon={<Target />} title="Chưa có kết quả">
+            Tải golden set lên để xem precision và recall theo doanh nghiệp và theo nguồn.
+          </Empty>
+        </Section>
+      )}
 
       {r && (
         <div className="space-y-6">
-          <StatGrid className="grid-cols-2 lg:grid-cols-5">
+          <StatGrid className="grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
             <StatCard
               label="Precision"
               value={pct(r.precision)}
@@ -138,7 +148,11 @@ export function EvalPage() {
                     : { tone: "bad", text: "Chưa đạt" }
               }
             />
-            <StatCard label="Golden / tìm được / khớp" value={`${r.golden} / ${r.predicted} / ${r.matched}`} hint={`${r.companies.length} doanh nghiệp trong golden set`} />
+            <StatCard
+              label="Golden / tìm được / khớp"
+              value={`${num(r.golden)} / ${num(r.predicted)} / ${num(r.matched)}`}
+              hint={`${num(r.companies.length)} doanh nghiệp trong golden set`}
+            />
             {Object.entries(r.perf).map(([k, v]) => (
               <StatCard key={k} label={k} value={v} />
             ))}
@@ -165,14 +179,14 @@ export function EvalPage() {
                     <TableCell>
                       {c.company_id ? <TextLink to={`/companies/${c.company_id}`}>{cap(c.name)}</TextLink> : cap(c.name)}
                     </TableCell>
-                    <TableCell className="text-meta">{c.run_status ? label(c.run_status) : "–"}</TableCell>
+                    <TableCell>{c.run_status ? <StatusBadge value={c.run_status} /> : <span className="text-muted-foreground">–</span>}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.golden}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.predicted}</TableCell>
                     <TableCell className="text-right tabular-nums">{c.matched}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(c.precision)}</TableCell>
                     <TableCell className="text-right tabular-nums">{pct(c.recall)}</TableCell>
-                    <TableCell className="max-w-72 text-meta whitespace-normal">{c.missing.join("; ")}</TableCell>
-                    <TableCell className="max-w-72 text-meta whitespace-normal text-muted-foreground">{c.extra.join("; ")}</TableCell>
+                    <TableCell className="max-w-72 text-meta whitespace-normal text-danger-ink">{c.missing.join("; ") || <span className="text-muted-foreground">–</span>}</TableCell>
+                    <TableCell className="max-w-72 text-meta whitespace-normal text-muted-foreground">{c.extra.join("; ") || "–"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -205,16 +219,17 @@ export function EvalPage() {
           </Section>
 
           {r.warnings.length > 0 && (
-            <Alert>
-              <AlertTitle>Cảnh báo</AlertTitle>
-              <AlertDescription>
-                <ul className="list-disc pl-4 text-meta">
+            <div className="flex items-start gap-3 rounded-xl border border-warning/35 bg-warning/8 p-4">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-ink" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Cảnh báo</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-meta text-muted-foreground">
                   {r.warnings.map((w) => (
                     <li key={w}>{cap(w)}</li>
                   ))}
                 </ul>
-              </AlertDescription>
-            </Alert>
+              </div>
+            </div>
           )}
         </div>
       )}
