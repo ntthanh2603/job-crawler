@@ -13,7 +13,7 @@ import { bytes, dec, num, sourceLabel } from "@/lib/format"
 import type { SettingItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { describeCron, describeWindow, humanSeconds, parseWindow, type Raw } from "./model"
+import { describeCron, humanSeconds, parseWindow, windowLength, type Raw } from "./model"
 
 type FieldProps = {
   item: SettingItem
@@ -21,6 +21,8 @@ type FieldProps = {
   onChange: (value: Raw) => void
   id: string
   invalid: boolean
+  /** Múi giờ thu thập (CRAWL_TIMEZONE đang sửa): lịch cron tính theo múi này. */
+  timezone?: string
 }
 
 /** Ô nhập theo loại cài đặt. */
@@ -98,6 +100,7 @@ function NumberField({ item, value, onChange, id, invalid }: FieldProps) {
           value={text}
           placeholder={item.nullable ? "Không giới hạn" : undefined}
           aria-invalid={invalid || undefined}
+          title={bounds ? bounds.charAt(0).toUpperCase() + bounds.slice(1) : undefined}
           onChange={(e) => onChange(e.target.value)}
           className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm tabular-nums outline-none placeholder:text-muted-foreground"
         />
@@ -107,13 +110,8 @@ function NumberField({ item, value, onChange, id, invalid }: FieldProps) {
           </span>
         )}
       </div>
-      {(extra || bounds) && (
-        <Hint>
-          {extra && <span className="text-foreground/80">= {extra}</span>}
-          {extra && bounds && " · "}
-          {bounds && <span>{bounds.charAt(0).toUpperCase() + bounds.slice(1)}</span>}
-        </Hint>
-      )}
+      {/* Giới hạn hiện khi rê chuột và trong thông báo lỗi; dưới ô chỉ đổi đơn vị cho dễ đọc. */}
+      {extra && <Hint>= {extra}</Hint>}
     </div>
   )
 }
@@ -199,7 +197,7 @@ function ChoiceListField({ item, value, onChange, id }: FieldProps) {
   }
   return (
     <div className="space-y-1.5">
-      <div id={id} role="group" aria-label={item.label} className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-2 xl:grid-cols-3">
+      <div id={id} role="group" aria-label={item.label} className="grid grid-cols-2 gap-1.5 @lg:grid-cols-3 @3xl:grid-cols-4 @5xl:grid-cols-5">
         {item.options.map((o) => (
           <label
             key={o.value}
@@ -325,12 +323,12 @@ function WindowField({ value, onChange, id }: FieldProps) {
         </span>
         <TimeSelect label="Kết thúc" value={end} onChange={(v) => onChange(`${start}-${v}`)} />
       </div>
-      <Hint>{describeWindow(text)}</Hint>
+      {w ? <Hint>{windowLength(text)}</Hint> : <Hint>Khung giờ chưa hợp lệ</Hint>}
     </div>
   )
 }
 
-function CronField({ item, value, onChange, id, invalid }: FieldProps) {
+function CronField({ item, value, onChange, id, invalid, timezone }: FieldProps) {
   const text = String(value)
   const description = describeCron(text)
   return (
@@ -344,7 +342,11 @@ function CronField({ item, value, onChange, id, invalid }: FieldProps) {
         className="bg-card font-mono text-meta md:text-meta"
         spellCheck={false}
       />
-      <Hint>{description ? `${description} · giờ UTC` : "Cần 5 trường: phút giờ ngày tháng thứ"}</Hint>
+      <Hint>
+        {description
+          ? `${description} · giờ ${timezone || "theo múi giờ thu thập"}`
+          : "Cần 5 trường: phút giờ ngày tháng thứ"}
+      </Hint>
     </div>
   )
 }

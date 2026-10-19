@@ -1,7 +1,7 @@
 // Giá trị trên trang Cài đặt: chuyển giữa giá trị API và giá trị đang sửa trong ô nhập, kiểm tra
 // nhanh phía trình duyệt, mô tả khung giờ / cron / thời lượng bằng chữ.
 import { bytes, cap, dec, num, sourceLabel } from "@/lib/format"
-import type { SettingItem, SettingValue } from "@/lib/types"
+import type { SettingGroup, SettingItem, SettingValue } from "@/lib/types"
 
 /**
  * Giá trị đang sửa của một ô: số và chuỗi giữ nguyên chữ người dùng gõ, danh sách nhiều dòng là
@@ -231,6 +231,79 @@ export function formatValue(item: SettingItem, value: SettingValue): string {
       return describeWindow(String(value))
     default:
       return String(value)
+  }
+}
+
+/** Tên biến môi trường của cài đặt (pydantic-settings: tên field viết hoa, không tiền tố). */
+export function envName(item: SettingItem): string {
+  return item.key.toUpperCase()
+}
+
+/** Giá trị đang dùng khác mặc định (đặt bằng biến môi trường hoặc ở giao diện, và khác giá trị
+ * mặc định; biến môi trường đặt trùng mặc định không tính). */
+export function isCustom(item: SettingItem): boolean {
+  if (item.source === "default") return false
+  if (item.secret) return Boolean(item.is_set)
+  return stable(item.value) !== stable(item.default)
+}
+
+export type SectionView = { title: string; description: string; items: SettingItem[] }
+
+/** Các mục con của nhóm kèm cài đặt; cài đặt không thuộc mục nào (API cũ) gom vào một mục cuối. */
+export function sectionsOf(group: SettingGroup, keep: (item: SettingItem) => boolean = () => true): SectionView[] {
+  const byKey = new Map(group.items.map((i) => [i.key, i]))
+  const placed = new Set<string>()
+  const out: SectionView[] = []
+  for (const s of group.sections ?? []) {
+    const items = s.keys.flatMap((k) => {
+      const item = byKey.get(k)
+      if (!item) return []
+      placed.add(k)
+      return keep(item) ? [item] : []
+    })
+    if (items.length) out.push({ title: s.title, description: s.description, items })
+  }
+  const rest = group.items.filter((i) => !placed.has(i.key) && keep(i))
+  if (rest.length) out.push({ title: out.length ? "Khác" : "", description: "", items: rest })
+  return out
+}
+
+/** Phút trong ngày của "HH:MM" (24:00 → 1440). */
+function minuteOf(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number)
+  return h * 60 + m
+}
+
+/** Các đoạn [bắt đầu, kết thúc) (phút trong ngày) của khung giờ, để vẽ trên dải 0–24 giờ. */
+export function windowSegments(value: string): [number, number][] {
+  const w = parseWindow(value)
+  if (!w) return []
+  if (w.allDay) return [[0, 1440]]
+  const start = minuteOf(w.start) % 1440
+  const end = minuteOf(w.end)
+  if (!w.overnight) return [[start, end || 1440]]
+  const parts: [number, number][] = [
+    [start, 1440],
+    [0, end],
+  ]
+  return parts.filter(([a, b]) => b > a)
+}
+
+/** Độ dài khung giờ bằng chữ: "6 giờ", "7 giờ, qua nửa đêm", "Cả ngày". */
+export function windowLength(value: string): string | null {
+  const w = parseWindow(value)
+  if (!w) return null
+  if (w.allDay) return "Cả ngày"
+  return `${hoursText(w.minutes)}${w.overnight ? ", qua nửa đêm" : ""}`
+}
+
+/** Giờ hiện tại ("14:35") theo múi giờ IANA; null nếu tên múi không hợp lệ. */
+export function nowIn(timeZone: string, at: Date = new Date()): string | null {
+  try {
+    const text = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at)
+    return /^\d{2}:\d{2}$/.test(text) ? text : null
+  } catch {
+    return null
   }
 }
 

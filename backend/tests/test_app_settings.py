@@ -55,6 +55,23 @@ def test_groups_in_order() -> None:
     assert a.SPEC_BY_KEY["llm_api_key"].group == "ai"
 
 
+def test_every_setting_is_in_exactly_one_section_of_its_group() -> None:
+    for group in a.GROUPS:
+        assert group.sections, group.key
+        keys = [k for s in group.sections for k in s.keys]
+        assert len(keys) == len(set(keys)), f"{group.key}: trùng mục"
+        assert set(keys) == {spec.key for spec in group.items}, group.key
+        assert all(s.title for s in group.sections)
+
+
+def test_describe_lists_sections() -> None:
+    s = base()
+    groups = a.describe(s, {}, s)
+    schedule = next(g for g in groups if g["group"] == "schedule")
+    assert [sec["title"] for sec in schedule["sections"]][:2] == ["Khung giờ", "Nhịp poll"]
+    assert schedule["sections"][0]["keys"] == ["crawl_timezone", "build_window", "poll_window"]
+
+
 def test_enum_options_come_from_literal() -> None:
     for key in ("proxy_mode", "serp_provider"):
         spec = a.SPEC_BY_KEY[key]

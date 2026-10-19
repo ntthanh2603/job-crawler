@@ -138,11 +138,21 @@ class SettingSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class Section:
+    """Một mục con trong nhóm (giao diện vẽ thành một khối có tiêu đề)."""
+
+    title: str
+    keys: tuple[str, ...]
+    description: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Group:
     key: str
     title: str
     description: str
     items: tuple[SettingSpec, ...]
+    sections: tuple[Section, ...] = ()
 
 
 def _bounds(info: FieldInfo) -> tuple[float | None, float | None, bool, bool]:
@@ -312,7 +322,10 @@ def _group(key: str, title: str, description: str, *items: SettingSpec) -> Group
     return Group(key, title, description, tuple(replace(i, group=key) for i in items))
 
 
-_CRON_HELP = "Biểu thức cron 5 trường (phút giờ ngày tháng thứ), tính theo giờ UTC."
+_CRON_HELP = (
+    "Biểu thức cron 5 trường (phút giờ ngày tháng thứ), tính theo múi giờ thu thập "
+    "(CRAWL_TIMEZONE)."
+)
 
 GROUPS: tuple[Group, ...] = (
     _group(
@@ -1274,6 +1287,207 @@ GROUPS: tuple[Group, ...] = (
     ),
 )
 
+
+def _sec(title: str, *keys: str, description: str = "") -> Section:
+    return Section(title, keys, description)
+
+
+# Mục con của từng nhóm, theo thứ tự hiển thị. Mỗi cài đặt nằm đúng một mục của nhóm mình
+# (`tests/test_app_settings.py` kiểm tra).
+_SECTIONS: dict[str, tuple[Section, ...]] = {
+    "schedule": (
+        _sec("Khung giờ", "crawl_timezone", "build_window", "poll_window"),
+        _sec(
+            "Nhịp poll",
+            "poll_interval_seconds",
+            "poll_jitter_seconds",
+            "poll_deadline_seconds",
+            "poll_timeout_seconds",
+            description="Độ trễ phát hiện tin mới ≈ chu kỳ poll + thời gian một lượt poll.",
+        ),
+        _sec(
+            "Giới hạn mỗi lượt poll",
+            "poll_max_listing_pages",
+            "poll_max_detail_pages",
+            description="Lượt poll càng ít request càng nhanh và rẻ; phần còn lại được đọc ở "
+            "lượt sau hoặc lượt build đêm.",
+        ),
+        _sec(
+            "Build lại bộ khung", "poll_max_failures", "rebuild_on_error", "build_refresh_discovery"
+        ),
+        _sec("Scheduler", "scheduler_batch", "build_queue_max_backlog", "poll_queue_max_backlog"),
+    ),
+    "runner": (
+        _sec(
+            "Job song song mỗi runner",
+            "runner_build_concurrency",
+            "runner_poll_concurrency",
+            "runner_board_concurrency",
+        ),
+        _sec(
+            "Lượt build",
+            "company_deadline_seconds",
+            "company_timeout_seconds",
+            "company_job_retries",
+            "company_max_continuations",
+            "company_continuation_delay_seconds",
+        ),
+        _sec("Hàng đợi", "queue_reclaim_seconds"),
+    ),
+    "workers": (
+        _sec(
+            "Cấu hình gửi xuống worker",
+            "gateway_http_slots",
+            "gateway_render_slots",
+            "gateway_impersonate",
+            "gateway_heartbeat_seconds",
+            "gateway_lease_wait_ms",
+            description="Gateway gửi kèm khi worker đăng ký và mỗi lần báo sống; 0 / trống là giữ "
+            "cấu hình của worker.",
+        ),
+        _sec(
+            "Gateway",
+            "gateway_worker_ttl_seconds",
+            "fetch_queue_grace_seconds",
+            "fetch_max_body_bytes",
+        ),
+        _sec("Định tuyến", "fetch_routes"),
+    ),
+    "proxy": (
+        _sec("Chế độ", "proxy_mode"),
+        _sec(
+            "Danh sách proxy chung",
+            "proxies",
+            "proxy_sticky_seconds",
+            "proxy_cooldown_seconds",
+            "proxy_max_consecutive_failures",
+            "proxy_dead_seconds",
+            "proxy_check_url",
+            description="Dùng khi chế độ là “Proxy chung”: backend chọn proxy cho từng request. "
+            "Proxy riêng của worker đặt ở máy worker.",
+        ),
+    ),
+    "network": (
+        _sec(
+            "Request",
+            "http_timeout_seconds",
+            "http_max_retries",
+            "http_backoff_base_seconds",
+            "http_backoff_cap_seconds",
+            "http_max_retry_after_seconds",
+            "http_accept_language",
+            "http_cache_ttl_seconds",
+        ),
+        _sec("Tốc độ theo domain", "rate_limit_per_second", "rate_limit_burst", "rate_limits"),
+        _sec("robots.txt", "robots_cache_seconds", "robots_user_agents"),
+    ),
+    "sources": (
+        _sec(
+            "Tìm nguồn",
+            "discovery_cache_seconds",
+            "discovery_negative_cache_seconds",
+            "discovery_timeout_seconds",
+        ),
+        _sec(
+            "Giới hạn mỗi nguồn",
+            "source_max_jobs",
+            "source_max_detail_pages",
+            "source_max_listing_pages",
+            "source_max_rendered_pages",
+            "source_max_sub_listings",
+            "source_max_api_pages",
+        ),
+        _sec("Dùng lại & ATS", "job_reuse_days", "ats_rate_per_second"),
+    ),
+    "boards": (
+        _sec("Trang được index", "boards"),
+        _sec(
+            "Index đủ",
+            "board_index_cron",
+            "board_index_budget_seconds",
+            "board_max_jobs_per_run",
+            description="Đọc toàn bộ danh sách tin của mỗi trang, thường ban đêm.",
+        ),
+        _sec(
+            "Index đuôi",
+            "board_tail_cron",
+            "board_tail_budget_seconds",
+            "board_tail_max_jobs",
+            "board_poll_companies",
+            description="Ban ngày chỉ đọc phần tin mới nhất rồi poll ngay doanh nghiệp có tin mới.",
+        ),
+        _sec("Tải tin", "board_refresh_days", "board_concurrency", "board_stale_hours"),
+        _sec(
+            "Khớp profile với doanh nghiệp",
+            "profile_match_trigram",
+            "profile_match_min_confidence",
+            "board_name_profiles_without_kyc",
+            "board_serp_lookup",
+            "board_serp_lookup_seconds",
+        ),
+    ),
+    "ai": (
+        _sec("Mô hình LLM", "llm_base_url", "llm_model", "llm_api_key", "llm_disable_thinking"),
+        _sec(
+            "Giới hạn LLM",
+            "llm_max_concurrency",
+            "llm_max_input_chars",
+            "llm_timeout_seconds",
+            "llm_requests_per_minute",
+        ),
+        _sec(
+            "Tìm kiếm (SERP)",
+            "serp_provider",
+            "serp_api_key",
+            "serp_results",
+            "serp_rate_per_second",
+            "serp_cache_seconds",
+            "serp_timeout_seconds",
+        ),
+    ),
+    "quality": (
+        _sec(
+            "Xác minh tin",
+            "verify_min_confidence",
+            "verify_min_jd_chars",
+            "verify_board_max_age_days",
+            "verify_llm_max_jobs",
+            "normalize_llm_max_jobs",
+        ),
+        _sec(
+            "KYC doanh nghiệp",
+            "kyc_cache_days",
+            "kyc_trigram_threshold",
+            "kyc_min_confidence",
+            "kyc_timeout_seconds",
+            "kyc_max_sites",
+        ),
+    ),
+    "maintenance": (
+        _sec("Lịch", "maintenance_cron", "overview_cron"),
+        _sec(
+            "Lưu trữ",
+            "source_fetch_retention_days",
+            "log_retention_days",
+            "failed_page_retention_days",
+            "failed_pages_per_run",
+        ),
+        _sec(
+            "Nén dữ liệu",
+            "compression_level",
+            "compression_dict_size",
+            "compression_dict_min_samples",
+            "compression_dict_max_samples",
+            "compression_dict_delay_seconds",
+            "compression_dict_refresh_seconds",
+            "compression_dict_retrain_days",
+            "compression_recompress_rows",
+        ),
+    ),
+}
+
+GROUPS = tuple(replace(group, sections=_SECTIONS.get(group.key, ())) for group in GROUPS)
+
 SPECS: list[SettingSpec] = [spec for group in GROUPS for spec in group.items]
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SPECS}
 
@@ -1690,6 +1904,10 @@ def describe(
                 "group": group.key,
                 "title": group.title,
                 "description": group.description,
+                "sections": [
+                    {"title": s.title, "description": s.description, "keys": list(s.keys)}
+                    for s in group.sections
+                ],
                 "items": items,
             }
         )

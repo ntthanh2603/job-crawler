@@ -436,7 +436,17 @@ export type SettingItem = {
   env_is_set: boolean | null
 }
 
-export type SettingGroup = { group: string; title: string; description: string; items: SettingItem[] }
+/** Mục con trong nhóm: tiêu đề, giải thích ngắn, các cài đặt theo thứ tự hiển thị. */
+export type SettingSection = { title: string; description: string; keys: string[] }
+
+export type SettingGroup = {
+  group: string
+  title: string
+  description: string
+  /** Có thể thiếu khi API cũ hơn giao diện: coi cả nhóm là một mục. */
+  sections?: SettingSection[]
+  items: SettingItem[]
+}
 
 export type SettingsPage = { version: number; groups: SettingGroup[] }
 
