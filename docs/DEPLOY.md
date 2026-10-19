@@ -166,6 +166,6 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
   `FORWARDED_ALLOW_IPS` để thấy IP thật). Cổng Postgres / Redis không mở ra Internet (compose
   một máy chỉ mở ở `127.0.0.1`); máy dữ liệu riêng thì chặn bằng firewall, chỉ cho máy ứng dụng.
 - Log được che bí mật trước khi ghi (URL có mật khẩu, token, khoá API); thao tác của người vận
-  hành ghi ở `audit_events` (bí mật bị che). Báo lỗ hổng: [SECURITY.md](../SECURITY.md).
+  hành ghi ở `audit_events` (bí mật bị che). Báo lỗ hổng: [SECURITY.md](../.github/SECURITY.md).
 - Proxy tại worker nằm trong file / biến môi trường của máy worker; danh sách proxy chung (nếu dùng
   `PROXY_MODE=central`) lưu ở DB, giao diện chỉ hiện dạng che mật khẩu.

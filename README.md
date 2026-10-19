@@ -10,7 +10,7 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
 - Vận hành (dịch vụ, giới hạn, bảo trì, sự cố): [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Đặc tả gốc: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md); tiến độ ghi trong commit message.
 - Quy ước khi sửa mã (người và coding agent): [AGENTS.md](AGENTS.md); báo lỗ hổng:
-  [SECURITY.md](SECURITY.md).
+  [SECURITY.md](.github/SECURITY.md).
 
 ## Cấu trúc repo
 
@@ -20,7 +20,7 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
 | `worker/`   | `jobworker`        | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng |
 | `proto/`    | `jobcrawler-proto` | hợp đồng gRPC (`jcproto/v1/crawl.proto` + mã sinh sẵn)                                   |
 | `frontend/` |                    | React + shadcn/ui + Tailwind                                                             |
-| `deploy/`   |                    | compose cho máy backend và máy worker riêng                                              |
+| `deploy/`   |                    | compose cho máy backend / máy worker riêng; script khởi tạo Postgres của compose          |
 
 Workspace uv: `uv sync` cài cả ba gói vào `.venv` cùng công cụ dev.
 

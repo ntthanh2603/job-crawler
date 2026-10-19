@@ -16,7 +16,7 @@ tasks:
       - sh: uv --version
         msg: "Cần uv: https://docs.astral.sh/uv/"
       - sh: npm --version
-        msg: "Cần Node.js + npm (bản trong .nvmrc)"
+        msg: "Cần Node.js + npm (bản trong frontend/.nvmrc)"
     cmds:
       - uv sync
       - task: ui:install

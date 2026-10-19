@@ -37,12 +37,18 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 | `worker/jobworker/`    | worker lấy trang (curl_cffi + Chromium, proxy riêng), gọi gateway qua gRPC             |
 | `proto/jcproto/v1/`    | hợp đồng gRPC `crawl.proto` + mã sinh sẵn                                              |
 | `frontend/`            | React + Vite + Tailwind + shadcn/ui; build ra `backend/jobcrawler/web/dist`            |
-| `deploy/`              | compose cho máy backend và máy worker riêng                                           |
+| `deploy/`              | compose cho máy backend / máy worker riêng; script khởi tạo Postgres (`postgres/init/`) |
 | `docs/`                | ARCHITECTURE, OPERATIONS, DEPLOY, BUILD_PROMPT (đặc tả gốc)                            |
 | `scripts/`             | `gen_proto.py`, `loadtest/` (seed, bench, site giả đo SLA)                            |
 
 Workspace uv một `.venv` cho ba gói (`jobcrawler`, `jobworker`, `jobcrawler-proto`). Node theo
-`.nvmrc`.
+`frontend/.nvmrc`.
+
+Ở gốc repo chỉ để file mà công cụ bắt buộc tìm ở gốc hoặc dùng chung cho mọi gói: `pyproject.toml`,
+`uv.lock`, `.python-version` (workspace uv), `.dockerignore` (context build của cả hai image là gốc
+repo), `docker-compose.yaml`, `Taskfile.yml`, `.env(.example)`, `.pre-commit-config.yaml`, README /
+AGENTS. File chỉ của một phần thì để trong thư mục đó (vd. `frontend/.nvmrc`,
+`deploy/postgres/init/`, `.github/SECURITY.md`).
 
 ## Lệnh chính (`task`, từ gốc repo)
 
