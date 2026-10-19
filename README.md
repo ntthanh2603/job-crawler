@@ -4,7 +4,8 @@ Thu thập tin tuyển dụng đang mở cho ~10.000 doanh nghiệp (chủ yếu
 ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu PostgreSQL.
 
 Đặc tả và milestone: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md). Tiến độ từng milestone ghi
-trong commit message.
+trong commit message. Kiến trúc (process, luồng dữ liệu, từng tầng):
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Vận hành (dịch vụ, giới hạn khi chưa có proxy, quy mô dữ liệu, chống trùng, bảo trì):
 [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
