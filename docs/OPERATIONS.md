@@ -177,3 +177,18 @@ lớn ("could not resize shared memory segment … No space left on device"), n�
   Docker Desktop; các container có `restart: unless-stopped` tự lên.
 - **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis `localhost:16379`), hay
   gặp ngay sau khi Docker Desktop khởi động lại: chạy lại từng file test là qua.
+- **Redis không lên sau khi máy hết bộ nhớ / tắt đột ngột** (log Redis: "Bad file format reading
+  the append only file …incr.aof"; `api`, `worker`, `indexer` khởi động lại liên tục vì không nối
+  được Redis): lệnh ghi cuối của AOF bị cắt dở. Dừng Redis, sao lưu rồi cắt phần hỏng (chỉ mất
+  lệnh ghi dở cuối cùng), sau đó bật lại cả stack:
+
+  ```bash
+  docker compose stop redis
+  docker compose run --rm --no-deps -T --entrypoint sh redis -c \
+    'b=/data/aof-backup-$(date +%Y%m%d-%H%M%S); mkdir -p $b && cp -a /data/appendonlydir/. $b/ &&
+     cd /data/appendonlydir && echo y | redis-check-aof --fix appendonly.aof.manifest'
+  docker compose up -d
+  ```
+
+  Lần gặp 19/10/2026 chỉ cắt 152 byte; bản sao lưu nằm trong volume `redisdata`
+  (`/data/aof-backup-20261019-022229`), xoá khi Redis chạy ổn.
