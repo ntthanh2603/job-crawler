@@ -1,8 +1,9 @@
 import { lazy, Suspense, type ComponentType } from "react"
 import { Link, Route, Routes } from "react-router"
 
-import { Empty, Loading, PageHeader } from "@/components/common"
+import { Empty, PageHeader, PageLoading } from "@/components/common"
 import { Layout } from "@/components/layout"
+import { Button } from "@/components/ui/button"
 
 // Mỗi trang một chunk (trang tổng quan kéo theo recharts, không cần tải ở trang khác).
 function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K): ComponentType {
@@ -25,7 +26,7 @@ const pages = {
 
 function page(Component: ComponentType) {
   return (
-    <Suspense fallback={<Loading rows={8} />}>
+    <Suspense fallback={<PageLoading />}>
       <Component />
     </Suspense>
   )
@@ -35,12 +36,14 @@ function NotFound() {
   return (
     <>
       <PageHeader title="Không tìm thấy trang" />
-      <Empty>
-        <p>Đường dẫn này không tồn tại hoặc đã bị đổi.</p>
-        <Link to="/" className="mt-2 inline-block font-medium text-brand hover:underline">
-          Về trang Tổng quan
-        </Link>
-      </Empty>
+      <Empty
+        title="Đường dẫn này không tồn tại hoặc đã bị đổi"
+        action={
+          <Button asChild size="sm">
+            <Link to="/">Về trang Tổng quan</Link>
+          </Button>
+        }
+      />
     </>
   )
 }

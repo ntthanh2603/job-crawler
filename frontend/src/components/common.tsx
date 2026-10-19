@@ -1,8 +1,8 @@
 // Thành phần dùng chung giữa các trang.
 import { useQuery } from "@tanstack/react-query"
-import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Search } from "lucide-react"
-import { useEffect, useState, type ReactNode } from "react"
-import { Link } from "react-router"
+import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Info, RotateCw, Search, X } from "lucide-react"
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react"
+import { Link, useNavigate, useSearchParams } from "react-router"
 
 import {
   AlertDialog,
@@ -19,8 +19,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api } from "@/lib/api"
-import { cap, label, num } from "@/lib/format"
+import { TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { api, ApiError } from "@/lib/api"
+import { cap, label, num, reason, sourceProblem } from "@/lib/format"
 import type { Job, Page } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -36,9 +38,15 @@ const TONE: Record<string, Tone> = {
   correct: "good",
   partial: "warn",
   timeout: "warn",
+  robots_disallowed: "warn",
   ambiguous: "neutral",
   running: "info",
   queued: "muted",
+  deferred: "muted",
+  not_found: "muted",
+  none: "muted",
+  expired: "muted",
+  removed: "muted",
   failed: "bad",
   blocked: "bad",
   error: "bad",
@@ -46,14 +54,14 @@ const TONE: Record<string, Tone> = {
   aborted: "bad",
 }
 
-// Chữ của nhãn: màu chữ thường, chỉ "lỗi" mới đổi màu; màu nằm ở chấm.
-const TONE_CLASS: Record<Tone, string> = {
-  good: "text-foreground/85",
-  warn: "text-foreground/85",
-  bad: "text-destructive",
-  info: "text-foreground/85",
-  neutral: "text-foreground/85",
-  muted: "text-muted-foreground",
+/** Nền nhạt + chữ đậm cùng màu (đủ tương phản), chấm màu đậm. */
+const BADGE_CLASS: Record<Tone, string> = {
+  good: "bg-success/12 text-success-ink",
+  warn: "bg-warning/16 text-warning-ink",
+  bad: "bg-destructive/10 text-danger-ink",
+  info: "bg-info/12 text-info-ink",
+  neutral: "bg-neutral-tone/12 text-neutral-ink",
+  muted: "bg-muted text-muted-foreground ring-1 ring-border/70 ring-inset",
 }
 
 const DOT_CLASS: Record<Tone, string> = {
@@ -62,37 +70,52 @@ const DOT_CLASS: Record<Tone, string> = {
   bad: "bg-destructive",
   info: "bg-info",
   neutral: "bg-neutral-tone",
-  muted: "bg-muted-foreground/60",
+  muted: "bg-muted-foreground/50",
 }
 
 export function toneOf(value: string | null | undefined): Tone {
   return TONE[value ?? ""] ?? "muted"
 }
 
-/** Nhãn trạng thái: chấm màu + chữ (viết hoa đầu). `value` là mã gốc, hiện khi rê chuột. */
+/** Nhãn trạng thái dạng viên thuốc: chấm màu + chữ (viết hoa đầu). `value` là mã gốc. */
 export function StatusBadge({
   value,
   text,
   tone,
+  pulse,
   className,
 }: {
   value: string | null | undefined
   text?: ReactNode
   tone?: Tone
+  /** Chấm nhấp nháy (đang chạy). */
+  pulse?: boolean
   className?: string
 }) {
   const t = tone ?? toneOf(value)
   return (
     <span
-      title={value ?? undefined}
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 text-meta font-medium whitespace-nowrap",
-        TONE_CLASS[t],
+        "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-meta font-medium whitespace-nowrap",
+        BADGE_CLASS[t],
         className,
       )}
     >
-      <span className={cn("size-[7px] shrink-0 rounded-full", DOT_CLASS[t])} aria-hidden />
+      <span className="relative flex size-1.5 shrink-0" aria-hidden>
+        {pulse && <span className={cn("absolute inset-0 animate-ping rounded-full opacity-60", DOT_CLASS[t])} />}
+        <span className={cn("relative size-1.5 rounded-full", DOT_CLASS[t])} />
+      </span>
       {typeof text === "string" ? cap(text) : (text ?? label(value))}
+    </span>
+  )
+}
+
+/** Chấm màu + chữ, không nền: dùng trong chú giải, danh sách đếm dày. */
+export function Dot({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap", className)}>
+      <span className={cn("size-2 shrink-0 rounded-full", DOT_CLASS[tone])} aria-hidden />
+      {children}
     </span>
   )
 }
@@ -102,7 +125,7 @@ export function Tag({ children, title, className }: { children: ReactNode; title
     <span
       title={title}
       className={cn(
-        "inline-flex h-5 items-center rounded-[4px] border px-1.5 text-caption whitespace-nowrap text-muted-foreground",
+        "inline-flex h-5 items-center rounded-md bg-secondary px-1.5 text-caption font-medium whitespace-nowrap text-secondary-foreground",
         className,
       )}
     >
@@ -123,15 +146,133 @@ export function JobTags({ job }: { job: Pick<Job, "level" | "employment_type" | 
   )
 }
 
-export function ReasonTags({ reasons }: { reasons: string[] }) {
+/** Ô có giải thích khi rê chuột (hoặc focus bằng bàn phím). */
+export function Hint({ content, children, className }: { content: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className={cn("cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50", className)}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-80 text-meta">{content}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Biểu tượng (i) kèm giải thích. */
+export function InfoTip({ children }: { children: ReactNode }) {
+  return (
+    <Hint content={children} className="inline-grid size-4 place-items-center rounded-full text-muted-foreground hover:text-foreground">
+      <Info className="size-3.5" aria-label="Giải thích" />
+    </Hint>
+  )
+}
+
+const REASON_CLASS: Record<string, string> = {
+  bad: "bg-destructive/10 text-danger-ink",
+  warn: "bg-warning/16 text-warning-ink",
+  good: "bg-success/12 text-success-ink",
+  info: "bg-secondary text-secondary-foreground",
+}
+
+/** Lý do xác minh tin dạng nhãn tiếng Việt; rê chuột xem chi tiết và mã gốc. */
+export function ReasonTags({ reasons, hideSource = false }: { reasons: string[]; hideSource?: boolean }) {
+  const items = reasons.map(reason).filter((r) => !(hideSource && r.code.startsWith("SOURCE_")))
+  if (!items.length) return null
   return (
     <span className="inline-flex flex-wrap gap-1">
-      {reasons.map((r) => (
-        <Tag key={r} title={r} className="font-mono tracking-tight">
-          {r.split(":")[0]}
-        </Tag>
+      {items.map((r, i) => (
+        <Hint
+          key={`${r.code}-${i}`}
+          content={
+            <>
+              {r.detail && <span className="block break-words">{r.detail}</span>}
+              <span className="font-mono opacity-70">{r.code}</span>
+            </>
+          }
+        >
+          <span
+            className={cn(
+              "inline-flex h-5 items-center rounded-md px-1.5 text-caption font-medium whitespace-nowrap",
+              REASON_CLASS[r.tone],
+            )}
+          >
+            {r.label}
+          </span>
+        </Hint>
       ))}
     </span>
+  )
+}
+
+/** Lý do loại tin: nhãn + chi tiết (chỉ các lý do loại / hoãn; bỏ lý do thông tin như nguồn). */
+export function ReasonList({ reasons }: { reasons: string[] }) {
+  const all = reasons.map(reason)
+  const bad = all.filter((r) => r.tone === "bad" || r.tone === "warn")
+  const items = bad.length ? bad : all.filter((r) => r.tone !== "info")
+  if (!items.length) return <span className="text-muted-foreground">–</span>
+  return (
+    <ul className="space-y-1.5">
+      {items.map((r, i) => (
+        <li key={`${r.code}-${i}`} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span
+            title={r.code}
+            className={cn(
+              "inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-caption font-medium whitespace-nowrap",
+              REASON_CLASS[r.tone],
+            )}
+          >
+            {r.label}
+          </span>
+          {r.detail && <span className="min-w-0 text-meta break-words text-muted-foreground [overflow-wrap:anywhere]">{r.detail}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** Nguồn chưa xong của một lượt chạy: nhãn gọn, rê chuột xem giải thích. */
+export function IncompleteSources({ sources, className }: { sources: string[]; className?: string }) {
+  if (!sources.length) return null
+  return (
+    <span className={cn("inline-flex flex-wrap gap-1", className)}>
+      {sources.map((s) => {
+        const p = sourceProblem(s)
+        return (
+          <Hint key={s} content={p.detail}>
+            <span className="inline-flex h-5 max-w-56 items-center truncate rounded-md bg-warning/14 px-1.5 text-caption font-medium text-warning-ink">
+              {p.label}
+            </span>
+          </Hint>
+        )
+      })}
+    </span>
+  )
+}
+
+/** Danh sách nguồn chưa xong kèm giải thích (trang lượt chạy, tổng quan). */
+export function IncompleteList({ items }: { items: { source: string; count?: number }[] }) {
+  return (
+    <ul className="divide-y">
+      {items.map(({ source, count }) => {
+        const p = sourceProblem(source)
+        return (
+          <li key={source} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+            <span className="mt-1.5 size-2 shrink-0 rounded-full bg-warning" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium break-words">{p.label}</div>
+              <div className="text-meta text-muted-foreground">{p.detail}</div>
+            </div>
+            {count !== undefined && (
+              <span className="shrink-0 text-sm font-semibold tabular-nums" title="Số lượt chạy">
+                {num(count)}
+              </span>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -142,52 +283,54 @@ export function PageHeader({
   description,
   actions,
   crumbs,
+  children,
 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
   crumbs?: { to: string; label: string }[]
+  /** Dòng phụ dưới mô tả (nhãn trạng thái, link…). */
+  children?: ReactNode
 }) {
   useEffect(() => {
     if (typeof title === "string") document.title = `${cap(title)} · jobcrawler`
   }, [title])
   return (
-    <header className="mb-8 flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b pb-6">
-      <div className="min-w-0 space-y-2">
+    <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
+      <div className="min-w-0 space-y-1.5">
         {crumbs && (
           <nav aria-label="Đường dẫn" className="flex flex-wrap items-center gap-1 text-meta text-muted-foreground">
             {crumbs.map((c) => (
-              <span key={c.to} className="inline-flex items-center gap-1">
-                <Link to={c.to} className="transition-colors hover:text-foreground">
+              <span key={c.to} className="inline-flex min-w-0 items-center gap-1">
+                <Link to={c.to} className="max-w-64 truncate transition-colors hover:text-foreground">
                   {cap(c.label)}
                 </Link>
-                <ChevronRight className="size-3.5 opacity-60" />
+                <ChevronRight className="size-3.5 shrink-0 opacity-60" />
               </span>
             ))}
           </nav>
         )}
-        <h1 className="text-page font-semibold text-foreground">
+        <h1 className="text-page font-semibold break-words text-foreground">
           {typeof title === "string" ? cap(title) : title}
         </h1>
         {description && (
-          <div className="max-w-2xl text-sm text-muted-foreground">
+          <div className="max-w-3xl text-sm text-muted-foreground">
             {typeof description === "string" ? cap(description) : description}
           </div>
         )}
+        {children && <div className="pt-1">{children}</div>}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
   )
 }
 
-/** Dải số liệu: các ô chia bằng đường kẻ mảnh, số cột do `className`. */
+/** Lưới các thẻ số liệu; số cột do `className`. */
 export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn("grid overflow-hidden rounded-lg border bg-card", className)}>{children}</div>
-  )
+  return <div className={cn("grid gap-3 sm:gap-4", className)}>{children}</div>
 }
 
-/** Một ô số liệu trong `StatGrid`. `status` (đạt / chưa đạt) hiện cạnh tiêu đề. */
+/** Một thẻ số liệu. `status` (đạt / chưa đạt…) hiện góc phải, không có thì hiện biểu tượng. */
 export function StatCard({
   label: title,
   value,
@@ -196,25 +339,30 @@ export function StatCard({
   icon,
   className,
 }: {
-  label: string
+  label: ReactNode
   value: ReactNode
   hint?: ReactNode
-  status?: { tone: Tone; text: string }
+  status?: { tone: Tone; text: string; pulse?: boolean }
   icon?: ReactNode
   className?: string
 }) {
   return (
-    <div className={cn("-mt-px -ml-px border-t border-l px-5 py-4", className)}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-meta text-muted-foreground [&_svg]:size-4 [&_svg]:stroke-[1.75]">
-          {icon}
-          {cap(title)}
+    <div className={cn("min-w-0 rounded-xl border bg-card p-4 shadow-card sm:px-5", className)}>
+      <div className="flex min-h-6 items-start justify-between gap-2">
+        <span className="pt-0.5 text-meta font-medium text-muted-foreground">
+          {typeof title === "string" ? cap(title) : title}
         </span>
-        {status && <StatusBadge value={null} tone={status.tone} text={status.text} />}
+        {status ? (
+          <StatusBadge value={null} tone={status.tone} text={status.text} pulse={status.pulse} />
+        ) : (
+          icon && (
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/8 text-brand dark:bg-primary/15 [&_svg]:size-4 [&_svg]:stroke-[1.75]">
+              {icon}
+            </span>
+          )
+        )}
       </div>
-      <div className="mt-2 text-stat font-semibold text-foreground tabular-nums">
-        {value}
-      </div>
+      <div className="mt-1.5 text-stat font-semibold text-foreground tabular-nums">{value}</div>
       {hint && (
         <div className="mt-1 text-meta text-muted-foreground">{typeof hint === "string" ? cap(hint) : hint}</div>
       )}
@@ -242,10 +390,7 @@ export function Section({
   return (
     <section
       id={id}
-      className={cn(
-        "overflow-hidden rounded-lg border bg-card text-card-foreground",
-        className,
-      )}
+      className={cn("min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground shadow-card", className)}
     >
       {(title || actions) && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-5 py-3.5">
@@ -267,43 +412,150 @@ export function Section({
   )
 }
 
+// --- tab theo URL --------------------------------------------------------------------------------
+
+/** Tab hiện tại lưu ở `?tab=` (giữ khi tải lại trang, gửi link được). */
+export function useTabParam<T extends string>(tabs: readonly T[], fallback: T): [T, (tab: string) => void] {
+  const [params, setParams] = useSearchParams()
+  const raw = params.get("tab") as T | null
+  const tab = raw && tabs.includes(raw) ? raw : fallback
+  const set = (next: string) =>
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        if (next === fallback) out.delete("tab")
+        else out.set("tab", next)
+        return out
+      },
+      { replace: true },
+    )
+  return [tab, set]
+}
+
+/** Thanh tab gạch chân, kèm số đếm. Đặt trong `<Tabs>`. */
+export function TabBar({ items, className }: { items: { value: string; label: string; count?: number }[]; className?: string }) {
+  return (
+    <TabsList
+      className={cn(
+        "h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-transparent p-0 [scrollbar-width:none]",
+        className,
+      )}
+    >
+      {items.map((t) => (
+        <TabsTrigger
+          key={t.value}
+          value={t.value}
+          className="relative h-10 flex-none rounded-none border-0 px-3 text-muted-foreground after:rounded-full after:bg-primary hover:text-foreground group-data-[orientation=horizontal]/tabs:after:inset-x-2 group-data-[orientation=horizontal]/tabs:after:bottom-0 group-data-[orientation=horizontal]/tabs:after:h-0.5 data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none data-[state=active]:after:opacity-100 dark:data-[state=active]:border-0 dark:data-[state=active]:bg-transparent"
+        >
+          {t.label}
+          {t.count !== undefined && (
+            <span className="rounded-full bg-muted px-1.5 text-caption font-medium text-muted-foreground tabular-nums">
+              {num(t.count)}
+            </span>
+          )}
+        </TabsTrigger>
+      ))}
+    </TabsList>
+  )
+}
+
+// --- dòng bảng bấm được ---------------------------------------------------------------------------
+
+/**
+ * Cả dòng bảng / thẻ là một link: bấm vào chỗ trống trong dòng thì mở `to` (Ctrl/⌘ mở tab mới).
+ * Link, nút, ô chọn trong dòng vẫn giữ hành vi riêng; bôi đen chữ không mở trang.
+ */
+export function useRowLink() {
+  const navigate = useNavigate()
+  return (to: string, className?: string) => ({
+    className: cn("cursor-pointer", className),
+    onClick: (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest("a,button,input,label,[role=checkbox],[role=combobox]")) return
+      if (window.getSelection()?.toString()) return
+      if (e.metaKey || e.ctrlKey) window.open(to, "_blank", "noopener")
+      else navigate(to)
+    },
+  })
+}
+
 // --- trạng thái tải / lỗi / rỗng --------------------------------------------------------------------
 
 export function Loading({ rows = 6 }: { rows?: number }) {
   return (
     <div className="space-y-2" aria-busy="true" aria-label="Đang tải">
       {Array.from({ length: rows }, (_, i) => (
-        <Skeleton key={i} className="h-10 w-full rounded-lg" style={{ opacity: 1 - i * 0.08 }} />
+        <Skeleton key={i} className="h-11 w-full rounded-lg" style={{ opacity: 1 - i * 0.08 }} />
       ))}
     </div>
   )
 }
 
-export function ErrorState({ error }: { error: unknown }) {
-  const message = error instanceof Error ? error.message : String(error)
+/** Khung trang lúc tải: tiêu đề + dải thẻ + một khung lớn. */
+export function PageLoading() {
   return (
-    <div
-      role="alert"
-      className="flex items-start gap-3 rounded-lg border border-destructive/25 bg-destructive/8 p-4 text-sm text-destructive"
-    >
-      <AlertCircle className="mt-0.5 size-4 shrink-0" />
-      <div>
-        <div className="font-medium">Không tải được dữ liệu</div>
-        <div className="opacity-90">{cap(message)}</div>
+    <div aria-busy="true" aria-label="Đang tải" className="space-y-6">
+      <div className="space-y-2.5">
+        <Skeleton className="h-3.5 w-28" />
+        <Skeleton className="h-8 w-72 max-w-full" />
+        <Skeleton className="h-4 w-96 max-w-full" />
       </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+      <Skeleton className="h-96 rounded-xl" />
     </div>
   )
 }
 
-export function Empty({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
+export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const message = error instanceof Error ? error.message : String(error)
+  const missing = error instanceof ApiError && error.status === 404
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-      <div className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-5 [&_svg]:stroke-[1.75]">
+    <div
+      role="alert"
+      className="flex flex-wrap items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/6 p-4 text-sm"
+    >
+      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-danger-ink">{missing ? "Không tìm thấy" : "Không tải được dữ liệu"}</div>
+        <div className="break-words text-muted-foreground">{cap(message)}</div>
+      </div>
+      {onRetry && !missing && (
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          <RotateCw /> Thử lại
+        </Button>
+      )}
+    </div>
+  )
+}
+
+export function Empty({
+  children,
+  title,
+  icon,
+  action,
+  className,
+}: {
+  children?: ReactNode
+  title?: string
+  icon?: ReactNode
+  action?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("flex flex-col items-center justify-center gap-3 px-6 py-14 text-center", className)}>
+      <div className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground [&_svg]:size-5 [&_svg]:stroke-[1.75]">
         {icon ?? <Inbox />}
       </div>
-      <div className="max-w-sm text-sm text-muted-foreground">
-        {typeof children === "string" ? cap(children) : children}
+      <div className="max-w-sm space-y-1">
+        {title && <div className="text-sm font-medium text-foreground">{cap(title)}</div>}
+        {children && (
+          <div className="text-sm text-muted-foreground">{typeof children === "string" ? cap(children) : children}</div>
+        )}
       </div>
+      {action}
     </div>
   )
 }
@@ -331,7 +583,8 @@ export function Pager({
   onPage: (page: number) => void
   className?: string
 }) {
-  const first = total ? (page - 1) * size + 1 : 0
+  if (!total) return null
+  const first = (page - 1) * size + 1
   const last = Math.min(total, page * size)
   return (
     <div
@@ -341,20 +594,23 @@ export function Pager({
       )}
     >
       <span className="tabular-nums">
-        Hiển thị {num(first)}–{num(last)} / {num(total)}
+        <span className="font-medium text-foreground">
+          {num(first)}–{num(last)}
+        </span>{" "}
+        trong {num(total)}
         {!exact && "+"}
         {!exact && page >= pages && " · lọc hẹp hơn để xem tiếp"}
       </span>
       {pages > 1 && (
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-            <ChevronLeft /> Trước
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Trang trước">
+            <ChevronLeft /> <span className="max-sm:sr-only">Trước</span>
           </Button>
-          <span className="px-2 tabular-nums">
-            Trang {page}/{pages}
+          <span className="px-1.5 tabular-nums">
+            Trang <span className="font-medium text-foreground">{page}</span> / {num(pages)}
           </span>
-          <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-            Sau <ChevronRight />
+          <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)} aria-label="Trang sau">
+            <span className="max-sm:sr-only">Sau</span> <ChevronRight />
           </Button>
         </div>
       )}
@@ -386,7 +642,7 @@ export function PagedList<T>({
   if (query.isError)
     return (
       <div className="p-5">
-        <ErrorState error={query.error} />
+        <ErrorState error={query.error} onRetry={() => query.refetch()} />
       </div>
     )
   if (!query.data)
@@ -397,7 +653,7 @@ export function PagedList<T>({
     )
   const d = query.data
   return (
-    <div className={cn(query.isFetching && "opacity-70 transition-opacity")}>
+    <div className={cn("transition-opacity", query.isFetching && query.isPlaceholderData && "opacity-60")}>
       {d.items.length ? children(d.items) : <Empty>{empty}</Empty>}
       {d.pages > 1 && <Pager {...d} onPage={setPage} />}
     </div>
@@ -407,21 +663,38 @@ export function PagedList<T>({
 const ALL = "__all__"
 
 /**
- * Thanh lọc ở đầu bảng (trong cùng khung với bảng): ô tìm (`search`) và các bộ lọc. Trên điện
- * thoại ô tìm chiếm một dòng, các bộ lọc thành một hàng vuốt ngang.
+ * Thanh lọc ở đầu bảng (trong cùng khung với bảng): ô tìm (`search`), các bộ lọc, và phần bên
+ * phải (`end`, vd. sắp xếp). Trên điện thoại ô tìm chiếm một dòng, các bộ lọc thành hàng vuốt ngang.
  */
-export function FilterBar({ search, children, className }: { search?: ReactNode; children: ReactNode; className?: string }) {
+export function FilterBar({
+  search,
+  children,
+  end,
+  className,
+}: {
+  search?: ReactNode
+  children?: ReactNode
+  end?: ReactNode
+  className?: string
+}) {
   return (
-    <div className={cn("space-y-2 border-b px-5 py-3 sm:flex sm:flex-wrap sm:items-center sm:gap-2 sm:space-y-0", className)}>
-      {search}
-      <div className="-mx-5 flex gap-2 overflow-x-auto px-5 [scrollbar-width:none] max-sm:[&>*]:shrink-0 sm:contents">
-        {children}
-      </div>
+    <div className={cn("space-y-2.5 border-b bg-muted/30 px-4 py-3 sm:px-5", className)}>
+      {(search || end) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {search && <div className="min-w-0 flex-1 basis-60">{search}</div>}
+          {end && <div className="flex shrink-0 flex-wrap items-center gap-2">{end}</div>}
+        </div>
+      )}
+      {children && (
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] max-sm:[&>*]:shrink-0 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+          {children}
+        </div>
+      )}
     </div>
   )
 }
 
-/** Ô tìm kiếm: Enter để tìm. */
+/** Ô tìm kiếm: Enter để tìm; nút xoá khi có chữ. */
 export function SearchBox({
   value,
   onChange,
@@ -431,7 +704,7 @@ export function SearchBox({
 }: {
   value: string
   onChange: (value: string) => void
-  onSubmit: () => void
+  onSubmit: (value?: string) => void
   placeholder: string
   className?: string
 }) {
@@ -444,14 +717,27 @@ export function SearchBox({
         onSubmit()
       }}
     >
-      <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="h-8 w-full bg-card pl-8 text-sm"
+        className="h-9 w-full bg-card pr-9 pl-9 text-sm"
       />
+      {value && (
+        <button
+          type="button"
+          aria-label="Xoá ô tìm"
+          className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => {
+            onChange("")
+            onSubmit("")
+          }}
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
     </form>
   )
 }
@@ -483,13 +769,16 @@ export function FilterSelect({
   return (
     <Select value={value || ALL} onValueChange={(v) => onChange(v === ALL ? "" : v)}>
       <SelectTrigger
-        size="sm"
-        className={cn("w-auto max-w-64 gap-1.5 bg-card text-sm", active && "border-primary/40 bg-accent/40", className)}
+        className={cn(
+          "h-9 w-auto max-w-72 gap-1.5 bg-card text-sm",
+          active && "border-primary/50 bg-primary/6 text-foreground dark:bg-primary/12",
+          className,
+        )}
       >
         {name && <span className="shrink-0 text-muted-foreground">{name}</span>}
         <SelectValue placeholder={all ?? undefined} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" align="start" className="max-h-80">
         {all !== null && <SelectItem value={ALL}>{all}</SelectItem>}
         {items.map(([v, t]) => (
           <SelectItem key={v} value={v}>
@@ -524,7 +813,8 @@ export function NumberChip({
   return (
     <label
       className={cn(
-        "flex h-8 items-center gap-1.5 rounded-md border bg-card px-2.5 text-sm shadow-xs transition-[box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+        "flex h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm shadow-xs transition-[box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
+        value && "border-primary/50 bg-primary/6 dark:bg-primary/12",
         className,
       )}
     >
@@ -542,15 +832,6 @@ export function NumberChip({
         className="w-10 [appearance:textfield] bg-transparent text-center font-medium tabular-nums outline-none placeholder:font-normal placeholder:text-muted-foreground/70 [&::-webkit-inner-spin-button]:appearance-none"
       />
       {suffix && <span className="text-muted-foreground">{suffix}</span>}
-    </label>
-  )
-}
-
-export function Field({ label: text, children, className }: { label: string; children: ReactNode; className?: string }) {
-  return (
-    <label className={cn("flex flex-col gap-1.5 text-meta font-medium text-foreground/70", className)}>
-      {cap(text)}
-      {children}
     </label>
   )
 }
@@ -595,9 +876,10 @@ export function ConfirmButton({
   )
 }
 
+/** Danh sách nhãn – giá trị. Giá trị chuỗi được viết hoa đầu, nên URL / mã truyền dạng phần tử. */
 export function Meta({ items }: { items: [string, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[minmax(7rem,max-content)_1fr] gap-x-5 gap-y-3 text-sm">
+    <dl className="grid grid-cols-[minmax(6.5rem,max-content)_1fr] gap-x-5 gap-y-3 text-sm">
       {items.map(([k, v], i) => (
         <div key={i} className="contents">
           <dt className="text-muted-foreground">{cap(k)}</dt>
@@ -674,12 +956,14 @@ export function FilePicker({
   return (
     <label
       className={cn(
-        "flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed bg-muted/40 px-4 py-5 text-center transition-colors hover:bg-muted/60 focus-within:ring-2 focus-within:ring-ring/50",
-        file && "border-solid border-brand/40 bg-brand/5",
+        "flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-dashed border-input bg-muted/40 px-4 py-6 text-center transition-colors hover:border-primary/50 hover:bg-primary/4 focus-within:ring-[3px] focus-within:ring-ring/50",
+        file && "border-solid border-primary/50 bg-primary/6",
         className,
       )}
     >
-      <FileUp className="size-5 stroke-[1.75] text-muted-foreground" />
+      <span className="grid size-9 place-items-center rounded-full bg-card text-brand shadow-card">
+        <FileUp className="size-4.5 stroke-[1.75]" />
+      </span>
       <span className="max-w-full truncate text-sm font-medium">{file ? file.name : title}</span>
       <span className="text-meta text-muted-foreground">{file ? "Bấm để chọn file khác" : hint}</span>
       <input type="file" accept={accept} className="sr-only" onChange={(e) => onChange(e.target.files?.[0] ?? null)} />

@@ -8,51 +8,56 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Tone xanh dương: nền trắng / xám trung tính, màu chính xanh lam, accent xanh nhạt, chart-1..5 là
- * dải xanh từ sáng tới đậm. Mở rộng: `brand` (xanh đậm hơn, đủ tương phản cho chữ/link) và màu
- * trạng thái — success (lá), warning (hổ phách), info (xanh chính), neutral-tone (tím), teal —
- * chỉ dùng đúng ý nghĩa. Giao diện phẳng: viền mảnh, không đổ bóng thẻ.
+ * Nền "bàn làm việc" xám lạnh rất nhạt, thẻ trắng có bóng mảnh để tách lớp; chữ gần đen (xám xanh)
+ * cho tương phản tốt. Màu chính xanh lam đậm (chữ trắng trên nút đạt ≥ 4,5:1). Mở rộng: `brand`
+ * (màu link), màu trạng thái — success (lá), warning (hổ phách), info (xanh), neutral-tone (tím) —
+ * mỗi màu có bản `-ink` đậm hơn để viết chữ trên nền nhạt của chính nó (nhãn trạng thái).
  */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.3211 0 0);
+  --background: oklch(0.982 0.003 260);
+  --foreground: oklch(0.22 0.015 262);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.3211 0 0);
+  --card-foreground: oklch(0.22 0.015 262);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.3211 0 0);
-  --primary: oklch(0.6231 0.188 259.8145);
+  --popover-foreground: oklch(0.22 0.015 262);
+  --primary: oklch(0.53 0.2 262);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.967 0.0029 264.5419);
-  --secondary-foreground: oklch(0.4461 0.0263 256.8018);
-  --muted: oklch(0.9846 0.0017 247.8389);
-  --muted-foreground: oklch(0.551 0.0234 264.3637);
-  --accent: oklch(0.9514 0.025 236.8242);
-  --accent-foreground: oklch(0.3791 0.1378 265.5222);
-  --destructive: oklch(0.6368 0.2078 25.3313);
-  --border: oklch(0.9276 0.0058 264.5313);
-  --input: oklch(0.9276 0.0058 264.5313);
-  --ring: oklch(0.6231 0.188 259.8145);
+  --secondary: oklch(0.96 0.006 260);
+  --secondary-foreground: oklch(0.3 0.02 262);
+  --muted: oklch(0.965 0.005 260);
+  --muted-foreground: oklch(0.5 0.018 262);
+  --accent: oklch(0.955 0.018 260);
+  --accent-foreground: oklch(0.32 0.1 262);
+  --destructive: oklch(0.58 0.21 25);
+  --border: oklch(0.915 0.006 260);
+  --input: oklch(0.885 0.008 260);
+  --ring: oklch(0.53 0.2 262);
   --chart-1: oklch(0.6231 0.188 259.8145);
   --chart-2: oklch(0.5461 0.2152 262.8809);
   --chart-3: oklch(0.4882 0.2172 264.3763);
   --chart-4: oklch(0.4244 0.1809 265.6377);
   --chart-5: oklch(0.3791 0.1378 265.5222);
-  --sidebar: oklch(0.9846 0.0017 247.8389);
-  --sidebar-foreground: oklch(0.3211 0 0);
-  --sidebar-primary: oklch(0.6231 0.188 259.8145);
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.3 0.018 262);
+  --sidebar-primary: oklch(0.53 0.2 262);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.9514 0.025 236.8242);
-  --sidebar-accent-foreground: oklch(0.3791 0.1378 265.5222);
-  --sidebar-border: oklch(0.9276 0.0058 264.5313);
-  --sidebar-ring: oklch(0.6231 0.188 259.8145);
+  --sidebar-accent: oklch(0.96 0.012 260);
+  --sidebar-accent-foreground: oklch(0.22 0.015 262);
+  --sidebar-border: oklch(0.925 0.006 260);
+  --sidebar-ring: oklch(0.53 0.2 262);
   /* Mở rộng */
-  --brand: oklch(0.5461 0.2152 262.8809);
+  --brand: oklch(0.5 0.19 262);
   --brand-foreground: oklch(1 0 0);
-  --success: oklch(0.6 0.14 155);
-  --warning: oklch(0.66 0.15 65);
-  --info: oklch(0.6231 0.188 259.8145);
-  --neutral-tone: oklch(0.58 0.12 300);
+  --success: oklch(0.63 0.15 155);
+  --success-ink: oklch(0.45 0.12 155);
+  --warning: oklch(0.74 0.16 70);
+  --warning-ink: oklch(0.5 0.13 58);
+  --danger-ink: oklch(0.5 0.19 25);
+  --info: oklch(0.6 0.17 258);
+  --info-ink: oklch(0.46 0.17 262);
+  --neutral-tone: oklch(0.6 0.14 300);
+  --neutral-ink: oklch(0.46 0.14 300);
   --teal: oklch(0.62 0.1 195);
   --shadow-color: oklch(0.3 0.03 260 / 0.07);
   /*
@@ -74,44 +79,49 @@
 }
 
 .dark {
-  --background: oklch(0.2046 0 0);
-  --foreground: oklch(0.9219 0 0);
-  --card: oklch(0.2686 0 0);
-  --card-foreground: oklch(0.9219 0 0);
-  --popover: oklch(0.2686 0 0);
-  --popover-foreground: oklch(0.9219 0 0);
-  --primary: oklch(0.6231 0.188 259.8145);
+  --background: oklch(0.16 0.006 262);
+  --foreground: oklch(0.94 0.005 260);
+  --card: oklch(0.2 0.007 262);
+  --card-foreground: oklch(0.94 0.005 260);
+  --popover: oklch(0.22 0.008 262);
+  --popover-foreground: oklch(0.94 0.005 260);
+  --primary: oklch(0.58 0.19 260);
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.2686 0 0);
-  --secondary-foreground: oklch(0.9219 0 0);
-  --muted: oklch(0.2393 0 0);
-  --muted-foreground: oklch(0.7155 0 0);
-  --accent: oklch(0.3791 0.1378 265.5222);
-  --accent-foreground: oklch(0.8823 0.0571 254.1284);
-  --destructive: oklch(0.6368 0.2078 25.3313);
-  --border: oklch(0.3715 0 0);
-  --input: oklch(0.3715 0 0);
-  --ring: oklch(0.6231 0.188 259.8145);
+  --secondary: oklch(0.25 0.008 262);
+  --secondary-foreground: oklch(0.9 0.006 260);
+  --muted: oklch(0.235 0.007 262);
+  --muted-foreground: oklch(0.7 0.012 262);
+  --accent: oklch(0.27 0.02 262);
+  --accent-foreground: oklch(0.93 0.03 260);
+  --destructive: oklch(0.64 0.2 25);
+  --border: oklch(0.29 0.008 262);
+  --input: oklch(0.34 0.01 262);
+  --ring: oklch(0.62 0.17 260);
   --chart-1: oklch(0.7137 0.1434 254.624);
   --chart-2: oklch(0.6231 0.188 259.8145);
   --chart-3: oklch(0.5461 0.2152 262.8809);
   --chart-4: oklch(0.4882 0.2172 264.3763);
   --chart-5: oklch(0.4244 0.1809 265.6377);
-  --sidebar: oklch(0.2046 0 0);
-  --sidebar-foreground: oklch(0.9219 0 0);
-  --sidebar-primary: oklch(0.6231 0.188 259.8145);
+  --sidebar: oklch(0.18 0.007 262);
+  --sidebar-foreground: oklch(0.86 0.008 260);
+  --sidebar-primary: oklch(0.62 0.17 260);
   --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.3791 0.1378 265.5222);
-  --sidebar-accent-foreground: oklch(0.8823 0.0571 254.1284);
-  --sidebar-border: oklch(0.3715 0 0);
-  --sidebar-ring: oklch(0.6231 0.188 259.8145);
+  --sidebar-accent: oklch(0.25 0.012 262);
+  --sidebar-accent-foreground: oklch(0.96 0.005 260);
+  --sidebar-border: oklch(0.27 0.008 262);
+  --sidebar-ring: oklch(0.62 0.17 260);
   /* Mở rộng */
-  --brand: oklch(0.7137 0.1434 254.624);
-  --brand-foreground: oklch(0.2046 0 0);
-  --success: oklch(0.74 0.14 155);
-  --warning: oklch(0.8 0.14 75);
-  --info: oklch(0.7137 0.1434 254.624);
-  --neutral-tone: oklch(0.74 0.11 300);
+  --brand: oklch(0.76 0.12 258);
+  --brand-foreground: oklch(0.16 0.006 262);
+  --success: oklch(0.72 0.15 155);
+  --success-ink: oklch(0.82 0.13 155);
+  --warning: oklch(0.8 0.15 75);
+  --warning-ink: oklch(0.86 0.13 80);
+  --danger-ink: oklch(0.76 0.15 25);
+  --info: oklch(0.7 0.14 255);
+  --info-ink: oklch(0.81 0.11 255);
+  --neutral-tone: oklch(0.72 0.12 300);
+  --neutral-ink: oklch(0.82 0.1 300);
   --teal: oklch(0.76 0.1 195);
   --shadow-color: oklch(0 0 0 / 0.3);
   --viz-2: #d95926;
@@ -169,9 +179,16 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-teal: var(--teal);
   --color-success: var(--success);
+  --color-success-ink: var(--success-ink);
   --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-danger-ink: var(--danger-ink);
   --color-info: var(--info);
+  --color-info-ink: var(--info-ink);
   --color-neutral-tone: var(--neutral-tone);
+  --color-neutral-ink: var(--neutral-ink);
+  /* Bóng thẻ: rất mảnh ở nền sáng, ở nền tối chỉ dựa vào viền. */
+  --shadow-card: 0 1px 2px 0 var(--shadow-color), 0 1px 3px -1px var(--shadow-color);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -217,6 +234,11 @@
   }
   ::selection {
     @apply bg-primary/25;
+  }
+  /* Thanh cuộn mảnh, cùng tông nền (Chromium/Firefox). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 }
 

@@ -13,20 +13,16 @@ import {
   Sun,
   Target,
   UserRound,
-  X,
 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 
 import { useTheme, type Theme } from "@/components/theme"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
+import { num } from "@/lib/format"
+import type { QueuePage } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const GROUPS = [
@@ -34,7 +30,7 @@ const GROUPS = [
     title: "Vận hành",
     items: [
       { to: "/", label: "Tổng quan", icon: LayoutDashboard, end: true },
-      { to: "/queue", label: "Hàng đợi", icon: Layers },
+      { to: "/queue", label: "Hàng đợi", icon: Layers, queue: true },
       { to: "/boards", label: "Trang tuyển dụng", icon: Globe },
     ],
   },
@@ -60,24 +56,29 @@ const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "Theo hệ thống", icon: Monitor },
 ]
 
-function ThemeMenu() {
+/** Chọn giao diện sáng / tối / theo hệ thống: ba nút liền nhau. */
+function ThemeSwitch() {
   const { theme, setTheme } = useTheme()
-  const current = THEMES.find((t) => t.value === theme) ?? THEMES[2]
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2 text-meta text-muted-foreground">
-          <current.icon className="size-3.5" /> {current.label}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {THEMES.map((t) => (
-          <DropdownMenuItem key={t.value} onClick={() => setTheme(t.value)}>
-            <t.icon /> {t.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div role="radiogroup" aria-label="Giao diện" className="flex rounded-lg bg-muted p-0.5">
+      {THEMES.map((t) => (
+        <button
+          key={t.value}
+          type="button"
+          role="radio"
+          aria-checked={theme === t.value}
+          title={t.label}
+          onClick={() => setTheme(t.value)}
+          className={cn(
+            "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+            theme === t.value && "bg-card text-foreground shadow-card",
+          )}
+        >
+          <t.icon className="size-3.5" />
+          <span className="sr-only">{t.label}</span>
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -86,24 +87,46 @@ function Brand() {
     <div className="flex items-center gap-2.5">
       <img src="/logo-mark.png" alt="" width={32} height={32} className="size-8 shrink-0" />
       <div className="leading-tight">
-        <div className="text-sm font-semibold tracking-tight text-foreground">jobcrawler</div>
+        <div className="text-[0.9375rem] font-semibold tracking-tight text-foreground">jobcrawler</div>
         <div className="text-caption text-muted-foreground">Thu thập tin tuyển dụng</div>
       </div>
     </div>
   )
 }
 
+/** Số việc trong hàng đợi (dùng chung cho mục "Hàng đợi" và dòng trạng thái worker). */
+function useQueueSummary() {
+  const query = useQuery({
+    queryKey: ["queue-summary"],
+    queryFn: () => api.get<QueuePage>("/queue"),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+  })
+  const queues = query.data?.queues ?? []
+  return {
+    loaded: Boolean(query.data),
+    active: queues.reduce((n, q) => n + q.active, 0),
+    queued: queues.reduce((n, q) => n + q.queued, 0),
+    workers: queues.reduce((n, q) => n + q.workers, 0),
+    error: query.isError || queues.some((q) => q.error),
+  }
+}
+
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<{ user: string | null; auth: boolean }>("/me") })
+  const queue = useQueueSummary()
+  const busy = queue.active + queue.queued
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-16 items-center px-4">
+      <div className="flex h-16 shrink-0 items-center px-5">
         <Brand />
       </div>
-      <nav aria-label="Điều hướng chính" className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+      <nav aria-label="Điều hướng chính" className="flex-1 space-y-6 overflow-y-auto px-3 pt-2 pb-4">
         {GROUPS.map((group) => (
           <div key={group.title}>
-            <div className="mb-1 px-2.5 text-caption font-medium text-muted-foreground">{group.title}</div>
+            <div className="mb-1.5 px-3 text-caption font-semibold tracking-wide text-muted-foreground/80 uppercase">
+              {group.title}
+            </div>
             <div className="space-y-0.5">
               {group.items.map((item) => (
                 <NavLink
@@ -113,17 +136,24 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     cn(
-                      "group relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                      // Mục đang mở: nền xanh nhạt + vạch màu chính bên trái.
+                      "flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
                       isActive &&
-                        "bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:inset-y-1.5 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-sidebar-primary",
+                        "bg-primary/8 font-medium text-brand hover:bg-primary/10 hover:text-brand dark:bg-primary/15 dark:hover:bg-primary/20",
                     )
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      <item.icon className={cn("size-4 stroke-[1.75]", isActive ? "text-brand" : "text-muted-foreground")} />
-                      {item.label}
+                      <item.icon className={cn("size-4 shrink-0 stroke-[1.75]", isActive ? "text-brand" : "text-muted-foreground")} />
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {item.queue && busy > 0 && (
+                        <span
+                          title={`${num(queue.active)} đang chạy · ${num(queue.queued)} đang chờ`}
+                          className="rounded-full bg-primary/12 px-1.5 text-caption font-semibold text-brand tabular-nums"
+                        >
+                          {num(busy)}
+                        </span>
+                      )}
                     </>
                   )}
                 </NavLink>
@@ -131,24 +161,48 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             </div>
           </div>
         ))}
-        <div className="border-t border-sidebar-border pt-3">
+        <div className="border-t border-sidebar-border pt-4">
           <a
             href="/api/docs"
             target="_blank"
             rel="noopener"
-            className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+            className="flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <BookOpen className="size-4 stroke-[1.75] text-muted-foreground" />
             Tài liệu API
           </a>
         </div>
       </nav>
-      <div className="flex items-center justify-between gap-2 border-t border-sidebar-border px-3 py-2.5">
-        <span className="flex min-w-0 items-center gap-2 px-1 text-meta text-muted-foreground">
-          <UserRound className="size-3.5 shrink-0" />
-          <span className="truncate">{me.data?.user ? me.data.user : "Không đăng nhập"}</span>
-        </span>
-        <ThemeMenu />
+      <div className="space-y-3 border-t border-sidebar-border px-4 py-3.5">
+        {queue.loaded && (
+          <div className="flex items-center gap-2 text-meta text-muted-foreground">
+            <span className="relative flex size-2" aria-hidden>
+              {queue.active > 0 && <span className="absolute inset-0 animate-ping rounded-full bg-success opacity-60" />}
+              <span
+                className={cn(
+                  "relative size-2 rounded-full",
+                  queue.error || !queue.workers ? "bg-warning" : queue.active ? "bg-success" : "bg-muted-foreground/50",
+                )}
+              />
+            </span>
+            {queue.error
+              ? "Không đọc được hàng đợi"
+              : !queue.workers
+                ? "Không có worker nào chạy"
+                : queue.active
+                  ? `${num(queue.active)} việc đang chạy · ${num(queue.workers)} worker`
+                  : `Đang rảnh · ${num(queue.workers)} worker`}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-2 text-meta text-sidebar-foreground">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+              <UserRound className="size-3.5" />
+            </span>
+            <span className="truncate">{me.data?.user ? me.data.user : "Không đăng nhập"}</span>
+          </span>
+          <ThemeSwitch />
+        </div>
       </div>
     </div>
   )
@@ -163,7 +217,7 @@ export function Layout() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-svh lg:grid lg:grid-cols-[248px_1fr]">
+    <div className="min-h-svh lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
       <a
         href="#main"
         className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -174,32 +228,20 @@ export function Layout() {
         <Sidebar />
       </aside>
 
-      {open && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-72 border-r border-sidebar-border bg-sidebar shadow-xl">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="absolute top-4 right-3"
-              onClick={() => setOpen(false)}
-              aria-label="Đóng menu"
-            >
-              <X />
-            </Button>
-            <Sidebar onNavigate={() => setOpen(false)} />
-          </aside>
-        </div>
-      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <SheetContent title="Điều hướng" className="lg:hidden">
+          <Sidebar onNavigate={() => setOpen(false)} />
+        </SheetContent>
+      </Dialog>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur lg:hidden">
-          <Button variant="ghost" size="icon-sm" onClick={() => setOpen(true)} aria-label="Mở menu" aria-expanded={open}>
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md lg:hidden">
+          <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Mở menu" aria-expanded={open}>
             <Menu />
           </Button>
           <Brand />
         </header>
-        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-8 pb-16 sm:px-6 lg:px-10">
+        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-16 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
           <Outlet />
         </main>
       </div>

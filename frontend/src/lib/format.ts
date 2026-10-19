@@ -66,7 +66,11 @@ export function bytes(value: number | null | undefined): string {
 
 export function salary(s: Salary | null): string {
   if (!s) return "–"
-  if (s.min === null && s.max === null) return s.negotiable ? "Thoả thuận" : s.raw || "–"
+  if (s.min === null && s.max === null) {
+    if (s.negotiable) return "Thoả thuận"
+    // Chuỗi gốc kiểu "0 VND/MONTH" là trang để trống lương, không phải mức lương.
+    return s.raw && !/^\s*0\b/.test(s.raw) ? s.raw : "–"
+  }
   const amount = (v: number | null) => {
     if (v === null) return "?"
     if (s.currency === "VND" && v >= 1_000_000) return `${decimalFmt.format(v / 1_000_000)} tr`
@@ -130,6 +134,82 @@ export function sourceLabel(value: string | null | undefined): string {
   return SOURCE_NAMES[kind] ?? cap(kind)
 }
 
+/** Bỏ "https://", "www." và "/" cuối để URL gọn khi hiển thị. */
+export function shortUrl(url: string | null | undefined): string {
+  return (url ?? "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")
+}
+
+export type SourceProblem = { label: string; detail: string }
+
+/**
+ * Một mục `incomplete_sources` của lượt chạy (hoặc loại nguồn trong thống kê) → chữ dễ hiểu:
+ * `careers:<host>` trang careers chưa đọc hết, `board:<trang>:<id>` profile trên trang tuyển dụng,
+ * `discovery:<domain>` chưa dò hết website, `kyc`, `verify` (tin nghi ngờ chờ LLM chấm), ATS…
+ */
+export function sourceProblem(value: string): SourceProblem {
+  const [kind, ...rest] = value.split(":")
+  const target = rest.join(":")
+  switch (kind) {
+    case "careers":
+      return {
+        label: target ? `Careers ${target}` : "Trang careers",
+        detail: "Hết giờ hoặc chạm giới hạn trước khi đọc hết trang careers của doanh nghiệp",
+      }
+    case "discovery":
+      return {
+        label: target ? `Tìm nguồn trên ${target}` : "Tìm nguồn trên website",
+        detail: "Chưa dò hết website (hết giờ, bị chặn hoặc không mở được trang chủ) nên có thể còn sót trang tuyển dụng",
+      }
+    case "board":
+      return {
+        label: rest[0] ? `Profile ${sourceLabel(`board:${rest[0]}`)}` : "Trang tuyển dụng",
+        detail: "Chưa đọc hết tin trên profile nhà tuyển dụng ở trang tuyển dụng",
+      }
+    case "verify":
+      return {
+        label: "Tin chờ LLM chấm",
+        detail: "Một số tin còn nghi ngờ chưa kịp được LLM chấm; lượt sau chấm tiếp, chưa nhận cũng chưa loại",
+      }
+    case "kyc":
+      return { label: "KYC", detail: "Chưa xác minh xong pháp nhân (MST, website) của doanh nghiệp" }
+    default:
+      return {
+        label: target ? `${sourceLabel(kind)} ${target}` : sourceLabel(kind),
+        detail: "Nguồn bị dừng trước khi đọc hết tin (hết giờ hoặc chạm giới hạn)",
+      }
+  }
+}
+
+/** Mã lý do xác minh tin → nhãn tiếng Việt và sắc thái (loại / nhận / thông tin). */
+const REASONS: Record<string, [string, "bad" | "good" | "info" | "warn"]> = {
+  EXPIRED: ["Hết hạn", "bad"],
+  EMPTY_JD: ["Mô tả trống", "bad"],
+  EMPLOYER_MISMATCH: ["Sai nhà tuyển dụng", "bad"],
+  AGENCY_POSTING: ["Tuyển hộ", "bad"],
+  SCAM_SIGNALS: ["Dấu hiệu lừa đảo", "bad"],
+  NOT_A_JOB: ["Không phải tin tuyển dụng", "bad"],
+  SPAM_REPOST: ["Đăng lại", "bad"],
+  LOW_CONFIDENCE: ["Độ tin cậy thấp", "bad"],
+  DEFERRED: ["Chờ LLM chấm", "warn"],
+  EMPLOYER_MATCH: ["Đúng nhà tuyển dụng", "good"],
+  LLM_CONFIRMED: ["LLM xác nhận", "good"],
+  SOURCE_BOARD: ["Từ trang tuyển dụng", "info"],
+  SOURCE_CAREERS: ["Từ trang careers", "info"],
+}
+
+export type Reason = { code: string; label: string; detail: string; tone: "bad" | "good" | "info" | "warn" }
+
+/** "SPAM_REPOST: đăng lại của https://…" → { code, label: "Đăng lại", detail: "Đăng lại của https://…" }. */
+export function reason(value: string): Reason {
+  const i = value.indexOf(":")
+  const code = (i >= 0 ? value.slice(0, i) : value).trim()
+  const detail = i >= 0 ? cap(value.slice(i + 1).trim()) : ""
+  const known = REASONS[code]
+  if (known) return { code, label: known[0], detail, tone: known[1] }
+  if (code.startsWith("SOURCE_")) return { code, label: `Nguồn ${sourceLabel(code.slice(7).toLowerCase())}`, detail, tone: "info" }
+  return { code, label: cap(code.toLowerCase().replaceAll("_", " ")), detail, tone: "info" }
+}
+
 // Nguyên âm tiếng Việt (kể cả có dấu): từ không có nguyên âm là viết tắt ("TNHH", "FPT", "MTV").
 const VOWEL = /[aeiouyàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹ]/i
 
@@ -178,6 +258,7 @@ export const LABELS: Record<string, string> = {
   complete: "Xong",
   aborted: "Đã huỷ",
   new: "Mới",
+  deferred: "Hẹn giờ",
   // bộ lọc
   never: "Chưa chạy",
   with: "Có job đang mở",

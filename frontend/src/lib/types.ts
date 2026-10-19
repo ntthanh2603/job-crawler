@@ -233,7 +233,7 @@ export type Stats = {
   boards: BoardStats[]
   storage: StorageStats[]
   tables: [string, number][]
-  targets: { name: string; value: number | null; target: string; ok: boolean | null }[]
+  targets: { name: string; value: number | null; target: string; ok: boolean | null; kind: "seconds" | "rate" }[]
 }
 
 export type Pair = [string, number]
@@ -367,9 +367,13 @@ export type QueueJob = {
   timeout: number
   queued: number
   started: number
+  /** Hẹn giờ chạy, giây epoch (0 = chạy ngay). */
+  scheduled: number
   error: string | null
   label: string
   company_id: string | null
+  /** Lượt tự chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường). */
+  continuation: number
 }
 
 export type QueuePage = {

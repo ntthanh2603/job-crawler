@@ -41,18 +41,22 @@ export function BarList({
   items,
   total,
   empty = "Chưa có dữ liệu.",
+  format = num,
   className,
 }: {
   items: BarItem[]
   total?: number
   empty?: ReactNode
+  /** Định dạng giá trị (mặc định số đếm); khác `num` thì không hiện phần trăm. */
+  format?: (value: number) => string
   className?: string
 }) {
   if (!items.length) return <p className="text-sm text-muted-foreground">{empty}</p>
   const max = Math.max(...items.map((i) => i.value), 1)
   const sum = total ?? items.reduce((n, i) => n + i.value, 0)
+  const showShare = format === num
   return (
-    <ul className={cn("space-y-2.5", className)}>
+    <ul className={cn("space-y-2", className)}>
       {items.map((item) => {
         const share = sum ? item.value / sum : 0
         const row = (
@@ -62,11 +66,15 @@ export function BarList({
                 {item.label}
               </span>
               <span className="shrink-0 tabular-nums">
-                <span className="font-medium text-foreground">{num(item.value)}</span>
-                <span className="ml-1.5 text-meta text-muted-foreground">{Math.round(share * 100)}%</span>
+                <span className="font-medium text-foreground">{format(item.value)}</span>
+                {showShare && (
+                  <span className="ml-1.5 inline-block w-8 text-right text-meta text-muted-foreground">
+                    {Math.round(share * 100)}%
+                  </span>
+                )}
               </span>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full transition-[width] duration-500"
                 style={{
@@ -77,18 +85,18 @@ export function BarList({
             </div>
           </>
         )
-        const title = `${item.label}: ${num(item.value)} (${(share * 100).toFixed(1)}%)${item.hint ? ` · ${item.hint}` : ""}`
+        const title = `${item.label}: ${format(item.value)}${showShare ? ` (${(share * 100).toFixed(1)}%)` : ""}${item.hint ? ` · ${item.hint}` : ""}`
         return (
           <li key={item.key} title={title}>
             {item.href ? (
               <Link
                 to={item.href}
-                className="-mx-2 block rounded-md px-2 py-1 transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                className="-mx-2 block rounded-lg px-2 py-1.5 transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
               >
                 {row}
               </Link>
             ) : (
-              <div className="-mx-2 px-2 py-1">{row}</div>
+              <div className="-mx-2 px-2 py-1.5">{row}</div>
             )}
           </li>
         )
@@ -161,7 +169,7 @@ export function ShareBar({ items }: { items: ShareItem[] }) {
   if (!sum) return <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
   return (
     <div className="space-y-4">
-      <div className="flex h-3 gap-[2px] overflow-hidden rounded-full" role="img" aria-label="Tỉ lệ">
+      <div className="flex h-3.5 gap-[2px] overflow-hidden rounded-full" role="img" aria-label="Tỉ lệ">
         {items
           .filter((i) => i.value)
           .map((i) => (
@@ -172,12 +180,15 @@ export function ShareBar({ items }: { items: ShareItem[] }) {
             />
           ))}
       </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-2">
+      <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
         {items.map((i) => (
           <li key={i.key} className="flex items-center gap-2 text-sm">
             <span className="size-2.5 shrink-0 rounded-[3px]" style={{ background: i.color }} aria-hidden />
             <span className="min-w-0 truncate text-muted-foreground">{i.label}</span>
             <span className="ml-auto font-medium tabular-nums">{num(i.value)}</span>
+            <span className="w-9 text-right text-meta text-muted-foreground tabular-nums">
+              {Math.round((i.value / sum) * 100)}%
+            </span>
           </li>
         ))}
       </ul>
