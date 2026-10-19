@@ -519,7 +519,6 @@ export function OverviewPage() {
     mutationFn: () => api.post<{ queued: boolean }>("/maintenance"),
     onSuccess: (r) =>
       r.queued ? toast.success("Đã đưa lượt bảo trì vào hàng đợi") : toast.warning("Đang có lượt bảo trì chờ hoặc đang chạy"),
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   const setLatency = (v: number) =>

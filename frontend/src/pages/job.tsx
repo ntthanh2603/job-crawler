@@ -16,13 +16,12 @@ import {
 } from "@/components/common"
 import { JobBody, JobFacts, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
-import { api } from "@/lib/api"
 import { cap, date, displayName, dt, num, pct, sourceLabel } from "@/lib/format"
-import type { JobDetail } from "@/lib/types"
+import { jobQuery } from "@/lib/queries"
 
 export function JobPage() {
-  const { id } = useParams()
-  const query = useQuery({ queryKey: ["job", id], queryFn: () => api.get<JobDetail>(`/jobs/${id}`) })
+  const { id = "" } = useParams()
+  const query = useQuery(jobQuery(id))
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
   const d = query.data

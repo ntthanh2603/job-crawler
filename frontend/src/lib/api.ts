@@ -1,4 +1,5 @@
 // Gọi API FastAPI cùng origin (dev: Vite chuyển /api sang cổng 8000).
+import { cap } from "@/lib/format"
 
 export class ApiError extends Error {
   status: number
@@ -34,6 +35,18 @@ async function handle<T>(res: Response): Promise<T> {
     throw new ApiError(res.status, message, detail)
   }
   return (await res.json()) as T
+}
+
+/**
+ * Thông báo lỗi để hiện cho người dùng (toast, khung lỗi): lỗi API dùng `detail` của FastAPI (đã
+ * gộp vào `message`), lỗi mạng thành câu tiếng Việt; viết hoa chữ đầu.
+ */
+export function errorMessage(e: unknown): string {
+  if (e instanceof ApiError) return cap(e.message) || `Lỗi ${e.status}`
+  // fetch() bị từ chối (mất mạng, máy chủ tắt): TypeError "Failed to fetch" / "NetworkError…".
+  if (e instanceof TypeError && /fetch|network/i.test(e.message)) return "Không kết nối được máy chủ"
+  if (e instanceof Error) return cap(e.message) || "Đã có lỗi xảy ra"
+  return cap(String(e ?? "")) || "Đã có lỗi xảy ra"
 }
 
 export function qs(params: Record<string, string | number | boolean | null | undefined>): string {

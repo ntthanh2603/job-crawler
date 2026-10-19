@@ -17,7 +17,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { api } from "@/lib/api"
 import { ago, cap, dec, duration, dt, num, shortUrl, sourceLabel } from "@/lib/format"
-import type { CompanyCrawl, CrawlPlan, CrawlSchedule, RunKind, RunTrigger, ScheduleState } from "@/lib/types"
+import { companyCrawlQuery, keys } from "@/lib/queries"
+import type { CrawlPlan, CrawlSchedule, RunKind, RunTrigger, ScheduleState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // --- nhãn ------------------------------------------------------------------------------------------
@@ -149,16 +150,12 @@ export function due(value: string | null | undefined): string {
 
 // --- bộ khung doanh nghiệp ---------------------------------------------------------------------------
 
-function errorText(e: unknown) {
-  return cap(e instanceof Error ? e.message : String(e))
-}
-
 /** Poll ngay / build lại bộ khung một doanh nghiệp. */
 export function useCrawlActions(id: string) {
   const client = useQueryClient()
   const refresh = () => {
-    client.invalidateQueries({ queryKey: ["company-crawl", id] })
-    client.invalidateQueries({ queryKey: ["queue-summary"] })
+    client.invalidateQueries({ queryKey: keys.companyCrawl(id) })
+    client.invalidateQueries({ queryKey: keys.queueSummary })
   }
   const poll = useMutation({
     mutationFn: () => api.post<{ queued: boolean }>(`/companies/${id}/poll`),
@@ -167,7 +164,6 @@ export function useCrawlActions(id: string) {
       else toast.warning("Lượt poll của doanh nghiệp này đã có trong hàng đợi")
       refresh()
     },
-    onError: (e) => toast.error(errorText(e)),
   })
   const build = useMutation({
     mutationFn: () => api.post<{ queued: boolean }>(`/companies/${id}/build`),
@@ -176,7 +172,6 @@ export function useCrawlActions(id: string) {
       else toast.warning("Lượt build của doanh nghiệp này đã có trong hàng đợi")
       refresh()
     },
-    onError: (e) => toast.error(errorText(e)),
   })
   return { poll, build }
 }
@@ -321,11 +316,7 @@ function PlanItem({ plan: p }: { plan: CrawlPlan }) {
 
 /** Tab "Bộ khung & lịch" của trang doanh nghiệp. */
 export function CompanyCrawlTab({ id }: { id: string }) {
-  const query = useQuery({
-    queryKey: ["company-crawl", id],
-    queryFn: () => api.get<CompanyCrawl>(`/companies/${id}/crawl`),
-    refetchInterval: 15_000,
-  })
+  const query = useQuery(companyCrawlQuery(id))
   const { poll, build } = useCrawlActions(id)
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data)

@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { useNavigate } from "react-router"
+import { useBlocker } from "react-router"
 import { toast } from "sonner"
 
 import { Empty, ErrorState, PageHeader, PageLoading, SearchBox } from "@/components/common"
@@ -47,9 +47,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { api, ApiError } from "@/lib/api"
-import { cap, num } from "@/lib/format"
-import type { SettingGroup, SettingItem, SettingsPage as SettingsData, SettingsSaved } from "@/lib/types"
+import { api, ApiError, errorMessage } from "@/lib/api"
+import { num } from "@/lib/format"
+import { settingsQuery } from "@/lib/queries"
+import type { SettingGroup, SettingItem, SettingsSaved } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const GROUP_ICON: Record<string, LucideIcon> = {
@@ -70,38 +71,26 @@ function GroupIcon({ group, className }: { group: string; className?: string }) 
   return <Icon className={cn("size-4 shrink-0 stroke-[1.75]", className)} aria-hidden />
 }
 
-/** Cảnh báo khi rời trang (đóng tab, tải lại, bấm link trong ứng dụng) lúc còn thay đổi chưa lưu. */
+/**
+ * Cảnh báo khi rời trang lúc còn thay đổi chưa lưu: chuyển trang trong ứng dụng (link, nút
+ * quay lại / tiến tới) hỏi bằng hộp thoại; đóng tab hay tải lại dùng hộp thoại của trình duyệt.
+ */
 function useLeaveGuard(dirty: boolean) {
-  const navigate = useNavigate()
-  const [pending, setPending] = useState<string | null>(null)
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+  )
   useEffect(() => {
     if (!dirty) return
     const beforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
       e.returnValue = ""
     }
-    // Router hiện dùng BrowserRouter (không có useBlocker): chặn click vào link nội bộ ở pha capture,
-    // trước khi react-router xử lý.
-    const click = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null
-      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download")) return
-      const url = new URL(a.href, window.location.href)
-      if (url.origin !== window.location.origin || url.pathname.startsWith("/api/")) return
-      if (url.pathname === window.location.pathname && url.search === window.location.search) return
-      e.preventDefault()
-      e.stopPropagation()
-      setPending(url.pathname + url.search + url.hash)
-    }
     window.addEventListener("beforeunload", beforeUnload)
-    document.addEventListener("click", click, true)
-    return () => {
-      window.removeEventListener("beforeunload", beforeUnload)
-      document.removeEventListener("click", click, true)
-    }
+    return () => window.removeEventListener("beforeunload", beforeUnload)
   }, [dirty])
   return (
-    <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+    <AlertDialog open={blocker.state === "blocked"} onOpenChange={(open) => !open && blocker.reset?.()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Rời trang khi chưa lưu?</AlertDialogTitle>
@@ -110,10 +99,11 @@ function useLeaveGuard(dirty: boolean) {
         <AlertDialogFooter>
           <AlertDialogCancel>Ở lại</AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => {
-              const to = pending
-              setPending(null)
-              if (to) setTimeout(() => navigate(to), 0)
+            onClick={(e) => {
+              // Không để hộp thoại tự đóng (onOpenChange sẽ gọi reset() và huỷ lượt chuyển trang):
+              // proceed() đưa blocker sang "proceeding", hộp thoại đóng theo.
+              e.preventDefault()
+              blocker.proceed?.()
             }}
           >
             Rời trang
@@ -190,7 +180,7 @@ function GroupHeader({ group, dirty }: { group: SettingGroup; dirty: number }) {
 
 export function SettingsPage() {
   const client = useQueryClient()
-  const query = useQuery({ queryKey: ["settings"], queryFn: () => api.get<SettingsData>("/settings") })
+  const query = useQuery(settingsQuery())
   const [draft, setDraft] = useState<Draft>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [group, setGroup] = useState<string>("schedule")
@@ -239,7 +229,7 @@ export function SettingsPage() {
     mutationFn: (values: Record<string, unknown>) => api.put<SettingsSaved>("/settings", { values }),
     onSuccess: (data, values) => {
       const { restart_required, ...page } = data
-      client.setQueryData(["settings"], page)
+      client.setQueryData(settingsQuery().queryKey, page)
       setDraft({})
       setErrors({})
       toast.success(`Đã lưu ${num(Object.keys(values).length)} thay đổi`)
@@ -253,7 +243,7 @@ export function SettingsPage() {
         showFirst(Object.keys(fields))
         toast.error(`Chưa lưu: ${num(Object.keys(fields).length)} giá trị chưa hợp lệ`)
       } else {
-        toast.error(cap(e instanceof Error ? e.message : String(e)))
+        toast.error(errorMessage(e))
       }
     },
   })

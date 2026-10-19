@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { api, ApiError } from "@/lib/api"
+import { api, ApiError, errorMessage } from "@/lib/api"
 import { cap, label, num, reason, sourceProblem } from "@/lib/format"
 import type { Job, Page } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -509,8 +509,23 @@ export function PageLoading() {
   )
 }
 
-export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  const message = error instanceof Error ? error.message : String(error)
+/**
+ * Khung lỗi. Mặc định: "Không tải được dữ liệu" + thông báo lỗi + nút "Thử lại" (khi có `onRetry`);
+ * `title`, `message`, `action` thay từng phần (trang lỗi của router).
+ */
+export function ErrorState({
+  error,
+  onRetry,
+  title,
+  message,
+  action,
+}: {
+  error: unknown
+  onRetry?: () => void
+  title?: ReactNode
+  message?: ReactNode
+  action?: ReactNode
+}) {
   const missing = error instanceof ApiError && error.status === 404
   return (
     <div
@@ -519,14 +534,15 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
     >
       <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
       <div className="min-w-0 flex-1">
-        <div className="font-medium text-danger-ink">{missing ? "Không tìm thấy" : "Không tải được dữ liệu"}</div>
-        <div className="break-words text-muted-foreground">{cap(message)}</div>
+        <div className="font-medium text-danger-ink">{title ?? (missing ? "Không tìm thấy" : "Không tải được dữ liệu")}</div>
+        <div className="break-words text-muted-foreground">{message ?? errorMessage(error)}</div>
       </div>
-      {onRetry && !missing && (
-        <Button variant="outline" size="sm" onClick={onRetry}>
-          <RotateCw /> Thử lại
-        </Button>
-      )}
+      {action ??
+        (onRetry && !missing && (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            <RotateCw /> Thử lại
+          </Button>
+        ))}
     </div>
   )
 }
@@ -628,7 +644,7 @@ export function PagedList<T>({
   empty,
   children,
 }: {
-  queryKey: unknown[]
+  queryKey: readonly unknown[]
   url: string
   empty: ReactNode
   children: (items: T[]) => ReactNode

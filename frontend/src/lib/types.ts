@@ -465,6 +465,10 @@ export type WorkerStats = {
   cpu_percent: number
   rss_bytes: number
   proxies_alive: number
+  /** Render tạm tắt vì lỗi Chromium (rỗng = render được). */
+  render_disabled_reason: string
+  /** Lúc worker thử render lại (ms); 0 khi tắt hẳn (máy không có Chromium). */
+  render_retry_at_ms: number
 }
 
 export type WorkerStatus = {
@@ -481,6 +485,10 @@ export type WorkerStatus = {
   last_seen_ms: number
   leased: number
   completed: number
+  /** Kết quả gateway bỏ vì worker không còn giữ việc (trả muộn sau khi bị coi là đã rời). */
+  dropped: number
+  /** Việc gateway trả lại backend để giao lại vì worker rời / quá hạn báo sống. */
+  lost: number
   stats: WorkerStats
   alive: boolean
   draining: boolean
@@ -593,3 +601,25 @@ export type CrawlStatus = {
     next_poll_start: string
   }
 }
+
+// --- nhật ký thao tác (`GET /api/audit`) --------------------------------------------------------
+
+/** Giá trị trước / sau của một trường (bí mật đã che phía máy chủ). */
+export type AuditChange = { before: unknown; after: unknown }
+
+export type AuditEvent = {
+  id: string
+  occurred_at: string
+  /** Tên đăng nhập; `system` (CLI, cron) hoặc `anonymous` (không đăng nhập). */
+  actor: string
+  /** Tên có chấm, ổn định: `settings.update`, `company.build`... */
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  request_id: string | null
+  changes: Record<string, AuditChange> | null
+  metadata: Record<string, unknown> | null
+}
+
+/** Một trang nhật ký; `next` = id truyền vào `before` để lấy trang sau, `null` khi đã hết. */
+export type AuditPage = { items: AuditEvent[]; next: string | null }

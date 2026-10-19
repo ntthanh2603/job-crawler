@@ -5,6 +5,7 @@ import {
   Building2,
   Cpu,
   Globe,
+  History,
   Layers,
   LayoutDashboard,
   ListChecks,
@@ -24,7 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, SheetContent } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 import { num } from "@/lib/format"
-import type { QueuePage } from "@/lib/types"
+import { queueSummaryQuery } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 const GROUPS = [
@@ -55,6 +56,7 @@ const GROUPS = [
     items: [
       { to: "/workers", label: "Workers", icon: Cpu },
       { to: "/settings", label: "Cài đặt", icon: SlidersHorizontal },
+      { to: "/audit", label: "Nhật ký thao tác", icon: History },
     ],
   },
 ]
@@ -115,8 +117,7 @@ function queueShortName(name: string) {
  * trạng thái runner. */
 function useQueueSummary() {
   const query = useQuery({
-    queryKey: ["queue-summary"],
-    queryFn: () => api.get<QueuePage>("/queue"),
+    ...queueSummaryQuery(),
     refetchInterval: 15_000,
     refetchOnWindowFocus: true,
   })

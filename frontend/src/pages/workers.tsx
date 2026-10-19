@@ -51,6 +51,38 @@ function Slots({ used, total, className }: { used: number; total: number; classN
   )
 }
 
+/** Slot render kèm trạng thái: tạm tắt sau lỗi Chromium (thử lại lúc …) hoặc tắt hẳn. */
+function RenderSlots({ worker, nowMs }: { worker: WorkerStatus; nowMs: number }) {
+  const { render_disabled_reason: reason, render_retry_at_ms: retryAt } = worker.stats
+  return (
+    <div className="space-y-0.5">
+      <Slots used={worker.stats.render_inflight} total={worker.render_slots} />
+      {reason && worker.alive && (
+        <div className="text-meta whitespace-nowrap text-warning-ink" title={reason}>
+          {retryAt > 0
+            ? `Tạm tắt · thử lại ${retryAt > nowMs ? `sau ${num(Math.ceil((retryAt - nowMs) / 1000))} giây` : "ngay"}`
+            : "Tắt (không mở được Chromium)"}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Việc gateway trả lại backend (worker rời / quá hạn báo sống) và kết quả trả muộn bị bỏ. */
+function HandBack({ worker }: { worker: WorkerStatus }) {
+  if (!worker.lost && !worker.dropped) return null
+  return (
+    <div
+      className="text-caption whitespace-nowrap text-muted-foreground"
+      title="Trả lại: việc worker đang giữ được giao lại ngay khi worker rời hoặc quá hạn báo sống. Bỏ: kết quả worker gửi muộn cho việc đã giao lại."
+    >
+      {[worker.lost ? `trả lại ${num(worker.lost)}` : "", worker.dropped ? `bỏ ${num(worker.dropped)}` : ""]
+        .filter(Boolean)
+        .join(" · ")}
+    </div>
+  )
+}
+
 function Proxies({ worker }: { worker: WorkerStatus }) {
   if (!worker.local_proxies) return <span className="text-muted-foreground">Không có</span>
   return (
@@ -187,13 +219,14 @@ function WorkerList({
               </div>
               <div>
                 <div className="mb-0.5 text-caption text-muted-foreground">Slot render</div>
-                <Slots used={w.stats.render_inflight} total={w.render_slots} />
+                <RenderSlots worker={w} nowMs={nowMs} />
               </div>
               <div>
                 <div className="text-caption text-muted-foreground">Xong / lỗi</div>
                 <span className="tabular-nums">
                   {num(done(w))} / <span className={failed(w) ? "text-danger-ink" : ""}>{num(failed(w))}</span>
                 </span>
+                <HandBack worker={w} />
               </div>
               <div>
                 <div className="text-caption text-muted-foreground">Proxy riêng</div>
@@ -246,10 +279,11 @@ function WorkerList({
                 <Slots used={w.stats.http_inflight} total={w.http_slots} />
               </TableCell>
               <TableCell>
-                <Slots used={w.stats.render_inflight} total={w.render_slots} />
+                <RenderSlots worker={w} nowMs={nowMs} />
               </TableCell>
               <TableCell className="text-right text-meta tabular-nums">
                 {num(done(w))} / <span className={failed(w) ? "text-danger-ink" : ""}>{num(failed(w))}</span>
+                <HandBack worker={w} />
               </TableCell>
               <TableCell className="text-meta">
                 <div className="space-y-0.5">
@@ -299,7 +333,6 @@ export function WorkersPage() {
       toast.success(r.draining ? `${w.worker_id} sẽ dừng nhận việc sau khi làm nốt việc đang chạy` : `${w.worker_id} nhận việc lại`)
       client.invalidateQueries({ queryKey: ["workers"] })
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   const d = query.data

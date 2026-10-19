@@ -19,18 +19,13 @@ import {
 import { JobBody, JobFacts, ReviewBox } from "@/components/job"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api, qs } from "@/lib/api"
 import { ago, cap, displayName, num, pct, sourceLabel } from "@/lib/format"
-import type { ReviewPage as ReviewData } from "@/lib/types"
+import { reviewQuery } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 export function ReviewPage() {
   const [skip, setSkip] = useState<string | null>(null)
-  const query = useQuery({
-    queryKey: ["review", skip],
-    queryFn: () => api.get<ReviewData>(`/review${qs({ skip })}`),
-    placeholderData: (prev) => prev,
-  })
+  const query = useQuery({ ...reviewQuery(skip), placeholderData: (prev) => prev })
   const d = query.data
   const next = d?.next
 

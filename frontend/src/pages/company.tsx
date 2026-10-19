@@ -47,7 +47,8 @@ import {
   shortUrl,
   sourceLabel,
 } from "@/lib/format"
-import type { CompanyCrawl, CompanyDetail, Job, Page, Posting, Run } from "@/lib/types"
+import { companyCrawlQuery, companyRunsQuery, keys } from "@/lib/queries"
+import type { CompanyDetail, Job, Posting, Run } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -142,7 +143,7 @@ function CompanyRuns({ id }: { id: string }) {
   const rowLink = useRowLink()
   return (
     <Section bodyClassName="p-0" title="Các lượt chạy" description="Mới nhất trước · bấm một dòng để xem request và log">
-      <PagedList<Run> queryKey={["company-runs", id]} url={`/companies/${id}/runs`} empty="Chưa chạy lần nào.">
+      <PagedList<Run> queryKey={keys.companyRuns(id)} url={`/companies/${id}/runs`} empty="Chưa chạy lần nào.">
         {(runs) => (
           <Table>
             <TableHeader>
@@ -236,16 +237,9 @@ export function CompanyPage() {
     queryFn: () => api.get<CompanyDetail>(`/companies/${id}`),
   })
   // Trang 1 các lượt chạy (cùng khoá với tab "Lượt chạy" nên chỉ tải một lần).
-  const runs = useQuery({
-    queryKey: ["company-runs", id, 1],
-    queryFn: () => api.get<Page<Run>>(`/companies/${id}/runs?page=1`),
-  })
+  const runs = useQuery(companyRunsQuery(id, 1))
   // Lịch thu thập (cùng khoá với tab "Bộ khung & lịch"): trạng thái hiện ở thẻ số liệu.
-  const crawl = useQuery({
-    queryKey: ["company-crawl", id],
-    queryFn: () => api.get<CompanyCrawl>(`/companies/${id}/crawl`),
-    refetchInterval: 15_000,
-  })
+  const crawl = useQuery(companyCrawlQuery(id))
   const { poll } = useCrawlActions(id)
 
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />

@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { ago, cap, date, pct, salary, shortUrl, sourceLabel } from "@/lib/format"
+import { keys } from "@/lib/queries"
 import type { Job, JobDetail } from "@/lib/types"
 
 /** Nội dung tin: HTML do server sinh từ markdown (markdown-it, không cho HTML thô). */
@@ -144,21 +145,19 @@ export function ReviewBox({
     mutationFn: (correct: boolean) => api.post(`/jobs/${job.id}/review`, { correct, note }),
     onSuccess: (_, correct) => {
       toast.success(`Đã ghi “${job.title}”: ${correct ? "Đúng" : "Sai"}`)
-      client.invalidateQueries({ queryKey: ["job", job.id] })
-      client.invalidateQueries({ queryKey: ["review"] })
-      client.invalidateQueries({ queryKey: ["jobs"] })
+      client.invalidateQueries({ queryKey: keys.job(job.id) })
+      client.invalidateQueries({ queryKey: keys.review })
+      client.invalidateQueries({ queryKey: keys.jobs })
       onDone?.()
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const remove = useMutation({
     mutationFn: () => api.delete(`/jobs/${job.id}/review`),
     onSuccess: () => {
       toast.success("Đã xoá đánh giá")
-      client.invalidateQueries({ queryKey: ["job", job.id] })
-      client.invalidateQueries({ queryKey: ["review"] })
+      client.invalidateQueries({ queryKey: keys.job(job.id) })
+      client.invalidateQueries({ queryKey: keys.review })
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   useEffect(() => {

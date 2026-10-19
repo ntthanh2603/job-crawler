@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { Briefcase, Check, ChevronDown, Download, X } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams } from "react-router"
 
 import {
   Empty,
@@ -22,24 +21,26 @@ import {
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { api, qs } from "@/lib/api"
+import { qs } from "@/lib/api"
 import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
-import type { Job, Meta, Page } from "@/lib/types"
+import { jobsQuery, metaQuery } from "@/lib/queries"
+import { useUrlFilters } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
 
-const KEYS = [
-  "q",
-  "province",
-  "level",
-  "employment_type",
-  "work_mode",
-  "source",
-  "status",
-  "salary_from",
-  "company_id",
-  "reviewed",
-  "sort",
-] as const
+/** Bộ lọc trên URL và giá trị mặc định (không ghi lên URL). */
+const FILTERS = {
+  q: "",
+  province: "",
+  level: "",
+  employment_type: "",
+  work_mode: "",
+  source: "",
+  status: "active",
+  salary_from: "",
+  company_id: "",
+  reviewed: "",
+  sort: "new",
+}
 
 const STATUSES = [
   ["active", "Đang mở"],
@@ -77,38 +78,19 @@ function Reviewed({ value }: { value: boolean | null }) {
 }
 
 export function JobsPage() {
-  const [params, setParams] = useSearchParams()
-  const filters: Record<string, string> = Object.fromEntries(KEYS.map((k) => [k, params.get(k) ?? ""]))
-  filters.status ||= "active"
-  filters.sort ||= "new"
-  const page = Number(params.get("page") ?? 1)
+  const { filters, page, update, reset, isFiltered } = useUrlFilters(FILTERS)
   const [search, setSearch] = useState(filters.q)
   const [salaryFrom, setSalaryFrom] = useState(filters.salary_from)
   useEffect(() => setSearch(filters.q), [filters.q])
   useEffect(() => setSalaryFrom(filters.salary_from), [filters.salary_from])
   const rowLink = useRowLink()
 
-  const meta = useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: 300_000 })
-  const query = useQuery({
-    queryKey: ["jobs", filters, page],
-    queryFn: () => api.get<Page<Job>>(`/jobs${qs({ ...filters, page })}`),
-    placeholderData: (prev) => prev,
-  })
-
-  const update = (changes: Record<string, string | number>) => {
-    const next: Record<string, string> = { ...filters, page: "1" }
-    for (const [k, v] of Object.entries(changes)) next[k] = String(v)
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(next)) {
-      if (!v || (k === "status" && v === "active") || (k === "sort" && v === "new") || (k === "page" && v === "1")) continue
-      out[k] = v
-    }
-    setParams(out)
-  }
+  const meta = useQuery(metaQuery())
+  const query = useQuery({ ...jobsQuery(filters, page), placeholderData: (prev) => prev })
 
   const exportUrl = (fmt: string) => `/api/jobs/export${qs({ ...filters, fmt })}`
   const items = query.data?.items ?? []
-  const filtered = [...params.keys()].some((k) => k !== "page" && k !== "sort")
+  const filtered = isFiltered("sort")
 
   return (
     <>
@@ -209,7 +191,7 @@ export function JobsPage() {
             </span>
           )}
           {filtered && (
-            <Button variant="ghost" className="text-muted-foreground" onClick={() => setParams({})}>
+            <Button variant="ghost" className="text-muted-foreground" onClick={reset}>
               <X /> Xoá bộ lọc
             </Button>
           )}
@@ -313,7 +295,7 @@ export function JobsPage() {
               title="Không có việc làm nào khớp bộ lọc"
               action={
                 filtered && (
-                  <Button variant="outline" size="sm" onClick={() => setParams({})}>
+                  <Button variant="outline" size="sm" onClick={reset}>
                     Xoá bộ lọc
                   </Button>
                 )

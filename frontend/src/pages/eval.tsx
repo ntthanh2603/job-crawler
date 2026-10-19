@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { AlertTriangle, Download, FolderOpen, Play, Target } from "lucide-react"
 import { useState } from "react"
-import { toast } from "sonner"
 
 import {
   Empty,
@@ -39,7 +38,6 @@ export function EvalPage() {
       form.append("include_inactive", String(inactive))
       return api.form<EvalReport>("/eval", form)
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const r = run.data
 

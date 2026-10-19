@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api } from "@/lib/api"
 import { ago, cap, dt, num, sourceLabel } from "@/lib/format"
+import { keys } from "@/lib/queries"
 import type { BoardRun, Boards } from "@/lib/types"
 
 const MODES: Record<BoardRun["mode"], { label: string; title: string; className: string }> = {
@@ -59,9 +60,8 @@ export function BoardsPage() {
       else if (!r.workers) toast.warning(`Đã đưa ${board} vào hàng đợi nhưng chưa có worker index nào chạy`)
       else toast.success(`Đã đưa ${board} vào hàng đợi index`)
       client.invalidateQueries({ queryKey: ["boards"] })
-      client.invalidateQueries({ queryKey: ["queue-summary"] })
+      client.invalidateQueries({ queryKey: keys.queueSummary })
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 
   const d = query.data

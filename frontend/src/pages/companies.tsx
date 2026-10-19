@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Building2, Play, Upload, X } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useSearchParams } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -36,8 +35,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { api, qs } from "@/lib/api"
 import { ago, cap, companyName, displayName, duration, num } from "@/lib/format"
-import type { CompanyItem, EnqueueResult, ImportOutcome, Meta, Page } from "@/lib/types"
+import { keys, metaQuery } from "@/lib/queries"
+import type { CompanyItem, EnqueueResult, ImportOutcome, Page } from "@/lib/types"
+import { useUrlFilters, type FilterChanges } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
+
+/** Bộ lọc trên URL (mặc định: không lọc). */
+const FILTERS = { q: "", kyc: "", run: "", jobs: "" }
 
 function enqueueMessage(r: EnqueueResult) {
   return `Đã đưa ${num(r.enqueued)}/${num(r.selected)} doanh nghiệp vào hàng đợi${
@@ -58,10 +62,9 @@ function useEnqueue(onDone?: () => void) {
     onSuccess: (r) => {
       toast.success(enqueueMessage(r))
       client.invalidateQueries({ queryKey: ["companies"] })
-      client.invalidateQueries({ queryKey: ["queue-summary"] })
+      client.invalidateQueries({ queryKey: keys.queueSummary })
       onDone?.()
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
 }
 
@@ -137,7 +140,6 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
       toast.success(`Đã nạp ${num(r.rows)} dòng: ${num(r.created)} mới, ${num(r.updated)} cập nhật`)
       client.invalidateQueries({ queryKey: ["companies"] })
     },
-    onError: (e) => toast.error(cap(e instanceof Error ? e.message : String(e))),
   })
   const r = mutation.data
 
@@ -282,14 +284,7 @@ function KycBadge({ status }: { status: string | null }) {
 }
 
 export function CompaniesPage() {
-  const [params, setParams] = useSearchParams()
-  const filters = {
-    q: params.get("q") ?? "",
-    kyc: params.get("kyc") ?? "",
-    run: params.get("run") ?? "",
-    jobs: params.get("jobs") ?? "",
-    page: Number(params.get("page") ?? 1),
-  }
+  const { filters, page, update: setFilters, reset, isFiltered } = useUrlFilters(FILTERS)
   const [search, setSearch] = useState(filters.q)
   useEffect(() => setSearch(filters.q), [filters.q])
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -297,18 +292,16 @@ export function CompaniesPage() {
   const [importOpen, setImportOpen] = useState(false)
   const rowLink = useRowLink()
 
-  const meta = useQuery({ queryKey: ["meta"], queryFn: () => api.get<Meta>("/meta"), staleTime: 300_000 })
+  const meta = useQuery(metaQuery())
   const query = useQuery({
-    queryKey: ["companies", filters],
-    queryFn: () => api.get<Page<CompanyItem>>(`/companies${qs(filters)}`),
+    queryKey: ["companies", filters, page],
+    queryFn: () => api.get<Page<CompanyItem>>(`/companies${qs({ ...filters, page })}`),
     placeholderData: (prev) => prev,
   })
 
-  const update = (changes: Record<string, string | number>) => {
-    const next = { ...filters, page: 1, ...changes }
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(next)) if (v !== "" && !(k === "page" && v === 1)) out[k] = String(v)
-    setParams(out)
+  // Đổi bộ lọc thì bỏ chọn (các dòng đã chọn không còn trên trang); chuyển trang thì giữ.
+  const update = (changes: FilterChanges<keyof typeof FILTERS>) => {
+    setFilters(changes)
     if (!("page" in changes)) setSelected(new Set())
   }
 
@@ -325,7 +318,7 @@ export function CompaniesPage() {
       else next.add(id)
       return next
     })
-  const filtered = Boolean(filters.q || filters.kyc || filters.run || filters.jobs)
+  const filtered = isFiltered()
 
   return (
     <>
@@ -375,7 +368,7 @@ export function CompaniesPage() {
           />
           <FilterSelect label="Việc làm" value={filters.jobs} onChange={(v) => update({ jobs: v })} options={["with", "without"]} />
           {filtered && (
-            <Button variant="ghost" className="text-muted-foreground" onClick={() => setParams({})}>
+            <Button variant="ghost" className="text-muted-foreground" onClick={reset}>
               <X /> Xoá bộ lọc
             </Button>
           )}
@@ -493,7 +486,7 @@ export function CompaniesPage() {
               title={filtered ? "Không có doanh nghiệp nào khớp bộ lọc" : "Chưa có doanh nghiệp nào"}
               action={
                 filtered ? (
-                  <Button variant="outline" size="sm" onClick={() => setParams({})}>
+                  <Button variant="outline" size="sm" onClick={reset}>
                     Xoá bộ lọc
                   </Button>
                 ) : (
