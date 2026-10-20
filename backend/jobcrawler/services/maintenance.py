@@ -25,6 +25,7 @@ from jobcrawler.config import Settings
 from jobcrawler.db import compress
 from jobcrawler.db.ids import NIL
 from jobcrawler.db.models import BoardIndexRun, CompanyRun, Job, JobPosting
+from jobcrawler.locks import RedisLease
 from jobcrawler.logging import get_logger
 from jobcrawler.pipeline import store
 from jobcrawler.pipeline.dedup import stored_fingerprint
@@ -38,6 +39,8 @@ DELETE_BATCH = 10_000
 # Số job chưa có dấu vân tay xử lý mỗi lượt bảo trì (job mới luôn có sẵn; chỉ dữ liệu cũ).
 DEDUP_PER_RUN = 5_000
 LOCK_KEY = "jobcrawler-maintenance"
+# Hạn khoá của lượt bảo trì (gia hạn mỗi LOCK_SECONDS / 3 trong lúc chạy).
+LOCK_SECONDS = 60.0
 # Lượt chạy doanh nghiệp còn `running` sau timeout cứng + chừng này giây là đã chết.
 ABANDON_GRACE_SECONDS = 300
 # Lượt index một trang: ngân sách + thời gian ghi cuối lượt + chừng này giây.
@@ -310,40 +313,36 @@ async def run_maintenance(
     started = time.monotonic()
     now = now or datetime.now(UTC)
     s = res.settings
-    async with res.engine.connect() as lock_conn:
-        got = await lock_conn.scalar(select(func.pg_try_advisory_lock(func.hashtext(LOCK_KEY))))
-        await lock_conn.commit()
-        if not got:
+    # Một lượt mỗi lúc trên mọi runner (lease Redis tự gia hạn trong lúc chạy, `jobcrawler.locks`).
+    lease = RedisLease(res.redis, f"{s.redis_prefix}:lock:{LOCK_KEY}", ttl=LOCK_SECONDS)
+    async with lease.hold() as held:
+        if not held:
             report.skipped = "đang có lượt bảo trì khác"
             return report
-        try:
-            async with res.sessionmaker.begin() as session:
-                report.abandoned_runs, report.abandoned_board_runs = await mark_abandoned(
-                    session, s, now=now
+        async with res.sessionmaker.begin() as session:
+            report.abandoned_runs, report.abandoned_board_runs = await mark_abandoned(
+                session, s, now=now
+            )
+            await refresh_company_summaries(session)
+        report.deduplicated = (await dedupe_jobs(res.sessionmaker, limit=DEDUP_PER_RUN)).merged
+        if prune:
+            for table, column, days in (
+                ("failed_pages", "created_at", s.failed_page_retention_days),
+                ("source_fetches", "fetched_at", s.source_fetch_retention_days),
+                ("logs", "ts", s.log_retention_days),
+            ):
+                report.deleted[table] = await delete_older(
+                    res.sessionmaker, table, column, now - timedelta(days=days)
                 )
-                await refresh_company_summaries(session)
-            report.deduplicated = (await dedupe_jobs(res.sessionmaker, limit=DEDUP_PER_RUN)).merged
-            if prune:
-                for table, column, days in (
-                    ("failed_pages", "created_at", s.failed_page_retention_days),
-                    ("source_fetches", "fetched_at", s.source_fetch_retention_days),
-                    ("logs", "ts", s.log_retention_days),
-                ):
-                    report.deleted[table] = await delete_older(
-                        res.sessionmaker, table, column, now - timedelta(days=days)
-                    )
-            if compression:
-                report.trained = await compress.train_dictionaries(
-                    res.sessionmaker, train_options(s), now=now
-                )
-                budget = s.compression_recompress_rows
-                for kind in compress.Kind:
-                    done = await compress.recompress(res.sessionmaker, kind, limit=budget)
-                    report.recompressed[kind.value] = done
-                    budget -= done
-        finally:
-            await lock_conn.execute(select(func.pg_advisory_unlock(func.hashtext(LOCK_KEY))))
-            await lock_conn.commit()
+        if compression:
+            report.trained = await compress.train_dictionaries(
+                res.sessionmaker, train_options(s), now=now
+            )
+            budget = s.compression_recompress_rows
+            for kind in compress.Kind:
+                done = await compress.recompress(res.sessionmaker, kind, limit=budget)
+                report.recompressed[kind.value] = done
+                budget -= done
     report.duration_ms = int((time.monotonic() - started) * 1000)
     log.info(
         "maintenance.done",

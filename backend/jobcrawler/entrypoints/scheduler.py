@@ -1,8 +1,19 @@
 """Scheduler: xếp build đêm và poll ngày (services/schedule.py) mỗi SCHEDULER_TICK_SECONDS.
 
-Chạy nhiều replica được: chỉ replica giữ khoá Postgres (`pg_try_advisory_lock`, trên một kết nối
-giữ suốt đời process) làm việc, các replica khác chờ và thay khi nó chết (kết nối đứt thì Postgres
-nhả khoá).
+Chạy nhiều replica được: chỉ replica giữ khoá leader (lease trên Redis chính, `jobcrawler.locks`,
+khoá `<prefix>:lock:scheduler`, hạn LEASE_SECONDS, gia hạn mỗi nhịp) làm việc; các replica khác
+thử lại mỗi STANDBY_SECONDS và thay khi leader chết (khoá hết hạn) hoặc dừng (nhả khoá). Không giữ
+kết nối Postgres suốt đời process nên chạy được sau PgBouncer chế độ transaction. Leader treo quá
+hạn khoá thì mất khoá (lần gia hạn sau báo `scheduler.lease_lost`) — nhịp xếp lịch chạy trùng trong
+chốc lát vô hại vì job có khoá duy nhất.
+
+Health: vòng lặp chính ghi heartbeat `scheduler` (`jobcrawler.heartbeat`) — replica dự phòng sau mỗi
+lần hỏi được Postgres, replica làm việc sau mỗi nhịp xếp lịch thành công; mất Postgres / Redis /
+nhịp lỗi liên tục thì heartbeat cũ dần và `jobcrawler health scheduler` báo hỏng.
+
+Watchdog (`jobcrawler.watchdog`, WATCHDOG_SECONDS): mọi vòng của vòng lặp chính (kể cả vòng lỗi,
+chờ kết nối lại) gọi `loop_iteration()`; event loop hoặc vòng lặp đứng quá ngưỡng thì process thoát
+(mã 70) để Docker dựng lại. Mất Postgres không làm thoát.
 """
 
 from __future__ import annotations
@@ -14,51 +25,81 @@ import time
 from datetime import UTC, datetime
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
 
 from jobcrawler.config import Settings
+from jobcrawler.heartbeat import Heartbeat
+from jobcrawler.locks import RedisLease
 from jobcrawler.logging import get_logger
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.services import schedule
+from jobcrawler.watchdog import Watchdog, start_watchdog
 
 log = get_logger(__name__)
 
-# Khoá advisory của scheduler (số cố định, khác khoá index trang tuyển dụng).
-LEADER_LOCK = 0x6A6F_6273_6368  # "jobsch"
 STANDBY_SECONDS = 5.0
+# Hạn khoá leader: leader gia hạn mỗi nhịp (SCHEDULER_TICK_SECONDS); chết thì replica khác thay sau
+# tối đa chừng này giây.
+LEASE_SECONDS = 30.0
+COMPONENT = "scheduler"
 
 
-async def _try_lead(conn: AsyncConnection) -> bool:
-    got = await conn.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": LEADER_LOCK})
-    return bool(got)
+def leader_key(prefix: str) -> str:
+    return f"{prefix}:lock:scheduler"
 
 
-async def run_loop(res: Resources, stop: asyncio.Event) -> None:
+async def _db_ok(res: Resources) -> None:
+    """Replica dự phòng: hỏi được Postgres mới coi là khoẻ (ném lỗi khi không)."""
+    async with res.engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+async def run_loop(
+    res: Resources,
+    stop: asyncio.Event,
+    beat: Heartbeat | None = None,
+    watchdog: Watchdog | None = None,
+) -> None:
     s = res.settings
-    while not stop.is_set():
-        try:
-            async with res.engine.connect() as conn:
-                while not stop.is_set() and not await _try_lead(conn):
+    beat = beat or Heartbeat(res.redis, s.redis_prefix, COMPONENT)
+    # Vòng nào cũng báo watchdog (kể cả vòng lỗi): chỉ vòng lặp đứng hẳn mới làm process thoát.
+    dog = watchdog or Watchdog(COMPONENT, max_stall=0)
+    lease = RedisLease(res.redis, leader_key(s.redis_prefix), ttl=LEASE_SECONDS)
+    leading = False
+    try:
+        while not stop.is_set():
+            dog.loop_iteration()
+            try:
+                if not await lease.acquire():
+                    if leading:
+                        log.warning("scheduler.lease_lost")
+                        leading = False
+                    await _db_ok(res)
+                    await beat.tick()  # dự phòng: còn hỏi được Redis + Postgres là khoẻ
                     with contextlib.suppress(TimeoutError):
                         await asyncio.wait_for(stop.wait(), STANDBY_SECONDS)
-                if stop.is_set():
-                    return
-                log.info("scheduler.leader")
-                while not stop.is_set():
-                    started = time.monotonic()
-                    try:
-                        await schedule.tick(res, datetime.now(UTC))
-                    except Exception:
-                        log.exception("scheduler.tick_error")
-                    # Kết nối giữ khoá còn sống (không thì nhường khoá cho replica khác).
-                    await conn.execute(text("SELECT 1"))
-                    wait = max(0.0, s.scheduler_tick_seconds - (time.monotonic() - started))
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(stop.wait(), wait)
-        except Exception:
-            log.exception("scheduler.connection_lost")
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), STANDBY_SECONDS)
+                    continue
+                if not leading:
+                    log.info("scheduler.leader", lease=lease.token)
+                    leading = True
+                started = time.monotonic()
+                try:
+                    await schedule.tick(res, datetime.now(UTC))
+                except Exception:
+                    log.exception("scheduler.tick_error")
+                else:
+                    await beat.tick()
+                wait = max(0.0, s.scheduler_tick_seconds - (time.monotonic() - started))
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), wait)
+            except Exception:
+                log.exception("scheduler.connection_lost")
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), STANDBY_SECONDS)
+    finally:
+        if leading:
+            # Dừng có chủ đích: nhả khoá để replica khác thay ngay, không chờ hết hạn.
+            with contextlib.suppress(Exception):
+                await lease.release()
 
 
 async def run_scheduler(settings: Settings) -> None:
@@ -76,4 +117,8 @@ async def run_scheduler(settings: Settings) -> None:
             poll_interval=settings.poll_interval_seconds,
             timezone=settings.crawl_timezone,
         )
-        await run_loop(res, stop)
+        dog = start_watchdog(COMPONENT, max_stall=settings.watchdog_seconds, parts=("main",))
+        try:
+            await run_loop(res, stop, watchdog=dog)
+        finally:
+            dog.stop()  # trước khi đóng tài nguyên: lượt dừng chậm không bị watchdog giết

@@ -80,7 +80,12 @@ function jobState(j: QueueJob, now: number): { tone: Tone; text: string; pulse?:
 
 function Counts({ q }: { q: QueueStats }) {
   const cells: { label: string; value: string; hint?: string; tone?: "warn" | "bad" }[] = [
-    { label: "Đang chạy", value: num(q.active) },
+    {
+      label: "Đang chạy / tối đa",
+      value: q.capacity ? `${num(q.active)} / ${num(q.capacity)}` : num(q.active),
+      hint: "Tối đa = tổng số job chạy cùng lúc của các runner (tự tính theo CPU / RAM của máy nếu để 0)",
+      tone: q.capacity && q.active >= q.capacity && q.queued > 0 ? "warn" : undefined,
+    },
     { label: "Đang chờ", value: num(q.queued) },
     { label: "Hẹn giờ", value: num(q.scheduled), hint: "Việc định kỳ và lượt chạy tiếp" },
     { label: "Runner", value: num(q.workers), hint: "Số runner đang nhận việc của hàng đợi này", tone: q.workers ? undefined : "warn" },
