@@ -6,7 +6,7 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
 
 - Kiến trúc (process, luồng dữ liệu, bộ khung build/poll, gateway gRPC, worker):
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Triển khai và quy mô 10.000 doanh nghiệp: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Triển khai và các mức scale (1.000 → 50.000 doanh nghiệp): [docs/DEPLOY.md](docs/DEPLOY.md)
 - Vận hành (dịch vụ, giới hạn, bảo trì, sự cố): [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Tiến độ và quyết định của từng đợt thay đổi ghi trong commit message.
 - Quy ước khi sửa mã (người và coding agent): [AGENTS.md](AGENTS.md); báo lỗ hổng:
@@ -36,15 +36,15 @@ hợp đồng HTTP của mình).
 - **Ban đêm** (`BUILD_WINDOW`, mặc định 00:00–06:00 giờ Việt Nam) mỗi doanh nghiệp được build một
   lần, rải đều trong khung: KYC, tìm nguồn trên website, đọc đủ danh sách + trang tin, xác minh,
   gộp, lưu, và ghi **bộ khung** của từng nguồn (trang danh sách, API của trang SPA, trang phải mở
-  bằng trình duyệt…).
+  bằng trình duyệt…) — tối đa 10 trang mỗi doanh nghiệp, mỗi nguồn ít nhất 3 trang khi site có đủ.
 - **Ban ngày** (`POLL_WINDOW`, 06:00–24:00) mỗi doanh nghiệp được poll mỗi 150 giây: chỉ đọc đúng
   các trang / API trong bộ khung, chỉ mở trang của tin mới. Poll lỗi (trang chính hỏng, cấu trúc
   đổi, lỗi lặp lại) thì build lại bộ khung ngay.
 - Doanh nghiệp mới nạp được build ngay, không chờ đêm.
 - Trang tuyển dụng: index đủ ban đêm, index đuôi (tin mới nhất) mỗi 2 phút ban ngày, rồi poll ngay
   doanh nghiệp có tin mới.
-- Mọi request tới website đi qua **worker** (chạy ở máy nào cũng được, kèm proxy riêng); backend
-  quyết định robots, rate limit, retry, nhận diện trang chặn.
+- Mọi request tới website đi qua **worker** (chạy ở máy nào cũng được); worker tải danh sách proxy
+  chung về và tự xoay vòng; backend quyết định robots, rate limit, retry, nhận diện trang chặn.
 
 ## Chạy nhanh (một máy)
 
@@ -82,11 +82,12 @@ docker compose up -d --no-deps worker   # máy worker riêng (WORKER_GATEWAY_ADD
 task worker:cli -- check             # thử kết nối gateway và từng proxy tại worker
 ```
 
-- `PROXY_MODE=worker` (mặc định): mỗi worker dùng proxy của mình (`WORKER_PROXIES` /
-  `WORKER_PROXIES_FILE`, định dạng như `worker/config/proxies.example.txt`), gắn theo domain, nghỉ
-  khi lỗi.
-- `PROXY_MODE=central`: backend chọn và xoay vòng proxy từ danh sách chung (bảng proxy ở trang
-  Cài đặt, lưu trong DB; thêm `PROXIES_FILE` nếu có).
+- `PROXY_MODE=worker` (mặc định, "Worker tự xoay"): worker tải danh sách proxy chung (bảng proxy ở
+  trang Cài đặt) về qua gateway và tự xoay vòng — mỗi domain giữ một proxy 10 phút rồi sang proxy kế
+  tiếp, nghỉ khi bị chặn / lỗi. Máy có proxy riêng (`WORKER_PROXIES` / `WORKER_PROXIES_FILE`, định
+  dạng như `worker/config/proxies.example.txt`) dùng proxy của nó.
+- `PROXY_MODE=central` ("Backend chọn"): backend chọn proxy cho từng request từ danh sách chung
+  (thêm `PROXIES_FILE` nếu có).
 - `PROXY_MODE=off` / `jobcrawler --no-proxy …`: không proxy.
 - `WORKER_POOL` + `FETCH_ROUTES` (backend): định tuyến domain về nhóm worker riêng (vd. trang tuyển
   dụng qua proxy dân cư).
