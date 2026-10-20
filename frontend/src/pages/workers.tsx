@@ -17,7 +17,7 @@ import {
   Tag,
 } from "@/components/common"
 import { JoinKeyDialog } from "@/components/join-key-dialog"
-import { LiveStatus, useLiveWorkers } from "@/components/live"
+import { useLiveWorkers } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -321,7 +321,7 @@ function SlotHint({ used, total }: { used: number; total: number }): ReactNode {
 
 export function WorkersPage() {
   const client = useQueryClient()
-  const { query, state } = useLiveWorkers()
+  const { query } = useLiveWorkers()
   const drain = useMutation({
     mutationFn: (w: WorkerStatus) =>
       // orval không mã hoá tham số path; id worker do worker tự đặt nên mã hoá ở đây.
@@ -342,14 +342,11 @@ export function WorkersPage() {
         title="Workers lấy trang"
         description="Các máy lấy trang (HTTP và trình duyệt) đang kết nối với backend."
         actions={
-          <>
-            <LiveStatus state={state} pollSeconds={5} />
-            {d?.auth_enabled && (
-              <Button onClick={() => setJoining(true)}>
-                <Plus /> Thêm worker
-              </Button>
-            )}
-          </>
+          d?.auth_enabled && (
+            <Button onClick={() => setJoining(true)}>
+              <Plus /> Thêm worker
+            </Button>
+          )
         }
       >
         {d && (
@@ -360,7 +357,7 @@ export function WorkersPage() {
           />
         )}
       </PageHeader>
-      <JoinKeyDialog open={joining} onOpenChange={setJoining} />
+      <JoinKeyDialog open={joining} onOpenChange={setJoining} pools={pools} />
       {query.isError && !d && <ErrorState error={query.error} onRetry={() => query.refetch()} />}
       {query.isLoading && <PageLoading />}
       {d && s && (

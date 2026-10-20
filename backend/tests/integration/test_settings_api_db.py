@@ -475,7 +475,10 @@ async def test_worker_join_keys(integration_settings: Settings) -> None:
         assert r.status_code == 200, r.text
         key = r.json()
         assert key["key"].startswith("jcj_")
-        assert key["ttl_seconds"] == 300
+        assert key["ttl_seconds"] == 900
+        # Lệnh `docker run` của giao diện: không đặt địa chỉ công khai thì lấy tên máy của trang.
+        assert key["gateway_url"] is None
+        assert key["worker_image"] == web.settings.gateway_worker_image
         status = (await web.client.get(f"/api/workers/join-keys/{key['id']}")).json()
         assert status == {"id": key["id"], "status": "pending", "worker_id": None}
         # Redis chỉ giữ băm: khoá không nằm trong tên / giá trị khoá Redis nào.
@@ -487,3 +490,13 @@ async def test_worker_join_keys(integration_settings: Settings) -> None:
         assert r.json()["status"] == "expired"
         status = (await web.client.get(f"/api/workers/join-keys/{key['id']}")).json()
         assert status["status"] == "expired"
+
+    async with open_web(
+        integration_settings,
+        gateway_token=SecretStr("s3cret"),
+        gateway_public_url="https://crawler.example.com",
+        gateway_worker_image="ghcr.io/acme/jobcrawler-worker:1.4.0",
+    ) as web:
+        key = (await web.client.post("/api/workers/join-keys")).json()
+        assert key["gateway_url"] == "https://crawler.example.com"
+        assert key["worker_image"] == "ghcr.io/acme/jobcrawler-worker:1.4.0"

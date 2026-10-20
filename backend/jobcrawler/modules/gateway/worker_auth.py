@@ -5,7 +5,7 @@ Bật khi đặt GATEWAY_TOKEN; trống thì gateway không hỏi gì (dev, mạ
 1. **Vào lần đầu** (`Register`, metadata `authorization: Bearer <khoá>`), một trong hai:
    - GATEWAY_TOKEN — khoá cố định cho worker trong hạ tầng của mình (compose, máy worker riêng);
    - khoá tham gia dùng MỘT lần tạo ở trang Workers (`create_join_key`): sống JOIN_TTL_SECONDS
-     (5 phút) trên Redis, `GETDEL` lúc dùng nên hai worker không dùng chung được.
+     (15 phút) trên Redis, `GETDEL` lúc dùng nên hai worker không dùng chung được.
    Gateway trả `worker_token` riêng của worker (`RegisterResponse.worker_token`).
 2. **Mọi lời gọi sau** (Lease / Complete / Heartbeat / Leave, cả Register lại): token riêng đó.
    Token gắn với `worker_id` hiện tại (đổi khi worker khởi động lại và Register bằng token cũ);
@@ -15,7 +15,7 @@ Bật khi đặt GATEWAY_TOKEN; trống thì gateway không hỏi gì (dev, mạ
 
 Redis chỉ giữ SHA-256 của khoá / token (dump Redis không lộ khoá dùng được):
 
-- `<prefix>:gw:join:<sha256(khoá)>` → JSON {id, created_by, created_at} (TTL 5 phút);
+- `<prefix>:gw:join:<sha256(khoá)>` → JSON {id, created_by, created_at} (TTL 15 phút);
 - `<prefix>:gw:join-id:<id>` → sha256 của khoá (để huỷ theo id mà không cần khoá), sau khi dùng là
   `used:<worker_id>` (giao diện biết khoá đã được dùng);
 - `<prefix>:gw:wtoken:<sha256(token)>` → JSON {worker_id, via, issued_at} (TTL trượt).
@@ -36,7 +36,7 @@ from jobcrawler.common.logging import get_logger
 
 log = get_logger(__name__)
 
-JOIN_TTL_SECONDS = 300
+JOIN_TTL_SECONDS = 900
 WORKER_TOKEN_TTL_SECONDS = 7 * 24 * 3600
 MAX_CREDENTIAL_CHARS = 256
 JOIN_PREFIX = "jcj_"

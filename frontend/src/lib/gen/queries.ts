@@ -668,13 +668,15 @@ export type JobDetailOut = {
 };
 
 /**
- * Khoá tham gia dùng một lần cho một máy worker mới (chỉ trả `key` lúc tạo).
+ * Khoá tham gia dùng một lần (chỉ trả `key` lúc tạo) kèm cấu hình cho lệnh `docker run`.
  */
 export type JoinKeyOut = {
   expires_at_ms: number;
+  gateway_url: string | null;
   id: string;
   key: string;
   ttl_seconds: number;
+  worker_image: string;
 };
 
 export type JoinKeyStatusOutStatus = typeof JoinKeyStatusOutStatus[keyof typeof JoinKeyStatusOutStatus];
@@ -5570,8 +5572,8 @@ export function useGetWorkers<TData = Awaited<ReturnType<typeof getWorkers>>, TE
 
 
 /**
- * Tạo khoá tham gia dùng một lần (hết hạn sau 5 phút) cho máy worker mới. Chỉ khi gateway
- * bật xác thực; khoá chỉ trả một lần, trên máy chủ chỉ giữ dạng băm.
+ * Tạo khoá tham gia dùng một lần (hết hạn sau 15 phút) kèm cấu hình cho lệnh `docker run`.
+ * Chỉ khi gateway bật xác thực; khoá chỉ trả một lần, máy chủ chỉ giữ dạng băm.
  * @summary Create Join Key
  */
 export const createJoinKey = (

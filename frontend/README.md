@@ -2,7 +2,9 @@
 
 Giao diện vận hành: doanh nghiệp, việc làm, kiểm tay chất lượng, hàng đợi, worker, cài đặt. React 19
 + React Router + TanStack Query, shadcn/ui (Radix) + Tailwind 4, build bằng Vite. Là một service
-riêng: image nginx phục vụ bản build và chuyển `/api/` tới API của backend; không có mã server.
+riêng: image nginx phục vụ bản build, chuyển `/api/` tới API và gRPC của worker
+(`/jobcrawler.crawl.v1.CrawlGateway/`, HTTP/2 không TLS cùng cổng) tới gateway của backend; không có
+mã server.
 
 ## Phát triển
 

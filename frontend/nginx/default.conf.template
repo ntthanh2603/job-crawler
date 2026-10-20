@@ -1,7 +1,7 @@
-# Giao diện jobcrawler: phục vụ bản build Vite (/usr/share/nginx/html) và chuyển /api/ tới backend.
+# Giao diện jobcrawler: phục vụ bản build Vite, chuyển /api/ tới backend và gRPC của worker tới gateway.
 #
-# Template của image nginx chính thức: lúc khởi động, envsubst thay ${API_UPSTREAM},
-# ${NGINX_LOCAL_RESOLVERS} và NGINX_REAL_IP (chỉ ba biến này: NGINX_ENVSUBST_FILTER trong
+# Template của image nginx chính thức: lúc khởi động, envsubst thay ${API_UPSTREAM}, ${GATEWAY_UPSTREAM},
+# ${NGINX_LOCAL_RESOLVERS} và NGINX_REAL_IP (chỉ bốn biến này: NGINX_ENVSUBST_FILTER trong
 # Dockerfile) rồi ghi ra /etc/nginx/conf.d/default.conf, được include trong khối `http` của
 # nginx.conf. Biến của nginx (chữ thường, vd. $uri) giữ nguyên. envsubst thay cả trong chú thích.
 
@@ -24,6 +24,9 @@ log_format jc_web '$remote_addr - $remote_user [$time_local] "$request" $status 
 server {
     listen 8080;
     server_name _;
+    # Worker nối gRPC (HTTP/2 không TLS) vào chính cổng này; trình duyệt vẫn dùng HTTP/1.1.
+    http2 on;
+    keepalive_requests 100000;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -120,6 +123,18 @@ server {
         proxy_connect_timeout 10s;
         proxy_send_timeout 1h;
         proxy_read_timeout 1h;
+    }
+
+    # Gateway gRPC cho worker (`crawl.proto`): hệ thống chỉ mở một cổng là cổng này.
+    location ^~ /jobcrawler.crawl.v1.CrawlGateway/ {
+        access_log off;
+        set $gateway_upstream "${GATEWAY_UPSTREAM}";
+        grpc_pass $gateway_upstream;
+        grpc_connect_timeout 10s;
+        # Lease chờ việc tối đa 30 s.
+        grpc_read_timeout 120s;
+        grpc_send_timeout 120s;
+        client_max_body_size 64m;
     }
 
     # File của bản build (tên có hash). Thiếu file thì 404, không trả index.html: trình duyệt giữ

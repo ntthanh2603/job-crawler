@@ -54,9 +54,9 @@ như không đặt.
 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
-| `GATEWAY_ADDR` | `localhost:50051` | Địa chỉ gateway gRPC (`host:port`) |
+| `GATEWAY_ADDR` | `localhost:50051` | Địa chỉ gateway gRPC (`host:port`): máy khác dùng host:cổng giao diện của máy backend (nginx chuyển tới gateway) |
 | `GATEWAY_TOKEN` | — | Khoá tham gia cố định, khớp `GATEWAY_TOKEN` của backend: vào gateway lần đầu / khi token riêng hết hạn |
-| `WORKER_JOIN_KEY` | — | Khoá tham gia dùng một lần (trang Workers → "Thêm worker", hết hạn sau 5 phút) |
+| `WORKER_JOIN_KEY` | — | Khoá tham gia dùng một lần (trang Workers → "Thêm worker", hết hạn sau 15 phút) |
 | `WORKER_TOKEN_FILE` | `~/.jobworker/token` | Token riêng gateway cấp sau khi vào (`jobworker/credentials.py`); mount volume để giữ qua lần tạo lại container |
 | `GATEWAY_TLS` | `false` | Kết nối TLS |
 | `GATEWAY_CA_CERT` | — | File PEM của CA riêng (chứng chỉ tự ký); trống = CA hệ thống |

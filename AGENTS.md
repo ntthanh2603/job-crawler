@@ -23,7 +23,8 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 6. **Không commit bí mật**: mọi `.env` (gốc, `backend/`, `worker/`), file proxy
    (`proxies.txt`, `*/config/*proxies*.txt` trừ file `.example`), chứng chỉ / khoá TLS.
 7. **Giao diện web không bao giờ hiện lệnh shell / hướng dẫn vận hành** — chỉ trạng thái và cài đặt.
-   Lưu ý vận hành ghi vào `docs/OPERATIONS.md` (hoặc `docs/DEPLOY.md`).
+   Lưu ý vận hành ghi vào `docs/OPERATIONS.md` (hoặc `docs/DEPLOY.md`). Ngoại lệ duy nhất: lệnh
+   `docker pull` + `docker run` chép được trong hộp thoại "Thêm worker" (kèm khoá tham gia).
 8. **Đổi hành vi thì cập nhật tài liệu cùng commit**: `docs/ARCHITECTURE.md`,
    `docs/OPERATIONS.md`, `docs/DEPLOY.md` (và `.env.example` của service khi thêm biến môi
    trường).
@@ -45,7 +46,7 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 | ---------------------- | ------------------------------------------------------------------------------------- |
 | `backend/`             | service backend (gói `jobcrawler`, một image): chia như `core-api/src` của open-asm: `bootstrap/` (CLI `cli.py`, app FastAPI `app.py`, process gateway / runner / scheduler), `modules/<tính năng>/` (`router.py`, `schemas.py`, service), `services/` (hạ tầng: Redis, HTTP / proxy, LLM), `database/` (model, Alembic), `common/`, `pipeline/`, `sources/`; `scripts/` (export OpenAPI, loadtest); `openapi.json` |
 | `worker/`              | service worker (gói `jobworker`): lấy trang (curl_cffi + Chromium, proxy riêng), gọi gateway qua gRPC; `config/` proxy mẫu |
-| `frontend/`            | service web: React + Vite + Tailwind + shadcn/ui, image nginx (`nginx/`) phục vụ bản build và chuyển `/api` tới backend |
+| `frontend/`            | service web: React + Vite + Tailwind + shadcn/ui, image nginx (`nginx/`) phục vụ bản build, chuyển `/api` và gRPC của worker tới backend (cổng duy nhất mở ra ngoài) |
 | `proto/`               | thư viện hợp đồng gRPC dùng chung: `jcproto/v1/crawl.proto` + mã sinh sẵn, `scripts/gen.py` |
 | `deploy/`              | script khởi tạo Postgres của compose (`postgres/init/`: DB `jobcrawler_test`)          |
 | `docs/`                | ARCHITECTURE, OPERATIONS, DEPLOY                                                      |

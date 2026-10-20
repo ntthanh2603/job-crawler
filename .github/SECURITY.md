@@ -27,7 +27,8 @@ báo được ghi công nếu muốn.
 
 ## Phạm vi và giả định triển khai
 
-- **Gateway gRPC** (`jobcrawler gateway`, cổng 50051): mở ra ngoài mạng nội bộ thì **bắt buộc**
+- **Gateway gRPC** (`jobcrawler gateway`, cổng 50051 trong mạng compose; từ ngoài đi qua cổng của
+  `frontend`): mở ra ngoài mạng nội bộ thì **bắt buộc**
   bật xác thực (`GATEWAY_TOKEN`: worker vào bằng khoá tham gia — khoá cố định hoặc khoá một lần —
   rồi dùng token riêng chỉ nằm trên Redis) và TLS — `GATEWAY_TLS_CERT/KEY` hoặc load balancer có
   TLS (HTTP/2). Chỉ health check (`grpc.health.v1`) không cần khoá.

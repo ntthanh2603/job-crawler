@@ -8,8 +8,8 @@ name: jobcrawler
 # backend / worker qua build context tên `proto`. `.env` ở gốc chỉ cho biến của compose (cổng, số
 # worker, tài khoản Postgres, image).
 #
-# Worker ở máy khác: trên máy đó `docker compose up -d --no-deps worker` với WORKER_GATEWAY_ADDR
-# trong `.env` gốc (docs/DEPLOY.md).
+# Chỉ `frontend` mở cổng ra ngoài (WEB_BIND:WEB_PORT): giao diện, /api và gRPC của worker ở máy
+# khác (nginx chuyển tới gateway). Postgres / Redis chỉ mở ở 127.0.0.1 cho CLI / test trên máy host.
 
 # Log của container xoay vòng (mặc định json-file không giới hạn, đầy đĩa sau vài tuần).
 x-logging: &logging
@@ -67,8 +67,8 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # `jobcrawler serve`: migration rồi bốn process — API JSON (:8000, chỉ trong mạng compose, trình
-  # duyệt đi qua `frontend`), gateway gRPC cho worker (:50051), scheduler, runner (build / poll /
+  # `jobcrawler serve`: migration rồi bốn process — API JSON (:8000) và gateway gRPC (:50051) chỉ
+  # trong mạng compose (từ ngoài đi qua `frontend`), scheduler, runner (build / poll /
   # trang tuyển dụng). Một process thoát hoặc treo (watchdog) thì container thoát và Docker dựng
   # lại. Cấu hình ở backend/.env; đặt UI_PASSWORD nếu mở giao diện ra ngoài.
   backend:
@@ -89,9 +89,6 @@ services:
       # Chỉ `frontend` (nginx) gọi tới được API: tin X-Forwarded-For của nó để chặn đoán mật khẩu
       # theo IP thật của người dùng.
       FORWARDED_ALLOW_IPS: "*"
-    # Worker ở máy khác nối vào đây; mở ra ngoài thì đặt GATEWAY_TOKEN (và TLS, docs/DEPLOY.md).
-    ports:
-      - "${GATEWAY_PUBLISH:-127.0.0.1:50051}:50051"
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,17 +114,18 @@ services:
     logging: *logging
 
   # Giao diện React trên nginx không root; /api/ chuyển tới `backend` (giữ Host cho kiểm tra chống
-  # CSRF). Chỉ mở ở 127.0.0.1.
+  # CSRF), gRPC của worker tới gateway. Cổng duy nhất mở ra ngoài; mặc định chỉ ở 127.0.0.1.
   frontend:
     image: ${REGISTRY:-}jobcrawler-frontend:${IMAGE_TAG:-latest}
     build:
       context: frontend
     environment:
       API_UPSTREAM: http://backend:8000
+      GATEWAY_UPSTREAM: grpc://backend:50051
       # Có load balancer / reverse proxy đứng trước: CIDR của nó (tin X-Forwarded-For từ đó).
       REAL_IP_FROM: ${REAL_IP_FROM:-}
     ports:
-      - "127.0.0.1:${WEB_PORT:-8000}:8080"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8080"
     depends_on:
       backend:
         condition: service_healthy

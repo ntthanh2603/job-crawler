@@ -94,8 +94,8 @@ async def get_workers(request: Request) -> WorkersPageOut:
 
 @router.post("/workers/join-keys")
 async def create_join_key(request: Request) -> JoinKeyOut:
-    """Tạo khoá tham gia dùng một lần (hết hạn sau 5 phút) cho máy worker mới. Chỉ khi gateway
-    bật xác thực; khoá chỉ trả một lần, trên máy chủ chỉ giữ dạng băm."""
+    """Tạo khoá tham gia dùng một lần (hết hạn sau 15 phút) kèm cấu hình cho lệnh `docker run`.
+    Chỉ khi gateway bật xác thực; khoá chỉ trả một lần, máy chủ chỉ giữ dạng băm."""
     auth = _worker_auth(request)
     if not auth.enabled:
         raise HTTPException(
@@ -111,8 +111,14 @@ async def create_join_key(request: Request) -> JoinKeyOut:
         resource_id=join.id,
         metadata={"ttl_seconds": JOIN_TTL_SECONDS},
     )
+    settings = res_of(request).settings
     return JoinKeyOut(
-        id=join.id, key=join.key, expires_at_ms=join.expires_at_ms, ttl_seconds=JOIN_TTL_SECONDS
+        id=join.id,
+        key=join.key,
+        expires_at_ms=join.expires_at_ms,
+        ttl_seconds=JOIN_TTL_SECONDS,
+        gateway_url=settings.gateway_public_url,
+        worker_image=settings.gateway_worker_image,
     )
 
 

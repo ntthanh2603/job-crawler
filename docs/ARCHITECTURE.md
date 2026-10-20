@@ -236,8 +236,9 @@ sequenceDiagram
 - **Đăng ký**: `Register` trả `WorkerConfig` (slot trần, impersonate, heartbeat, danh sách proxy
   chung). Lease / Heartbeat chỉ trả `config_version`; đổi phiên bản → worker đăng ký lại.
 - **Xác thực** (bật khi đặt `GATEWAY_TOKEN`): `Register` bằng khoá tham gia (`GATEWAY_TOKEN` hoặc khoá
-  dùng một lần, TTL 5 phút) → nhận `worker_token` riêng (chỉ trên Redis, băm SHA-256, hạn trượt 7
-  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id`.
+  dùng một lần, TTL 15 phút) → nhận `worker_token` riêng (chỉ trên Redis, băm SHA-256, hạn trượt 7
+  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id`. "Thêm worker" ghép lệnh `docker run`
+  từ khoá + `GATEWAY_PUBLIC_URL` (trống = địa chỉ trang web) + `GATEWAY_WORKER_IMAGE`.
 - **Slot**: `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống = tự tính theo máy (HTTP 8 / CPU trong
   [8, 64], render 1 / 768 MiB trong [1, 8]); gateway gửi mức trần.
 
@@ -299,6 +300,8 @@ Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sá
 
 - `frontend` (nginx) phục vụ bản build React và chuyển `/api/` tới API (FastAPI, ghép router
   `modules/*/router.py` ở `bootstrap/app.py`). Một origin nên cookie và chống CSRF giữ nguyên.
+  Cùng cổng đó nhận gRPC của worker (`http2 on`, `/jobcrawler.crawl.v1.CrawlGateway/` →
+  `GATEWAY_UPSTREAM`): hệ thống chỉ mở một cổng.
 - **Đăng nhập** (`modules/auth/auth.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie
   httpOnly `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP
   / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt

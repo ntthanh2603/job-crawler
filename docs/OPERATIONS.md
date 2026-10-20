@@ -96,9 +96,13 @@ Trang Cài đặt → **Proxy**.
 
 - Trang **Workers**: worker đang sống, pool, slot HTTP / render đang dùng, proxy, việc xong / lỗi, CPU /
   RAM; "Dừng nhận việc" để worker làm nốt rồi thoát (dùng khi thay proxy / nâng cấp).
-- **Thêm máy worker**: trang Workers → "Thêm worker" tạo khoá tham gia **dùng một lần** (hết hạn 5
-  phút) → đặt vào `WORKER_JOIN_KEY` của máy mới. Worker đổi khoá lấy token riêng, lưu ở
-  `WORKER_TOKEN_FILE` (mount volume để giữ qua lần tạo lại container). Worker trong compose dùng
+- **Thêm máy worker**: trang Workers → "Thêm worker" tạo khoá tham gia **dùng một lần** (15 phút;
+  đóng hộp thoại là huỷ) và lệnh `docker pull` + `docker run` để chạy trên máy worker. Địa chỉ
+  (worker nối gRPC qua cổng giao diện), image: Cài đặt → Worker lấy trang (`GATEWAY_PUBLIC_URL`,
+  trống = địa chỉ đang mở giao diện; `GATEWAY_WORKER_IMAGE`, mặc định tag `main` vì GHCR chưa có
+  `latest`). Địa chỉ `localhost` được đổi thành `host.docker.internal`, chỉ dùng được trên chính máy
+  backend; máy khác cần `WEB_BIND=0.0.0.0` hoặc load balancer. CA tự ký: thêm
+  `GATEWAY_CA_CERT` vào lệnh. Xoá container rồi tạo lại cần khoá mới. Worker trong compose dùng
   `GATEWAY_TOKEN` (cùng giá trị ở `backend/.env` và `worker/.env`). Thu hồi một worker: xoá
   `<prefix>:gw:wtoken:*` của nó trên Redis.
 - Không có worker nào → mọi request lỗi `no_worker`; worker quay lại thì tự chạy tiếp.

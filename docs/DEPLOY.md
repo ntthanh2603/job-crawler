@@ -23,17 +23,22 @@ flowchart LR
     W[worker]
   end
   U[Người vận hành] -->|HTTPS| LB[Load balancer + TLS] --> FE --> BE
-  W -->|gRPC + TLS + token| BE
+  W -->|gRPC + TLS + token| LB
   app --> data
 ```
 
 - **Một máy**: `docker-compose.yaml` ở gốc repo (5 container). Postgres / Redis quản lý: trỏ
   `DATABASE_URL` / `REDIS_URL` trong `backend/.env` tới đó, chỉ chạy `docker compose up -d backend
 frontend`.
-- **Máy worker** (chỉ cần ra Internet và tới gateway cổng 50051, không cần DB / Redis): `.env` gốc đặt
-  `WORKER_GATEWAY_ADDR=<máy backend>:50051`, `WORKER_REPLICAS`; `worker/.env` đặt khoá tham gia
-  (`WORKER_JOIN_KEY` một lần, hoặc `GATEWAY_TOKEN`), `GATEWAY_TLS`; rồi `docker compose up -d --no-deps
-worker`. Máy backend mở gateway: `GATEWAY_PUBLISH=0.0.0.0:50051` + `GATEWAY_TOKEN` + TLS.
+- **Một cổng**: chỉ `frontend` mở cổng (`WEB_BIND:WEB_PORT`); nginx chuyển gRPC của worker
+  (`/jobcrawler.crawl.v1.CrawlGateway/`, HTTP/2) tới gateway. Load balancer trước `frontend` phải
+  chuyển HTTP/2 cho đường đó (nginx `grpc_pass`, Caddy `h2c://`, ALB target group gRPC). Backend
+  có `GATEWAY_TLS_CERT` thì đặt `GATEWAY_UPSTREAM=grpcs://backend:50051` cho `frontend`.
+- **Máy worker** (chỉ cần ra Internet và tới cổng giao diện, không cần DB / Redis): lệnh của nút
+  "Thêm worker" (trang Workers), hoặc compose: `.env` gốc đặt
+  `WORKER_GATEWAY_ADDR=<máy backend>:<cổng giao diện>`, `WORKER_REPLICAS`; `worker/.env` đặt khoá tham
+  gia (`WORKER_JOIN_KEY` một lần, hoặc `GATEWAY_TOKEN`), `GATEWAY_TLS`; rồi `docker compose up -d
+--no-deps worker`. Máy backend: `WEB_BIND=0.0.0.0` (hoặc load balancer có TLS) + `GATEWAY_TOKEN`.
 - **Runner thêm**: cùng image, cùng `backend/.env`, lệnh `jobcrawler runner --role poll` (hoặc `build`,
   `boards`). Mỗi process Python dùng tối đa một core: giữ CPU mỗi process ≤ ~70%.
 - **Gateway thêm**: `jobcrawler gateway` sau load balancer L4 (HTTP/2); không giữ trạng thái.

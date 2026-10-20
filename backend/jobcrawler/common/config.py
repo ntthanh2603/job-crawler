@@ -192,6 +192,9 @@ class Settings(BaseSettings):
     gateway_impersonate: str = "chrome"
     gateway_heartbeat_seconds: int = Field(default=5, ge=1)
     gateway_lease_wait_ms: int = Field(default=1000, ge=50, le=30_000)
+    # Lệnh của nút "Thêm worker" (worker nối gRPC qua cổng giao diện); trống = địa chỉ trang web.
+    gateway_public_url: str | None = None
+    gateway_worker_image: str = "ghcr.io/ntthanh2603/jobcrawler-worker:main"
 
     # --- Proxy -----------------------------------------------------------------------------------
     # worker  = mỗi worker dùng proxy của mình (WORKER_PROXIES / WORKER_PROXIES_FILE), không có

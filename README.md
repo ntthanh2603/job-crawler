@@ -22,7 +22,7 @@ khối khác. Gốc repo chỉ gom lại (compose, Taskfile, CI, tài liệu).
 | ----------- | -------------------------- | -------------------------------------------------------------------------------------------- |
 | `backend/`  | image `backend` (`jobcrawler`) | API JSON, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, migration, DB — một container (`jobcrawler serve`) |
 | `worker/`   | image `worker` (`jobworker`)   | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng   |
-| `frontend/` | image `frontend` (nginx)       | giao diện React + shadcn/ui + Tailwind; nginx phục vụ bản build và chuyển `/api` tới `backend` |
+| `frontend/` | image `frontend` (nginx)       | giao diện React + shadcn/ui + Tailwind; nginx phục vụ bản build, chuyển `/api` và gRPC của worker tới `backend` |
 | `proto/`    | thư viện `jobcrawler-proto`    | hợp đồng gRPC backend ↔ worker (`jcproto/v1/crawl.proto` + mã sinh sẵn), dùng chung        |
 | `deploy/`   |                                | script khởi tạo Postgres của compose (tạo DB test)                                        |
 | `docs/`     |                                | kiến trúc, vận hành, triển khai                                                          |
@@ -58,9 +58,9 @@ task up                              # build 3 image, chạy 5 container: postgr
 task backend:cli -- import companies.csv   # nạp doanh nghiệp: được build ngay rồi poll theo lịch
 ```
 
-Giao diện: http://127.0.0.1:8000 (container `frontend`). Postgres / Redis mở ra host ở cổng 15432 /
-16379, gateway gRPC của `backend` ở `127.0.0.1:50051` (`GATEWAY_PUBLISH`); API của `backend` chỉ
-nhận từ `frontend` trong mạng compose.
+Giao diện: http://127.0.0.1:8000 (container `frontend`) — cổng duy nhất mở ra ngoài, cũng là cổng
+worker nối gRPC (nginx chuyển tới gateway). Postgres / Redis mở ở 127.0.0.1:15432 / 16379 cho CLI /
+test trên máy; API và gateway của `backend` chỉ nhận trong mạng compose.
 
 Chạy các service trên máy (dev) — mỗi lệnh một cửa sổ, cần ít nhất một worker để lấy trang:
 

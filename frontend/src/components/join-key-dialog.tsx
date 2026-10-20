@@ -1,27 +1,49 @@
-// Khoá tham gia dùng một lần cho máy worker mới (như "Connect worker" của open-asm): tạo khi mở hộp
-// thoại, đếm ngược tới khi hết hạn (theo số giây máy chủ trả, không lệch đồng hồ), báo khi worker đã
-// dùng khoá; đóng hộp thoại khi khoá chưa dùng thì huỷ khoá.
-import { CheckCircle2, Copy, KeyRound, RefreshCw } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+// "Thêm worker": mở thì tạo khoá tham gia một lần và ghép lệnh Docker; đóng khi khoá chưa dùng thì huỷ.
+import { CheckCircle2, Copy, KeyRound, RefreshCw, Settings2 } from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
+import { useLocation, useNavigate } from "react-router"
 import { toast } from "sonner"
 
+import { settingsSearch } from "@/components/settings-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { errorMessage } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { revokeJoinKey, useCreateJoinKey, useGetJoinKey, type JoinKeyOut } from "@/lib/gen/queries"
+import { cleanPool, isLoopback, workerRunCommand } from "@/lib/worker-command"
 
 function countdown(seconds: number): string {
   const s = Math.max(0, Math.ceil(seconds))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
 }
 
-export function JoinKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function copy(text: string, done: string) {
+  void navigator.clipboard.writeText(text).then(
+    () => toast.success(done),
+    () => toast.error("Không chép được, hãy chọn và chép tay"),
+  )
+}
+
+export function JoinKeyDialog({
+  open,
+  onOpenChange,
+  pools = [],
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  pools?: string[]
+}) {
   const [key, setKey] = useState<JoinKeyOut | null>(null)
   const [deadline, setDeadline] = useState(0) // performance.now() lúc hết hạn
   const [now, setNow] = useState(() => performance.now())
+  const [pool, setPool] = useState("default")
   const keyRef = useRef<JoinKeyOut | null>(null)
   keyRef.current = key
+  const poolId = useId()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const create = useCreateJoinKey({
     mutation: {
@@ -37,6 +59,18 @@ export function JoinKeyDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const used = key && status.data?.id === key.id && status.data.status === "used" ? status.data : null
   const left = (deadline - now) / 1000
   const expired = Boolean(key) && !used && left <= 0
+  // Worker nối gRPC qua chính cổng của giao diện.
+  const gatewayUrl = key?.gateway_url ?? window.location.origin
+  const command = key
+    ? workerRunCommand({
+        image: key.worker_image,
+        gatewayUrl,
+        joinKey: key.key,
+        pool,
+        name: `jobcrawler-worker-${key.id.slice(0, 6)}`,
+      })
+    : ""
+  const local = isLoopback(gatewayUrl)
 
   // Mở hộp thoại: tạo khoá; đóng: huỷ khoá chưa dùng.
   useEffect(() => {
@@ -67,38 +101,77 @@ export function JoinKeyDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     create.mutate()
   }
 
+  const openSettings = () => {
+    onOpenChange(false)
+    navigate({ search: settingsSearch(location.search, "workers") })
+  }
+
+  const stale = expired || Boolean(used)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Thêm worker</DialogTitle>
           <DialogDescription>
-            Khoá tham gia dùng một lần cho một máy worker mới; hết hạn sau {countdown(key?.ttl_seconds ?? 300)} phút. Sau khi vào,
-            worker nhận token riêng và không cần khoá này nữa.
+            Khoá trong lệnh dùng một lần, hết hạn sau {Math.round((key?.ttl_seconds ?? 900) / 60)} phút; đóng hộp thoại
+            trước khi worker vào là huỷ khoá.
           </DialogDescription>
         </DialogHeader>
         {create.isError && <p className="text-meta font-medium text-danger-ink">{errorMessage(create.error)}</p>}
         {key && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2 pl-3">
-              <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-              <code className={cn("min-w-0 flex-1 truncate font-mono text-sm", (expired || used) && "text-muted-foreground line-through")}>
-                {key.key}
-              </code>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={expired || Boolean(used)}
-                onClick={() =>
-                  void navigator.clipboard.writeText(key.key).then(
-                    () => toast.success("Đã chép khoá"),
-                    () => toast.error("Không chép được, hãy chọn và chép tay"),
-                  )
-                }
+          <div className="min-w-0 space-y-3">
+            <div className="flex items-center gap-3">
+              <Label htmlFor={poolId}>Pool</Label>
+              <Input
+                id={poolId}
+                className="h-8 w-48 font-mono"
+                value={pool}
+                list={`${poolId}-list`}
+                onChange={(e) => setPool(cleanPool(e.target.value))}
+                placeholder="default"
+                spellCheck={false}
+              />
+              <datalist id={`${poolId}-list`}>
+                {[...new Set(["default", ...pools])].map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+            </div>
+            <div className="relative rounded-lg border bg-muted/40">
+              <pre
+                aria-label="Lệnh chạy worker"
+                className={cn(
+                  "max-h-64 overflow-auto p-3 pr-28 font-mono text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]",
+                  stale && "text-muted-foreground line-through",
+                )}
               >
-                <Copy /> Chép
+                {command}
+              </pre>
+              <Button
+                className="absolute top-2 right-2"
+                size="sm"
+                disabled={stale}
+                onClick={() => copy(command, "Đã chép lệnh")}
+              >
+                <Copy /> Chép lệnh
               </Button>
             </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted-foreground">
+              <span>
+                Địa chỉ <span className="font-mono text-foreground">{gatewayUrl}</span>
+              </span>
+              <span className="min-w-0 truncate">
+                Image <span className="font-mono text-foreground">{key.worker_image}</span>
+              </span>
+              <Button variant="link" size="sm" className="h-auto p-0 text-meta has-[>svg]:px-0" onClick={openSettings}>
+                <Settings2 /> Đổi
+              </Button>
+            </div>
+            {local && !stale && (
+              <p className="text-meta text-warning-ink">
+                Đây là địa chỉ của máy này: worker ở máy khác không nối vào được.
+              </p>
+            )}
             {used ? (
               <p className="flex items-center gap-1.5 text-meta font-medium text-success-ink">
                 <CheckCircle2 className="size-4" /> Worker {used.worker_id} đã dùng khoá và tham gia.
@@ -111,12 +184,19 @@ export function JoinKeyDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           </div>
         )}
         <DialogFooter>
-          {(expired || used) && (
+          {key && !stale && (
+            <Button variant="ghost" className="sm:mr-auto" onClick={() => copy(key.key, "Đã chép khoá")}>
+              <KeyRound /> Chỉ chép khoá
+            </Button>
+          )}
+          {stale && (
             <Button variant="outline" onClick={renew} disabled={create.isPending}>
               <RefreshCw /> Tạo khoá khác
             </Button>
           )}
-          <Button onClick={() => onOpenChange(false)}>{used ? "Xong" : "Đóng"}</Button>
+          <Button variant={key && !stale ? "outline" : "default"} onClick={() => onOpenChange(false)}>
+            {used ? "Xong" : "Đóng"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

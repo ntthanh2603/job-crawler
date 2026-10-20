@@ -243,6 +243,27 @@ def _check_text(value: str | None) -> str | None:
     return value
 
 
+def _check_origin(value: str | None) -> str | None:
+    value = _check_url(value)
+    if value is None:
+        return None
+    parts = urlsplit(value)
+    if parts.path not in {"", "/"} or parts.query or parts.fragment:
+        raise ValueError("Chỉ gồm scheme://host[:port], không có đường dẫn")
+    try:
+        parts.port  # noqa: B018 — cổng sai thì ValueError
+    except ValueError as exc:
+        raise ValueError("Cổng không hợp lệ") from exc
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _check_image(value: str) -> str:
+    value = value.strip()
+    if not value or any(c.isspace() for c in value) or value.startswith("-"):
+        raise ValueError("Tên image không hợp lệ, ví dụ ghcr.io/<owner>/jobcrawler-worker:main")
+    return value
+
+
 def _clean_lines(values: Iterable[str]) -> list[str]:
     return [v.strip() for v in values if v.strip()]
 
@@ -640,6 +661,23 @@ GROUPS: tuple[Group, ...] = (
             value_type="str",
             check=_check_routes,
             live=False,
+        ),
+        _s(
+            "gateway_public_url",
+            "str",
+            "Địa chỉ cho worker mới",
+            "Địa chỉ giao diện mà máy worker ở nơi khác nối vào (https = TLS). Trống = địa chỉ "
+            "đang mở giao diện.",
+            check=_check_origin,
+            placeholder="https://crawler.example.com",
+        ),
+        _s(
+            "gateway_worker_image",
+            "str",
+            "Image worker",
+            "Nên cùng bản với backend.",
+            check=_check_image,
+            placeholder="ghcr.io/ntthanh2603/jobcrawler-worker:main",
         ),
     ),
     _group(
@@ -1399,6 +1437,12 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "fetch_max_body_bytes",
         ),
         _sec("Định tuyến", "fetch_routes"),
+        _sec(
+            "Thêm worker",
+            "gateway_public_url",
+            "gateway_worker_image",
+            description="Dùng trong lệnh Docker của nút “Thêm worker” ở trang Workers.",
+        ),
     ),
     "proxy": (
         _sec("Chế độ", "proxy_mode"),

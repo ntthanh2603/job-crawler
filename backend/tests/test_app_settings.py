@@ -134,6 +134,17 @@ def test_validate_value_checks_type_bounds_and_format() -> None:
         a.validate_value("proxy_check_url", "ftp://x")
     with pytest.raises(ValueError, match="một trong"):
         a.validate_value("proxy_mode", "tor")
+    assert (
+        a.validate_value("gateway_public_url", " https://gw.example.com/ ")
+        == "https://gw.example.com"
+    )
+    assert a.validate_value("gateway_public_url", "http://[::1]:8000") == "http://[::1]:8000"
+    assert a.validate_value("gateway_public_url", "") is None
+    for bad in ("gw.example.com:8000", "https://gw.example.com/app", "http://gw.example.com:99999"):
+        with pytest.raises(ValueError, match=r"http|đường dẫn|Cổng"):
+            a.validate_value("gateway_public_url", bad)
+    with pytest.raises(ValueError, match="image"):
+        a.validate_value("gateway_worker_image", "ghcr.io/a/b:main --privileged")
 
 
 def test_apply_overrides_skips_invalid_and_unknown() -> None:

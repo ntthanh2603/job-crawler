@@ -2169,11 +2169,22 @@
         "type": "object"
       },
       "JoinKeyOut": {
-        "description": "Khoá tham gia dùng một lần cho một máy worker mới (chỉ trả `key` lúc tạo).",
+        "description": "Khoá tham gia dùng một lần (chỉ trả `key` lúc tạo) kèm cấu hình cho lệnh `docker run`.",
         "properties": {
           "expires_at_ms": {
             "title": "Expires At Ms",
             "type": "integer"
+          },
+          "gateway_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gateway Url"
           },
           "id": {
             "title": "Id",
@@ -2186,13 +2197,19 @@
           "ttl_seconds": {
             "title": "Ttl Seconds",
             "type": "integer"
+          },
+          "worker_image": {
+            "title": "Worker Image",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "key",
           "expires_at_ms",
-          "ttl_seconds"
+          "ttl_seconds",
+          "gateway_url",
+          "worker_image"
         ],
         "title": "JoinKeyOut",
         "type": "object"
@@ -8522,7 +8539,7 @@
     },
     "/api/workers/join-keys": {
       "post": {
-        "description": "Tạo khoá tham gia dùng một lần (hết hạn sau 5 phút) cho máy worker mới. Chỉ khi gateway\nbật xác thực; khoá chỉ trả một lần, trên máy chủ chỉ giữ dạng băm.",
+        "description": "Tạo khoá tham gia dùng một lần (hết hạn sau 15 phút) kèm cấu hình cho lệnh `docker run`.\nChỉ khi gateway bật xác thực; khoá chỉ trả một lần, máy chủ chỉ giữ dạng băm.",
         "operationId": "create_join_key",
         "responses": {
           "200": {

@@ -40,12 +40,14 @@ class WorkersPageOut(ApiOut):
 
 
 class JoinKeyOut(ApiOut):
-    """Khoá tham gia dùng một lần cho một máy worker mới (chỉ trả `key` lúc tạo)."""
+    """Khoá tham gia dùng một lần (chỉ trả `key` lúc tạo) kèm cấu hình cho lệnh `docker run`."""
 
     id: str
     key: str
     expires_at_ms: int
     ttl_seconds: int
+    gateway_url: str | None  # GATEWAY_PUBLIC_URL; None = địa chỉ trang web
+    worker_image: str
 
 
 class JoinKeyStatusOut(ApiOut):
