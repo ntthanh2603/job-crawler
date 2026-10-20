@@ -93,8 +93,9 @@ class FetchRecord:
 class SourceLimits:
     max_jobs: int = 500  # mỗi nguồn
     max_detail_pages: int = 80  # trang chi tiết mỗi nguồn
-    # Lượt poll: số trang danh sách tối đa (0 = mọi trang trong bộ khung).
-    poll_listing_pages: int = 0
+    # Lượt poll: số trang (danh sách, danh mục, trang API) tối đa của nguồn — phần của nguồn trong
+    # bộ khung (`PlanSpec.pages`, mặc định PLAN_MAX_PAGES). 0 = không giới hạn thêm.
+    poll_pages: int = 0
     max_listing_pages: int = 10  # trang danh sách (phân trang, "xem tất cả")
     max_rendered_pages: int = 10  # trang mở bằng trình duyệt mỗi nguồn
     # Trang danh mục / theo tỉnh mở như trang chi tiết rồi hoá ra là danh sách con: không tính

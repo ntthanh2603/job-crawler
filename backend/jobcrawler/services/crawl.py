@@ -90,11 +90,12 @@ SUSPICIOUS_SHARE = 0.3
 
 def poll_limits(s: Settings) -> SourceLimits:
     """Giới hạn nguồn của lượt poll: như lượt build nhưng ít trang chi tiết hơn để lượt poll luôn
-    nhanh; tin mới còn lại được mở ở lượt poll sau (lượt này không đủ nên không đóng việc nào)."""
+    nhanh; tin mới còn lại được mở ở lượt poll sau (lượt này không đủ nên không đóng việc nào).
+    Số trang danh sách / API theo bộ khung của từng nguồn (`collect` thay bằng `PlanSpec.pages`)."""
     return dataclasses.replace(
         SourceLimits.from_settings(s),
         max_detail_pages=s.poll_max_detail_pages,
-        poll_listing_pages=s.poll_max_listing_pages,
+        poll_pages=s.plan_max_pages,
     )
 
 

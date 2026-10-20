@@ -221,6 +221,8 @@ export type PlanOut = {
   last_error: string | null;
   listings: string[];
   llm_listing: boolean;
+  pages: number;
+  pages_needed: number;
   polled_at: string | null;
   rendered: number;
   source: string;

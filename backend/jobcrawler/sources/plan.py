@@ -14,6 +14,7 @@ nghiệp được build lại.
 
 from __future__ import annotations
 
+from math import ceil
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -71,6 +72,10 @@ class PlanSpec(BaseModel):
     ats: dict[str, Any] | None = None
     jobs: int = 0  # số tin lượt build
     links: int = 0  # số link tin thấy trên các trang danh sách
+    # Số trang (danh sách, danh mục, trang API) một lượt poll được đọc ở nguồn này: phần của nguồn
+    # trong PLAN_MAX_PAGES của doanh nghiệp (`services.plans.allocate_pages`). 0 = bộ khung ghi
+    # trước khi có giới hạn này: poll dùng PLAN_MAX_PAGES.
+    pages: int = 0
 
     def add(
         self, field: Literal["listings", "hubs", "rendered", "api_only", "ignored"], url: str
@@ -102,6 +107,19 @@ class PlanSpec(BaseModel):
     @property
     def empty(self) -> bool:
         return not (self.listings or self.apis or self.ats)
+
+    def demand(self) -> int:
+        """Số trang một lượt poll cần để đọc trọn nguồn: trang danh sách + danh mục (bỏ trang SPA
+        mà API thay được) + các trang API (theo tổng số tin / cỡ trang bắt được ở lượt build).
+        Bảng tin ATS tính một trang (Workday phân trang 20 tin)."""
+        if self.ats is not None:
+            per_page = 20 if self.ats.get("kind") == "workday" else 0
+            return max(1, ceil(self.jobs / per_page)) if per_page else 1
+        pages = len((set(self.listings) | set(self.hubs)) - set(self.api_only))
+        for api in self.apis:
+            total = ceil(api.total / api.size) if api.paged and api.total and api.size else 1
+            pages += max(0, total - 1) if api.embedded else total
+        return pages
 
 
 def load_spec(data: dict[str, Any] | None) -> PlanSpec | None:

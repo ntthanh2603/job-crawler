@@ -41,6 +41,7 @@ from jobcrawler.schemas import (
     WorkMode,
 )
 from jobcrawler.services import audit, batch, evaluate, overview, stats
+from jobcrawler.sources.plan import load_spec
 from jobcrawler.web import actions, queries
 from jobcrawler.web import auth as auth_tokens
 from jobcrawler.web.markdown import to_html
@@ -1568,6 +1569,10 @@ class PlanOut(ApiOut):
     rendered: int
     llm_listing: bool
     ignored: int
+    # Số trang (danh sách, danh mục, API) một lượt poll được đọc ở nguồn này (0 = bộ khung cũ,
+    # dùng PLAN_MAX_PAGES) và số trang cần để đọc trọn nguồn.
+    pages: int
+    pages_needed: int
 
 
 class ScheduleOut(ApiOut):
@@ -1648,6 +1653,7 @@ class CrawlStatusOut(ApiOut):
 
 def _plan(p: Any) -> PlanOut:
     spec = p.spec or {}
+    loaded = load_spec(spec)
     return PlanOut(
         id=p.id,
         source=p.source,
@@ -1666,6 +1672,8 @@ def _plan(p: Any) -> PlanOut:
         rendered=len(spec.get("rendered") or []),
         llm_listing=bool(spec.get("llm_listing")),
         ignored=len(spec.get("ignored") or []),
+        pages=loaded.pages if loaded is not None else 0,
+        pages_needed=loaded.demand() if loaded is not None else 0,
     )
 
 

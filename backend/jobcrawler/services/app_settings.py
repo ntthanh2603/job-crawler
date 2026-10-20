@@ -411,12 +411,20 @@ GROUPS: tuple[Group, ...] = (
             unit="lượt",
         ),
         _s(
-            "poll_max_listing_pages",
+            "plan_min_pages",
             "int",
-            "Trang danh sách tối đa mỗi lượt poll",
-            "0 = đọc mọi trang danh sách trong bộ khung (phát hiện được cả tin đã gỡ). Đặt 1–2 để "
-            "giảm request với site phân trang dài và xếp tin mới lên đầu; khi đó tin đã gỡ chỉ "
-            "được đóng ở lượt build đêm.",
+            "Số trang tối thiểu mỗi nguồn",
+            "Khi chia trang của bộ khung, mỗi nguồn (trang careers, bảng tin ATS) được ít nhất "
+            "chừng này trang nếu site có đủ, trước khi nguồn khác được thêm.",
+            unit="trang",
+        ),
+        _s(
+            "plan_max_pages",
+            "int",
+            "Số trang tối đa mỗi doanh nghiệp",
+            "Mỗi lượt poll đọc tối đa chừng này trang danh sách, trang danh mục và trang API của "
+            "một doanh nghiệp, chia cho các nguồn ở lượt build đêm. Site nhiều trang hơn thì lượt "
+            "poll chỉ thấy tin mới ở các trang đầu và không đóng việc; lượt build đêm đọc đủ.",
             unit="trang",
         ),
         _s(
@@ -1338,11 +1346,13 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             description="Độ trễ phát hiện tin mới ≈ chu kỳ poll + thời gian một lượt poll.",
         ),
         _sec(
-            "Giới hạn mỗi lượt poll",
-            "poll_max_listing_pages",
+            "Bộ khung và giới hạn mỗi lượt poll",
+            "plan_min_pages",
+            "plan_max_pages",
             "poll_max_detail_pages",
-            description="Lượt poll càng ít request càng nhanh và rẻ; phần còn lại được đọc ở "
-            "lượt sau hoặc lượt build đêm.",
+            description="Lượt build đêm ghi bộ khung (trang / API cần đọc) của mỗi doanh nghiệp; "
+            "ban ngày lượt poll chỉ đọc đúng bộ khung đó. Ít trang hơn thì poll nhanh và rẻ hơn; "
+            "phần còn lại được đọc ở lượt sau hoặc lượt build đêm.",
         ),
         _sec(
             "Build lại bộ khung", "poll_max_failures", "rebuild_on_error", "build_refresh_discovery"

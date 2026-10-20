@@ -47,11 +47,39 @@ class BuiltPlan:
     error: str | None = None
 
 
+def allocate_pages(
+    demands: Sequence[int], *, max_pages: int, min_pages: int, growable: Sequence[bool] = ()
+) -> list[int]:
+    """Chia `max_pages` trang của một doanh nghiệp cho các nguồn (theo thứ tự): trước hết mỗi
+    nguồn tới `min(nhu cầu, min_pages)`, rồi chia vòng từng trang tới đủ nhu cầu; trang còn dư chia
+    vòng cho nguồn `growable` (trang careers: site thêm trang sau thì lượt poll vẫn đọc trọn)."""
+    alloc = [0] * len(demands)
+    left = max_pages
+    for i, need in enumerate(demands):
+        give = min(need, min_pages, left)
+        alloc[i], left = give, left - give
+    while left > 0 and any(a < d for a, d in zip(alloc, demands, strict=True)):
+        for i, need in enumerate(demands):
+            if left > 0 and alloc[i] < need:
+                alloc[i], left = alloc[i] + 1, left - 1
+    grow = [i for i, g in enumerate(growable) if g and demands[i] > 0]
+    while left > 0 and grow:
+        for i in grow:
+            if left > 0:
+                alloc[i], left = alloc[i] + 1, left - 1
+    return alloc
+
+
 def built_plans(
-    reports: Sequence[SourceReport], ats_refs: Sequence[AtsRef] = ()
+    reports: Sequence[SourceReport],
+    ats_refs: Sequence[AtsRef] = (),
+    *,
+    max_pages: int = 10,
+    min_pages: int = 3,
 ) -> list[BuiltPlan]:
     """Bộ khung của các nguồn website / ATS trong một lượt build (nguồn trang tuyển dụng không
-    có bộ khung: chúng đọc từ index chung)."""
+    có bộ khung: chúng đọc từ index chung). Mỗi bộ khung được phần trang poll của mình
+    (`PlanSpec.pages`, `allocate_pages`)."""
     refs = {ref.name: ref for ref in ats_refs}
     out: list[BuiltPlan] = []
     for report in reports:
@@ -75,6 +103,14 @@ def built_plans(
                 error=report.error,
             )
         )
+    shares = allocate_pages(
+        [p.spec.demand() if p.ok else 0 for p in out],
+        max_pages=max_pages,
+        min_pages=min_pages,
+        growable=[p.ok and p.kind == CAREERS for p in out],
+    )
+    for plan, pages in zip(out, shares, strict=True):
+        plan.spec.pages = pages
     return out
 
 

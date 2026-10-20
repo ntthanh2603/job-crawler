@@ -145,10 +145,12 @@ class Settings(BaseSettings):
     poll_max_failures: int = Field(default=3, ge=1)
     # Trang chi tiết tối đa mỗi nguồn trong một lượt poll (tin mới còn lại để lượt sau).
     poll_max_detail_pages: int = Field(default=10, ge=1)
-    # Trang danh sách tối đa mỗi nguồn trong một lượt poll (0 = mọi trang của bộ khung). Đặt 1–2
-    # để giảm request khi site phân trang dài và xếp tin mới lên đầu; tin đã gỡ khi đó chỉ được
-    # đóng ở lượt build đêm.
-    poll_max_listing_pages: int = Field(default=0, ge=0)
+    # Bộ khung mỗi doanh nghiệp: một lượt poll đọc tối đa PLAN_MAX_PAGES trang danh sách / danh
+    # mục / API, chia cho các nguồn ở lượt build; mỗi nguồn được ít nhất PLAN_MIN_PAGES trang khi
+    # site có đủ. Site nhiều trang hơn bộ khung thì poll chỉ thấy tin mới ở các trang đầu và không
+    # đóng việc (lượt build đêm đọc đủ mới đóng).
+    plan_min_pages: int = Field(default=3, ge=1)
+    plan_max_pages: int = Field(default=10, ge=1)
     # Poll lỗi (bộ khung hỏng) thì build lại ngay, kể cả ban ngày.
     rebuild_on_error: bool = True
     # Build ban đêm tìm lại nguồn trên website (không dùng cache tìm nguồn).
@@ -391,6 +393,11 @@ class Settings(BaseSettings):
             )
         for name in ("build_window", "poll_window"):
             parse_window(getattr(self, name), name.upper())
+        if self.plan_min_pages > self.plan_max_pages:
+            raise ValueError(
+                "PLAN_MIN_PAGES không được lớn hơn PLAN_MAX_PAGES "
+                f"({self.plan_min_pages} > {self.plan_max_pages})"
+            )
         if self.fetch_queue_max_wait_seconds <= self.fetch_queue_grace_seconds:
             raise ValueError(
                 "FETCH_QUEUE_MAX_WAIT_SECONDS phải lớn hơn FETCH_QUEUE_GRACE_SECONDS "

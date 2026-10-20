@@ -797,6 +797,29 @@ def api_pager(api: ApiSpec) -> json_jobs.Pager:
     )
 
 
+@dataclass(slots=True)
+class PageBudget:
+    """Số trang (danh sách, danh mục, trang API) lượt poll còn được đọc ở một nguồn — phần của
+    nguồn trong bộ khung. `limited=False`: không giới hạn. `cut`: đã phải bỏ trang vì hết."""
+
+    left: int
+    limited: bool
+    cut: bool = False
+
+    @classmethod
+    def of(cls, pages: int) -> PageBudget:
+        return cls(left=pages, limited=pages > 0)
+
+    def take(self) -> bool:
+        if not self.limited:
+            return True
+        if self.left <= 0:
+            self.cut = True
+            return False
+        self.left -= 1
+        return True
+
+
 class CareersSource(Source):
     kind = KIND
 
@@ -846,12 +869,16 @@ class CareersSource(Source):
         links: dict[str, str],
         seen: set[str],
         names: json_jobs.IdNames,
+        budget: PageBudget | None = None,
     ) -> AsyncIterator[RawJob | JobLink]:
         """Đọc các trang sau của API danh sách tin: tin có mô tả, hoặc link trang tin. `seen`: mã
-        tin / URL đã có — trang không có gì mới (API bỏ qua tham số trang) thì dừng."""
+        tin / URL đã có — trang không có gì mới (API bỏ qua tham số trang) thì dừng. `budget`:
+        số trang lượt poll còn được đọc (hết thì dừng, không tính là lỗi)."""
         read = first
         for step in range(1, session.limits.max_api_pages):
             if pager.done(read):
+                return
+            if budget is not None and not budget.take():
                 return
             docs = await self._api_page(session, pager, step)
             if docs is None:
@@ -1231,8 +1258,11 @@ class CareersSource(Source):
         api: ApiSpec,
         seen: set[str],
         names: json_jobs.IdNames,
+        budget: PageBudget,
     ) -> AsyncIterator[RawJob | JobLink]:
         """Gọi thẳng API danh sách tin bắt được ở lượt build (trang đầu rồi các trang sau)."""
+        if not budget.take():
+            return
         pager = api_pager(api)
         docs = await (self._api_page(session, pager, 0) if api.paged else self._feed(session, api))
         if docs is None:
@@ -1267,7 +1297,7 @@ class CareersSource(Source):
             return
         if not api.paged:
             return
-        async for item in self._api_jobs(session, pager, read, page, {}, seen, names):
+        async for item in self._api_jobs(session, pager, read, page, {}, seen, names, budget):
             yield item
 
     async def _feed(self, session: SourceSession, api: ApiSpec) -> list[json_jobs.JsonDoc] | None:
@@ -1304,13 +1334,16 @@ class CareersSource(Source):
             # Tin đã lưu: dùng bản đã lưu (nội dung đổi được cập nhật ở lượt build đêm).
             return session.reuse(key=(job.source, job.external_id)) or job
 
+        # Số trang của bộ khung: API trước (rẻ, thường đủ tin), rồi trang danh sách / danh mục.
+        budget = PageBudget.of(limits.poll_pages)
+
         # API danh sách tin (trang SPA): gọi thẳng, không mở trình duyệt.
         api_listings: set[str] = set()
         for api in spec.apis:
             if api.embedded:
                 continue
             got = 0
-            async for item in self._poll_api(session, api, seen, names):
+            async for item in self._poll_api(session, api, seen, names, budget):
                 got += 1
                 if isinstance(item, JobLink):
                     pending.setdefault(item.url, item)
@@ -1327,18 +1360,15 @@ class CareersSource(Source):
         first = spec.listings[0] if spec.listings and not api_listings else None
         visited: set[str] = set()
         scans: list[ListingScan] = []
-        budget = max(limits.max_listing_pages, len(queue))
-        if limits.poll_listing_pages:
-            # Chỉ đọc N trang danh sách đầu mỗi lượt poll: rẻ hơn nhiều với site phân trang dài;
-            # đổi lại lượt poll không đọc trọn nên tin đã gỡ chỉ được đóng ở lượt build đêm.
-            budget = limits.poll_listing_pages
-            if len(queue) > budget:
-                session.truncate("poll_listing_pages")
-                queue = queue[:budget]
-        while queue and len(visited) < budget:
+        # Không có giới hạn bộ khung (0): vẫn chặn trang sau mới phát sinh như lượt build.
+        cap = max(limits.max_listing_pages, len(queue))
+        while queue and len(visited) < cap:
             url = queue.pop(0)
             if url in visited:
                 continue
+            if not budget.take():
+                queue.insert(0, url)
+                break
             visited.add(url)
             # HTTP trước (rẻ); trang mà lượt build phải mở bằng trình duyệt chỉ render lại khi
             # HTML không có tin nào.
@@ -1366,7 +1396,7 @@ class CareersSource(Source):
             scan_names = {**names, **scan.id_names}
             for pager, count in scan.apis:
                 async for item in self._api_jobs(
-                    session, pager, count, scan.page, texts, seen, scan_names
+                    session, pager, count, scan.page, texts, seen, scan_names, budget
                 ):
                     listed += 1
                     if isinstance(item, JobLink):
@@ -1374,7 +1404,7 @@ class CareersSource(Source):
                     elif item.external_id not in yielded:
                         yielded.add(item.external_id)
                         yield known_or(item)
-        if any(u not in visited for u in queue):
+        if any(u not in visited for u in queue) and not budget.cut:
             session.truncate("listing_pages")
 
         if spec.llm_listing and not listed and scans and session.llm.enabled:
@@ -1395,6 +1425,10 @@ class CareersSource(Source):
             # lại để biết chắc.
             session.mark_broken("empty_listing")
             return
+        if budget.cut:
+            # Site nhiều trang hơn phần của nguồn trong bộ khung: tin mới ở các trang đầu vẫn thấy,
+            # nhưng lượt poll không đọc trọn nên không đóng việc (lượt build đêm đọc đủ mới đóng).
+            session.truncate("plan_pages")
 
         # Trang chi tiết: tin đã biết dùng lại, link không phải tin bỏ qua, chỉ mở link mới.
         done: set[str] = set()

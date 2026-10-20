@@ -384,7 +384,10 @@ async def _run_pipeline(
         jobs_new=processed.new,
         jobs_closed=processed.removed,
         plans=plan_service.built_plans(
-            found.collected.reports, discovery.ats if discovery is not None else ()
+            found.collected.reports,
+            discovery.ats if discovery is not None else (),
+            max_pages=res.settings.plan_max_pages,
+            min_pages=res.settings.plan_min_pages,
         ),
         retire_missing=discovery is not None and discovery.error is None,
     )

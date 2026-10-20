@@ -269,6 +269,12 @@ function PlanItem({ plan: p }: { plan: CrawlPlan }) {
   const st = PLAN_STATUS[p.status] ?? { label: cap(p.status), tone: "muted" as Tone }
   const target = p.source.includes(":") ? p.source.split(":").slice(1).join(":") : ""
   const counts = [
+    // Phần trang của nguồn trong bộ khung: lượt poll đọc tối đa chừng này trang danh sách / API.
+    p.pages > 0
+      ? p.pages_needed > p.pages
+        ? `Poll đọc ${num(p.pages)}/${num(p.pages_needed)} trang`
+        : `Poll đọc trọn ${num(Math.max(p.pages_needed, 1))} trang`
+      : null,
     p.listings.length ? `${num(p.listings.length)} trang danh sách` : null,
     p.apis.length ? `${num(p.apis.length)} API` : null,
     p.hubs ? `${num(p.hubs)} trang danh mục` : null,

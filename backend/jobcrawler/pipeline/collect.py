@@ -11,6 +11,7 @@ theo bộ khung truyền vào (`plans`, theo tên nguồn) và báo `broken` khi
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -147,9 +148,19 @@ async def collect(
     sinks: list[list[RawJob]] = []
     tasks: dict[asyncio.Task[None], SourceReport] = {}
     for source in sources:
-        session = SourceSession(source.name, fetcher, llm, limits, result.records, known=known)
+        spec = plans.get(source.name) if plans is not None else None
+        own = limits
+        if mode == "poll" and spec is not None and spec.pages > 0:
+            # Phần trang của nguồn trong bộ khung (ATS phân trang như Workday đọc theo
+            # `max_listing_pages`).
+            own = dataclasses.replace(
+                limits,
+                poll_pages=spec.pages,
+                max_listing_pages=min(limits.max_listing_pages, spec.pages),
+            )
+        session = SourceSession(source.name, fetcher, llm, own, result.records, known=known)
         session.mode = mode
-        if plans is not None and (spec := plans.get(source.name)) is not None:
+        if spec is not None:
             session.plan = spec.model_copy(deep=True)
         report = SourceReport(name=source.name, url=source.url)
         sink: list[RawJob] = []

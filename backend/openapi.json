@@ -2907,6 +2907,14 @@
             "title": "Llm Listing",
             "type": "boolean"
           },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "pages_needed": {
+            "title": "Pages Needed",
+            "type": "integer"
+          },
           "polled_at": {
             "anyOf": [
               {
@@ -2952,7 +2960,9 @@
           "apis",
           "rendered",
           "llm_listing",
-          "ignored"
+          "ignored",
+          "pages",
+          "pages_needed"
         ],
         "title": "PlanOut",
         "type": "object"
