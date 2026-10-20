@@ -1,21 +1,19 @@
-"""Ứng dụng web (FastAPI): chỉ API JSON (`/api/...`) và `/healthz`. Giao diện React là service
-riêng (nginx phục vụ bản build, chuyển `/api` tới đây).
+"""Ứng dụng web (FastAPI): API JSON (`/api/...`) và `/healthz`. Giao diện React là service riêng
+(nginx phục vụ bản build, chỉ chuyển `/api/` tới đây).
 
-`jobcrawler api` hoặc service `api` trong compose. Dùng chung `open_resources` và các hàm trong
-`jobcrawler.services` như CLI; worker vẫn là process riêng, giao diện chỉ đưa job vào queue.
+`jobcrawler api` (trong compose: một process của container `backend`). Dùng chung
+`open_resources` và các hàm trong `jobcrawler.services` như CLI; worker vẫn là process riêng, giao
+diện chỉ đưa job vào queue.
 
 Middleware, từ ngoài vào: `RequestIdMiddleware` (request id, log truy cập, lỗi chưa xử lý thành 500)
-→ `GuardMiddleware` (đăng nhập HTTP Basic, chặn đoán mật khẩu, chặn CSRF) → FastAPI. Mọi lỗi trả
-về cùng dạng JSON `{"detail": ...}` như `HTTPException` của FastAPI.
+→ `GuardMiddleware` (đăng nhập: header của proxy SSO hoặc HTTP Basic, chặn đoán mật khẩu, chặn
+CSRF) → FastAPI. Mọi lỗi trả về cùng dạng JSON `{"detail": ...}` như `HTTPException` của FastAPI.
 """
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import logging
-import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -37,12 +35,20 @@ from jobcrawler.config import Settings, get_settings
 from jobcrawler.db.ids import uuid7
 from jobcrawler.logging import configure_logging, get_logger
 from jobcrawler.resources import open_resources
+from jobcrawler.watchdog import start_watchdog
 from jobcrawler.web import api, settings_api
+from jobcrawler.web import auth as auth_tokens
+from jobcrawler.web.auth import TokenAuth
 
 log = get_logger(__name__)
 
-PUBLIC_PATHS = ("/healthz",)
+# Không qua đăng nhập giao diện: healthcheck.
+# Không qua đăng nhập: healthcheck, đăng nhập / đăng xuất (tự đọc token).
+PUBLIC_PATHS = ("/healthz", "/api/auth/login", "/api/auth/logout")
+# Giá trị header người dùng của proxy SSO dài hơn chừng này thì cắt (ghi vào log / nhật ký).
+MAX_PROXY_USER_CHARS = 256
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
+BEARER_CHALLENGE = 'Bearer realm="jobcrawler"'
 
 REQUEST_ID_HEADER = "X-Request-Id"
 # Log truy cập chỉ cho API: /healthz (healthcheck vài giây một lần) là nhiễu.
@@ -237,11 +243,23 @@ def _client_ip(scope: Scope) -> str:
 
 
 class GuardMiddleware:
-    """Đăng nhập HTTP Basic (khi có UI_PASSWORD) và chặn request ghi từ site khác (CSRF: trình
-    duyệt tự gửi kèm thông tin đăng nhập Basic).
+    """Đăng nhập và chặn request ghi từ site khác (CSRF: trình duyệt tự gửi kèm cookie phiên).
+
+    Ba chế độ (`Settings.auth_mode`):
+
+    - `proxy` (`proxy_user_header`, AUTH_PROXY_USER_HEADER): SSO qua proxy tin cậy (oauth2-proxy
+      đứng trước service giao diện) — người dùng lấy từ header đó, trống thì từ
+      `proxy_email_header`; thiếu cả hai thì 401 JSON. Không có mật khẩu để đoán.
+      BẢO MẬT: chỉ an toàn khi không ai gọi thẳng được API (cổng api không mở ra ngoài; mọi
+      request đi qua nginx giao diện sau oauth2-proxy, proxy ghi đè header này) — gọi thẳng được
+      thì ai cũng tự đặt header và đăng nhập thành bất kỳ ai.
+    - `jwt` (UI_PASSWORD): JWT của `POST /api/auth/login` trong cookie `jc_token` hoặc header
+      `Authorization: Bearer` (`web/auth.py`): đúng chữ ký, còn hạn, chưa thu hồi. Thiếu / sai thì
+      401 JSON kèm `WWW-Authenticate: Bearer` (giao diện chuyển tới trang đăng nhập).
+    - `none`: không hỏi đăng nhập, người dùng là `username`.
 
     Người dùng đã đăng nhập ở `request.state.user` (và `actor` trong contextvars của structlog để
-    log của request kèm theo). `throttle`: chặn đoán mật khẩu (chỉ khi có mật khẩu).
+    log của request kèm theo; nhật ký thao tác ghi đúng người).
     """
 
     def __init__(
@@ -249,29 +267,43 @@ class GuardMiddleware:
         app: ASGIApp,
         *,
         username: str,
-        password: str | None,
-        throttle: LoginThrottle | None = None,
+        token_auth: Callable[[], TokenAuth | None] | None = None,
+        redis: Callable[[], AuthRedis | None] | None = None,
+        prefix: str = "jc",
+        proxy_user_header: str | None = None,
+        proxy_email_header: str | None = None,
     ) -> None:
         self.app = app
         self.username = username
-        self.password = password
-        self.throttle = throttle if password is not None else None
+        self.token_auth = token_auth
+        self.redis = redis or (lambda: None)
+        self.prefix = prefix
+        self.proxy_user_header = (proxy_user_header or "").strip() or None
+        self.proxy_email_header = (proxy_email_header or "").strip() or None
 
-    def _user(self, headers: Headers) -> str | None:
-        if self.password is None:
-            return self.username
-        value = headers.get("authorization", "")
-        scheme, _, token = value.partition(" ")
-        if scheme.lower() != "basic":
+    def _proxy_user(self, headers: Headers) -> str | None:
+        """Người dùng do proxy SSO gắn: header người dùng, trống thì header email."""
+        for name in (self.proxy_user_header, self.proxy_email_header):
+            if name and (value := headers.get(name, "").strip()):
+                return value[:MAX_PROXY_USER_CHARS]
+        return None
+
+    async def _token_user(self, headers: Headers) -> str | None:
+        auth = self.token_auth() if self.token_auth else None
+        token = auth_tokens.token_from(headers)
+        if auth is None or token is None:
             return None
-        try:
-            user, _, password = base64.b64decode(token).decode().partition(":")
-        except (binascii.Error, UnicodeDecodeError):
+        claims = auth.verify(token)
+        if claims is None:
             return None
-        ok = secrets.compare_digest(user.encode(), self.username.encode()) & secrets.compare_digest(
-            password.encode(), self.password.encode()
-        )
-        return user if ok else None
+        redis = self.redis()
+        if redis is not None:
+            try:
+                if await auth_tokens.is_revoked(redis, self.prefix, claims.jti):
+                    return None
+            except Exception as exc:  # Redis lỗi: không khoá mọi người ở ngoài
+                log.warning("auth.revoked_check_failed", error=str(exc))
+        return claims.user
 
     @staticmethod
     def _same_origin(headers: Headers) -> bool:
@@ -286,31 +318,27 @@ class GuardMiddleware:
             await self.app(scope, receive, send)
             return
         headers = Headers(scope=scope)
-        throttle, ip = self.throttle, _client_ip(scope)
-        failures = await throttle.failures(ip) if throttle else 0
-        if throttle and failures >= throttle.limit:
-            # Chặn cả mật khẩu đúng: không thì đoán tiếp vẫn biết lúc nào trúng.
-            retry = await throttle.retry_after(ip)
-            response = json_error(
-                429, "Đăng nhập sai quá nhiều lần, thử lại sau", {"Retry-After": str(retry)}
-            )
-            await response(scope, receive, send)
-            return
-        user = self._user(headers)
-        if user is None:
-            if throttle and headers.get("authorization"):
-                count = await throttle.failed(ip)
-                if count == throttle.limit:
-                    log.warning("auth.locked", ip=ip, failures=count, seconds=throttle.window)
-            response = json_error(
-                401,
-                "Cần đăng nhập",
-                {"WWW-Authenticate": 'Basic realm="jobcrawler", charset="UTF-8"'},
-            )
-            await response(scope, receive, send)
-            return
-        if throttle and failures:
-            await throttle.succeeded(ip)
+        if self.proxy_user_header is not None:
+            user = self._proxy_user(headers)
+            if user is None:
+                await json_error(401, "Cần đăng nhập SSO")(scope, receive, send)
+                return
+        elif self.token_auth is not None:
+            user = await self._token_user(headers)
+            if user is None:
+                # `Bearer`: trình duyệt không bật hộp đăng nhập; giao diện nhận ra để chuyển tới
+                # trang đăng nhập (khác 401 của SSO).
+                challenge = {"WWW-Authenticate": BEARER_CHALLENGE}
+                await json_error(401, "Cần đăng nhập", challenge)(scope, receive, send)
+                return
+        else:
+            user = self.username
+        await self._pass(scope, receive, send, headers, user)
+
+    async def _pass(
+        self, scope: Scope, receive: Receive, send: Send, headers: Headers, user: str
+    ) -> None:
+        """Đã biết người dùng: chặn CSRF rồi cho request đi tiếp, kèm người dùng."""
         if scope["method"] in _UNSAFE and not self._same_origin(headers):
             await json_error(403, "Request từ site khác bị chặn")(scope, receive, send)
             return
@@ -347,9 +375,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with open_resources(settings, db_logs=False) as res:
             app.state.res = res
-            if settings.ui_password is None:
+            if settings.auth_mode == "jwt" and settings.ui_password is not None:
+                secret = await auth_tokens.resolve_secret(settings, res.redis)
+                app.state.token_auth = auth_tokens.TokenAuth(
+                    username=settings.ui_username,
+                    password=settings.ui_password.get_secret_value(),
+                    secret=secret,
+                    hours=settings.auth_token_hours,
+                )
+            if settings.auth_mode == "proxy":
+                log.info(
+                    "ui.auth_proxy",
+                    user_header=settings.auth_proxy_user_header,
+                    email_header=settings.auth_proxy_email_header,
+                    reason="người dùng lấy từ header của proxy SSO: API không được mở ra ngoài",
+                )
+            elif settings.auth_mode == "none":
                 log.warning("ui.no_password", reason="chưa đặt UI_PASSWORD: không hỏi đăng nhập")
-            yield
+            # Event loop đứng quá WATCHDOG_SECONDS (mọi request treo) thì process thoát (mã 70) để
+            # Docker dựng lại (`jobcrawler.watchdog`).
+            dog = start_watchdog("api", max_stall=settings.watchdog_seconds)
+            try:
+                yield
+            finally:
+                dog.stop()
 
     app = FastAPI(
         title="jobcrawler",
@@ -367,10 +416,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         res = getattr(app.state, "res", None)  # có sau khi lifespan mở tài nguyên
         return None if res is None else res.redis
 
-    password = settings.ui_password.get_secret_value() if settings.ui_password else None
-    throttle = LoginThrottle(redis, prefix=settings.redis_prefix)
+    # Chặn đoán mật khẩu ở `POST /api/auth/login`; khoá ký JWT có sau khi lifespan đọc Redis.
+    app.state.throttle = LoginThrottle(redis, prefix=settings.redis_prefix)
+    app.state.token_auth = None
+
+    def token_auth() -> auth_tokens.TokenAuth | None:
+        return app.state.token_auth
+
     app.add_middleware(
-        GuardMiddleware, username=settings.ui_username, password=password, throttle=throttle
+        GuardMiddleware,
+        username=settings.ui_username,
+        token_auth=token_auth if settings.auth_mode == "jwt" else None,
+        redis=redis,
+        prefix=settings.redis_prefix,
+        proxy_user_header=settings.auth_proxy_user_header,
+        proxy_email_header=settings.auth_proxy_email_header,
     )
     app.add_middleware(RequestIdMiddleware)  # thêm sau cùng = ngoài cùng
 

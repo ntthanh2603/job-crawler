@@ -28,15 +28,20 @@ báo được ghi công nếu muốn.
 ## Phạm vi và giả định triển khai
 
 - **Gateway gRPC** (`jobcrawler gateway`, cổng 50051): mở ra ngoài mạng nội bộ thì **bắt buộc**
-  `GATEWAY_TOKEN` (worker gửi `authorization: Bearer …`) và TLS — `GATEWAY_TLS_CERT/KEY` hoặc load
-  balancer có TLS (HTTP/2). Chỉ health check (`grpc.health.v1`) không cần token.
-- **Giao diện web / API**: chỉ service `web` (nginx) mở cổng, compose chỉ mở ở `127.0.0.1`;
-  `api` (`jobcrawler api`) chỉ nhận từ `web` trong mạng nội bộ. Mở ra ngoài thì đặt `UI_PASSWORD`
-  (backend/.env) và đặt `web` sau reverse proxy có TLS.
+  bật xác thực (`GATEWAY_TOKEN`: worker vào bằng khoá tham gia — khoá cố định hoặc khoá một lần —
+  rồi dùng token riêng chỉ nằm trên Redis) và TLS — `GATEWAY_TLS_CERT/KEY` hoặc load balancer có
+  TLS (HTTP/2). Chỉ health check (`grpc.health.v1`) không cần khoá.
+- **Giao diện web / API**: chỉ container `frontend` (nginx) mở cổng, compose chỉ mở ở `127.0.0.1`;
+  API của `backend` (`jobcrawler api`) chỉ nhận từ `frontend` trong mạng nội bộ. Mở ra ngoài thì đặt
+  `UI_PASSWORD` và `JWT_SECRET` (backend/.env; trang đăng nhập, phiên JWT trong cookie httpOnly) và
+  đặt `frontend` sau reverse proxy có TLS.
 - **Postgres, Redis** chỉ mở ở `127.0.0.1` trên máy chạy compose (Redis không mật khẩu); ở triển
   khai nhiều máy chúng nằm trong mạng riêng, không bao giờ mở ra Internet.
-- **Worker** chỉ giữ `GATEWAY_TOKEN` và proxy của chính nó; không có thông tin DB, Redis, LLM, SERP.
-  Worker bị chiếm chỉ lộ token gateway và proxy của máy đó — thu hồi bằng cách đổi `GATEWAY_TOKEN`.
+- **Worker** chỉ giữ khoá tham gia / token riêng và proxy của chính nó; không có thông tin DB, Redis,
+  LLM, SERP. Worker bị chiếm chỉ lộ token của nó và proxy của máy đó — thu hồi bằng cách xoá token
+  trên Redis (`<prefix>:gw:wtoken:*`) và đổi `GATEWAY_TOKEN` nếu máy đó có khoá cố định.
+- **Trường nhạy cảm trong DB** (khoá API LLM / SERP, proxy chung có mật khẩu) lưu mã hoá
+  AES-256-GCM bằng `ENCRYPTION_KEYS`; khoá không bao giờ nằm trong Postgres.
 - **API key SERP / LLM** chỉ nằm ở backend (gọi thẳng từ backend, không qua worker).
 - **Bí mật không bao giờ hiện ở giao diện** và được che trong log / nhật ký thay đổi cài đặt (mật
   khẩu trong URL proxy, token, API key). Mục kết nối / bí mật hạ tầng chỉ đặt bằng biến môi trường,

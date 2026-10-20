@@ -7,11 +7,13 @@ import base64
 import contextlib
 import http.client
 import json
+import tempfile
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -37,7 +39,10 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         self.known: set[str] = set()
         self.drain = False
         self.not_found_leases = 0  # số lần Lease tiếp theo trả NOT_FOUND
+        # Khoá tham gia (GATEWAY_TOKEN / khoá một lần). `worker_token`: đặt thì Register trả token
+        # riêng này và mọi lời gọi khác phải dùng nó (như gateway thật khi bật xác thực).
         self.token: str | None = None
+        self.worker_token: str | None = None
         self.auth_failures = 0
         self._changed = asyncio.Event()
 
@@ -67,18 +72,26 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
 
     # --- RPC ---
 
-    async def _auth(self, context: grpc.aio.ServicerContext) -> None:
+    async def _auth(self, context: grpc.aio.ServicerContext, *, register: bool = False) -> None:
         md = {str(k): str(v) for k, v in context.invocation_metadata() or ()}
         self.metadata.append(md)
-        if self.token is not None and md.get("authorization") != f"Bearer {self.token}":
+        if self.token is None and self.worker_token is None:
+            return
+        if self.worker_token is None:
+            allowed = {self.token}
+        elif register:
+            allowed = {self.token, self.worker_token}
+        else:
+            allowed = {self.worker_token}
+        if md.get("authorization") not in {f"Bearer {a}" for a in allowed if a}:
             self.auth_failures += 1
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "token sai")
 
     async def Register(self, request: Any, context: Any) -> crawl_pb2.RegisterResponse:
-        await self._auth(context)
+        await self._auth(context, register=True)
         self.registers.append(request)
         self.known.add(request.info.worker_id)
-        return crawl_pb2.RegisterResponse(config=self.config)
+        return crawl_pb2.RegisterResponse(config=self.config, worker_token=self.worker_token or "")
 
     async def Lease(self, request: Any, context: Any) -> crawl_pb2.LeaseResponse:
         await self._auth(context)
@@ -377,7 +390,8 @@ def closed_port() -> int:
 
 
 def make_settings(port: int, **kw: Any) -> Any:
-    """WorkerSettings cho test: không đọc .env, không Chromium (trừ khi ghi đè)."""
+    """WorkerSettings cho test: không đọc .env, không Chromium, không watchdog thật (dừng ở
+    debugger quá hạn thì `os._exit` giết luôn pytest) — trừ khi ghi đè."""
     from jobworker.config import WorkerSettings
 
     values: dict[str, Any] = {
@@ -386,6 +400,9 @@ def make_settings(port: int, **kw: Any) -> Any:
         "worker_http_slots": 4,
         "worker_render_slots": 0,
         "worker_shutdown_grace_seconds": 10,
+        "worker_watchdog_seconds": 0,
+        # Không ghi token vào thư mục home của máy chạy test.
+        "worker_token_file": Path(tempfile.mkdtemp(prefix="jobworker-test-")) / "token",
     }
     values.update(kw)
     return WorkerSettings(_env_file=None, **values)  # pyright: ignore[reportCallIssue]

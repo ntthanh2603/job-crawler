@@ -125,6 +125,9 @@ message RegisterRequest {
 
 message RegisterResponse {
   WorkerConfig config = 1;
+  // Gateway bật xác thực: token riêng của worker khi vào bằng GATEWAY_TOKEN hoặc khoá tham gia một
+  // lần; worker dùng nó cho mọi lời gọi sau (kể cả Register lại). Rỗng = giữ token đang dùng.
+  string worker_token = 2;
 }
 
 message LeaseRequest {

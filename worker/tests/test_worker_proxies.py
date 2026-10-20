@@ -88,6 +88,8 @@ def test_load_proxies_from_list_and_file(tmp_path: Path) -> None:
 def test_split_proxies_formats() -> None:
     assert split_proxies('["http://a:1", "b:2"]') == ["http://a:1", "b:2"]
     assert split_proxies("http://a:1, b:2\nc:3\n") == ["http://a:1", "b:2", "c:3"]
+    # Chú thích `#` như file proxy (secret `worker_proxies`), kể cả chú thích có dấu phẩy.
+    assert split_proxies("# a:1, b:2\r\nc:3  # x, y\n\n") == ["c:3"]
     assert split_proxies(None) == []
 
 
@@ -109,7 +111,8 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.worker_render_slots == 0
     assert s.log_level == "DEBUG"
     assert s.worker_pool == "default"
-    assert s.worker_http_slots == 32
+    assert s.worker_http_slots is None  # trống = tự tính theo máy
+    assert 8 <= s.http_slots <= 64
 
 
 def test_default_worker_id_is_unique() -> None:

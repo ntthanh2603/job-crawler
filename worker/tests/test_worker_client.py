@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, cast
 
 import grpc
@@ -228,6 +229,38 @@ async def test_auth_metadata(gateway: Gateway, web: WebServer) -> None:
         await run.stop()
     assert gw.auth_failures == 0
     assert all(md["authorization"] == f"Bearer {gw.token}" for md in gw.metadata)
+
+
+async def test_join_key_then_own_token_saved_and_renewed(
+    gateway: Gateway, web: WebServer, tmp_path: Path
+) -> None:
+    gw, port = gateway
+    gw.token, gw.worker_token = "jcj_khoa", "jcw_rieng"
+    token_file = tmp_path / "token"
+    gw.add(http_task("t1", web.url("/small")))
+    run = start(port, worker_join_key="jcj_khoa", worker_token_file=token_file)
+    try:
+        await gw.wait_results(1)
+    finally:
+        await run.stop()
+    # Register bằng khoá tham gia, các lời gọi sau bằng token riêng (đã lưu vào file).
+    assert gw.metadata[0]["authorization"] == "Bearer jcj_khoa"
+    assert {md["authorization"] for md in gw.metadata[1:]} == {"Bearer jcw_rieng"}
+    assert token_file.read_text(encoding="utf-8") == "jcw_rieng"
+
+    # Khởi động lại: dùng token đã lưu. Gateway không còn nhận token cũ (hết hạn) → bỏ token,
+    # vào lại bằng khoá tham gia, nhận token mới.
+    gw.metadata.clear()
+    gw.worker_token = "jcw_moi"
+    gw.add(http_task("t2", web.url("/small")))
+    run = start(port, worker_join_key="jcj_khoa", worker_token_file=token_file)
+    try:
+        await gw.wait_results(2)
+    finally:
+        await run.stop()
+    assert gw.metadata[0]["authorization"] == "Bearer jcw_rieng"  # token cũ bị từ chối
+    assert gw.metadata[1]["authorization"] == "Bearer jcj_khoa"
+    assert token_file.read_text(encoding="utf-8") == "jcw_moi"
 
 
 async def test_wrong_token_keeps_retrying(gateway: Gateway) -> None:

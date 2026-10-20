@@ -3,7 +3,6 @@ tác ở giao diện, API danh sách (lọc + phân trang keyset), bảo trì kh
 
 from __future__ import annotations
 
-import base64
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -74,7 +73,6 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
             "ui_password": SecretStr("mat-khau"),
         }
     )
-    auth = {"Authorization": "Basic " + base64.b64encode(f"{user}:mat-khau".encode()).decode()}
     app = create_app(settings)
     try:
         async with app.router.lifespan_context(app):
@@ -100,7 +98,7 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://ui.test",
-                headers=auth | ORIGIN,
+                headers={"Authorization": f"Bearer {app.state.token_auth.issue().token}"} | ORIGIN,
             ) as client:
                 yield Web(client, settings, res, tag, user, *ids)
             async with res.sessionmaker.begin() as s:

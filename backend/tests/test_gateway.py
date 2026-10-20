@@ -29,7 +29,8 @@ from jobcrawler.gateway.remote import (
     proxy_id_of,
     to_raw_response,
 )
-from jobcrawler.gateway.server import bearer_ok, config_version, worker_config
+from jobcrawler.gateway.server import config_version, worker_config
+from jobcrawler.gateway.worker_auth import bearer
 from jobcrawler.net.http import CapturedJson, TransportError
 from jobcrawler.net.proxy_pool import parse_proxy_line
 
@@ -408,13 +409,13 @@ def test_worker_config_version_is_stable() -> None:
 # --- token ---------------------------------------------------------------------------------------
 
 
-def test_bearer_ok() -> None:
-    assert bearer_ok([("authorization", "Bearer s3cret")], "s3cret")
-    assert bearer_ok((("x", "y"), ("Authorization", b"Bearer s3cret")), "s3cret")
-    assert not bearer_ok([("authorization", "Bearer wrong")], "s3cret")
-    assert not bearer_ok([("authorization", "s3cret")], "s3cret")
-    assert not bearer_ok([("x-token", "Bearer s3cret")], "s3cret")
-    assert not bearer_ok(None, "s3cret")
+def test_bearer_reads_authorization_metadata() -> None:
+    assert bearer([("authorization", "Bearer s3cret")]) == "s3cret"
+    assert bearer((("x", "y"), ("Authorization", b"Bearer s3cret"))) == "s3cret"
+    assert bearer([("authorization", "s3cret")]) is None
+    assert bearer([("authorization", "Bearer ")]) is None
+    assert bearer([("x-token", "Bearer s3cret")]) is None
+    assert bearer(None) is None
 
 
 def test_task_json_round_trip_keeps_unicode() -> None:

@@ -18,12 +18,11 @@ import asyncio
 import contextlib
 import functools
 import hashlib
-import hmac
 import json
 import re
 import sys
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import grpc
@@ -52,6 +51,7 @@ from jobcrawler.gateway.registry import (
     save_worker,
     touch_worker,
 )
+from jobcrawler.gateway.worker_auth import WorkerAuth, bearer
 from jobcrawler.logging import get_logger
 
 log = get_logger(__name__)
@@ -62,7 +62,6 @@ MAX_WAIT_MS = 30_000
 PRUNE_SECONDS = 10.0
 CONFIG_CACHE_SECONDS = 5.0
 STOP_GRACE_SECONDS = 10.0
-_PUBLIC_PREFIX = "/grpc.health.v1.Health/"  # health check không cần token
 _WORKER_ID = re.compile(r"^[A-Za-z0-9_.:@-]{1,128}$", re.ASCII)
 _POOL = re.compile(r"^[A-Za-z0-9_.-]{1,64}$", re.ASCII)
 _INT32_MAX = 2**31 - 1
@@ -96,59 +95,6 @@ def worker_config(settings: Settings) -> crawl_pb2.WorkerConfig:
     return crawl_pb2.WorkerConfig(version=config_version(fields), **fields)
 
 
-# --- xác thực ------------------------------------------------------------------------------------
-
-
-def bearer_ok(metadata: Iterable[tuple[str, str | bytes]] | None, token: str) -> bool:
-    """Metadata có `authorization: Bearer <token>` (so sánh thời gian hằng)."""
-    expected = f"Bearer {token}".encode()
-    for key, value in metadata or ():
-        if key.lower() == "authorization":
-            got = value if isinstance(value, bytes) else value.encode()
-            return hmac.compare_digest(got, expected)
-    return False
-
-
-def _denied(handler: grpc.RpcMethodHandler) -> grpc.RpcMethodHandler:
-    async def abort(_request: Any, context: grpc.aio.ServicerContext) -> None:
-        await context.abort(
-            grpc.StatusCode.UNAUTHENTICATED,
-            "thiếu hoặc sai token (metadata authorization: Bearer <GATEWAY_TOKEN>)",
-        )
-
-    codec = {
-        "request_deserializer": handler.request_deserializer,
-        "response_serializer": handler.response_serializer,
-    }
-    if handler.unary_unary:
-        return grpc.unary_unary_rpc_method_handler(abort, **codec)
-    if handler.unary_stream:
-        return grpc.unary_stream_rpc_method_handler(abort, **codec)
-    if handler.stream_unary:
-        return grpc.stream_unary_rpc_method_handler(abort, **codec)
-    return grpc.stream_stream_rpc_method_handler(abort, **codec)
-
-
-class TokenInterceptor(grpc.aio.ServerInterceptor):
-    """Từ chối (UNAUTHENTICATED) mọi lời gọi thiếu token, trừ health check."""
-
-    def __init__(self, token: str) -> None:
-        self._token = token
-
-    async def intercept_service(
-        self,
-        continuation: Callable[[grpc.HandlerCallDetails], Awaitable[grpc.RpcMethodHandler]],
-        handler_call_details: grpc.HandlerCallDetails,
-    ) -> grpc.RpcMethodHandler:
-        handler = await continuation(handler_call_details)
-        method: str = handler_call_details.method  # pyright: ignore[reportAttributeAccessIssue]
-        metadata = handler_call_details.invocation_metadata  # pyright: ignore[reportAttributeAccessIssue]
-        if handler is None or method.startswith(_PUBLIC_PREFIX) or bearer_ok(metadata, self._token):
-            return handler
-        log.warning("gateway.unauthenticated", method=method)
-        return _denied(handler)
-
-
 # --- servicer ------------------------------------------------------------------------------------
 
 Handler = Callable[[Any, Any, grpc.aio.ServicerContext], Awaitable[Any]]
@@ -178,9 +124,12 @@ class CrawlGateway:
         settings_provider: SettingsProvider,
         *,
         config_cache_seconds: float = CONFIG_CACHE_SECONDS,
+        auth: WorkerAuth | None = None,
     ) -> None:
         self.redis = redis
         self.keys = keys
+        # Xác thực worker (`gateway/worker_auth.py`); None / tắt = không hỏi (GATEWAY_TOKEN trống).
+        self.auth = auth
         self._provider = settings_provider
         self._cache_seconds = config_cache_seconds
         self._cached: tuple[float, Settings, crawl_pb2.WorkerConfig] | None = None
@@ -209,6 +158,52 @@ class CrawlGateway:
             return None, bool(draining)
         return raw, bool(draining)
 
+    async def _authorize(self, context: grpc.aio.ServicerContext, worker_id: str) -> str | None:
+        """Lease / Complete / Heartbeat / Leave: token riêng của đúng worker này. Trả token (để
+        gia hạn), None khi gateway không bật xác thực. Sai thì huỷ lời gọi."""
+        if self.auth is None or not self.auth.enabled:
+            return None
+        token = bearer(context.invocation_metadata())
+        record = await self.auth.check_token(token) if token else None
+        if token is None or record is None:
+            log.warning("gateway.unauthenticated", worker_id=worker_id)
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "token worker không hợp lệ hoặc đã hết hạn: Register lại bằng khoá tham gia",
+            )
+            raise AssertionError("unreachable")  # context.abort luôn ném
+        if record.worker_id != worker_id:
+            await context.abort(
+                grpc.StatusCode.PERMISSION_DENIED, "token thuộc worker khác: Register lại"
+            )
+        return token
+
+    async def _join(
+        self, context: grpc.aio.ServicerContext, worker_id: str
+    ) -> tuple[str, str | None]:
+        """Register: (cách vào, token mới cho worker hoặc None = giữ token đang dùng)."""
+        assert self.auth is not None
+        credential = bearer(context.invocation_metadata())
+        if credential is None:
+            await context.abort(grpc.StatusCode.UNAUTHENTICATED, "thiếu khoá: gửi Bearer <khoá>")
+            raise AssertionError("unreachable")
+        if self.auth.is_static(credential):
+            return "static", await self.auth.issue_token(worker_id=worker_id, via="static")
+        record = await self.auth.check_token(credential)
+        if record is not None:
+            await self.auth.bind(credential, record, worker_id)
+            return "token", None
+        join_id = await self.auth.consume_join_key(credential, worker_id=worker_id)
+        if join_id is not None:
+            log.info("gateway.joined", worker_id=worker_id, join_id=join_id)
+            return "join", await self.auth.issue_token(worker_id=worker_id, via="join")
+        log.warning("gateway.unauthenticated", worker_id=worker_id, method="Register")
+        await context.abort(
+            grpc.StatusCode.UNAUTHENTICATED,
+            "khoá không hợp lệ, hết hạn hoặc khoá tham gia đã được dùng",
+        )
+        raise AssertionError("unreachable")
+
     @staticmethod
     async def _unknown(context: grpc.aio.ServicerContext, worker_id: str) -> None:
         await context.abort(
@@ -226,6 +221,11 @@ class CrawlGateway:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "worker_id không hợp lệ")
         if not _POOL.match(pool):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"pool không hợp lệ: {pool!r}")
+        via, worker_token = (
+            await self._join(context, info.worker_id)
+            if self.auth is not None and self.auth.enabled
+            else ("open", None)
+        )
         settings, config = self._current()
         status = WorkerStatus(
             worker_id=info.worker_id,
@@ -250,14 +250,16 @@ class CrawlGateway:
             http_slots=info.http_slots,
             render_slots=info.render_slots,
             local_proxies=info.local_proxies,
+            auth=via,
         )
-        return crawl_pb2.RegisterResponse(config=config)
+        return crawl_pb2.RegisterResponse(config=config, worker_token=worker_token or "")
 
     @_redis_guard
     async def Lease(
         self, request: crawl_pb2.LeaseRequest, context: grpc.aio.ServicerContext
     ) -> crawl_pb2.LeaseResponse:
         worker_id = request.worker_id
+        await self._authorize(context, worker_id)
         raw, draining = await self._lookup(worker_id)
         if raw is None:
             await self._unknown(context, worker_id)
@@ -296,6 +298,7 @@ class CrawlGateway:
         self, request: crawl_pb2.CompleteRequest, context: grpc.aio.ServicerContext
     ) -> crawl_pb2.CompleteResponse:
         worker_id = request.worker_id
+        await self._authorize(context, worker_id)
         accepted, malformed, stale = await complete_results(
             self.redis, self.keys, worker_id, request.results
         )
@@ -318,6 +321,9 @@ class CrawlGateway:
         self, request: crawl_pb2.HeartbeatRequest, context: grpc.aio.ServicerContext
     ) -> crawl_pb2.HeartbeatResponse:
         worker_id = request.worker_id
+        token = await self._authorize(context, worker_id)
+        if token is not None and self.auth is not None:
+            await self.auth.touch(token)  # worker còn sống: token không hết hạn
         raw, draining = await self._lookup(worker_id)
         if raw is None:
             await self._unknown(context, worker_id)
@@ -336,6 +342,7 @@ class CrawlGateway:
         self, request: crawl_pb2.LeaveRequest, context: grpc.aio.ServicerContext
     ) -> crawl_pb2.LeaveResponse:
         worker_id = request.worker_id
+        await self._authorize(context, worker_id)
         raw = await self.redis.get(self.keys.worker(worker_id))
         await remove_worker(self.redis, self.keys, worker_id)
         lost = await self._release(worker_id, reason="leave")
@@ -410,11 +417,14 @@ class GatewayServer:
         config_cache_seconds: float = CONFIG_CACHE_SECONDS,
     ) -> None:
         self.settings = settings
+        keys = Keys(settings.redis_prefix)
+        token = settings.gateway_token.get_secret_value() if settings.gateway_token else None
         self.servicer = CrawlGateway(
             redis,
-            Keys(settings.redis_prefix),
+            keys,
             settings_provider or (lambda: settings),
             config_cache_seconds=config_cache_seconds,
+            auth=WorkerAuth(redis, keys.base, static_token=token),
         )
         self.health = health.aio.HealthServicer()  # pyright: ignore[reportAttributeAccessIssue]
         self.port = 0
@@ -425,11 +435,9 @@ class GatewayServer:
     async def start(self, host: str | None = None, port: int | None = None) -> int:
         """Mở cổng (`port=0`: cổng ngẫu nhiên) và chạy; trả cổng đã mở."""
         s = self.settings
-        token = s.gateway_token.get_secret_value() if s.gateway_token else ""
-        server = grpc.aio.server(
-            interceptors=[TokenInterceptor(token)] if token else None,
-            options=server_options(),
-        )
+        # Xác thực worker nằm trong từng RPC (`CrawlGateway._join` / `_authorize`): cần biết
+        # worker_id của request để gắn token với đúng worker. Health check không cần khoá.
+        server = grpc.aio.server(options=server_options())
         crawl_pb2_grpc.add_CrawlGatewayServicer_to_server(self.servicer, server)
         health_pb2_grpc.add_HealthServicer_to_server(self.health, server)
         address = _address(host or s.gateway_host, s.gateway_port if port is None else port)
@@ -446,7 +454,8 @@ class GatewayServer:
         for service in ("", SERVICE_NAME):
             await self.health.set(service, health_pb2.HealthCheckResponse.SERVING)
         self._pruner = asyncio.get_running_loop().create_task(self._prune_loop())
-        log.info("gateway.start", address=address, port=self.port, tls=tls, auth=bool(token))
+        auth = self.servicer.auth is not None and self.servicer.auth.enabled
+        log.info("gateway.start", address=address, port=self.port, tls=tls, auth=auth)
         return self.port
 
     async def _prune_loop(self) -> None:

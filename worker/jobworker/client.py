@@ -13,6 +13,10 @@
   min(30 s · 2^(n−1), 10 phút) với n là số lần lỗi liên tiếp, hết hạn thì Register lại với đủ slot
   render và thử lại; mở được thì n về 0. Máy chưa cài Chromium thì tắt hẳn. Trạng thái báo trong
   `WorkerStats.render_disabled_reason` / `render_retry_at_ms`.
+- File trạng thái cho healthcheck (WORKER_HEALTH_FILE, `jobworker health`): ghi sau mỗi lời gọi
+  gateway thành công / lỗi kết nối và ở mỗi nhịp heartbeat; xem `jobworker.health`.
+- Watchdog (WORKER_WATCHDOG_SECONDS): event loop hoặc vòng heartbeat đứng quá hạn → thoát mã 70 để
+  Docker chạy lại; mất gateway không tính, lúc dừng chỉ còn hạn tổng; xem `jobworker.watchdog`.
 """
 
 from __future__ import annotations
@@ -36,10 +40,13 @@ from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobworker import __version__
 from jobworker.browser import BrowserManager, BrowserUnavailableError
 from jobworker.config import WorkerSettings
+from jobworker.credentials import Credentials
 from jobworker.fetch import HttpFetcher
+from jobworker.health import HealthStatus
 from jobworker.logging import get_logger
 from jobworker.proxies import LocalProxyPool, Proxy, browser_compatible, load_proxies
 from jobworker.results import expired, failure, now_ms, task_timeout
+from jobworker.watchdog import Watchdog
 
 log = get_logger(__name__)
 
@@ -51,6 +58,7 @@ COMPLETE_FLUSH_SECONDS = 0.05
 COMPLETE_MAX_BYTES = 8 * 1024 * 1024
 COMPLETE_ATTEMPTS = 4
 RPC_TIMEOUT_SECONDS = 15.0
+LEAVE_TIMEOUT_SECONDS = 5.0
 LEASE_EXTRA_SECONDS = 15.0  # thêm vào wait_ms làm hạn của lời gọi Lease
 BACKOFF_BASE_SECONDS = 0.5
 BACKOFF_CAP_SECONDS = 30.0
@@ -97,12 +105,6 @@ def open_channel(settings: WorkerSettings) -> grpc.aio.Channel:
         creds = grpc.ssl_channel_credentials(root_certificates=root)
         return grpc.aio.secure_channel(settings.gateway_addr, creds, options=channel_options())
     return grpc.aio.insecure_channel(settings.gateway_addr, options=channel_options())
-
-
-def auth_metadata(settings: WorkerSettings) -> tuple[tuple[str, str], ...]:
-    if settings.gateway_token is None:
-        return ()
-    return (("authorization", f"Bearer {settings.gateway_token.get_secret_value()}"),)
 
 
 async def wait_any(timeout: float, *events: asyncio.Event) -> None:
@@ -161,8 +163,8 @@ class RuntimeConfig:
     @classmethod
     def local(cls, settings: WorkerSettings) -> RuntimeConfig:
         return cls(
-            http_slots=settings.worker_http_slots,
-            render_slots=settings.worker_render_slots,
+            http_slots=settings.http_slots,
+            render_slots=settings.render_slots,
             impersonate=settings.worker_impersonate,
             max_body_bytes=settings.worker_max_body_bytes,
             heartbeat_seconds=DEFAULT_HEARTBEAT_SECONDS,
@@ -233,6 +235,7 @@ class Worker:
         proxies: LocalProxyPool | None = None,
         http: HttpFetcher | None = None,
         browser: BrowserManager | None = None,
+        watchdog: Watchdog | None = None,
     ) -> None:
         self.settings = settings
         self.worker_id = settings.worker_id
@@ -270,10 +273,18 @@ class Worker:
         self._render_timer: asyncio.TimerHandle | None = None
         self._channel = channel or open_channel(settings)
         self._stub = crawl_pb2_grpc.CrawlGatewayStub(self._channel)
-        self._metadata = auth_metadata(settings)
+        self.credentials = Credentials(settings)
         self.counters = Counters()
         self._cpu = _CpuMeter()
         self._started_at_ms = now_ms()
+        self.health = HealthStatus(
+            settings.worker_health_file,
+            self.worker_id,
+            heartbeat_seconds=self.config.heartbeat_seconds,
+        )
+        if watchdog is None:
+            watchdog = Watchdog(settings.worker_watchdog_seconds)
+        self.watchdog = watchdog
 
         self._halt = asyncio.Event()  # thôi xin việc (dừng hoặc drain)
         self._closing = asyncio.Event()  # thôi báo sống (đã làm xong việc đang chạy)
@@ -301,6 +312,7 @@ class Worker:
         log.info("worker.stopping", reason=reason, inflight=len(self._tasks))
         self._halt.set()
         self._wake.set()
+        self.health.drain()
 
     def _begin_drain(self, source: str) -> None:
         if self._halt.is_set():
@@ -309,6 +321,7 @@ class Worker:
         self.draining = True
         self._halt.set()
         self._wake.set()
+        self.health.drain()
 
     async def _pause(self, seconds: float) -> None:
         """Ngủ `seconds` giây, dậy sớm khi dừng / drain."""
@@ -316,8 +329,9 @@ class Worker:
             await asyncio.wait_for(self._halt.wait(), timeout=seconds)
 
     def _call(self, method: Any, request: Any, *, timeout: float) -> Any:
-        """Gọi RPC kèm metadata xác thực; trả về call awaitable của grpc.aio."""
-        return method(request, timeout=timeout, metadata=self._metadata)
+        """Gọi RPC kèm metadata xác thực (token riêng, chưa có thì khoá tham gia); trả về call
+        awaitable của grpc.aio."""
+        return method(request, timeout=timeout, metadata=self.credentials.metadata())
 
     # --- vòng chính -------------------------------------------------------------------------
 
@@ -330,14 +344,21 @@ class Worker:
             http_slots=self.config.http_slots,
             render_slots=self.config.render_slots,
             local_proxies=len(self.proxies),
+            watchdog_seconds=self.watchdog.limit,
             version=__version__,
         )
+        self.health.write()  # `starting`: có file ngay cả khi gateway chưa lên
+        self.watchdog.start()
         completer = asyncio.create_task(self._complete_loop(), name="worker-complete")
         heartbeat = asyncio.create_task(self._heartbeat_loop(), name="worker-heartbeat")
         try:
             await self._lease_loop()
         finally:
-            await self._shutdown(completer, heartbeat)
+            try:
+                await self._shutdown(completer, heartbeat)
+            finally:
+                # Trước khi rời event loop: thread kiểm tra không được thấy loop "đứng" vì đã tắt.
+                await self.watchdog.stop()
 
     async def _lease_loop(self) -> None:
         backoff = Backoff()
@@ -354,6 +375,12 @@ class Worker:
                     self._need_register = True
                     await self._pause(backoff.next())
                 elif code in AUTH_CODES:
+                    # Token hết hạn / khoá sai: thử khoá kế tiếp ngay, hết khoá thì chờ rồi thử lại.
+                    self._need_register = True
+                    if self.credentials.reject():
+                        await self._pause(backoff.next())
+                        continue
+                    self.health.failed()
                     log.error(
                         "worker.unauthenticated",
                         code=code.name,
@@ -362,6 +389,7 @@ class Worker:
                     )
                     await self._pause(AUTH_RETRY_SECONDS)
                 else:
+                    self.health.failed()
                     delay = backoff.next()
                     log.warning(
                         "worker.gateway_unavailable",
@@ -372,6 +400,7 @@ class Worker:
                     await self._pause(delay)
             except Exception:
                 # Lỗi không lường trước: không để process chết, thử lại như mất kết nối.
+                self.health.failed()
                 delay = backoff.next()
                 log.exception("worker.lease_error", retry_in=round(delay, 2))
                 await self._pause(delay)
@@ -393,9 +422,12 @@ class Worker:
             crawl_pb2.RegisterRequest(info=info),
             timeout=RPC_TIMEOUT_SECONDS,
         )
+        if resp.worker_token:
+            self.credentials.accept(resp.worker_token)
         self._apply(resp.config)
         self._need_register = False
         self._registered_once = True
+        self.health.ok()
         log.info(
             "worker.registered",
             worker_id=self.worker_id,
@@ -409,6 +441,7 @@ class Worker:
         new = self.local.merge(cfg)
         old = self.config
         self.config = new
+        self.health.heartbeat_seconds = new.heartbeat_seconds
         if replace(old, version=new.version) != new:
             log.info(
                 "worker.config",
@@ -530,6 +563,7 @@ class Worker:
             await asyncio.gather(call, return_exceptions=True)
             return
         resp: crawl_pb2.LeaseResponse = call.result()
+        self.health.ok()
         if resp.tasks:
             log.debug("worker.lease", tasks=len(resp.tasks), http=free_http, render=free_render)
         for task in resp.tasks:
@@ -719,6 +753,7 @@ class Worker:
                     attempts=attempt + 1,
                 )
                 return
+            self.health.ok()
             log.debug(
                 "worker.complete", results=len(batch), accepted=resp.accepted, dropped=resp.dropped
             )
@@ -751,11 +786,17 @@ class Worker:
         while not self._closing.is_set():
             # Tính lại hạn mỗi lần dậy: gateway đổi `heartbeat_seconds` thì áp dụng ngay.
             remaining = last + self.config.heartbeat_seconds - loop.time()
+            # Watchdog: vòng chính còn quay. Lượt sau tới muộn nhất sau thời gian chờ tới nhịp kế
+            # cộng một lời gọi Heartbeat (có hạn RPC_TIMEOUT_SECONDS), kể cả lúc mất gateway.
+            self.watchdog.beat(max(0.0, remaining) + RPC_TIMEOUT_SECONDS)
             if remaining > 0:
                 self._config_changed.clear()
                 await wait_any(remaining, self._closing, self._config_changed)
                 continue
             last = loop.time()
+            # Mỗi nhịp ghi lại file trạng thái (kể cả lúc chưa đăng ký được): file còn mới nghĩa
+            # là event loop còn chạy; lời gọi bên dưới cập nhật trạng thái kết nối.
+            self.health.touch()
             if self._need_register:
                 continue
             try:
@@ -765,23 +806,37 @@ class Worker:
                     timeout=RPC_TIMEOUT_SECONDS,
                 )
             except grpc.aio.AioRpcError as exc:
-                if exc.code() in REREGISTER_CODES:
+                if exc.code() in REREGISTER_CODES or exc.code() in AUTH_CODES:
+                    # Gateway quên worker / token hết hạn: vòng xin việc Register lại.
                     log.info("worker.reregister", code=exc.code().name, details=exc.details())
                     self._need_register = True
                     self._wake.set()
                 else:
+                    self.health.failed()
                     log.debug("worker.heartbeat_failed", code=exc.code().name)
                 continue
             except Exception:
                 log.exception("worker.heartbeat_error")
                 continue
+            self.health.ok()
             if resp.drain:
                 self._begin_drain("heartbeat")
             self._check_version(resp.config_version)
 
     # --- dừng -------------------------------------------------------------------------------
 
+    def shutdown_budget(self) -> float:
+        """Giây dừng êm lâu nhất dự kiến: chờ việc đang chạy, gửi nốt kết quả, Leave."""
+        return (
+            self.settings.worker_shutdown_grace_seconds
+            + RPC_TIMEOUT_SECONDS * 2
+            + LEAVE_TIMEOUT_SECONDS
+        )
+
     async def _shutdown(self, completer: asyncio.Task[None], heartbeat: asyncio.Task[None]) -> None:
+        # Vòng heartbeat sắp dừng: watchdog thôi xét vòng chính, chỉ giữ hạn tổng cho việc dừng
+        # (dừng êm không bị giết, dừng treo vẫn thoát được).
+        self.watchdog.drain(self.shutdown_budget())
         if self._render_timer is not None:
             self._render_timer.cancel()
             self._render_timer = None
@@ -820,7 +875,7 @@ class Worker:
                 await self._call(
                     self._stub.Leave,
                     crawl_pb2.LeaveRequest(worker_id=self.worker_id),
-                    timeout=5.0,
+                    timeout=LEAVE_TIMEOUT_SECONDS,
                 )
                 log.info("worker.left", worker_id=self.worker_id)
             except grpc.aio.AioRpcError as exc:
@@ -829,6 +884,7 @@ class Worker:
         if self.browser is not None:
             await self.browser.close()
         await self._channel.close()
+        self.health.remove()
         log.info("worker.stopped", **asdict(self.counters))
 
 

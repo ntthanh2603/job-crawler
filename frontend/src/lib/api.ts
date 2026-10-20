@@ -18,7 +18,22 @@ export class ApiError extends Error {
   }
 }
 
+/** Đường dẫn trang đăng nhập, kèm trang muốn quay lại sau khi đăng nhập. */
+export function loginPath(next = `${window.location.pathname}${window.location.search}`): string {
+  return next && next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login"
+}
+
+/** 401 của đăng nhập bằng mật khẩu (`WWW-Authenticate: Bearer`; SSO thì không có): phiên hết hạn
+ * hoặc chưa đăng nhập → chuyển tới trang đăng nhập (tải lại hẳn để xoá dữ liệu đang giữ). */
+function redirectToLogin(res: Response): boolean {
+  if (res.status !== 401 || !res.headers.get("www-authenticate")?.toLowerCase().startsWith("bearer")) return false
+  if (window.location.pathname === "/login") return false
+  window.location.assign(loginPath())
+  return true
+}
+
 async function handle<T>(res: Response): Promise<T> {
+  if (redirectToLogin(res)) return new Promise<T>(() => undefined) // trang đang chuyển đi
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     let detail: unknown
@@ -74,7 +89,7 @@ export type RequestConfig = {
 
 /**
  * Client của mọi hàm / hook sinh từ spec (`mutator` trong orval.config.ts, như `orvalClient` của
- * open-asm): fetch cùng origin kèm cookie / đăng nhập Basic của trình duyệt; query bỏ giá trị rỗng
+ * open-asm): fetch cùng origin kèm cookie phiên đăng nhập (JWT httpOnly); query bỏ giá trị rỗng
  * như `qs`; body JSON, hoặc FormData để trình duyệt tự đặt `Content-Type` (boundary). Lỗi HTTP ném
  * `ApiError` (đọc `detail` của FastAPI).
  */

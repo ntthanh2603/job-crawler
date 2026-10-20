@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -14,6 +12,7 @@ from starlette.routing import Route
 
 from jobcrawler.config import Settings
 from jobcrawler.web.app import GuardMiddleware, create_app
+from jobcrawler.web.auth import TokenAuth
 from jobcrawler.web.markdown import to_html
 
 
@@ -28,23 +27,27 @@ def guarded(password: str | None) -> httpx.AsyncClient:
             Route("/healthz", whoami),
         ]
     )
-    wrapped = GuardMiddleware(app, username="admin", password=password)
+    auth = TokenAuth(username="admin", password=password or "", secret=b"k" * 32, hours=1)
+    wrapped = GuardMiddleware(
+        app, username="admin", token_auth=(lambda: auth) if password is not None else None
+    )
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=wrapped), base_url="http://ui.test")
 
 
-def basic(user: str, password: str) -> dict[str, str]:
-    token = base64.b64encode(f"{user}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
+def bearer(password: str) -> dict[str, str]:
+    token = TokenAuth(username="admin", password=password, secret=b"k" * 32, hours=1).issue().token
+    return {"Authorization": f"Bearer {token}"}
 
 
-async def test_basic_auth_when_password_set() -> None:
+async def test_jwt_required_when_password_set() -> None:
     async with guarded("bí mật") as client:
         r = await client.get("/x")
         assert r.status_code == 401
-        assert r.headers["www-authenticate"].startswith("Basic")
-        assert (await client.get("/x", headers=basic("admin", "sai"))).status_code == 401
-        assert (await client.get("/x", headers={"Authorization": "Basic !!!"})).status_code == 401
-        ok = await client.get("/x", headers=basic("admin", "bí mật"))
+        assert r.headers["www-authenticate"].startswith("Bearer")
+        # Token ký với mật khẩu khác (đã đổi trong .env): hết dùng.
+        assert (await client.get("/x", headers=bearer("sai"))).status_code == 401
+        assert (await client.get("/x", headers={"Authorization": "Bearer !!!"})).status_code == 401
+        ok = await client.get("/x", headers=bearer("bí mật"))
         assert (ok.status_code, ok.text) == (200, "admin")
         assert (await client.get("/healthz")).status_code == 200  # healthcheck không cần đăng nhập
 
@@ -80,12 +83,13 @@ def test_markdown_escapes_html_and_scripts() -> None:
 
 def api_client() -> httpx.AsyncClient:
     settings = Settings(_env_file=None, ui_password=SecretStr("x"))  # pyright: ignore[reportCallIssue]
-    # Không chạy lifespan: các route dưới đây không cần DB.
+    # Không chạy lifespan: các route dưới đây không cần DB; khoá ký JWT gắn tay như lifespan.
     app = create_app(settings)
+    app.state.token_auth = TokenAuth(username="admin", password="x", secret=b"k" * 32, hours=1)
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://ui.test",
-        headers=basic("admin", "x"),
+        headers=bearer("x"),
     )
 
 

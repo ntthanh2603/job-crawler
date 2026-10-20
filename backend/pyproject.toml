@@ -1,4 +1,4 @@
-# Service backend (gói jobcrawler), đứng riêng: API, gateway gRPC, runner, scheduler, migrate.
+# Service backend (gói jobcrawler), đứng riêng: API, gateway gRPC, runner, scheduler.
 # Lệnh chạy trong thư mục này: `uv sync`, `uv run jobcrawler ...`, `task --list` (xem README.md).
 # Hợp đồng gRPC dùng chung với worker ở ../proto (gói jobcrawler-proto, phụ thuộc qua đường dẫn).
 
@@ -13,6 +13,7 @@ dependencies = [
     "asyncpg>=0.32.0",
     # Lịch cron của hàng đợi Redis Streams (streamqueue.CronJob).
     "croniter>=6.2.4",
+    "cryptography>=50.0.2",
     "datasketch>=1.6",
     "extruct>=0.18.0",
     # API JSON (`jobcrawler api`; giao diện React là service riêng): FastAPI, uvicorn, upload,
@@ -30,6 +31,7 @@ dependencies = [
     "openai>=3.31.0",
     "pydantic>=2.14",
     "pydantic-settings>=2.16.0",
+    "pyjwt>=2.15.1",
     "python-multipart>=0.0.32",
     "rapidfuzz>=3.10",
     "redis>=7.4.1",

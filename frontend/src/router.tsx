@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from "react"
-import { createBrowserRouter, type RouteObject } from "react-router"
+import { createBrowserRouter, Navigate, type RouteObject } from "react-router"
 
 import { PageLoading } from "@/components/common"
 import { Layout } from "@/components/layout"
@@ -24,7 +24,7 @@ const pages = {
   queue: lazyPage(() => import("@/pages/queue"), "QueuePage"),
   workers: lazyPage(() => import("@/pages/workers"), "WorkersPage"),
   audit: lazyPage(() => import("@/pages/audit"), "AuditPage"),
-  settings: lazyPage(() => import("@/pages/settings"), "SettingsPage"),
+  login: lazyPage(() => import("@/pages/login"), "LoginPage"),
 }
 
 function page(Component: ComponentType) {
@@ -36,6 +36,8 @@ function page(Component: ComponentType) {
 }
 
 export const routes: RouteObject[] = [
+  // Trang đăng nhập nằm ngoài khung ứng dụng (không thanh bên).
+  { path: "login", element: page(pages.login), errorElement: <RootError /> },
   {
     element: <Layout />,
     // Khung ứng dụng hỏng: trang lỗi riêng giữa màn hình.
@@ -58,7 +60,8 @@ export const routes: RouteObject[] = [
           { path: "queue", element: page(pages.queue) },
           { path: "workers", element: page(pages.workers) },
           { path: "audit", element: page(pages.audit) },
-          { path: "settings", element: page(pages.settings) },
+          // Cài đặt là popup mở trên trang đang xem (`?settings`); đường dẫn cũ mở trên Tổng quan.
+          { path: "settings", element: <Navigate to="/?settings=" replace /> },
           { path: "*", element: <NotFound /> },
         ],
       },

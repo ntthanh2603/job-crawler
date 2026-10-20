@@ -185,10 +185,12 @@ class RegisterRequest(_message.Message):
     def __init__(self, info: _Optional[_Union[WorkerInfo, _Mapping]] = ...) -> None: ...
 
 class RegisterResponse(_message.Message):
-    __slots__ = ("config",)
+    __slots__ = ("config", "worker_token")
     CONFIG_FIELD_NUMBER: _ClassVar[int]
+    WORKER_TOKEN_FIELD_NUMBER: _ClassVar[int]
     config: WorkerConfig
-    def __init__(self, config: _Optional[_Union[WorkerConfig, _Mapping]] = ...) -> None: ...
+    worker_token: str
+    def __init__(self, config: _Optional[_Union[WorkerConfig, _Mapping]] = ..., worker_token: _Optional[str] = ...) -> None: ...
 
 class LeaseRequest(_message.Message):
     __slots__ = ("worker_id", "http_slots", "render_slots", "wait_ms")

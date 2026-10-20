@@ -159,6 +159,7 @@ class FakeWorker:
         self.render_slots = render_slots
         self.handler = handler
         self.metadata = (("authorization", f"Bearer {token}"),) if token else None
+        self.worker_token: str | None = None
         self._channel = _channel(port)
         self._complete_channel = _channel(complete_port) if complete_port else self._channel
         self.stub = crawl_pb2_grpc.CrawlGatewayStub(self._channel)
@@ -184,6 +185,9 @@ class FakeWorker:
             crawl_pb2.RegisterRequest(info=info), metadata=self.metadata
         )
         self.config = resp.config
+        if resp.worker_token:  # gateway bật xác thực: các lời gọi sau dùng token riêng
+            self.worker_token = resp.worker_token
+            self.metadata = (("authorization", f"Bearer {resp.worker_token}"),)
         return resp.config
 
     async def complete(self, *results: crawl_pb2.FetchResult) -> crawl_pb2.CompleteResponse:
@@ -660,11 +664,52 @@ async def test_token_auth(redis: Redis, prefix: str) -> None:
             await worker.__aexit__()
         async with FakeWorker(gw.port, token="s3cret", serve=False) as worker:
             assert worker.config is not None
+            # Vào bằng GATEWAY_TOKEN: nhận token riêng, các lời gọi sau dùng token đó.
+            assert worker.worker_token is not None
+            assert worker.worker_token.startswith("jcw_")
             assert not (await worker.lease(wait_ms=0)).drain
+            # GATEWAY_TOKEN không dùng được cho Lease (chỉ để vào).
+            worker.metadata = (("authorization", "Bearer s3cret"),)
+            with pytest.raises(grpc.aio.AioRpcError) as info:
+                await worker.lease(wait_ms=0)
+            assert info.value.code() == grpc.StatusCode.UNAUTHENTICATED
         async with _channel(gw.port) as channel:
             health_stub: Any = health_pb2_grpc.HealthStub(channel)
             check = await health_stub.Check(health_pb2.HealthCheckRequest(service=""))
     assert check.status == health_pb2.HealthCheckResponse.SERVING
+
+
+async def test_one_time_join_key_and_token_binding(redis: Redis, prefix: str) -> None:
+    settings = make_settings(prefix, gateway_token="s3cret")
+    async with gateway(redis, settings) as gw:
+        auth = gw.servicer.auth
+        assert auth is not None
+        join = await auth.create_join_key(created_by="admin")
+        assert await auth.join_key_status(join.id) == ("pending", None)
+        async with FakeWorker(gw.port, token=join.key, serve=False) as worker:
+            assert worker.worker_token is not None
+            assert await auth.join_key_status(join.id) == ("used", worker.worker_id)
+            token = worker.worker_token
+            # Khoá tham gia chỉ dùng một lần.
+            again = FakeWorker(gw.port, token=join.key)
+            with pytest.raises(grpc.aio.AioRpcError) as info:
+                await again.register()
+            assert info.value.code() == grpc.StatusCode.UNAUTHENTICATED
+            await again.__aexit__()
+            # Token gắn với worker này: worker khác dùng thì bị từ chối.
+            other = FakeWorker(gw.port, token=token, serve=False)
+            other.metadata = (("authorization", f"Bearer {token}"),)
+            with pytest.raises(grpc.aio.AioRpcError) as info:
+                await other.lease(wait_ms=0)
+            assert info.value.code() == grpc.StatusCode.PERMISSION_DENIED
+            await other.__aexit__()
+        # Redis chỉ giữ băm của khoá / token.
+        keys = [k.decode() async for k in redis.scan_iter(match=f"{prefix}:gw:*")]
+        assert not any(join.key in k or token in k for k in keys)
+        # Huỷ khoá chưa dùng.
+        spare = await auth.create_join_key(created_by="admin")
+        assert await auth.revoke_join_key(spare.id)
+        assert await auth.join_key_status(spare.id) == ("expired", None)
 
 
 # --- việc worker đang giữ, hàng ưu tiên, thời gian chờ -------------------------------------------

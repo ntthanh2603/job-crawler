@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, Cpu, Globe2, MonitorPlay, Pause, Play } from "lucide-react"
-import type { ReactNode } from "react"
+import { CheckCircle2, Cpu, Globe2, MonitorPlay, Pause, Play, Plus } from "lucide-react"
+import { useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import {
@@ -16,6 +16,8 @@ import {
   StatusBadge,
   Tag,
 } from "@/components/common"
+import { JoinKeyDialog } from "@/components/join-key-dialog"
+import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { drainWorker, getGetWorkersQueryKey, undrainWorker, useGetWorkers } from "@/lib/gen/queries"
@@ -329,6 +331,7 @@ export function WorkersPage() {
     },
   })
 
+  const [joining, setJoining] = useState(false)
   const d = query.data
   const s = d?.summary
   const pools = d ? [...new Set(d.workers.map((w) => w.pool))] : []
@@ -337,7 +340,23 @@ export function WorkersPage() {
       <PageHeader
         title="Workers lấy trang"
         description="Các máy lấy trang (HTTP và trình duyệt) đang kết nối với backend. Tự làm mới mỗi 5 giây."
-      />
+        actions={
+          d?.auth_enabled && (
+            <Button onClick={() => setJoining(true)}>
+              <Plus /> Thêm worker
+            </Button>
+          )
+        }
+      >
+        {d && (
+          <StatusBadge
+            value={null}
+            tone={d.auth_enabled ? "good" : "warn"}
+            text={d.auth_enabled ? "Worker cần khoá để nối vào" : "Gateway không hỏi khoá: worker nào cũng nối vào được"}
+          />
+        )}
+      </PageHeader>
+      <JoinKeyDialog open={joining} onOpenChange={setJoining} />
       {query.isError && !d && <ErrorState error={query.error} onRetry={() => query.refetch()} />}
       {query.isLoading && <PageLoading />}
       {d && s && (
