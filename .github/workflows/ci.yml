@@ -1,16 +1,21 @@
 name: CI
 
-# Commit thẳng lên main (không có nhánh / PR): chạy mỗi lần push main, hoặc bấm tay.
+# Pull request: chỉ kiểm tra — format, lint, typecheck, mã sinh (proto, OpenAPI), test, build thử ba
+# image (không đẩy). Push lên main (merge PR hoặc commit thẳng) và tag vX.Y.Z (`task release`): kiểm
+# tra như trên rồi build và đẩy ba image lên GHCR (ghcr.io/<owner>/jobcrawler-{backend,worker,frontend}).
 # Mỗi service một job, chạy trong thư mục của nó với lockfile / công cụ riêng (như `task <svc>:check`).
+# Test E2E trên stack compose chạy ở máy (`task frontend:e2e`), không chạy ở CI.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
-# Push mới huỷ lượt đang chạy của commit cũ hơn trên cùng nhánh.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR: lượt mới huỷ lượt cũ. main và tag: không huỷ (commit nào cũng cần image).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -44,6 +49,43 @@ jobs:
       - name: Mã sinh khớp crawl.proto
         run: uv run python scripts/gen.py --check
       - run: uv run pytest -q
+
+  proto-breaking:
+    name: proto (buf lint, breaking so với commit trước)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # Cần commit mốc trong .git cục bộ (buf so sánh với nó, không cần mạng / token).
+          fetch-depth: 0
+      # Mốc so sánh: PR → commit gốc của nhánh đích; push → commit ngay trước lượt push. Không có
+      # (bấm tay, tag mới) thì commit cha của HEAD.
+      - name: Mốc so sánh
+        id: base
+        env:
+          BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+              && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "sha=$BEFORE" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git rev-parse HEAD~1)" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: bufbuild/buf-action@v1
+        with:
+          # Cùng bản với lệnh docker trong proto/buf.yaml.
+          version: 1.73.0
+          input: proto
+          lint: true
+          format: false
+          breaking: true
+          breaking_against: .git#ref=${{ steps.base.outputs.sha }},subdir=proto
+          # Không có Buf Schema Registry: không push / archive module.
+          push: false
+          archive: false
+          pr_comment: false
 
   backend:
     name: backend (ruff, pyright, OpenAPI, pytest + Postgres/Redis)
@@ -150,10 +192,18 @@ jobs:
       - run: npm run test:run
       - run: npm run build
 
-  docker:
+
+  images:
     name: image ${{ matrix.image }}
+    # Chỉ build / đẩy image khi mọi kiểm tra đã xanh.
+    needs: [proto, proto-breaking, backend, worker, frontend]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      # Tải SARIF của Trivy lên Code scanning.
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -163,24 +213,110 @@ jobs:
           - image: backend
             context: backend
             contexts: proto=proto
+            description: jobcrawler backend (API, gateway gRPC, scheduler, runner in one container)
           - image: worker
             context: worker
             contexts: proto=proto
-          - image: web
+            description: jobcrawler fetch worker (curl_cffi + Chromium)
+          - image: frontend
             context: frontend
             contexts: ""
+            description: jobcrawler web UI (nginx, proxies /api to the backend)
+    env:
+      # Đẩy lên GHCR khi push main hoặc tag vX.Y.Z; PR / bấm tay trên nhánh khác: chỉ build thử.
+      PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # Tên image trên GHCR phải viết thường.
+      - name: Tên image
+        id: name
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE: ${{ matrix.image }}
+        run: echo "ref=ghcr.io/${OWNER,,}/jobcrawler-${IMAGE}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v4
-      # Chỉ build để bắt lỗi Dockerfile / lockfile; không đẩy image đi đâu.
-      - name: Build
+
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main → `main` + `sha-<7 ký tự>`; tag v1.4.0 → `1.4.0`, `1.4`, `latest`.
+      - name: Tag và nhãn OCI
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.name.outputs.ref }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+          labels: |
+            org.opencontainers.image.title=jobcrawler-${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+
+      - name: Build${{ env.PUBLISH == 'true' && ' + push' || '' }}
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           build-contexts: ${{ matrix.contexts }}
-          push: false
-          tags: jobcrawler-${{ matrix.image }}:ci
+          platforms: linux/amd64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      # Quét image vừa đẩy: lỗ hổng CRITICAL/HIGH đã có bản vá → tab Security (SARIF) và job đỏ.
+      # trivy-action ghim theo commit (v0.36.0): các tag cũ của action từng bị chiếm (03/2026).
+      - name: Trivy (SARIF)
+        if: env.PUBLISH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.name.outputs.ref }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: "0"
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      # Repo riêng tư cần GitHub Advanced Security (Code scanning) để nhận SARIF; không có thì bước
+      # này lỗi nhưng bước quét dạng bảng bên dưới vẫn chạy và in kết quả vào log.
+      - name: Tải kết quả lên Code scanning
+        if: always() && env.PUBLISH == 'true'
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+      - name: Trivy (chặn khi có lỗ hổng đã có bản vá)
+        if: env.PUBLISH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.name.outputs.ref }}@${{ steps.build.outputs.digest }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          # Bước trên đã cài Trivy và tải DB lỗ hổng.
+          skip-setup-trivy: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          TRIVY_SKIP_DB_UPDATE: "true"
