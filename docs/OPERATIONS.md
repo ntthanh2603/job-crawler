@@ -26,13 +26,13 @@ task down
 
 ## 2. Lịch thu thập
 
-| Khi nào                           | Việc                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------- |
-| Doanh nghiệp mới (thêm tay / nạp CSV) | build ngay, bất kể giờ                                                      |
-| Đêm `BUILD_WINDOW` 00:00–06:00    | build mỗi doanh nghiệp một lần: đọc đủ site, dựng lại bộ khung, đóng việc đã gỡ |
-| Ngày `POLL_WINDOW` 06:00–24:00    | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới                       |
-| Poll lỗi (bộ khung hỏng)          | build lại ngay; vẫn hỏng thì thử lại sau 2 giờ                                  |
-| Trang tuyển dụng có tin mới       | poll ngay doanh nghiệp có profile đó                                            |
+| Khi nào                               | Việc                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------- |
+| Doanh nghiệp mới (thêm tay / nạp CSV) | build ngay, bất kể giờ                                                          |
+| Đêm `BUILD_WINDOW` 00:00–06:00        | build mỗi doanh nghiệp một lần: đọc đủ site, dựng lại bộ khung, đóng việc đã gỡ |
+| Ngày `POLL_WINDOW` 06:00–24:00        | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới                       |
+| Poll lỗi (bộ khung hỏng)              | build lại ngay; vẫn hỏng thì thử lại sau 2 giờ                                  |
+| Trang tuyển dụng có tin mới           | poll ngay doanh nghiệp có profile đó                                            |
 
 Khung giờ theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh). Đổi khung / chu kỳ có hiệu lực trong vài giây.
 
@@ -56,12 +56,12 @@ Trang **Tổng quan** → "Độ trễ phát hiện tin mới":
   lượt poll đầu lúc 06:00. Muốn ≤ 3 phút cả đêm: đặt `POLL_WINDOW` 00:00–24:00 và thêm năng lực cho
   cả poll lẫn build ban đêm (DEPLOY.md).
 
-| Dấu hiệu                                      | Nguyên nhân thường gặp                  | Làm gì                                       |
-| --------------------------------------------- | --------------------------------------- | -------------------------------------------- |
-| Hàng đợi poll có việc **chờ**                 | thiếu slot runner poll                  | tăng `RUNNER_POLL_CONCURRENCY` / thêm runner |
-| Trang Workers: slot HTTP đang dùng sát tổng   | thiếu worker                            | thêm worker                                  |
-| P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng | proxy chậm / bị chặn     | đổi proxy, thêm proxy                        |
-| P95 > 180 s mà hàng đợi rỗng                  | lượt poll dài (rate limit 1 req/s / domain × nhiều trang) | giảm `PLAN_MAX_PAGES` hoặc `POLL_INTERVAL_SECONDS` (vd. 120) |
+| Dấu hiệu                                                     | Nguyên nhân thường gặp                                    | Làm gì                                                       |
+| ------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------ |
+| Hàng đợi poll có việc **chờ**                                | thiếu slot runner poll                                    | tăng `RUNNER_POLL_CONCURRENCY` / thêm runner                 |
+| Trang Workers: slot HTTP đang dùng sát tổng                  | thiếu worker                                              | thêm worker                                                  |
+| P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng | proxy chậm / bị chặn                                      | đổi proxy, thêm proxy                                        |
+| P95 > 180 s mà hàng đợi rỗng                                 | lượt poll dài (rate limit 1 req/s / domain × nhiều trang) | giảm `PLAN_MAX_PAGES` hoặc `POLL_INTERVAL_SECONDS` (vd. 120) |
 
 Đo đầu-cuối trên site giả (không phụ thuộc site thật):
 
@@ -134,7 +134,7 @@ Trang Cài đặt → **Proxy**.
 ## 8. Sức khoẻ, log, bảo trì
 
 - Healthcheck: `backend` gộp `/healthz`, `jobcrawler gateway-health`, `jobcrawler health scheduler
-  runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway quá 5 phút mới hỏng).
+runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway quá 5 phút mới hỏng).
   Docker chỉ đánh dấu unhealthy; process treo thì watchdog cho nó thoát (mã 70) và
   `restart: unless-stopped` dựng lại.
 - Log: `docker compose logs <service>` (xoay 10 MB × 3); `LOG_FORMAT=json` cho máy đọc. Bảng `logs` giữ
@@ -168,7 +168,7 @@ Trang Cài đặt → **Proxy**.
   ```
 
   Khôi phục: `docker compose stop backend worker`, chép file vào container, `pg_restore --clean
-  --if-exists -U jobcrawler -d jobcrawler /tmp/jobcrawler.dump`, `docker compose up -d`. Production dùng
+--if-exists -U jobcrawler -d jobcrawler /tmp/jobcrawler.dump`, `docker compose up -d`. Production dùng
   Postgres quản lý (snapshot + PITR).
 
 ## 10. Sự cố hay gặp
