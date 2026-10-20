@@ -711,6 +711,99 @@
         "title": "CompanyCrawlOut",
         "type": "object"
       },
+      "CompanyCreateIn": {
+        "properties": {
+          "enqueue": {
+            "default": false,
+            "description": "Đưa vào hàng đợi build ngay.",
+            "title": "Enqueue",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Tên doanh nghiệp (như cột `name` của CSV).",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CompanyCreateIn",
+        "type": "object"
+      },
+      "CompanyCreatedOut": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "queued": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "created",
+          "warnings",
+          "queued"
+        ],
+        "title": "CompanyCreatedOut",
+        "type": "object"
+      },
       "CompanyDetailOut": {
         "properties": {
           "active_jobs": {
@@ -2075,6 +2168,70 @@
         "title": "JobsDayOut",
         "type": "object"
       },
+      "JoinKeyOut": {
+        "description": "Khoá tham gia dùng một lần cho một máy worker mới (chỉ trả `key` lúc tạo).",
+        "properties": {
+          "expires_at_ms": {
+            "title": "Expires At Ms",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "expires_at_ms",
+          "ttl_seconds"
+        ],
+        "title": "JoinKeyOut",
+        "type": "object"
+      },
+      "JoinKeyStatusOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "used",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "worker_id"
+        ],
+        "title": "JoinKeyStatusOut",
+        "type": "object"
+      },
       "KycStatus": {
         "enum": [
           "verified",
@@ -2146,11 +2303,90 @@
         "title": "LogOut",
         "type": "object"
       },
+      "LoginIn": {
+        "properties": {
+          "password": {
+            "maxLength": 1000,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 200,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginIn",
+        "type": "object"
+      },
+      "LoginOut": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "access_token",
+          "token_type",
+          "expires_at"
+        ],
+        "title": "LoginOut",
+        "type": "object"
+      },
+      "LogoutOut": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "LogoutOut",
+        "type": "object"
+      },
       "MeOut": {
         "properties": {
           "auth": {
+            "enum": [
+              "proxy",
+              "jwt",
+              "none"
+            ],
             "title": "Auth",
-            "type": "boolean"
+            "type": "string"
+          },
+          "logout_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logout Url"
           },
           "user": {
             "anyOf": [
@@ -2166,7 +2402,8 @@
         },
         "required": [
           "user",
-          "auth"
+          "auth",
+          "logout_url"
         ],
         "title": "MeOut",
         "type": "object"
@@ -3028,6 +3265,260 @@
         "title": "ProfileOut",
         "type": "object"
       },
+      "ProxiesOut": {
+        "properties": {
+          "check_url": {
+            "title": "Check Url",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProxyStatusOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "worker",
+              "central",
+              "off"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "check_url",
+          "items"
+        ],
+        "title": "ProxiesOut",
+        "type": "object"
+      },
+      "ProxyCheckIn": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "ProxyCheckIn",
+        "type": "object"
+      },
+      "ProxyCheckOut": {
+        "description": "Kết quả gọi thử qua một proxy (`services.health.ProxyCheck`).",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "exit_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Ip"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "proxy": {
+            "title": "Proxy",
+            "type": "string"
+          },
+          "proxy_id": {
+            "title": "Proxy Id",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "proxy_id",
+          "proxy",
+          "ok",
+          "status",
+          "latency_ms",
+          "exit_ip",
+          "location",
+          "error"
+        ],
+        "title": "ProxyCheckOut",
+        "type": "object"
+      },
+      "ProxyChecksOut": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ProxyCheckOut"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "ProxyChecksOut",
+        "type": "object"
+      },
+      "ProxyStatusOut": {
+        "description": "Một proxy chung và trạng thái xoay vòng của nó (`services.proxies.ProxyStatus`).",
+        "properties": {
+          "cooling_domains": {
+            "title": "Cooling Domains",
+            "type": "integer"
+          },
+          "dead": {
+            "title": "Dead",
+            "type": "boolean"
+          },
+          "dead_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dead Reason"
+          },
+          "dead_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dead Seconds"
+          },
+          "fails": {
+            "title": "Fails",
+            "type": "integer"
+          },
+          "has_password": {
+            "title": "Has Password",
+            "type": "boolean"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "sticky_domains": {
+            "title": "Sticky Domains",
+            "type": "integer"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "id",
+          "line",
+          "source",
+          "scheme",
+          "host",
+          "port",
+          "username",
+          "has_password",
+          "score",
+          "fails",
+          "dead",
+          "dead_reason",
+          "dead_seconds",
+          "cooling_domains",
+          "sticky_domains"
+        ],
+        "title": "ProxyStatusOut",
+        "type": "object"
+      },
       "QueueJobOut": {
         "properties": {
           "attempts": {
@@ -3146,6 +3637,10 @@
             "title": "Active",
             "type": "integer"
           },
+          "capacity": {
+            "title": "Capacity",
+            "type": "integer"
+          },
           "complete": {
             "title": "Complete",
             "type": "integer"
@@ -3211,6 +3706,7 @@
           "active",
           "scheduled",
           "workers",
+          "capacity",
           "complete",
           "failed",
           "retried",
@@ -3248,6 +3744,10 @@
           },
           "active": {
             "title": "Active",
+            "type": "integer"
+          },
+          "capacity": {
+            "title": "Capacity",
             "type": "integer"
           },
           "complete": {
@@ -3296,6 +3796,7 @@
           "active",
           "scheduled",
           "workers",
+          "capacity",
           "complete",
           "failed",
           "retried",
@@ -4354,6 +4855,17 @@
       },
       "SettingItemOut": {
         "properties": {
+          "auto_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Value"
+          },
           "default": {
             "$ref": "#/components/schemas/SettingValue"
           },
@@ -4526,7 +5038,8 @@
           "source",
           "secret",
           "is_set",
-          "env_is_set"
+          "env_is_set",
+          "auto_value"
         ],
         "title": "SettingItemOut",
         "type": "object"
@@ -4623,14 +5136,50 @@
           }
         ]
       },
-      "SettingsPageOut": {
+      "SettingsImportedOut": {
         "properties": {
+          "auto_restart": {
+            "title": "Auto Restart",
+            "type": "boolean"
+          },
+          "env_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Keys",
+            "type": "array"
+          },
           "groups": {
             "items": {
               "$ref": "#/components/schemas/SettingGroupOut"
             },
             "title": "Groups",
             "type": "array"
+          },
+          "imported": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Imported",
+            "type": "array"
+          },
+          "restart_pending": {
+            "title": "Restart Pending",
+            "type": "boolean"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restart Required",
+            "type": "array"
+          },
+          "skipped": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "object"
           },
           "version": {
             "title": "Version",
@@ -4639,19 +5188,79 @@
         },
         "required": [
           "version",
-          "groups"
+          "groups",
+          "env_keys",
+          "auto_restart",
+          "restart_pending",
+          "restart_required",
+          "imported",
+          "skipped"
         ],
-        "title": "SettingsPageOut",
+        "title": "SettingsImportedOut",
         "type": "object"
       },
-      "SettingsSavedOut": {
+      "SettingsPageOut": {
         "properties": {
+          "auto_restart": {
+            "title": "Auto Restart",
+            "type": "boolean"
+          },
+          "env_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Keys",
+            "type": "array"
+          },
           "groups": {
             "items": {
               "$ref": "#/components/schemas/SettingGroupOut"
             },
             "title": "Groups",
             "type": "array"
+          },
+          "restart_pending": {
+            "title": "Restart Pending",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "groups",
+          "env_keys",
+          "auto_restart",
+          "restart_pending"
+        ],
+        "title": "SettingsPageOut",
+        "type": "object"
+      },
+      "SettingsSavedOut": {
+        "properties": {
+          "auto_restart": {
+            "title": "Auto Restart",
+            "type": "boolean"
+          },
+          "env_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Env Keys",
+            "type": "array"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SettingGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "restart_pending": {
+            "title": "Restart Pending",
+            "type": "boolean"
           },
           "restart_required": {
             "items": {
@@ -4668,6 +5277,9 @@
         "required": [
           "version",
           "groups",
+          "env_keys",
+          "auto_restart",
+          "restart_pending",
           "restart_required"
         ],
         "title": "SettingsSavedOut",
@@ -5362,6 +5974,10 @@
       },
       "WorkersPageOut": {
         "properties": {
+          "auth_enabled": {
+            "title": "Auth Enabled",
+            "type": "boolean"
+          },
           "now_ms": {
             "title": "Now Ms",
             "type": "integer"
@@ -5380,7 +5996,8 @@
         "required": [
           "workers",
           "summary",
-          "now_ms"
+          "now_ms",
+          "auth_enabled"
         ],
         "title": "WorkersPageOut",
         "type": "object"
@@ -5610,6 +6227,70 @@
         ]
       }
     },
+    "/api/auth/login": {
+      "post": {
+        "description": "Đăng nhập bằng UI_USERNAME / UI_PASSWORD: trả JWT và đặt cookie httpOnly `jc_token`. Sai\n20 lần trong 5 phút từ một IP thì 429 tới khi hết 5 phút (kể cả khi nhập đúng).",
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Đăng xuất: thu hồi token đang dùng (tới khi nó hết hạn) và xoá cookie.",
+        "operationId": "logout",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "api"
+        ]
+      }
+    },
     "/api/boards": {
       "get": {
         "operationId": "get_boards",
@@ -5815,6 +6496,46 @@
         "tags": [
           "api"
         ]
+      },
+      "post": {
+        "description": "Thêm một doanh nghiệp bằng tay. Đã có (cùng MST, hoặc cùng tên không mâu thuẫn MST /\nwebsite) thì không tạo trùng, chỉ bổ sung trường còn trống như nạp CSV.",
+        "operationId": "post_company",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Company",
+        "tags": [
+          "api"
+        ]
       }
     },
     "/api/companies/import": {
@@ -5853,6 +6574,26 @@
           }
         },
         "summary": "Post Import",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/companies/import/sample.csv": {
+      "get": {
+        "description": "File CSV mẫu để tải về: 50 doanh nghiệp lớn của Việt Nam, đúng định dạng nạp danh sách.",
+        "operationId": "get_import_sample",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Import Sample",
         "tags": [
           "api"
         ]
@@ -7022,6 +7763,70 @@
         ]
       }
     },
+    "/api/proxies": {
+      "get": {
+        "description": "Danh sách proxy chung (cài đặt `proxies` rồi PROXIES_FILE) kèm trạng thái xoay vòng.",
+        "operationId": "get_proxies",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProxiesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Proxies",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/proxies/check": {
+      "post": {
+        "description": "Gọi trang kiểm tra qua từng proxy trong `ids` (tối đa 20 mỗi lần) từ worker. Proxy sống\nđược đưa lại vào vòng xoay, proxy lỗi bị loại. Không có worker thì báo lỗi, không loại proxy.",
+        "operationId": "check_proxies",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProxyCheckIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProxyChecksOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Proxies",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/queue": {
       "get": {
         "description": "Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang\nchạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang\nQUEUE_PAGE job).",
@@ -7369,6 +8174,28 @@
         ]
       }
     },
+    "/api/settings/import-env": {
+      "post": {
+        "description": "Chép các cài đặt đang lấy từ biến môi trường / .env của backend (`env_keys`) vào DB để quản\nlý ở trang này; giá trị đang dùng không đổi. Giá trị không hợp lệ ở giao diện thì bỏ qua.",
+        "operationId": "import_env_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsImportedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Import Env Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/{key}": {
       "delete": {
         "description": "Bỏ giá trị đặt ở giao diện, về giá trị biến môi trường / mặc định.",
@@ -7484,6 +8311,112 @@
           }
         },
         "summary": "Get Workers",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/workers/join-keys": {
+      "post": {
+        "description": "Tạo khoá tham gia dùng một lần (hết hạn sau 5 phút) cho máy worker mới. Chỉ khi gateway\nbật xác thực; khoá chỉ trả một lần, trên máy chủ chỉ giữ dạng băm.",
+        "operationId": "create_join_key",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Join Key",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/workers/join-keys/{join_id}": {
+      "delete": {
+        "description": "Huỷ khoá tham gia chưa dùng (đóng hộp thoại, tạo khoá mới).",
+        "operationId": "revoke_join_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "join_id",
+            "required": true,
+            "schema": {
+              "title": "Join Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinKeyStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Join Key",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "description": "Khoá tham gia còn chờ, đã được worker dùng, hay hết hạn / đã huỷ.",
+        "operationId": "get_join_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "join_id",
+            "required": true,
+            "schema": {
+              "title": "Join Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinKeyStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Join Key",
         "tags": [
           "settings"
         ]

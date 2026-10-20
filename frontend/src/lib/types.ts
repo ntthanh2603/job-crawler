@@ -110,6 +110,11 @@ export type SettingsPage = S.SettingsPageOut
 
 export type SettingsSaved = S.SettingsSavedOut
 
+/** Proxy chung kèm trạng thái xoay vòng (`line` = dòng đã che mật khẩu của cài đặt `proxies`). */
+export type ProxyStatus = S.ProxyStatusOut
+
+export type ProxyCheck = S.ProxyCheckOut
+
 // --- trang Workers -----------------------------------------------------------------------------------
 
 /** `render_disabled_reason`: render tạm tắt vì lỗi Chromium (rỗng = render được), thử lại lúc

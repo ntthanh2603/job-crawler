@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Building2, Play, Upload, X } from "lucide-react"
+import { Building2, Download, Play, Plus, Upload, X } from "lucide-react"
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -30,9 +31,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
+import { errorMessage } from "@/lib/api"
 import { ago, cap, companyName, displayName, duration, num } from "@/lib/format"
 import {
   getGetCompaniesQueryKey,
@@ -40,6 +44,7 @@ import {
   postEnqueue,
   useGetCompanies,
   useGetMeta,
+  usePostCompany,
   usePostImport,
 } from "@/lib/gen/queries"
 import type { CompanyItem, EnqueueResult } from "@/lib/types"
@@ -48,6 +53,11 @@ import { cn } from "@/lib/utils"
 
 /** Bộ lọc trên URL (mặc định: không lọc). */
 const FILTERS = { q: "", kyc: "", run: "", jobs: "" }
+
+/** File CSV mẫu (50 doanh nghiệp lớn của Việt Nam), đúng định dạng nạp danh sách. */
+const SAMPLE_CSV_URL = "/api/companies/import/sample.csv"
+
+const EMPTY_COMPANY = { name: "", tax_code: "", website: "", note: "" }
 
 function enqueueMessage(r: EnqueueResult) {
   return `Đã đưa ${num(r.enqueued)}/${num(r.selected)} doanh nghiệp vào hàng đợi${
@@ -123,6 +133,121 @@ function RunDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
             onClick={() => enqueue.mutate(mode === "all" ? { all: true } : { stale_hours: Number(hours) || 24 })}
           >
             <Play /> {enqueue.isPending ? "Đang đưa vào hàng đợi…" : "Đưa vào hàng đợi"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Hộp thoại thêm một doanh nghiệp bằng tay (như một dòng của companies.csv); lỗi hiện trong hộp thoại. */
+function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const client = useQueryClient()
+  const navigate = useNavigate()
+  const [form, setForm] = useState(EMPTY_COMPANY)
+  const [enqueue, setEnqueue] = useState(false)
+  const set = (key: keyof typeof EMPTY_COMPANY) => (e: { target: { value: string } }) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }))
+  const mutation = usePostCompany({
+    mutation: {
+      onError: () => {}, // hiện dưới các ô thay cho toast chung
+      onSuccess: (r, { data }) => {
+        const name = data.name.trim()
+        const view = { label: "Xem", onClick: () => navigate(`/companies/${r.id}`) }
+        if (r.created) toast.success(`Đã thêm ${name}${r.queued ? " và đưa vào hàng đợi" : ""}`, { action: view })
+        else toast.info(`${name} đã có trong danh sách: đã bổ sung thông tin còn trống`, { action: view })
+        for (const w of r.warnings) toast.warning(cap(w))
+        client.invalidateQueries({ queryKey: getGetCompaniesQueryKey() })
+        if (r.queued) client.invalidateQueries({ queryKey: getGetQueueQueryKey() })
+        close()
+      },
+    },
+  })
+  const close = () => {
+    onOpenChange(false)
+    setForm(EMPTY_COMPANY)
+    setEnqueue(false)
+    mutation.reset()
+  }
+  const name = form.name.trim()
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Thêm doanh nghiệp</DialogTitle>
+          <DialogDescription>
+            Đã có doanh nghiệp cùng mã số thuế, hoặc cùng tên mà không khác mã số thuế / website, thì không tạo trùng mà chỉ
+            bổ sung thông tin còn trống.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          id="create-form"
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (name && !mutation.isPending) mutation.mutate({ data: { ...form, name, enqueue } })
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="company-name">Tên doanh nghiệp</Label>
+            <Input
+              id="company-name"
+              value={form.name}
+              onChange={set("name")}
+              autoFocus
+              required
+              autoComplete="off"
+              placeholder="Công ty Cổ phần ABC"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="company-tax">Mã số thuế</Label>
+              <Input
+                id="company-tax"
+                value={form.tax_code}
+                onChange={set("tax_code")}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="0101234567"
+                className="tabular-nums"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="company-website">Website</Label>
+              <Input
+                id="company-website"
+                value={form.website}
+                onChange={set("website")}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="abc.vn"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="company-note">Ghi chú</Label>
+            <Textarea id="company-note" value={form.note} onChange={set("note")} rows={2} />
+          </div>
+          <div className="flex items-center gap-2.5">
+            <Checkbox id="create-enqueue" checked={enqueue} onCheckedChange={(v) => setEnqueue(v === true)} />
+            <Label htmlFor="create-enqueue" className="font-normal">
+              Đưa vào hàng đợi ngay sau khi thêm
+            </Label>
+          </div>
+          {mutation.error && (
+            <p role="alert" className="text-meta font-medium text-danger-ink">
+              {errorMessage(mutation.error)}
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button variant="outline" onClick={close}>
+            Huỷ
+          </Button>
+          <Button type="submit" form="create-form" disabled={!name || mutation.isPending}>
+            <Plus /> {mutation.isPending ? "Đang thêm…" : "Thêm doanh nghiệp"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -230,13 +355,20 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
             )}
           </div>
         )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {r ? "Đóng" : "Huỷ"}
+        <DialogFooter className="sm:justify-between">
+          <Button variant="ghost" asChild>
+            <a href={SAMPLE_CSV_URL} download title="50 doanh nghiệp lớn của Việt Nam (tên + website), đúng định dạng để nạp">
+              <Download /> Tải CSV mẫu
+            </a>
           </Button>
-          <Button type="submit" form="import-form" disabled={!file || mutation.isPending}>
-            <Upload /> {mutation.isPending ? "Đang nạp…" : "Nạp danh sách"}
-          </Button>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              {r ? "Đóng" : "Huỷ"}
+            </Button>
+            <Button type="submit" form="import-form" disabled={!file || mutation.isPending}>
+              <Upload /> {mutation.isPending ? "Đang nạp…" : "Nạp danh sách"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -292,6 +424,7 @@ export function CompaniesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [runOpen, setRunOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const rowLink = useRowLink()
 
   const meta = useGetMeta({ query: { staleTime: 300_000 } })
@@ -329,6 +462,9 @@ export function CompaniesPage() {
         }
         actions={
           <>
+            <Button variant="outline" onClick={() => setCreateOpen(true)}>
+              <Plus /> Thêm doanh nghiệp
+            </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               <Upload /> Nạp danh sách
             </Button>
@@ -339,6 +475,7 @@ export function CompaniesPage() {
         }
       />
       <RunDialog open={runOpen} onOpenChange={setRunOpen} />
+      <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
 
       <Section bodyClassName="p-0">
@@ -488,9 +625,14 @@ export function CompaniesPage() {
                     Xoá bộ lọc
                   </Button>
                 ) : (
-                  <Button size="sm" onClick={() => setImportOpen(true)}>
-                    <Upload /> Nạp danh sách
-                  </Button>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)}>
+                      <Plus /> Thêm doanh nghiệp
+                    </Button>
+                    <Button size="sm" onClick={() => setImportOpen(true)}>
+                      <Upload /> Nạp danh sách
+                    </Button>
+                  </div>
                 )
               }
             />

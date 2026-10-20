@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import csv as csvlib
 import io
 import json
@@ -32,8 +31,6 @@ from jobcrawler.services import maintenance
 from jobcrawler.web.app import create_app
 
 pytestmark = pytest.mark.integration
-
-AUTH = {"Authorization": "Basic " + base64.b64encode(b"admin:mat-khau").decode()}
 
 
 @dataclass
@@ -221,8 +218,12 @@ async def web(integration_settings: Settings) -> AsyncIterator[Seed]:
     try:
         async with app.router.lifespan_context(app):
             ids = await seed(app.state, tag)
+            # Đăng nhập: JWT ký bằng khoá lifespan vừa đọc (như POST /api/auth/login).
+            token = app.state.token_auth.issue().token
             async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://ui.test", headers=AUTH
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://ui.test",
+                headers={"Authorization": f"Bearer {token}"},
             ) as client:
                 yield Seed(client, settings, tag, *map(str, ids))
     finally:
@@ -234,7 +235,20 @@ async def test_requires_login(web: Seed) -> None:
     r = await web.client.get("/api/me", headers={"Authorization": ""})
     assert r.status_code == 401
     me = (await web.client.get("/api/me")).json()
-    assert me == {"user": "admin", "auth": True}
+    assert me == {"user": "admin", "auth": "jwt", "logout_url": None}
+    # Đăng nhập thật bằng tài khoản trong cài đặt: cookie + token dùng được ngay.
+    login = await web.client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "mat-khau"},
+        headers={"Authorization": ""},
+    )
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    assert (await web.client.get("/api/me", headers={"Authorization": f"Bearer {token}"})).json()[
+        "user"
+    ] == "admin"
+    bad = await web.client.post("/api/auth/login", json={"username": "admin", "password": "sai"})
+    assert bad.status_code == 401
     meta = (await web.client.get("/api/meta")).json()
     assert "Hà Nội" in meta["provinces"]
     assert "senior" in meta["levels"]
@@ -494,3 +508,53 @@ async def test_eval_upload(web: Seed) -> None:
     )
     assert broken.status_code == 400
     assert (await web.client.get("/api/eval/server")).json()["path"] == "golden"
+
+
+async def test_create_company_by_hand(web: Seed) -> None:
+    name = f"Thêm tay {web.tag}"
+    r = await web.client.post(
+        "/api/companies",
+        json={"name": name, "website": f"themtay{web.tag}.vn", "tax_code": " ", "enqueue": True},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["created"], body["queued"], body["warnings"]) == (True, True, [])
+    detail = (await web.client.get(f"/api/companies/{body['id']}")).json()
+    assert detail["company"]["input_name"] == name
+    assert detail["input_website"] == f"themtay{web.tag}.vn"
+    # Cùng tên lần nữa (khác khoảng trắng): không tạo trùng, chỉ bổ sung ghi chú.
+    again = (
+        await web.client.post("/api/companies", json={"name": f"  {name} ", "note": "ghi chú"})
+    ).json()
+    assert (again["id"], again["created"], again["queued"]) == (body["id"], False, None)
+    assert (await web.client.get(f"/api/companies/{body['id']}")).json()["note"] == "ghi chú"
+    # Trường sai thì báo lỗi, không lặng lẽ bỏ qua như nạp CSV.
+    for bad, message in (
+        ({"name": "x"}, "quá ngắn"),
+        ({"name": name, "tax_code": "12ab"}, "Mã số thuế"),
+        ({"name": name, "website": "không phải web"}, "Website"),
+    ):
+        r = await web.client.post("/api/companies", json=bad)
+        assert r.status_code == 400
+        assert message in r.json()["detail"]
+    assert (await web.client.post("/api/companies", json={"name": ""})).status_code == 422
+    events = (
+        await web.client.get(
+            "/api/audit", params={"action": "company.create", "resource_id": body["id"]}
+        )
+    ).json()["items"]
+    assert [e["metadata"]["created"] for e in events] == [False, True]
+
+
+async def test_import_sample_csv(web: Seed) -> None:
+    from jobcrawler.services import batch
+
+    r = await web.client.get("/api/companies/import/sample.csv")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert "doanh-nghiep-mau.csv" in r.headers["content-disposition"]
+    assert r.content.startswith(b"\xef\xbb\xbf")  # BOM: Excel đọc đúng UTF-8
+    # Chính là định dạng nạp danh sách: đọc lại đủ 50 doanh nghiệp, không lỗi / cảnh báo.
+    report = batch.parse_companies_csv(r.content.decode("utf-8-sig"))
+    assert len(report.rows) == 50
+    assert (report.errors, report.warnings, report.duplicates) == ([], [], 0)

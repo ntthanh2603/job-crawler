@@ -39,6 +39,7 @@ ANONYMOUS = "anonymous"
 # Mọi tên thao tác đang ghi (danh sách lọc của trang Nhật ký, `GET /api/audit/actions`).
 SETTINGS_UPDATE = "settings.update"
 SETTINGS_RESET = "settings.reset"
+COMPANY_CREATE = "company.create"
 COMPANY_BUILD = "company.build"
 COMPANY_POLL = "company.poll"
 COMPANIES_ENQUEUE = "companies.enqueue"
@@ -50,10 +51,13 @@ MAINTENANCE_RUN = "maintenance.run"
 EVAL_RUN = "eval.run"
 WORKER_DRAIN = "worker.drain"
 WORKER_UNDRAIN = "worker.undrain"
+WORKER_JOIN_KEY = "worker.join_key"
+WORKER_JOIN_KEY_REVOKE = "worker.join_key_revoke"
 
 ACTIONS: tuple[str, ...] = (
     SETTINGS_UPDATE,
     SETTINGS_RESET,
+    COMPANY_CREATE,
     COMPANY_BUILD,
     COMPANY_POLL,
     COMPANIES_ENQUEUE,
@@ -65,6 +69,8 @@ ACTIONS: tuple[str, ...] = (
     EVAL_RUN,
     WORKER_DRAIN,
     WORKER_UNDRAIN,
+    WORKER_JOIN_KEY,
+    WORKER_JOIN_KEY_REVOKE,
 )
 
 # Danh sách id trong `metadata` giữ tối đa chừng này phần tử (kèm tổng số), không ghi cả lô.

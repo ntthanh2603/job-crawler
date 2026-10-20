@@ -103,6 +103,7 @@ export type BoardStatsOut = {
 export type QueueStatsOut = {
   aborted: number;
   active: number;
+  capacity: number;
   complete: number;
   error: string | null;
   failed: number;
@@ -261,6 +262,26 @@ export type CompanyCrawlOut = {
   plans: PlanOut[];
   poll_interval_seconds: number;
   schedule: ScheduleOut | null;
+};
+
+export type CompanyCreateIn = {
+  /** Đưa vào hàng đợi build ngay. */
+  enqueue?: boolean;
+  /**
+     * Tên doanh nghiệp (như cột `name` của CSV).
+     * @minLength 1
+     */
+  name: string;
+  note?: string | null;
+  tax_code?: string | null;
+  website?: string | null;
+};
+
+export type CompanyCreatedOut = {
+  created: boolean;
+  id: string;
+  queued: boolean | null;
+  warnings: string[];
 };
 
 export type KycStatus = typeof KycStatus[keyof typeof KycStatus];
@@ -644,6 +665,31 @@ export type JobDetailOut = {
   review: ReviewOut | null;
 };
 
+/**
+ * Khoá tham gia dùng một lần cho một máy worker mới (chỉ trả `key` lúc tạo).
+ */
+export type JoinKeyOut = {
+  expires_at_ms: number;
+  id: string;
+  key: string;
+  ttl_seconds: number;
+};
+
+export type JoinKeyStatusOutStatus = typeof JoinKeyStatusOutStatus[keyof typeof JoinKeyStatusOutStatus];
+
+
+export const JoinKeyStatusOutStatus = {
+  pending: 'pending',
+  used: 'used',
+  expired: 'expired',
+} as const;
+
+export type JoinKeyStatusOut = {
+  id: string;
+  status: JoinKeyStatusOutStatus;
+  worker_id: string | null;
+};
+
 export type LogOutContext = { [key: string]: unknown };
 
 export type LogOut = {
@@ -653,8 +699,36 @@ export type LogOut = {
   ts: string;
 };
 
+export type LoginIn = {
+  /** @maxLength 1000 */
+  password: string;
+  /** @maxLength 200 */
+  username: string;
+};
+
+export type LoginOut = {
+  access_token: string;
+  expires_at: string;
+  token_type: 'bearer';
+  user: string;
+};
+
+export type LogoutOut = {
+  ok: boolean;
+};
+
+export type MeOutAuth = typeof MeOutAuth[keyof typeof MeOutAuth];
+
+
+export const MeOutAuth = {
+  proxy: 'proxy',
+  jwt: 'jwt',
+  none: 'none',
+} as const;
+
 export type MeOut = {
-  auth: boolean;
+  auth: MeOutAuth;
+  logout_url: string | null;
   user: string | null;
 };
 
@@ -913,6 +987,68 @@ export type PageOutRunOut = {
   total: number;
 };
 
+export type ProxiesOutMode = typeof ProxiesOutMode[keyof typeof ProxiesOutMode];
+
+
+export const ProxiesOutMode = {
+  worker: 'worker',
+  central: 'central',
+  off: 'off',
+} as const;
+
+/**
+ * Một proxy chung và trạng thái xoay vòng của nó (`services.proxies.ProxyStatus`).
+ */
+export type ProxyStatusOut = {
+  cooling_domains: number;
+  dead: boolean;
+  dead_reason: string | null;
+  dead_seconds: number | null;
+  fails: number;
+  has_password: boolean;
+  host: string;
+  id: string;
+  line: string;
+  port: number;
+  scheme: string;
+  score: number;
+  source: string;
+  sticky_domains: number;
+  username: string | null;
+};
+
+export type ProxiesOut = {
+  check_url: string;
+  items: ProxyStatusOut[];
+  mode: ProxiesOutMode;
+};
+
+export type ProxyCheckIn = {
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  ids: string[];
+};
+
+/**
+ * Kết quả gọi thử qua một proxy (`services.health.ProxyCheck`).
+ */
+export type ProxyCheckOut = {
+  error: string | null;
+  exit_ip: string | null;
+  latency_ms: number | null;
+  location: string | null;
+  ok: boolean;
+  proxy: string;
+  proxy_id: string;
+  status: number | null;
+};
+
+export type ProxyChecksOut = {
+  results: ProxyCheckOut[];
+};
+
 export type QueueJobOutTrigger = typeof QueueJobOutTrigger[keyof typeof QueueJobOutTrigger] | null;
 
 
@@ -946,6 +1082,7 @@ export type QueueJobOut = {
 export type QueueOut = {
   aborted: number;
   active: number;
+  capacity: number;
   complete: number;
   error: string | null;
   failed: number;
@@ -1060,6 +1197,7 @@ export const SettingItemOutSource = {
 } as const;
 
 export type SettingItemOut = {
+  auto_value: number | null;
   default: SettingValue | null;
   env_is_set: boolean | null;
   env_value: SettingValue | null;
@@ -1100,13 +1238,32 @@ export type SettingGroupOut = {
   title: string;
 };
 
-export type SettingsPageOut = {
+export type SettingsImportedOutSkipped = {[key: string]: string};
+
+export type SettingsImportedOut = {
+  auto_restart: boolean;
+  env_keys: string[];
   groups: SettingGroupOut[];
+  imported: string[];
+  restart_pending: boolean;
+  restart_required: string[];
+  skipped: SettingsImportedOutSkipped;
+  version: number;
+};
+
+export type SettingsPageOut = {
+  auto_restart: boolean;
+  env_keys: string[];
+  groups: SettingGroupOut[];
+  restart_pending: boolean;
   version: number;
 };
 
 export type SettingsSavedOut = {
+  auto_restart: boolean;
+  env_keys: string[];
   groups: SettingGroupOut[];
+  restart_pending: boolean;
   restart_required: string[];
   version: number;
 };
@@ -1182,6 +1339,7 @@ export type WorkersSummaryOut = {
 };
 
 export type WorkersPageOut = {
+  auth_enabled: boolean;
   now_ms: number;
   summary: WorkersSummaryOut;
   workers: WorkerStatus[];
@@ -1521,6 +1679,143 @@ export function useGetAuditActions<TData = Awaited<ReturnType<typeof getAuditAct
 
 
 
+
+/**
+ * Đăng nhập bằng UI_USERNAME / UI_PASSWORD: trả JWT và đặt cookie httpOnly `jc_token`. Sai
+ * 20 lần trong 5 phút từ một IP thì 429 tới khi hết 5 phút (kể cả khi nhập đúng).
+ * @summary Login
+ */
+export const login = (
+    loginIn: LoginIn,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<LoginOut>(
+      {url: `/api/auth/login`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: loginIn, signal
+    },
+      );
+    }
+
+
+
+
+export const getLoginMutationKey = () => ['login'] as const;
+
+export const getLoginMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,LoginMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,LoginMutationVariables, TContext> => {
+
+const mutationKey = getLoginMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof login>>, LoginMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  login(data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LoginMutationResult = NonNullable<Awaited<ReturnType<typeof login>>>
+    export type LoginMutationBody = LoginIn
+    export type LoginMutationError = HTTPValidationError
+    export type LoginMutationVariables = {data: LoginIn}
+
+    /**
+ * @summary Login
+ */
+export const useLogin = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,LoginMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof login>>,
+        TError,
+        LoginMutationVariables,
+        TContext
+      > => {
+      return useMutation(getLoginMutationOptions(options), queryClient);
+    }
+
+/**
+ * Đăng xuất: thu hồi token đang dùng (tới khi nó hết hạn) và xoá cookie.
+ * @summary Logout
+ */
+export const logout = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<LogoutOut>(
+      {url: `/api/auth/logout`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getLogoutMutationKey = () => ['logout'] as const;
+
+export const getLogoutMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext> => {
+
+const mutationKey = getLogoutMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof logout>>, void> = () => {
+
+
+          return  logout()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LogoutMutationResult = NonNullable<Awaited<ReturnType<typeof logout>>>
+
+    export type LogoutMutationError = unknown
+
+
+    /**
+ * @summary Logout
+ */
+export const useLogout = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof logout>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getLogoutMutationOptions(options), queryClient);
+    }
 
 /**
  * @summary Get Boards
@@ -1870,6 +2165,76 @@ export function useGetCompanies<TData = Awaited<ReturnType<typeof getCompanies>>
 
 
 /**
+ * Thêm một doanh nghiệp bằng tay. Đã có (cùng MST, hoặc cùng tên không mâu thuẫn MST /
+ * website) thì không tạo trùng, chỉ bổ sung trường còn trống như nạp CSV.
+ * @summary Post Company
+ */
+export const postCompany = (
+    companyCreateIn: CompanyCreateIn,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<CompanyCreatedOut>(
+      {url: `/api/companies`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: companyCreateIn, signal
+    },
+      );
+    }
+
+
+
+
+export const getPostCompanyMutationKey = () => ['postCompany'] as const;
+
+export const getPostCompanyMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postCompany>>, TError,PostCompanyMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof postCompany>>, TError,PostCompanyMutationVariables, TContext> => {
+
+const mutationKey = getPostCompanyMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postCompany>>, PostCompanyMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  postCompany(data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostCompanyMutationResult = NonNullable<Awaited<ReturnType<typeof postCompany>>>
+    export type PostCompanyMutationBody = CompanyCreateIn
+    export type PostCompanyMutationError = HTTPValidationError
+    export type PostCompanyMutationVariables = {data: CompanyCreateIn}
+
+    /**
+ * @summary Post Company
+ */
+export const usePostCompany = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postCompany>>, TError,PostCompanyMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postCompany>>,
+        TError,
+        PostCompanyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostCompanyMutationOptions(options), queryClient);
+    }
+
+/**
  * @summary Post Import
  */
 export const postImport = (
@@ -1941,6 +2306,100 @@ export const usePostImport = <TError = HTTPValidationError,
       > => {
       return useMutation(getPostImportMutationOptions(options), queryClient);
     }
+
+/**
+ * File CSV mẫu để tải về: 50 doanh nghiệp lớn của Việt Nam, đúng định dạng nạp danh sách.
+ * @summary Get Import Sample
+ */
+export const getImportSample = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<unknown>(
+      {url: `/api/companies/import/sample.csv`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getGetImportSampleQueryKey = () => {
+    return [
+    `/api/companies/import/sample.csv`
+    ] as const;
+    }
+
+
+export const getGetImportSampleQueryOptions = <TData = Awaited<ReturnType<typeof getImportSample>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportSampleQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportSample>>> = ({ signal }) => getImportSample(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetImportSampleQueryResult = NonNullable<Awaited<ReturnType<typeof getImportSample>>>
+export type GetImportSampleQueryError = unknown
+
+
+export function useGetImportSample<TData = Awaited<ReturnType<typeof getImportSample>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportSample>>,
+          TError,
+          Awaited<ReturnType<typeof getImportSample>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportSample<TData = Awaited<ReturnType<typeof getImportSample>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportSample>>,
+          TError,
+          Awaited<ReturnType<typeof getImportSample>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportSample<TData = Awaited<ReturnType<typeof getImportSample>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Import Sample
+ */
+
+export function useGetImportSample<TData = Awaited<ReturnType<typeof getImportSample>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportSample>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetImportSampleQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 /**
  * @summary Get Company
@@ -3856,6 +4315,170 @@ export function useGetOverview<TData = Awaited<ReturnType<typeof getOverview>>, 
 
 
 /**
+ * Danh sách proxy chung (cài đặt `proxies` rồi PROXIES_FILE) kèm trạng thái xoay vòng.
+ * @summary Get Proxies
+ */
+export const getProxies = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ProxiesOut>(
+      {url: `/api/proxies`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getGetProxiesQueryKey = () => {
+    return [
+    `/api/proxies`
+    ] as const;
+    }
+
+
+export const getGetProxiesQueryOptions = <TData = Awaited<ReturnType<typeof getProxies>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProxiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProxies>>> = ({ signal }) => getProxies(signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetProxiesQueryResult = NonNullable<Awaited<ReturnType<typeof getProxies>>>
+export type GetProxiesQueryError = unknown
+
+
+export function useGetProxies<TData = Awaited<ReturnType<typeof getProxies>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProxies>>,
+          TError,
+          Awaited<ReturnType<typeof getProxies>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProxies<TData = Awaited<ReturnType<typeof getProxies>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getProxies>>,
+          TError,
+          Awaited<ReturnType<typeof getProxies>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetProxies<TData = Awaited<ReturnType<typeof getProxies>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Proxies
+ */
+
+export function useGetProxies<TData = Awaited<ReturnType<typeof getProxies>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getProxies>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetProxiesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * Gọi trang kiểm tra qua từng proxy trong `ids` (tối đa 20 mỗi lần) từ worker. Proxy sống
+ * được đưa lại vào vòng xoay, proxy lỗi bị loại. Không có worker thì báo lỗi, không loại proxy.
+ * @summary Check Proxies
+ */
+export const checkProxies = (
+    proxyCheckIn: ProxyCheckIn,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ProxyChecksOut>(
+      {url: `/api/proxies/check`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: proxyCheckIn, signal
+    },
+      );
+    }
+
+
+
+
+export const getCheckProxiesMutationKey = () => ['checkProxies'] as const;
+
+export const getCheckProxiesMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkProxies>>, TError,CheckProxiesMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof checkProxies>>, TError,CheckProxiesMutationVariables, TContext> => {
+
+const mutationKey = getCheckProxiesMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof checkProxies>>, CheckProxiesMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  checkProxies(data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CheckProxiesMutationResult = NonNullable<Awaited<ReturnType<typeof checkProxies>>>
+    export type CheckProxiesMutationBody = ProxyCheckIn
+    export type CheckProxiesMutationError = HTTPValidationError
+    export type CheckProxiesMutationVariables = {data: ProxyCheckIn}
+
+    /**
+ * @summary Check Proxies
+ */
+export const useCheckProxies = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkProxies>>, TError,CheckProxiesMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof checkProxies>>,
+        TError,
+        CheckProxiesMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCheckProxiesMutationOptions(options), queryClient);
+    }
+
+/**
  * Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang
  * chạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang
  * QUEUE_PAGE job).
@@ -4601,6 +5224,74 @@ export const usePutSettings = <TError = HTTPValidationError,
     }
 
 /**
+ * Chép các cài đặt đang lấy từ biến môi trường / .env của backend (`env_keys`) vào DB để quản
+ * lý ở trang này; giá trị đang dùng không đổi. Giá trị không hợp lệ ở giao diện thì bỏ qua.
+ * @summary Import Env Settings
+ */
+export const importEnvSettings = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<SettingsImportedOut>(
+      {url: `/api/settings/import-env`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getImportEnvSettingsMutationKey = () => ['importEnvSettings'] as const;
+
+export const getImportEnvSettingsMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importEnvSettings>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof importEnvSettings>>, TError,void, TContext> => {
+
+const mutationKey = getImportEnvSettingsMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof importEnvSettings>>, void> = () => {
+
+
+          return  importEnvSettings()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ImportEnvSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof importEnvSettings>>>
+
+    export type ImportEnvSettingsMutationError = unknown
+
+
+    /**
+ * @summary Import Env Settings
+ */
+export const useImportEnvSettings = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof importEnvSettings>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof importEnvSettings>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getImportEnvSettingsMutationOptions(options), queryClient);
+    }
+
+/**
  * Bỏ giá trị đặt ở giao diện, về giá trị biến môi trường / mặc định.
  * @summary Reset Setting
  */
@@ -4843,6 +5534,235 @@ export function useGetWorkers<TData = Awaited<ReturnType<typeof getWorkers>>, TE
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetWorkersQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * Tạo khoá tham gia dùng một lần (hết hạn sau 5 phút) cho máy worker mới. Chỉ khi gateway
+ * bật xác thực; khoá chỉ trả một lần, trên máy chủ chỉ giữ dạng băm.
+ * @summary Create Join Key
+ */
+export const createJoinKey = (
+
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<JoinKeyOut>(
+      {url: `/api/workers/join-keys`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getCreateJoinKeyMutationKey = () => ['createJoinKey'] as const;
+
+export const getCreateJoinKeyMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJoinKey>>, TError,void, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof createJoinKey>>, TError,void, TContext> => {
+
+const mutationKey = getCreateJoinKeyMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createJoinKey>>, void> = () => {
+
+
+          return  createJoinKey()
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateJoinKeyMutationResult = NonNullable<Awaited<ReturnType<typeof createJoinKey>>>
+
+    export type CreateJoinKeyMutationError = unknown
+
+
+    /**
+ * @summary Create Join Key
+ */
+export const useCreateJoinKey = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createJoinKey>>, TError,void, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createJoinKey>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateJoinKeyMutationOptions(options), queryClient);
+    }
+
+/**
+ * Huỷ khoá tham gia chưa dùng (đóng hộp thoại, tạo khoá mới).
+ * @summary Revoke Join Key
+ */
+export const revokeJoinKey = (
+    joinId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<JoinKeyStatusOut>(
+      {url: `/api/workers/join-keys/${joinId}`, method: 'DELETE', signal
+    },
+      );
+    }
+
+
+
+
+export const getRevokeJoinKeyMutationKey = () => ['revokeJoinKey'] as const;
+
+export const getRevokeJoinKeyMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeJoinKey>>, TError,RevokeJoinKeyMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof revokeJoinKey>>, TError,RevokeJoinKeyMutationVariables, TContext> => {
+
+const mutationKey = getRevokeJoinKeyMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeJoinKey>>, RevokeJoinKeyMutationVariables> = (props) => {
+          const {joinId} = props ?? {};
+
+          return  revokeJoinKey(joinId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeJoinKeyMutationResult = NonNullable<Awaited<ReturnType<typeof revokeJoinKey>>>
+
+    export type RevokeJoinKeyMutationError = HTTPValidationError
+    export type RevokeJoinKeyMutationVariables = {joinId: string}
+
+    /**
+ * @summary Revoke Join Key
+ */
+export const useRevokeJoinKey = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeJoinKey>>, TError,RevokeJoinKeyMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof revokeJoinKey>>,
+        TError,
+        RevokeJoinKeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRevokeJoinKeyMutationOptions(options), queryClient);
+    }
+
+/**
+ * Khoá tham gia còn chờ, đã được worker dùng, hay hết hạn / đã huỷ.
+ * @summary Get Join Key
+ */
+export const getJoinKey = (
+    joinId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<JoinKeyStatusOut>(
+      {url: `/api/workers/join-keys/${joinId}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getGetJoinKeyQueryKey = (joinId: string,) => {
+    return [
+    `/api/workers/join-keys/${joinId}`
+    ] as const;
+    }
+
+
+export const getGetJoinKeyQueryOptions = <TData = Awaited<ReturnType<typeof getJoinKey>>, TError = HTTPValidationError>(joinId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetJoinKeyQueryKey(joinId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getJoinKey>>> = ({ signal }) => getJoinKey(joinId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: joinId !== null && joinId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetJoinKeyQueryResult = NonNullable<Awaited<ReturnType<typeof getJoinKey>>>
+export type GetJoinKeyQueryError = HTTPValidationError
+
+
+export function useGetJoinKey<TData = Awaited<ReturnType<typeof getJoinKey>>, TError = HTTPValidationError>(
+ joinId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getJoinKey>>,
+          TError,
+          Awaited<ReturnType<typeof getJoinKey>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetJoinKey<TData = Awaited<ReturnType<typeof getJoinKey>>, TError = HTTPValidationError>(
+ joinId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getJoinKey>>,
+          TError,
+          Awaited<ReturnType<typeof getJoinKey>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetJoinKey<TData = Awaited<ReturnType<typeof getJoinKey>>, TError = HTTPValidationError>(
+ joinId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Join Key
+ */
+
+export function useGetJoinKey<TData = Awaited<ReturnType<typeof getJoinKey>>, TError = HTTPValidationError>(
+ joinId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getJoinKey>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetJoinKeyQueryOptions(joinId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

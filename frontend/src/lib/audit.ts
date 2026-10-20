@@ -5,6 +5,7 @@ import type { AuditEvent } from "@/lib/types"
 const ACTIONS: Record<string, string> = {
   "settings.update": "Lưu cài đặt",
   "settings.reset": "Đặt lại cài đặt về mặc định",
+  "company.create": "Thêm doanh nghiệp",
   "company.build": "Build lại bộ khung",
   "company.poll": "Poll ngay",
   "companies.enqueue": "Đưa doanh nghiệp vào hàng đợi",
@@ -16,6 +17,8 @@ const ACTIONS: Record<string, string> = {
   "eval.run": "Chạy golden set",
   "worker.drain": "Cho worker dừng nhận việc",
   "worker.undrain": "Cho worker nhận việc lại",
+  "worker.join_key": "Tạo khoá tham gia cho worker",
+  "worker.join_key_revoke": "Huỷ khoá tham gia của worker",
 }
 
 /** Tên thao tác → nhãn tiếng Việt; tên lạ giữ nguyên ("foo.bar"). */
@@ -69,7 +72,8 @@ const FIELDS: Record<string, string> = {
   // kiểm tay
   correct: "Kết quả kiểm",
   note: "Ghi chú",
-  // đưa vào hàng đợi, import
+  // thêm doanh nghiệp, đưa vào hàng đợi, import
+  name: "Tên doanh nghiệp",
   queued: "Vào hàng đợi",
   trigger: "Cách kích hoạt",
   selected: "Được chọn",

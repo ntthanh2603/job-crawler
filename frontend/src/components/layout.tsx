@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  ChevronsUpDown,
   Briefcase,
   Building2,
   Cpu,
@@ -8,6 +9,7 @@ import {
   Layers,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   Menu,
   Monitor,
   Moon,
@@ -15,18 +17,31 @@ import {
   Sun,
   Target,
   UserRound,
+  type LucideIcon,
 } from "lucide-react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { NavLink, Outlet, useLocation } from "react-router"
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
 
+import { SettingsDialog, settingsSearch } from "@/components/settings-dialog"
 import { useTheme, type Theme } from "@/components/theme"
 import { Button } from "@/components/ui/button"
 import { Dialog, SheetContent } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { num } from "@/lib/format"
-import { useGetMe, useGetQueue } from "@/lib/gen/queries"
+import { useGetMe, useGetQueue, useLogout } from "@/lib/gen/queries"
 import { cn } from "@/lib/utils"
 
-const GROUPS = [
+type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; queue?: boolean }
+
+const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Vận hành",
     items: [
@@ -53,11 +68,22 @@ const GROUPS = [
     title: "Hệ thống",
     items: [
       { to: "/workers", label: "Workers", icon: Cpu },
-      { to: "/settings", label: "Cài đặt", icon: SlidersHorizontal },
       { to: "/audit", label: "Nhật ký thao tác", icon: History },
     ],
   },
 ]
+
+const NAV_ITEM =
+  "flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+const NAV_ACTIVE =
+  "bg-primary/8 font-medium text-brand hover:bg-primary/10 hover:text-brand dark:bg-primary/15 dark:hover:bg-primary/20"
+
+/** Cách đăng nhập (`GET /api/me`), ghi dưới tên trong menu tài khoản. */
+const AUTH_TEXT: Record<string, string> = {
+  jwt: "Đăng nhập bằng mật khẩu",
+  proxy: "Đăng nhập qua SSO",
+  none: "Không cần đăng nhập",
+}
 
 const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Sáng", icon: Sun },
@@ -129,8 +155,22 @@ function useQueueSummary() {
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const me = useGetMe()
+  const user = me.data?.user || null
+  const logoutUrl = me.data?.logout_url || null
+  const client = useQueryClient()
+  const navigate = useNavigate()
+  // Đăng nhập bằng mật khẩu (JWT): đăng xuất = thu hồi phiên ở máy chủ rồi về trang đăng nhập.
+  const logout = useLogout({
+    mutation: {
+      onSettled: () => {
+        client.clear()
+        navigate("/login", { replace: true })
+      },
+    },
+  })
   const queue = useQueueSummary()
   const busy = queue.active + queue.queued
+  const location = useLocation()
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 shrink-0 items-center px-5">
@@ -149,13 +189,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   to={item.to}
                   end={item.end}
                   onClick={onNavigate}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
-                      isActive &&
-                        "bg-primary/8 font-medium text-brand hover:bg-primary/10 hover:text-brand dark:bg-primary/15 dark:hover:bg-primary/20",
-                    )
-                  }
+                  className={({ isActive }) => cn(NAV_ITEM, isActive && NAV_ACTIVE)}
                 >
                   {({ isActive }) => (
                     <>
@@ -214,14 +248,57 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         )}
         <div className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-2 text-meta text-sidebar-foreground">
-            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-              <UserRound className="size-3.5" />
-            </span>
-            <span className="truncate">{me.data?.user ? me.data.user : "Không đăng nhập"}</span>
-          </span>
+          {/* Bấm avatar: menu tài khoản (Cài đặt — popup `?settings` mở trên trang đang xem). */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Tài khoản"
+                className="-mx-1.5 flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-meta text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none data-[state=open]:bg-sidebar-accent"
+              >
+                <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+                  <UserRound className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-left" title={user ?? undefined}>
+                  {user ?? "Không đăng nhập"}
+                </span>
+                <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              <DropdownMenuLabel className="space-y-0.5">
+                <div className="truncate text-sm font-medium text-foreground">{user ?? "Không đăng nhập"}</div>
+                <div className="text-caption font-normal text-muted-foreground">{AUTH_TEXT[me.data?.auth ?? "none"]}</div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => {
+                  navigate({ pathname: location.pathname, search: settingsSearch(location.search) })
+                  onNavigate?.()
+                }}
+              >
+                <SlidersHorizontal /> Cài đặt
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ThemeSwitch />
         </div>
+        {/* Đăng nhập bằng mật khẩu (JWT): thu hồi phiên ở máy chủ rồi về trang đăng nhập. Đăng
+            xuất SSO: API trả logout_url khi đăng nhập qua reverse proxy (vd. oauth2-proxy) — thẻ <a>
+            thường, rời ứng dụng để proxy xoá phiên. */}
+        {me.data?.auth === "jwt" ? (
+          <Button variant="outline" className="w-full" onClick={() => logout.mutate()} disabled={logout.isPending}>
+            <LogOut /> {logout.isPending ? "Đang đăng xuất…" : "Đăng xuất"}
+          </Button>
+        ) : (
+          logoutUrl && (
+            <Button asChild variant="outline" className="w-full">
+              <a href={logoutUrl}>
+                <LogOut /> Đăng xuất
+              </a>
+            </Button>
+          )
+        )}
       </div>
     </div>
   )
@@ -264,6 +341,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      <SettingsDialog />
     </div>
   )
 }

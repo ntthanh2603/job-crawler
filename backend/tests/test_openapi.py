@@ -11,8 +11,8 @@ import pytest
 from pydantic import BaseModel
 
 from jobcrawler.db import compress
-from jobcrawler.services import batch, evaluate, sla, stats
-from jobcrawler.web import actions, api
+from jobcrawler.services import batch, evaluate, health, proxies, sla, stats
+from jobcrawler.web import actions, api, settings_api
 from jobcrawler.web.app import openapi_document
 
 SPEC = Path(__file__).resolve().parents[1] / "openapi.json"
@@ -39,7 +39,11 @@ def test_operation_ids_are_handler_names(spec: dict) -> None:
 
 
 # Endpoint không trả JSON (file tải về).
-NOT_JSON = {"/api/failed-pages/{page_id}/raw", "/api/jobs/export"}
+NOT_JSON = {
+    "/api/failed-pages/{page_id}/raw",
+    "/api/jobs/export",
+    "/api/companies/import/sample.csv",
+}
 
 
 def test_every_json_endpoint_has_a_response_model(spec: dict) -> None:
@@ -58,7 +62,14 @@ def test_response_fields_are_required(spec: dict) -> None:
     """Trường có mặc định vẫn luôn có trong JSON trả về: spec ghi bắt buộc (`ApiOut`, `API_OUTPUT`),
     kiểu TypeScript sinh ra không thành `x?:`. Chỉ mô hình nhận vào và lỗi của FastAPI có trường
     tuỳ chọn."""
-    inputs = {"EnqueueIn", "ReviewIn", "SettingsUpdate", "Body_post_import", "Body_post_eval"}
+    inputs = {
+        "EnqueueIn",
+        "ReviewIn",
+        "CompanyCreateIn",
+        "SettingsUpdate",
+        "Body_post_import",
+        "Body_post_eval",
+    }
     fastapi_errors = {"HTTPValidationError", "ValidationError"}
     optional = {
         name: sorted(set(schema.get("properties", {})) - set(schema.get("required", [])))
@@ -80,10 +91,13 @@ MIRRORS: list[tuple[type[BaseModel], type, set[str]]] = [
     (api.PollStatsOut, sla.PollStats, set()),
     (api.FreshnessOut, sla.Freshness, set()),
     (api.ImportOutcomeOut, actions.ImportOutcome, set()),
+    (api.CompanyCreatedOut, actions.CreateOutcome, set()),
     (api.EnqueueResultOut, batch.EnqueueResult, set()),
     (api.CompanyEvalOut, evaluate.CompanyEval, {"precision", "recall"}),
     (api.SourceEvalOut, evaluate.SourceEval, {"precision", "recall"}),
     (api.SourceReviewOut, evaluate.SourceReview, {"precision"}),
+    (settings_api.ProxyStatusOut, proxies.ProxyStatus, set()),
+    (settings_api.ProxyCheckOut, health.ProxyCheck, set()),
 ]
 
 
