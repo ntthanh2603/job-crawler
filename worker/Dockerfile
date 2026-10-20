@@ -8,6 +8,17 @@
 # Chạy kèm `--init` (compose: `init: true`) để dọn process con của Chromium.
 FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
 
+# Image Playwright ra bản chậm hơn bản vá của Ubuntu: vá gói hệ điều hành (openssl…). Nó còn cài
+# pip + virtualenv toàn cục (kèm urllib3 / msgpack / setuptools cũ, Trivy chặn ở CI); worker chạy
+# từ /opt/venv do uv tạo nên gỡ cả hai.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/python3.12/dist-packages/pip /usr/local/lib/python3.12/dist-packages/pip-* \
+        /usr/local/lib/python3.12/dist-packages/virtualenv /usr/local/lib/python3.12/dist-packages/virtualenv-* \
+        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 /usr/local/bin/virtualenv \
+        /root/.cache/virtualenv /root/.cache/pip
+
 COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /usr/local/bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
