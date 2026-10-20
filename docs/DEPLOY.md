@@ -9,42 +9,55 @@ Mục tiêu: 10.000 doanh nghiệp, tin mới của một doanh nghiệp đượ
 
 ```mermaid
 flowchart LR
-  subgraph data["Máy dữ liệu"]
-    PG[(PostgreSQL 16 + PgBouncer)]
+  subgraph data["Postgres + Redis (cùng máy hoặc dịch vụ quản lý)"]
+    PG[(PostgreSQL 16)]
     RD[(Redis 7, AOF)]
   end
-  subgraph app["Máy ứng dụng × 2–3"]
-    WEB[web ×2 — nginx: giao diện + /api]
-    API[api ×2]
-    GW[gateway ×2]
-    SCH[scheduler ×2 — 1 bản làm việc]
-    RP[runner-poll ×N]
-    RB[runner-build ×M]
-    RBo[runner-boards ×1]
+  subgraph app["Máy backend"]
+    FE[frontend — nginx: giao diện + /api]
+    BE[backend — api, gateway, scheduler, runner]
+    RX[runner thêm ×N — tuỳ tải]
   end
   subgraph workers["Máy worker × K (kèm proxy)"]
-    W1[jobworker ×n]
+    W1[worker ×n]
   end
-  LB[Load balancer L4 / HTTP2 + TLS] --> GW
-  U[Người vận hành] -->|HTTPS| LB2[Load balancer HTTP + TLS] --> WEB
-  WEB -->|/api| API
-  W1 -->|gRPC + token| LB
+  U[Người vận hành] -->|HTTPS| LB[Load balancer / reverse proxy + TLS] --> FE
+  FE -->|/api| BE
+  W1 -->|gRPC + token| BE
   app --> PG
   app --> RD
-  RP & RB -.->|LLM| LLM[vLLM / Qwen]
+  BE & RX -.->|LLM| LLM[vLLM / Qwen]
 ```
 
-- **Máy dữ liệu**: Postgres + Redis (hoặc dịch vụ quản lý). Không chạy ứng dụng ở đây.
-- **Máy ứng dụng**: image backend (`backend/Dockerfile`, ~0,9 GB, không có Chromium) và image `web`
-  (`frontend/Dockerfile`, nginx ~90 MB), file `deploy/backend.compose.yaml`. `web` (giao diện +
-  `/api` tới `api` cùng máy) và `gateway` sau load balancer; `scheduler` chạy 2 bản để
-  dự phòng (chỉ một bản giữ khoá); runner tăng bản theo bảng ở mục 3.
-- **Máy worker**: image worker (`worker/Dockerfile`, Playwright + Chromium, ~3,9 GB), file
-  `deploy/worker.compose.yaml`. Đặt gần nguồn proxy / IP sạch; chỉ cần ra Internet và tới gateway
-  (cổng 50051, HTTP/2). Không cần quyền vào DB / Redis.
+- Bắt đầu bằng `docker-compose.yaml` ở gốc repo: 5 container (`postgres`, `redis`, `backend`,
+  `frontend`, `worker`) trên một máy. Postgres / Redis quản lý: trỏ `DATABASE_URL` / `REDIS_URL`
+  trong `backend/.env` tới đó (bỏ khối `environment` ghi đè URL của `backend` trong compose) và
+  chỉ chạy `docker compose up -d backend frontend`.
+- **Máy worker** (gần nguồn proxy / IP sạch; chỉ cần ra Internet và tới gateway cổng 50051, không
+  cần DB / Redis): clone repo (hoặc chỉ `docker-compose.yaml` + `worker/`), `.env` gốc đặt
+  `WORKER_GATEWAY_ADDR=<máy backend>:50051` và `WORKER_REPLICAS`, `worker/.env` đặt `GATEWAY_TOKEN`
+  (giống backend), `GATEWAY_TLS`, proxy; rồi `docker compose up -d --no-deps worker`. Máy backend
+  mở gateway ra mạng: `GATEWAY_PUBLISH=0.0.0.0:50051` + `GATEWAY_TOKEN` (+ TLS, mục 6), và đặt
+  `WORKER_REPLICAS=0` nếu không muốn worker chạy ở đó.
+- **Runner thêm** khi một container `backend` không đủ (mục 3): chạy thêm process từ cùng image
+  với cùng `backend/.env`, vd. `jobcrawler runner --role poll` (vai `poll` / `build` / `boards`).
+  Số bản trong mục 3 là số process như vậy.
 
-Thứ tự nâng cấp: build và đẩy image → `migrate` (một lần) → khởi động lại backend (runner dừng êm:
-job đang chạy được xếp lại) → khởi động lại worker (worker làm nốt việc rồi thoát).
+Image: CI (`.github/workflows/ci.yml`, job `images`) build và đẩy `jobcrawler-backend`,
+`jobcrawler-worker`, `jobcrawler-frontend` lên GHCR (`ghcr.io/<owner>/…`) sau khi mọi kiểm tra xanh,
+mỗi lần push `main` — merge PR hay commit thẳng — (tag `main`, `sha-<7 ký tự>`) và mỗi tag `vX.Y.Z`
+(tag `X.Y.Z`, `X.Y`, `latest`), kèm quét lỗ hổng (Trivy); pull request chỉ build thử, không đẩy. Máy
+chạy kéo đúng tag: `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=1.4.0` (hoặc `sha-…`) trong `.env` gốc,
+rồi `docker compose pull && docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. GHCR của
+repo riêng tư cũng riêng tư: mỗi máy `docker login ghcr.io` (token chỉ quyền `read:packages`). Phát
+hành: `task release VERSION=X.Y.Z` (từ `main` sạch, khớp origin) tạo và đẩy tag, CI làm phần còn
+lại.
+
+Thứ tự nâng cấp: đẩy image (CI) → khởi động lại `backend` (migration chạy lúc khởi động; runner
+dừng êm: job đang chạy được xếp lại) → khởi động lại worker (worker làm nốt việc rồi thoát).
+
+Process treo: watchdog trong process (`WATCHDOG_SECONDS` / `WORKER_WATCHDOG_SECONDS`) cho process
+thoát, container thoát theo và `restart: unless-stopped` dựng lại. Healthcheck: OPERATIONS.md.
 
 ## 2. Số đo (19/10/2026, một máy dev, Docker Desktop 12 vCPU)
 
@@ -96,7 +109,10 @@ Ban ngày tải nằm ở poll; ban đêm ở build (poll tắt ngoài `POLL_WIN
 thì không poll (chung khoá), nên ban ngày build càng ít càng tốt: chỉ doanh nghiệp mới và bộ khung
 hỏng.
 
-Cấu hình đề xuất (giữ CPU mỗi process ≤ ~70%: mỗi process Python dùng tối đa một core):
+Cấu hình đề xuất (giữ CPU mỗi process ≤ ~70%: mỗi process Python dùng tối đa một core). Tên trong
+bảng là process của image backend: `runner-poll` = `jobcrawler runner --role poll` (tương tự
+`runner-build`, `runner-boards`), `scheduler`, `gateway`, `api` = lệnh cùng tên; một container
+`backend` chạy mỗi thứ một bản.
 
 | Thành phần       | Số bản / máy                                              | Cấu hình chính                                                                                 |
 | ---------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -107,8 +123,8 @@ Cấu hình đề xuất (giữ CPU mỗi process ≤ ~70%: mỗi process Python
 | `runner-boards`  | 1–2                                                       | index đủ ban đêm, đuôi ban ngày                                                                |
 | `scheduler`      | 2 (dự phòng, một bản giữ khoá)                            | `SCHEDULER_BATCH=500`, tick 1 s → xếp được 500 job / giây                                      |
 | `gateway`        | **4 bản** sau load balancer L4 (2 máy × 2)                | ~440 request / giây × ~6 ms ≈ 2,6 core                                                         |
-| `api` + `web`    | 2 mỗi loại (cùng máy ứng dụng)                            | đặt `UI_PASSWORD`; `web` sau load balancer, `api` chỉ nhận từ `web`                            |
-| **worker HTTP**  | **8–10 máy** 2 vCPU / 4 GB, `WORKER_HTTP_SLOTS=64`, `WORKER_RENDER_SLOTS=0` | ~440 request / giây × ~0,7 s ≈ 310 request cùng lúc; 640 slot, dư ~50%; CPU ~4–9 core tổng |
+| `api` + `frontend` | 2 mỗi loại (cùng máy backend)                           | đặt `UI_PASSWORD`; `frontend` sau load balancer, `api` chỉ nhận từ `frontend`                  |
+| **worker HTTP**  | **8–10 máy** 2 vCPU / 4 GB, `WORKER_HTTP_SLOTS=64`, `WORKER_RENDER_SLOTS=0` (đặt tay: tự tính chỉ cho 16 HTTP / 2 render) | ~440 request / giây × ~0,7 s ≈ 310 request cùng lúc; 640 slot, dư ~50%; CPU ~4–9 core tổng |
 | **worker render**| **3–4 máy** 4 vCPU / 8 GB, `WORKER_RENDER_SLOTS=6`, `WORKER_HTTP_SLOTS=16` | trang SPA chưa có API trong bộ khung + build đêm; ~300 MB RAM mỗi trang Chromium |
 | LLM (vLLM Qwen)  | theo GPU                                                  | ban ngày: xác minh tin mới; ban đêm: KYC hết hạn, chọn trang careers, xác minh / chuẩn hoá — đặt `LLM_REQUESTS_PER_MINUTE` theo năng lực; LLM lỗi làm build kéo dài (lượt nối tiếp) |
 
@@ -166,11 +182,25 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
 ## 6. Bảo mật
 
 - `GATEWAY_TOKEN` bắt buộc khi gateway mở ra ngoài; TLS ở load balancer (HTTP/2 tới gateway) hoặc
-  `GATEWAY_TLS_CERT/KEY`. Worker chỉ có token, không có thông tin DB / LLM / SERP.
+  `GATEWAY_TLS_CERT/KEY`. Máy worker mới nên dùng khoá tham gia **một lần** (trang Workers → "Thêm
+  worker", hết hạn sau 5 phút) thay vì chép `GATEWAY_TOKEN` ra nhiều máy; worker đổi khoá lấy token
+  riêng (chỉ trên Redis, hạn trượt 7 ngày). Worker chỉ có khoá / token, không có thông tin DB / LLM
+  / SERP.
 - API key SERP / LLM chỉ ở backend (SERP gọi thẳng từ backend, không qua worker).
-- `UI_PASSWORD` cho giao diện (sai 20 lần / IP trong 5 phút → 429; sau reverse proxy đặt
-  `FORWARDED_ALLOW_IPS` để thấy IP thật). Cổng Postgres / Redis không mở ra Internet (compose
-  một máy chỉ mở ở `127.0.0.1`); máy dữ liệu riêng thì chặn bằng firewall, chỉ cho máy ứng dụng.
+- Đăng nhập giao diện: một người vận hành thì `UI_USERNAME` / `UI_PASSWORD` (trang đăng nhập, phiên
+  JWT trong cookie httpOnly; đặt `JWT_SECRET`; sai 20 lần / IP trong 5 phút → 429); nhiều người thì đặt proxy SSO (vd. oauth2-proxy, OIDC) trước `frontend` và
+  `AUTH_PROXY_USER_HEADER` (OPERATIONS.md) — mỗi người một tài khoản, nhật ký thao tác ghi đúng
+  người. `frontend` sau load balancer: đặt `REAL_IP_FROM` = CIDR của load balancer để chặn đoán mật
+  khẩu theo IP thật. Cổng Postgres / Redis không mở ra Internet (compose chỉ mở ở `127.0.0.1`);
+  Postgres / Redis ở máy riêng thì chặn bằng firewall, chỉ cho máy backend.
+- Bí mật hạ tầng (`GATEWAY_TOKEN`, `UI_PASSWORD`, `JWT_SECRET`, `ENCRYPTION_KEYS`, proxy của worker)
+  nằm trong `backend/.env` / `worker/.env` (không commit), hoặc file trong `/run/secrets`
+  (OPERATIONS.md). Khoá LLM / SERP và proxy chung nhập ở trang Cài đặt, lưu trong DB dạng mã hoá
+  AES-256-GCM bằng `ENCRYPTION_KEYS` — đặt khoá này và sao lưu riêng, không cùng bản dump Postgres.
+- `DEMO_COMPANIES=false` ở production (không tự nạp 50 doanh nghiệp mẫu khi DB trống).
+- Sao lưu: compose không tự sao lưu (lệnh `pg_dump` tay ở OPERATIONS.md). Production nên dùng
+  Postgres quản lý (snapshot + PITR) hoặc lưu WAL liên tục (pgBackRest / WAL-G) ra kho ngoài máy;
+  thử khôi phục định kỳ.
 - Log được che bí mật trước khi ghi (URL có mật khẩu, token, khoá API); thao tác của người vận
   hành ghi ở `audit_events` (bí mật bị che). Báo lỗ hổng: [SECURITY.md](../.github/SECURITY.md).
 - Proxy tại worker nằm trong file / biến môi trường của máy worker; danh sách proxy chung (nếu dùng

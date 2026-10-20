@@ -8,7 +8,7 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Triển khai và quy mô 10.000 doanh nghiệp: [docs/DEPLOY.md](docs/DEPLOY.md)
 - Vận hành (dịch vụ, giới hạn, bảo trì, sự cố): [docs/OPERATIONS.md](docs/OPERATIONS.md)
-- Đặc tả gốc: [docs/BUILD_PROMPT.md](docs/BUILD_PROMPT.md); tiến độ ghi trong commit message.
+- Tiến độ và quyết định của từng đợt thay đổi ghi trong commit message.
 - Quy ước khi sửa mã (người và coding agent): [AGENTS.md](AGENTS.md); báo lỗ hổng:
   [SECURITY.md](.github/SECURITY.md).
 
@@ -20,11 +20,11 @@ khối khác. Gốc repo chỉ gom lại (compose, Taskfile, CI, tài liệu).
 
 | Thư mục     | Service / gói              | Việc                                                                                         |
 | ----------- | -------------------------- | -------------------------------------------------------------------------------------------- |
-| `backend/`  | image `backend` (`jobcrawler`) | API JSON, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, migrate, DB  |
+| `backend/`  | image `backend` (`jobcrawler`) | API JSON, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, migration, DB — một container (`jobcrawler serve`) |
 | `worker/`   | image `worker` (`jobworker`)   | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng   |
-| `frontend/` | image `web` (nginx)            | giao diện React + shadcn/ui + Tailwind; nginx phục vụ bản build và chuyển `/api` tới `api` |
+| `frontend/` | image `frontend` (nginx)       | giao diện React + shadcn/ui + Tailwind; nginx phục vụ bản build và chuyển `/api` tới `backend` |
 | `proto/`    | thư viện `jobcrawler-proto`    | hợp đồng gRPC backend ↔ worker (`jcproto/v1/crawl.proto` + mã sinh sẵn), dùng chung        |
-| `deploy/`   |                                | compose cho máy backend / máy worker riêng; script khởi tạo Postgres của compose          |
+| `deploy/`   |                                | script khởi tạo Postgres của compose (tạo DB test)                                        |
 | `docs/`     |                                | kiến trúc, vận hành, triển khai                                                          |
 
 Backend và worker phụ thuộc `proto/` theo đường dẫn (`../proto`); image của chúng nhận `proto/`
@@ -52,14 +52,15 @@ Cần [uv](https://docs.astral.sh/uv/), Node.js, Docker và [go-task](https://ta
 
 ```bash
 task setup                           # dependency của mọi service + .env, backend/.env, worker/.env
-                                     # (điền LLM_*, SERP_* trong backend/.env khi có)
-task up                              # build 3 image, chạy postgres, redis, migrate, api, web, gateway,
-                                     # scheduler, runner ×3 vai, worker
+                                     # (LLM, SERP, lịch… đặt ở trang Cài đặt, lưu trong DB)
+task up                              # build 3 image, chạy 5 container: postgres, redis, backend,
+                                     # frontend, worker
 task backend:cli -- import companies.csv   # nạp doanh nghiệp: được build ngay rồi poll theo lịch
 ```
 
-Giao diện: http://127.0.0.1:8000 (service `web`). Postgres / Redis mở ra host ở cổng 15432 / 16379,
-gateway gRPC ở `127.0.0.1:50051` (`GATEWAY_PUBLISH`); `api` chỉ nhận từ `web` trong mạng compose.
+Giao diện: http://127.0.0.1:8000 (container `frontend`). Postgres / Redis mở ra host ở cổng 15432 /
+16379, gateway gRPC của `backend` ở `127.0.0.1:50051` (`GATEWAY_PUBLISH`); API của `backend` chỉ
+nhận từ `frontend` trong mạng compose.
 
 Chạy các service trên máy (dev) — mỗi lệnh một cửa sổ, cần ít nhất một worker để lấy trang:
 
@@ -77,14 +78,15 @@ task frontend:dev                    # giao diện http://localhost:5173 (gọi 
 ## Worker và proxy
 
 ```bash
-docker compose -f deploy/worker.compose.yaml --env-file deploy/worker.env up -d   # máy worker riêng
+docker compose up -d --no-deps worker   # máy worker riêng (WORKER_GATEWAY_ADDR trong .env gốc)
 task worker:cli -- check             # thử kết nối gateway và từng proxy tại worker
 ```
 
 - `PROXY_MODE=worker` (mặc định): mỗi worker dùng proxy của mình (`WORKER_PROXIES` /
   `WORKER_PROXIES_FILE`, định dạng như `worker/config/proxies.example.txt`), gắn theo domain, nghỉ
   khi lỗi.
-- `PROXY_MODE=central`: backend chọn proxy từ danh sách chung (trang Cài đặt hoặc `PROXIES_FILE`).
+- `PROXY_MODE=central`: backend chọn và xoay vòng proxy từ danh sách chung (bảng proxy ở trang
+  Cài đặt, lưu trong DB; thêm `PROXIES_FILE` nếu có).
 - `PROXY_MODE=off` / `jobcrawler --no-proxy …`: không proxy.
 - `WORKER_POOL` + `FETCH_ROUTES` (backend): định tuyến domain về nhóm worker riêng (vd. trang tuyển
   dụng qua proxy dân cư).
@@ -146,12 +148,19 @@ task backend:test:unit                # pytest backend bỏ test tích hợp
 task proto:gen                        # sau khi sửa proto/jcproto/v1/crawl.proto
 task api                              # sau khi đổi mô hình trả về của API: backend/openapi.json + client frontend
 task backend:migration NAME="mô tả"   # sinh migration mới từ model
+task frontend:e2e                     # test E2E (Playwright) trên stack đang chạy ở 127.0.0.1:8000
+task release VERSION=1.2.0            # tag + CI đẩy image có phiên bản lên GHCR
 ```
 
 - Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
   `FakeChatClient`, worker dùng gateway giả + server HTTP cục bộ. Test tích hợp cần
   `TEST_DATABASE_URL` trỏ tới DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại).
-- CI (`.github/workflows/ci.yml`) chạy kiểm tra của từng service (một job mỗi service) mỗi lần
-  push lên `main`, kèm build 3 image; `audit.yml` kiểm lỗ hổng dependency mỗi tuần.
+- CI (`.github/workflows/ci.yml`): pull request chỉ kiểm tra — mỗi service một job (format, lint,
+  typecheck, mã sinh, test như `task check`), `buf` (tương thích proto), build thử 3 image. Push lên
+  `main` (merge PR / commit thẳng) và tag `vX.Y.Z` (`task release`): kiểm tra xanh thì build và đẩy
+  3 image lên GHCR (`ghcr.io/<owner>/jobcrawler-{backend,worker,frontend}`, tag `main` / `sha-…` /
+  phiên bản; Trivy quét lỗ hổng). E2E chạy ở máy (`task frontend:e2e`). `audit.yml` kiểm lỗ hổng
+  dependency mỗi tuần.
+- Vận hành, triển khai: [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/DEPLOY.md](docs/DEPLOY.md).
 - Hook tuỳ chọn: `uvx pre-commit install -t pre-commit -t commit-msg` (ruff, gitleaks, kiểm tra
   commit message kiểu Conventional Commits).

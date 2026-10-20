@@ -3,7 +3,7 @@
 Tài liệu này mô tả hệ thống chạy thế nào: các process, luồng dữ liệu, từng tầng trong mã nguồn và
 các quyết định thiết kế quan trọng. Cách vận hành (dịch vụ, giới hạn đang đặt, bảo trì) xem
 [OPERATIONS.md](OPERATIONS.md); triển khai và quy mô 10.000 doanh nghiệp xem
-[DEPLOY.md](DEPLOY.md); đặc tả gốc xem [BUILD_PROMPT.md](BUILD_PROMPT.md).
+[DEPLOY.md](DEPLOY.md).
 
 ## 1. Tổng quan
 
@@ -57,23 +57,28 @@ flowchart LR
 Mỗi khối là một service riêng, tự đủ trong thư mục của nó (mã, dependency + lockfile, công cụ,
 `Dockerfile`, `Taskfile.yml`, `.env`): `backend/` (gói `jobcrawler`, một image không có Chromium,
 các process khác nhau ở lệnh), `worker/` (gói `jobworker`, image Playwright + Chromium),
-`frontend/` (image `web`: nginx phục vụ bản build React, chuyển `/api/` tới `api`). `proto/` (gói
+`frontend/` (image `frontend`: nginx phục vụ bản build React, chuyển `/api/` tới `backend`). `proto/` (gói
 `jobcrawler-proto`) là thư viện hợp đồng gRPC mà backend và worker cùng phụ thuộc theo đường dẫn
 `../proto`; image của chúng nhận nó làm build context tên `proto`.
 
-| Dịch vụ          | Lệnh                                  | Việc                                                                                                                                       |
-| ---------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `postgres`       |                                       | dữ liệu                                                                                                                                    |
-| `redis`          |                                       | ba hàng đợi job, hàng việc lấy trang của worker, rate limit, proxy pool, robots/HTTP/LLM/SERP cache, khoá, số đo độ trễ, phiên bản cài đặt |
-| `migrate`        | `jobcrawler db upgrade`               | chạy Alembic mỗi lần `up` rồi thoát                                                                                                        |
-| `api`            | `jobcrawler api`                      | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `web`)                                                                                     |
-| `web`            | nginx (image `web`, `frontend/`)      | giao diện React; `/api/` chuyển tới `api` (giữ Host, ghi đè `X-Forwarded-For` bằng IP người dùng); cache file tĩnh                       |
-| `gateway`        | `jobcrawler gateway`                  | gRPC cho worker: giao việc lấy trang từ Redis Streams, nhận kết quả                                                                        |
-| `scheduler`      | `jobcrawler scheduler`                | mỗi giây xếp build đến hạn (đêm / doanh nghiệp mới / bộ khung hỏng) và poll đến hạn; một replica giữ khoá Postgres                          |
-| `runner-poll`    | `jobcrawler runner --role poll`       | queue `jobcrawler-poll`: `poll_company` (`RUNNER_POLL_CONCURRENCY` = 50 mỗi process)                                                       |
-| `runner-build`   | `jobcrawler runner --role build`      | queue `jobcrawler-build`: `build_company` (10 mỗi process); cron bảo trì (mỗi giờ), số liệu tổng quan (5 phút)                             |
-| `runner-boards`  | `jobcrawler runner --role boards`     | queue `jobcrawler-boards`: `index_board` (đủ, đêm), `tail_board` (đuôi, mỗi 2 phút ban ngày)                                               |
-| `worker`         | `jobworker run`                       | lấy trang: nhận việc qua gRPC, tải bằng curl_cffi / Chromium qua proxy của mình, trả kết quả                                               |
+Compose chạy 5 container:
+
+| Container  | Lệnh              | Việc                                                                                                   |
+| ---------- | ----------------- | ------------------------------------------------------------------------------------------------------ |
+| `postgres` |                   | dữ liệu                                                                                                |
+| `redis`    |                   | ba hàng đợi job, hàng việc lấy trang của worker, rate limit, proxy pool, khoá, số đo độ trễ, phiên bản cài đặt, heartbeat, cache (AOF, `noeviction`) |
+| `backend`  | `jobcrawler serve` | migration rồi bốn process con (dưới); một process thoát thì container thoát và Docker dựng lại        |
+| `frontend` | nginx             | giao diện React; `/api/` chuyển tới `backend` (giữ Host, ghi đè `X-Forwarded-For` bằng IP người dùng); cache file tĩnh |
+| `worker`   | `jobworker run`   | lấy trang: nhận việc qua gRPC, tải bằng curl_cffi / Chromium qua proxy của mình, trả kết quả           |
+
+Process con của `backend` (mỗi process một event loop + watchdog; chạy riêng được bằng lệnh của nó):
+
+| Process     | Lệnh                   | Việc                                                                                                   |
+| ----------- | ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| api         | `jobcrawler api`       | API JSON `/api/...` (cổng 8000, chỉ trong mạng compose, sau `frontend`)                                |
+| gateway     | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc lấy trang từ Redis Streams, nhận kết quả                        |
+| scheduler   | `jobcrawler scheduler` | mỗi giây xếp build đến hạn (đêm / doanh nghiệp mới / bộ khung hỏng) và poll đến hạn; giữ khoá Postgres  |
+| runner      | `jobcrawler runner`    | cả ba queue: `poll_company` (`RUNNER_POLL_CONCURRENCY`, 0 = tự tính theo máy: 12 mỗi CPU), `build_company` (2,5 mỗi CPU) + cron bảo trì / số liệu tổng quan, `index_board` / `tail_board` (`--role poll\|build\|boards` để tách vai) |
 
 CLI (`jobcrawler …`, `backend/jobcrawler/entrypoints/cli.py`) dùng đúng các hàm của tầng
 `services/`: build / poll một doanh nghiệp (`build`, `poll`, `run`), KYC (`kyc`), thử một website
@@ -83,8 +88,10 @@ CLI (`jobcrawler …`, `backend/jobcrawler/entrypoints/cli.py`) dùng đúng cá
 Mọi process backend mở tài nguyên qua `resources.open_resources()` → `Resources`: engine +
 sessionmaker SQLAlchemy async, Redis, ba hàng đợi, `LLMClient`, `HttpClient` gửi request qua worker
 (`fetch: FetchClient`), `api_http` gọi thẳng API bên ngoài (SERP), proxy pool chung. Cài đặt hiện
-hành là env/`backend/.env` cộng giá trị sửa ở trang Cài đặt, nạp lại khi đổi
-(`services/live_settings.py`).
+hành là env/`backend/.env` (chỉ kết nối, gateway, đăng nhập, log) cộng bảng `app_settings` (mọi
+cài đặt khác, sửa ở trang Cài đặt), nạp lại khi đổi (`services/live_settings.py`). Cài đặt chỉ đọc
+lúc khởi động (`live=False`): lưu thì tăng bộ đếm `<prefix>:settings:restart` trên Redis,
+`jobcrawler serve` thấy thì khởi động lại các process con.
 
 ## 3. Bản đồ mã nguồn
 
@@ -114,7 +121,7 @@ worker/                service worker: pyproject.toml + uv.lock, Dockerfile, Tas
 worker/jobworker/      config, client gRPC, fetch (curl_cffi), browser (Playwright), proxy tại worker
 proto/                 thư viện hợp đồng: jcproto/v1/crawl.proto + mã sinh sẵn, scripts/gen.py, tests/
 frontend/              service web: React + shadcn/ui + Tailwind (build vào frontend/dist), Dockerfile +
-                       nginx/ (image `web`), client sinh từ ../backend/openapi.json (orval → src/lib/gen/)
+                       nginx/ (image `frontend`), client sinh từ ../backend/openapi.json (orval → src/lib/gen/)
 ```
 
 Quy ước phụ thuộc: `sources/` chỉ biết `SourceSession` (bọc `Fetcher` + `LLMClient`), không biết
@@ -280,7 +287,11 @@ Cùng với đó `crawl_plans.job_keys` là mã các tin nguồn trả về ở 
 - Mỗi doanh nghiệp có pha cố định trong [0, 1) (hash của id) để rải đều: build đêm ở
   `đầu BUILD_WINDOW + pha × độ dài khung` (10.000 doanh nghiệp / 6 giờ ≈ 0,46 lượt/giây), poll đầu
   ngày ở `đầu POLL_WINDOW + pha × chu kỳ`.
-- Scheduler (một replica giữ `pg_try_advisory_lock`) mỗi `SCHEDULER_TICK_SECONDS`:
+- Scheduler mỗi `SCHEDULER_TICK_SECONDS`, chỉ một replica làm việc: replica giữ khoá leader
+  (lease Redis `<prefix>:lock:scheduler`, `locks.RedisLease`, hạn 30 s, gia hạn mỗi nhịp; chết thì
+  replica khác thay khi khoá hết hạn, dừng thì nhả ngay). Không giữ phiên Postgres nên chạy được sau
+  PgBouncer chế độ transaction. Lượt bảo trì cũng giữ lease Redis (tự gia hạn khi chạy); cron xếp
+  job có khoá duy nhất `cron:<hàm>` nên nhiều runner cũng chỉ một job mỗi mốc. Mỗi nhịp:
   tạo lịch cho doanh nghiệp mới (`new` → build ngay, bất kể khung giờ); lấy dòng đến hạn bằng
   `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp, xếp job (khoá theo doanh nghiệp nên không trùng).
   Hàng đợi còn quá `BUILD_QUEUE_MAX_BACKLOG` / `POLL_QUEUE_MAX_BACKLOG` việc chờ thì không xếp thêm.
@@ -385,7 +396,15 @@ sequenceDiagram
   `config_version`); `Heartbeat` mỗi 5 s kèm số liệu (cả lý do render đang tạm tắt: Chromium
   lỗi thì worker lùi 30 s → 10 phút rồi thử lại); gateway quên
   worker (khởi động lại) → `NOT_FOUND` → worker đăng ký lại; trang Workers yêu cầu "dừng nhận việc"
-  (drain) → worker làm nốt rồi `Leave`. Token (`GATEWAY_TOKEN`) và TLS tuỳ chọn.
+  (drain) → worker làm nốt rồi `Leave`. TLS tuỳ chọn.
+- Xác thực (`gateway/worker_auth.py`, bật khi đặt GATEWAY_TOKEN): `Register` bằng khoá tham gia —
+  GATEWAY_TOKEN (cố định) hoặc khoá dùng một lần tạo ở trang Workers (TTL 5 phút trên Redis, `GETDEL`
+  khi dùng) — nhận `worker_token` riêng; Lease / Complete / Heartbeat / Leave phải dùng token đó và
+  đúng `worker_id` của nó. Token chỉ nằm trên Redis (băm SHA-256, hạn trượt 7 ngày, Heartbeat gia
+  hạn), không lưu DB; worker lưu token ở WORKER_TOKEN_FILE, bị từ chối thì vào lại bằng khoá tham gia.
+- Slot của worker (`jobworker/sysres.py`): WORKER_HTTP_SLOTS / WORKER_RENDER_SLOTS trống = tự tính
+  theo CPU / RAM (cgroup của container) — HTTP 8 mỗi CPU trong [8, 64], render 1 mỗi 768 MiB RAM trong
+  [1, 8]; worker báo slot khi Register, trang Workers hiện đang dùng / tổng.
 
 ## 12. Hàng đợi (Redis Streams, `streamqueue.py`)
 
@@ -443,14 +462,16 @@ erDiagram
 
 ## 14. Giao diện web
 
-Service `web` (`frontend/`, nginx không root, cổng 8080) phục vụ bản build React và chuyển
-`/api/` tới service `api` — FastAPI (`web/app.py`, `web/api.py`, `web/settings_api.py`) chỉ phục
-vụ API `/api/...` (tài liệu `/api/docs`). Trình duyệt chỉ thấy một origin nên đăng nhập HTTP Basic
-và kiểm tra chống CSRF giữ nguyên (nginx giữ `Host`). Trang: Tổng quan (độ trễ phát hiện tin mới, độ tươi, lượt chạy,
+Container `frontend` (nginx không root, cổng 8080) phục vụ bản build React và chuyển `/api/` tới
+API của `backend` — FastAPI (`web/app.py`, `web/api.py`, `web/settings_api.py`) chỉ phục
+vụ API `/api/...` (tài liệu `/api/docs`). Trình duyệt chỉ thấy một origin nên cookie đăng nhập
+và kiểm tra chống CSRF giữ nguyên (nginx giữ `Host`). Trang đăng nhập `/login` nằm ngoài khung ứng
+dụng; Cài đặt là popup mở trên trang đang xem (`?settings=<nhóm>`, `components/settings-dialog.tsx`). Trang: Tổng quan (độ trễ phát hiện tin mới, độ tươi, lượt chạy,
 request), Hàng đợi (build / poll / trang tuyển dụng), Trang tuyển dụng (lượt đủ / đuôi), Doanh
-nghiệp (tab "Bộ khung & lịch": nguồn, trang/API trong bộ khung, mốc poll/build, nút Poll ngay /
-Build lại), Việc làm, Kiểm tay, Golden set, **Workers** (worker đang kết nối, slot, proxy, dừng nhận
-việc), **Cài đặt** (10 nhóm chia mục con, ghi rõ mục cần khởi động lại), **Nhật ký thao tác**
+nghiệp (thêm tay `POST /api/companies`, nạp CSV, tải CSV mẫu; tab "Bộ khung & lịch": nguồn,
+trang/API trong bộ khung, mốc poll/build, nút Poll ngay / Build lại), Việc làm, Kiểm tay, Golden set, **Workers** (worker đang kết nối, slot, proxy, dừng nhận
+việc), **Cài đặt** (10 nhóm chia mục con; mục cần khởi động lại được backend tự áp dụng; chép giá trị
+đặt bằng biến môi trường vào DB; bảng proxy chung kèm trạng thái xoay vòng và kiểm tra qua worker), **Nhật ký thao tác**
 (`/api/audit`). Giao diện chỉ hiện trạng thái, không hướng dẫn chạy lệnh.
 
 Middleware, từ ngoài vào:
@@ -459,17 +480,31 @@ Middleware, từ ngoài vào:
   vào contextvars của structlog (mọi log của request kèm `request_id`) và trả lại ở header; log
   `http.request` cho `/api/*` (method, path, status, thời gian, người dùng); lỗi chưa xử lý →
   500 `{"detail", "request_id"}`.
-- `GuardMiddleware`: HTTP Basic khi đặt `UI_PASSWORD` (sai 20 lần trong 5 phút từ một IP → 429
-  kèm `Retry-After`, đếm trên Redis, Redis lỗi thì cho qua); request ghi từ site khác bị chặn.
-  Mọi lỗi cùng dạng JSON `{"detail": ...}`.
-- (nginx của `web`) File trong `/assets` (tên có hash) cache một năm; `index.html` không cache;
+- `GuardMiddleware` (`web/auth.py`): đặt `UI_PASSWORD` thì cần JWT (HS256, ký bằng JWT_SECRET —
+  trống thì khoá ngẫu nhiên trên Redis) của `POST /api/auth/login` trong cookie httpOnly `jc_token`
+  hoặc header `Authorization: Bearer`; token mang dấu của mật khẩu (đổi mật khẩu = token cũ hết
+  dùng), đăng xuất thu hồi `jti` trên Redis tới khi token hết hạn. Thiếu / sai → 401 kèm
+  `WWW-Authenticate: Bearer` (giao diện chuyển tới `/login`). Đăng nhập sai 20 lần trong 5 phút từ
+  một IP → 429 kèm `Retry-After` (đếm trên Redis, Redis lỗi thì cho qua). Request ghi từ site khác
+  bị chặn. Mọi lỗi cùng dạng JSON `{"detail": ...}`.
+- (nginx của `frontend`) File trong `/assets` (tên có hash) cache một năm; `index.html` không cache;
   `X-Forwarded-For` ghi đè bằng IP người dùng (api tin header này để chặn đoán mật khẩu theo IP).
 
-Mọi thao tác thay đổi trạng thái (lưu cài đặt, build / poll ngay, xếp build, import, kiểm tay,
-index trang tuyển dụng, bảo trì, chấm golden set, dừng worker) ghi một dòng `audit_events`
+Mọi thao tác thay đổi trạng thái (lưu cài đặt, thêm doanh nghiệp, build / poll ngay, xếp build,
+import, kiểm tay, index trang tuyển dụng, bảo trì, chấm golden set, dừng worker) ghi một dòng `audit_events`
 (`services/audit.py`): lưu cài đặt và kiểm tay ghi trong cùng transaction với thay đổi; các thao
 tác còn lại ghi sau khi thành công, ghi nhật ký lỗi không làm hỏng request. Cài đặt bí mật và mật
 khẩu proxy luôn bị che.
+
+Đăng nhập SSO (tuỳ chọn): proxy SSO (vd. oauth2-proxy) đứng trước `frontend` và gửi
+`X-Forwarded-User` / `X-Forwarded-Email`; khi đặt `AUTH_PROXY_USER_HEADER`, `GuardMiddleware`
+lấy người dùng từ header đó thay cho trang đăng nhập, `/api/me` trả `auth: "proxy"` và `logout_url`.
+
+Trường nhạy cảm trong DB (`secretbox.py`): khoá API LLM / SERP và danh sách proxy của bảng
+`app_settings` lưu dạng `enc:v1:<kid>:<…>` (AES-256-GCM, AAD = tên trường) với khoá từ
+ENCRYPTION_KEYS (nhiều khoá: khoá cuối mã hoá, khoá trước chỉ giải mã) — trống thì khoá ngẫu nhiên
+trên Redis; `jobcrawler serve` mã hoá lại dòng cũ / dòng dùng khoá cũ lúc khởi động
+(`app_settings.seal_stored`). Khoá không bao giờ nằm trong Postgres.
 
 Frontend: React data router (`router.tsx`) — trang lỗi trong khung ứng dụng, nhận ra chunk cũ sau
 khi triển khai bản mới (mời tải lại); toast lỗi mặc định cho mọi mutation (`lib/query-client.ts`);
@@ -513,6 +548,10 @@ Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
   proxy tại worker `w:…`, thời gian, số tin, kết quả).
 - `crawl_plans.last_error`, `company_schedules.last_error`: vì sao bộ khung hỏng / poll lỗi.
 - `/api/crawl/status`: P50/P95 thời gian poll và cửa sổ phát hiện, % trong 3 phút, độ tươi.
+- Heartbeat (`heartbeat.py`): scheduler / runner ghi `<prefix>:health:<thành phần>:<hostname>`
+  mỗi 5 s ngay trong vòng lặp chính; `jobcrawler health scheduler runner` (cùng `/healthz` và
+  `gateway-health`) là healthcheck của container `backend`.
+  Worker ghi file trạng thái, `jobworker health` đọc.
 - `/api/workers`: worker sống, slot đang dùng, việc xong / lỗi.
 - `jobcrawler stats`, `jobcrawler queue info`, `jobcrawler eval`.
 
@@ -532,6 +571,10 @@ Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
 - **Đo thật**: `backend/scripts/loadtest/sla_site.py` + `sla_report.py` (độ trễ đầu-cuối trên site
   giả),
   `fake_sites.py` (hàng trăm site giả để thử tải poll).
+- **E2E** (`frontend/e2e/`, Playwright): đi qua mọi trang trên stack compose đang chạy, không
+  lỗi console, điện thoại không cuộn ngang; chạy ở máy (`task frontend:e2e`), không chạy ở CI.
+- **Hợp đồng gRPC**: `buf lint` + `buf breaking` (PR: so với nhánh đích; push: so với commit trước)
+  trên `proto/`.
 - **Frontend**: Vitest (`frontend/src/**/*.test.ts(x)`): hàm thuần (định dạng, mô hình trang Cài
   đặt, API client, bộ lọc URL, nhật ký), trang lỗi, mã orval sinh khớp `openapi.json`.
 - `TEST_DATABASE_URL` phải là DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại); khi
@@ -539,4 +582,5 @@ Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
 - Mỗi service kiểm riêng trong thư mục của nó (`task <service>:check`: ruff format/check, pyright,
   pytest; proto thêm mã sinh khớp; backend thêm spec API; frontend typecheck + client sinh + test +
   build); `task check` chạy cả bốn — cũng là việc CI (`.github/workflows/ci.yml`, một job mỗi
-  service + build 3 image) chạy mỗi lần push lên `main`.
+  service + build 3 image) chạy cho mỗi pull request và mỗi lần push lên `main`; push `main` / tag
+  `vX.Y.Z` còn đẩy 3 image lên GHCR khi mọi kiểm tra xanh.

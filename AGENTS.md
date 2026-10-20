@@ -20,7 +20,7 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
    `jobcrawler db revision`), xem lại file sinh ra trước khi commit. Không sửa revision đã áp dụng.
 5. **Test không gọi mạng ngoài**: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
    `FakeChatClient`, worker dùng gateway giả (`worker/tests/worker_fakes.py`) + server HTTP cục bộ.
-6. **Không commit bí mật**: mọi `.env` (gốc, `backend/`, `worker/`), `deploy/*.env`, file proxy
+6. **Không commit bí mật**: mọi `.env` (gốc, `backend/`, `worker/`), file proxy
    (`proxies.txt`, `*/config/*proxies*.txt` trừ file `.example`), chứng chỉ / khoá TLS.
 7. **Giao diện web không bao giờ hiện lệnh shell / hướng dẫn vận hành** — chỉ trạng thái và cài đặt.
    Lưu ý vận hành ghi vào `docs/OPERATIONS.md` (hoặc `docs/DEPLOY.md`).
@@ -32,6 +32,12 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 10. **`.claude/skills/*` là bên thứ ba, ghim hash trong `skills-lock.json`**: không sửa.
 11. **Mỗi service tự đủ**: không import chéo giữa `backend/` và `worker/` (chỉ cùng dùng `proto/`),
     không đọc / ghi file của service khác lúc chạy, không đặt lại file Python / Node ở gốc repo.
+12. **Hợp đồng không phá vỡ**: `crawl.proto` chỉ thêm field / message, không đổi số hay xoá
+    (`buf breaking` trong CI chặn); lệnh `jobcrawler serve`, `jobcrawler health` /
+    `gateway-health`, `jobworker health` là hợp đồng với healthcheck — đổi thì sửa cùng
+    `docker-compose.yaml`.
+13. **Cache mới đặt ở Redis cache** (`res.cache_redis` / `cache_kv`, `CACHE_REDIS_URL`): dữ liệu
+    mất được. Hàng đợi, khoá, rate limit, trạng thái phải giữ ở `res.redis` (`REDIS_URL`).
 
 ## Cấu trúc repo
 
@@ -41,8 +47,8 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 | `worker/`              | service worker (gói `jobworker`): lấy trang (curl_cffi + Chromium, proxy riêng), gọi gateway qua gRPC; `config/` proxy mẫu |
 | `frontend/`            | service web: React + Vite + Tailwind + shadcn/ui, image nginx (`nginx/`) phục vụ bản build và chuyển `/api` tới backend |
 | `proto/`               | thư viện hợp đồng gRPC dùng chung: `jcproto/v1/crawl.proto` + mã sinh sẵn, `scripts/gen.py` |
-| `deploy/`              | compose cho máy backend / máy worker riêng; script khởi tạo Postgres (`postgres/init/`) |
-| `docs/`                | ARCHITECTURE, OPERATIONS, DEPLOY, BUILD_PROMPT (đặc tả gốc)                            |
+| `deploy/`              | script khởi tạo Postgres của compose (`postgres/init/`: DB `jobcrawler_test`)          |
+| `docs/`                | ARCHITECTURE, OPERATIONS, DEPLOY                                                      |
 
 Mỗi service có trong thư mục của nó: mã, `pyproject.toml` + `uv.lock` + `.python-version` (hoặc
 `package.json` + lock + `.nvmrc`), cấu hình ruff / pyright / pytest, `Dockerfile` + `.dockerignore`,
@@ -61,7 +67,7 @@ service), `.env.example` (biến của compose: cổng, số bản, tài khoản
 ```bash
 task setup                    # dependency mọi service + .env, backend/.env, worker/.env từ .env.example
 task infra                    # chỉ postgres + redis (chờ healthy)
-task up / task down           # cả stack docker compose (up có build 3 image)
+task up / task down           # 5 container: postgres, redis, backend, frontend, worker (up build 3 image)
 task check                    # mọi thứ CI chạy (proto, backend, worker, frontend)
 task fmt / lint / typecheck / test   # trên mọi service
 task <service>:check          # một service: proto, backend, worker, frontend
@@ -71,6 +77,8 @@ task backend:dev / worker:dev / frontend:dev
 task backend:cli -- <lệnh jobcrawler>   # vd. task backend:cli -- import companies.csv
 task proto:gen / task proto:gen:check
 task api / task api:check     # mô hình API → backend/openapi.json → orval → frontend/src/lib/gen/
+task frontend:e2e             # Playwright trên stack đang chạy (127.0.0.1:8000)
+task release VERSION=X.Y.Z    # tag + đẩy; CI build và đẩy image lên GHCR (không tự chạy)
 ```
 
 Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit -t commit-msg`
@@ -96,8 +104,11 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
    `GATEWAY_HTTP_SLOTS`); worker dùng `WORKER_*` và `GATEWAY_ADDR` / `GATEWAY_TOKEN` /
    `GATEWAY_TLS` / `GATEWAY_CA_CERT`. Mỗi bên đọc `.env` của thư mục mình (`backend/.env`,
    `worker/.env`); `GATEWAY_TOKEN` phải giống nhau ở hai file.
-3. **Cài đặt sửa ở giao diện đè `.env`** (bảng `app_settings`, nạp lại ≤ 5 s). Mục `live=False` cần
-   khởi động lại process; kết nối / bí mật / gateway / đăng nhập là `ENV_ONLY`, không trả ra API.
+3. **Cài đặt nằm trong DB** (bảng `app_settings`, trang Cài đặt, đè `.env`, nạp lại ≤ 5 s); `.env`
+   chỉ cho `ENV_ONLY` (kết nối / bí mật hạ tầng / gateway / đăng nhập / log, không trả ra API).
+   Mục `live=False` đọc lúc khởi động: `jobcrawler serve` tự khởi động lại process con khi chúng
+   đổi (bộ đếm Redis `settings:restart`); cài đặt mới thêm vào `GROUPS` của
+   `services/app_settings.py`, không thêm vào `backend/.env.example`.
 4. **Cron** (`MAINTENANCE_CRON`, `BOARD_INDEX_CRON`, `BOARD_TAIL_CRON`…) và khung build / poll tính
    theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh), không phải UTC. Windows cần gói `tzdata` (đã có).
 5. **Image Docker phải `--reinstall-package`** chính service và `jobcrawler-proto`: cache của uv cho
@@ -111,8 +122,8 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
 8. **Postgres / Redis chỉ mở ở `127.0.0.1` (IPv4)**. Trên Windows `localhost` thử `::1` trước, bị
    từ chối sau ~2 s cho mỗi kết nối mới → URL nên dùng `127.0.0.1`.
 9. **Healthcheck gateway** là `jobcrawler gateway-health` (grpc.health.v1, không cần token; TLS theo
-   `GATEWAY_TLS_CERT/KEY`). Worker trong compose chờ gateway healthy; chứng chỉ không có tên
-   `127.0.0.1` thì healthcheck cần `--server-name`.
+   `GATEWAY_TLS_CERT/KEY`), một phần healthcheck của container `backend` (worker chờ nó healthy);
+   chứng chỉ không có tên `127.0.0.1` thì healthcheck cần `--server-name`.
 10. **Migration tạo extension** `pg_trgm`, `unaccent`: user DB cần quyền tạo extension (Postgres
     quản lý: tạo trước). Revision đánh số tiếp `0002`, `0003`…
 11. **Mã sinh proto phụ thuộc bản `grpcio-tools`** trong `proto/uv.lock` và cần `protobuf` cùng
@@ -127,3 +138,13 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
 14. **Giao diện gọi API qua hàm / hook orval sinh** (`@/lib/gen/queries`, như open-asm), không
     `fetch` tay. orval không mã hoá tham số path: id tự do phải `encodeURIComponent`.
     openapi-typescript / hey-api không chạy được với TypeScript 7 (cần API compiler của TS 5).
+15. **Đăng nhập là JWT** (`web/auth.py`): test gọi API có `UI_PASSWORD` thì tự ký token
+    (`app.state.token_auth.issue()`) và gửi `Authorization: Bearer` — không còn HTTP Basic.
+    Trường bí mật / proxy của `app_settings` lưu mã hoá (`secretbox`, `app_settings.SENSITIVE`):
+    đọc bảng thẳng thì giải mã bằng `secretbox.current()`; thêm cài đặt bí mật mới (kind `secret`)
+    là tự được mã hoá.
+16. **Worker xác thực bằng token riêng** (`gateway/worker_auth.py`): `GATEWAY_TOKEN` / khoá một lần
+    chỉ để `Register`; RPC khác cần `worker_token` đúng `worker_id`. Worker giả trong test gateway
+    phải đổi metadata sang `RegisterResponse.worker_token` sau khi đăng ký.
+17. **Khoá phân tán dùng `locks.RedisLease`** (scheduler leader, bảo trì), không dùng khoá advisory
+    theo phiên Postgres mới (hỏng sau PgBouncer chế độ transaction).

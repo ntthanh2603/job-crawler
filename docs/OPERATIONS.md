@@ -7,37 +7,30 @@ lớn, và những việc cần làm khi đổi cấu hình. Giao diện web ch�
 
 ## Dịch vụ (docker compose, một máy)
 
-| Dịch vụ         | Việc                                                                              | Số bản                   |
-| --------------- | --------------------------------------------------------------------------------- | ------------------------ |
-| `postgres`      | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres))                           | 1                        |
-| `redis`         | hàng đợi (Redis Streams), việc lấy trang của worker, cache, khoá, số đo, cài đặt  | 1                        |
-| `migrate`       | `jobcrawler db upgrade` mỗi lần `up` (không có việc thì thoát)                    | —                        |
-| `api`           | API JSON (`jobcrawler api`), chỉ trong mạng compose                                | 1                        |
-| `web`           | giao diện React (nginx) + chuyển `/api/` tới `api`, `127.0.0.1:${WEB_PORT:-8000}`  | 1                        |
-| `gateway`       | gRPC cho worker, `${GATEWAY_PUBLISH:-127.0.0.1:50051}`                            | 1                        |
-| `scheduler`     | xếp build đêm / poll ngày mỗi giây (một bản giữ khoá làm việc)                    | 1                        |
-| `runner-poll`   | `poll_company` (50 lượt song song mỗi bản)                                        | `RUNNER_POLL_REPLICAS`   |
-| `runner-build`  | `build_company` (10 mỗi bản), cron bảo trì, cron số liệu tổng quan                | `RUNNER_BUILD_REPLICAS`  |
-| `runner-boards` | index trang tuyển dụng: đủ (00:30), đuôi (mỗi 2 phút, 6h–23h)                     | `RUNNER_BOARDS_REPLICAS` |
-| `worker`        | lấy trang (curl_cffi + Chromium) qua proxy của worker                             | `WORKER_REPLICAS`        |
+| Container  | Việc                                                                                              | Số bản                |
+| ---------- | ------------------------------------------------------------------------------------------------- | --------------------- |
+| `postgres` | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres))                                           | 1                     |
+| `redis`    | hàng đợi (Redis Streams), việc lấy trang của worker, khoá, số đo, cài đặt, cache — AOF, `noeviction` | 1                  |
+| `backend`  | `jobcrawler serve`: migration rồi API JSON (chỉ trong mạng compose), gateway gRPC (`${GATEWAY_PUBLISH:-127.0.0.1:50051}`), scheduler, runner (poll 50 lượt song song, build 10 + cron bảo trì / số liệu, index trang tuyển dụng) | 1 |
+| `frontend` | giao diện React (nginx) + chuyển `/api/` tới `backend`, `127.0.0.1:${WEB_PORT:-8000}`             | 1                     |
+| `worker`   | lấy trang (curl_cffi + Chromium) qua proxy của worker                                             | `WORKER_REPLICAS` (1) |
 
 Mỗi service là một thư mục tự đủ (`backend/`, `worker/`, `frontend/`; `proto/` là thư viện dùng
-chung) với `.env` riêng: `backend/.env` cho mọi process backend, `worker/.env` cho worker, `.env`
-ở gốc chỉ cho biến của compose (cổng, số bản, tài khoản Postgres). Lệnh `jobcrawler …` chạy trong
+chung) với `.env` riêng: `backend/.env` cho container `backend`, `worker/.env` cho worker, `.env`
+ở gốc chỉ cho biến của compose (cổng, số worker, tài khoản Postgres). Lệnh `jobcrawler …` chạy trong
 `backend/` (`cd backend && uv run jobcrawler …` hoặc `task backend:cli -- …`).
 
 Đổi mã nguồn: `docker compose build && docker compose up -d` (hoặc `task up`; migration chạy tự
 động). Image backend (`backend/Dockerfile`) không có Chromium; image worker (`worker/Dockerfile`)
-có. Cả hai build từ thư mục gốc repo và luôn cài lại gói của workspace (cache của uv cho gói cục
-bộ chỉ theo `pyproject.toml`, không ép thì image có thể mang mã cũ).
+có. Cả hai build từ thư mục service (cộng build context `proto`) và luôn cài lại gói cục bộ (cache
+của uv cho gói cục bộ chỉ theo `pyproject.toml`, không ép thì image có thể mang mã cũ).
 
 - Postgres (`15432`) và Redis (`16379`) chỉ mở ở `127.0.0.1` của máy host (Redis không có mật
   khẩu). Chạy CLI / test trên máy host thì dùng `127.0.0.1` trong URL, không dùng `localhost`:
   trên Windows `localhost` thử IPv6 `::1` trước và mỗi kết nối mới chờ thêm ~2 s.
 - Log của mọi container xoay vòng (json-file, 10 MB × 3).
-- `gateway` có healthcheck (`jobcrawler gateway-health`, dịch vụ health chuẩn của gRPC, dùng TLS
-  khi đặt `GATEWAY_TLS_CERT/KEY`); `worker` chỉ khởi động khi gateway healthy. Image backend cũ
-  (trước lệnh này) làm gateway luôn unhealthy: build lại image trước khi `up`.
+- `frontend` và `worker` chỉ khởi động khi `backend` healthy (xem
+  [Sức khoẻ](#sức-khoẻ-và-tự-khởi-động-lại)).
 
 ## Lịch thu thập
 
@@ -52,7 +45,7 @@ bộ chỉ theo `pyproject.toml`, không ép thì image có thể mang mã cũ).
 
 Đổi khung giờ / chu kỳ ở trang Cài đặt có hiệu lực trong vài giây (scheduler đọc lại mỗi nhịp).
 Cron (`BOARD_INDEX_CRON`, `BOARD_TAIL_CRON`, `MAINTENANCE_CRON`) đọc theo `CRAWL_TIMEZONE` và cần
-khởi động lại runner tương ứng.
+khởi động lại `backend`.
 
 ## Độ trễ phát hiện tin mới
 
@@ -61,9 +54,10 @@ Trang Tổng quan → "Độ trễ phát hiện tin mới" (API `/api/crawl/stat
 - **Cửa sổ phát hiện** của mỗi lượt poll đủ = lúc xong − lúc bắt đầu lượt poll đủ trước: tin đăng
   ngay sau lượt trước bắt đầu sẽ được thấy muộn nhất lúc này. P95 phải ≤ 180 s.
 - **Độ tươi** = tuổi lượt poll đủ gần nhất của từng doanh nghiệp đang poll (ảnh chụp lúc này).
-- P95 vượt mục tiêu thường do: hàng đợi poll dồn (thêm `runner-poll` hoặc worker), lượt poll dài
-  (site phân trang dài → `POLL_MAX_LISTING_PAGES`, rate limit theo domain), doanh nghiệp đang build
-  (poll bị bỏ qua trong lúc build), worker thiếu (trang Workers: slot đang dùng sát tổng).
+- P95 vượt mục tiêu thường do: hàng đợi poll dồn (thêm worker, tăng `RUNNER_POLL_CONCURRENCY`), lượt
+  poll dài (site phân trang dài → `POLL_MAX_LISTING_PAGES`, rate limit theo domain), doanh nghiệp
+  đang build (poll bị bỏ qua trong lúc build), worker thiếu (trang Workers: slot đang dùng sát
+  tổng).
 
 Đo đầu-cuối trên site giả (không phụ thuộc site thật có đăng tin):
 
@@ -88,6 +82,25 @@ uv run python scripts/loadtest/sla_report.py sla.jsonl
 - Poll không cập nhật `last_seen_at` của tin còn thấy (tránh ghi hàng chục dòng mỗi lượt); lượt
   build đêm cập nhật. Độ tươi của doanh nghiệp xem ở `company_schedules.last_poll_ok_at`.
 
+## Proxy
+
+- Hai cách: **Proxy chung** (trang Cài đặt → Proxy → Chế độ "Proxy chung") — danh sách lưu trong
+  DB, backend chọn proxy cho từng request và worker dùng đúng proxy đó; **Proxy tại worker** (mặc
+  định) — mỗi máy worker dùng proxy của nó (`WORKER_PROXIES` / `WORKER_PROXIES_FILE` trong
+  `worker/.env`).
+- Bảng proxy chung: thêm / sửa / xoá từng proxy (loại HTTP / HTTPS / SOCKS, host, cổng, tài khoản,
+  mật khẩu), "Dán nhiều dòng" (`http://user:pass@host:port`, `host:port`, `host:port:user:pass`;
+  trùng bỏ qua) rồi bấm Lưu. Mật khẩu không bao giờ trả lại giao diện; sửa proxy khác host / cổng /
+  tài khoản thì phải nhập lại mật khẩu.
+- Xoay vòng: mỗi domain gắn một proxy trong "Giữ proxy theo domain" (30 phút), chọn ngẫu nhiên theo
+  điểm (0–100: thành công +1, bị chặn −5, lỗi kết nối −10); 403 / 429 thì cho proxy nghỉ với domain
+  đó; lỗi kết nối liên tiếp đủ ngưỡng thì loại proxy khỏi vòng xoay rồi thử lại sau "Thời gian loại
+  proxy". Bảng hiện trạng thái từng proxy (trong vòng xoay + điểm, bị loại + còn bao lâu, số domain
+  đang nghỉ / đang gắn), tải lại mỗi 15 s.
+- "Kiểm tra" / "Kiểm tra tất cả" (proxy đã lưu, 20 proxy mỗi lần): worker gọi "Trang kiểm tra
+  proxy" qua từng proxy, báo độ trễ, IP ra, quốc gia; proxy sống được đưa lại vào vòng xoay, proxy
+  lỗi bị loại. Không có worker thì báo lỗi, không loại proxy.
+
 ## Worker lấy trang
 
 - Trang **Workers**: worker đang sống, pool, slot HTTP / render đang dùng, proxy tại worker, việc
@@ -97,21 +110,47 @@ uv run python scripts/loadtest/sla_report.py sla.jsonl
   worker trở lại thì tự chạy tiếp.
 - Cấu hình đẩy xuống mọi worker (slot, impersonate, heartbeat…) sửa ở trang Cài đặt → nhóm
   "Worker lấy trang"; worker nhận trong ≤ 5 s. Slot đặt ở đây là **mức trần**: worker dùng số nhỏ
-  hơn giữa giá trị này và `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` của máy nó.
+  hơn giữa giá trị này và `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` của máy nó — hai biến này để
+  trống thì worker tự tính theo CPU / RAM của máy (giới hạn cgroup nếu trong container): HTTP 8 mỗi
+  CPU trong [8, 64], render 1 mỗi 768 MiB RAM trong [1, 8].
+- Số job song song của runner (Cài đặt → Runner & hàng đợi) mặc định 0 = tự tính theo máy chạy
+  backend (poll 12 mỗi CPU trong [20, 100], build 2,5 mỗi CPU không quá 2 mỗi GiB RAM trong [4, 20],
+  trang tuyển dụng 1 mỗi CPU trong [2, 8]); ô cài đặt ghi giá trị máy đang tính ra. Trang Hàng đợi
+  hiện "đang chạy / tối đa" của từng hàng đợi: chạm trần mà còn việc chờ thì tăng số hoặc thêm
+  runner / worker.
 - Chromium lỗi (không mở được, crash): worker tạm tắt render rồi thử lại sau 30 s, 1, 2… tối đa 10
   phút; trang Workers ghi "Tạm tắt · thử lại sau …". Máy không cài Chromium thì tắt hẳn.
 - Cột "Xong / lỗi" của trang Workers kèm "trả lại" (việc giao lại khi worker rời) và "bỏ" (kết
   quả gửi muộn): tăng đều là dấu hiệu worker mất kết nối / quá tải.
-- Mở gateway ra ngoài mạng nội bộ: đặt `GATEWAY_TOKEN` (worker gửi cùng token) và TLS
-  (`GATEWAY_TLS_CERT/KEY`, hoặc đặt sau reverse proxy có TLS hỗ trợ HTTP/2).
+- Xác thực worker (bật khi đặt `GATEWAY_TOKEN` trong `backend/.env`): worker vào lần đầu bằng một
+  khoá tham gia rồi nhận token riêng, dùng cho mọi lời gọi sau (token chỉ nằm trên Redis, hạn trượt
+  7 ngày). Khoá tham gia là `GATEWAY_TOKEN` (đặt cùng giá trị ở `worker/.env` — worker trong
+  compose, máy worker của mình) hoặc khoá **dùng một lần** tạo ở trang Workers → "Thêm worker" (hết
+  hạn sau 5 phút; đặt vào `WORKER_JOIN_KEY` của máy worker mới). Worker lưu token ở
+  `WORKER_TOKEN_FILE` (mặc định `~/.jobworker/token`): máy chỉ có khoá một lần thì mount volume vào
+  đó, không thì tạo lại container phải xin khoá mới. Token hết hạn / mất Redis: worker tự vào lại
+  bằng `GATEWAY_TOKEN` nếu có. Đổi `GATEWAY_TOKEN` không thu hồi token đã cấp (chờ hết hạn, hoặc xoá
+  khoá `<prefix>:gw:wtoken:*` trên Redis).
+- Mở gateway ra ngoài mạng nội bộ: luôn đặt `GATEWAY_TOKEN` và TLS (`GATEWAY_TLS_CERT/KEY`, hoặc đặt
+  sau reverse proxy có TLS hỗ trợ HTTP/2).
 
 ## Cài đặt sửa ở giao diện
 
-Trang Cài đặt ghi đè giá trị từ `backend/.env` (bảng `app_settings`). Mỗi lần lưu tăng phiên bản trên Redis;
-mọi process (api, gateway, scheduler, runner) nạp lại trong ≤ 5 s. Mục ghi "Cần khởi động lại" chỉ
-có hiệu lực khi khởi động lại process dùng nó (endpoint LLM, cấu hình HTTP, proxy chung, cron, số
-job song song của runner). "Khôi phục" xoá giá trị ghi đè, về giá trị trong `.env` / mặc định. Các
-mục kết nối (DB, Redis, cổng, token, mật khẩu giao diện) chỉ đặt bằng `.env`.
+Cài đặt nằm trong DB (bảng `app_settings`) và sửa ở trang Cài đặt; `backend/.env` chỉ còn những
+gì cần để khởi động (kết nối DB / Redis, gateway, đăng nhập giao diện, watchdog, log — xem
+`backend/.env.example`). Mỗi lần lưu tăng phiên bản trên Redis; mọi process (api, gateway,
+scheduler, runner) nạp lại trong ≤ 5 s.
+
+- Mục có biểu tượng ↻ (endpoint LLM, cấu hình HTTP, proxy chung, cron, số job song song của
+  runner…) chỉ đọc lúc process khởi động. Lưu mà đổi chúng thì `jobcrawler serve` (container
+  `backend`) tự khởi động lại bốn process con trong vòng vài giây (job đang chạy được xếp lại,
+  worker nối lại gateway); trang Cài đặt hiện "Đang áp dụng" tới khi xong. Chạy từng process riêng
+  (dev, runner thêm ở máy khác) thì phải tự khởi động lại chúng.
+- Một cài đặt vẫn đặt được bằng biến môi trường cùng tên (`LLM_BASE_URL=…` trong `backend/.env`):
+  trang Cài đặt ghi "Biến môi trường" và có nút **Lưu vào cơ sở dữ liệu** chép mọi giá trị như vậy
+  vào DB (giá trị đang dùng không đổi); sau đó xoá các dòng đó khỏi `.env` được. Giá trị lưu ở
+  trang Cài đặt luôn thắng biến môi trường.
+- "Khôi phục" xoá giá trị trong DB, về giá trị biến môi trường / mặc định.
 
 ## Index trang tuyển dụng
 
@@ -187,17 +226,112 @@ Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng tri
 
 ## Đăng nhập giao diện
 
-Đặt `UI_PASSWORD` (HTTP Basic). Một IP sai mật khẩu 20 lần (mỗi lần cách nhau dưới 5 phút) thì
-nhận 429 tới khi hết 5 phút, kể cả khi nhập đúng; đăng nhập đúng xoá bộ đếm. Bộ đếm ở Redis;
-Redis lỗi thì không chặn ai. Sau reverse proxy, uvicorn chỉ thấy IP thật khi IP của proxy nằm
-trong `FORWARDED_ALLOW_IPS` (mặc định `127.0.0.1`); không thì mọi người dùng chung một bộ đếm của
-IP proxy.
+- **Trang đăng nhập** (khi đặt `UI_PASSWORD` trong `backend/.env`; tài khoản `UI_USERNAME` /
+  `UI_PASSWORD`): phiên là JWT trong cookie httpOnly, hạn `AUTH_TOKEN_HOURS` (12 giờ), ký bằng
+  `JWT_SECRET` (trống = khoá tự sinh trên Redis). "Đăng xuất" thu hồi phiên ngay. Đổi mật khẩu /
+  `JWT_SECRET` thì mọi phiên cũ hết dùng. Script gọi API: `POST /api/auth/login` lấy
+  `access_token`, gửi `Authorization: Bearer <token>`. Một IP sai mật khẩu 20 lần (mỗi lần cách
+  nhau dưới 5 phút) thì nhận 429 tới khi hết 5 phút, kể cả khi nhập đúng; đăng nhập đúng xoá bộ
+  đếm (Redis; Redis lỗi thì không chặn ai). Để trống `UI_PASSWORD` = không hỏi đăng nhập (chỉ khi
+  cổng chỉ mở ở 127.0.0.1). `frontend` (nginx) gửi IP của người kết nối
+  tới nó cho API; `frontend` đứng sau một load balancer khác thì đặt `REAL_IP_FROM` (`.env` gốc) bằng CIDR
+  của load balancer — nó phải **ghi thêm** IP client vào `X-Forwarded-For` — không thì mọi người
+  dùng chung bộ đếm của IP load balancer.
+- **SSO** (nhiều người vận hành, mỗi người một tài khoản): đặt một proxy SSO (vd. oauth2-proxy)
+  trước `frontend`, gửi `X-Forwarded-User` / `X-Forwarded-Email`; `backend/.env`:
+  `AUTH_PROXY_USER_HEADER` (và `AUTH_PROXY_EMAIL_HEADER`, `AUTH_LOGOUT_URL` cho nút "Đăng xuất").
+  API lấy người dùng từ header đó, không dùng trang đăng nhập. Chỉ an toàn khi mọi request đi qua
+  proxy đó (proxy ghi đè header).
+
+## Sức khoẻ và tự khởi động lại
+
+- Healthcheck: `postgres` (`pg_isready`), `redis` (`PING`), `frontend` (`/healthz` của nginx),
+  `worker` (`jobworker health`: file trạng thái trong container; mất liên lạc gateway quá 5 phút
+  mới hỏng để backend khởi động lại không kéo theo mọi worker), `backend` gộp: `/healthz` của API,
+  `jobcrawler gateway-health` (health chuẩn của gRPC, TLS khi đặt `GATEWAY_TLS_CERT/KEY`) và
+  `jobcrawler health scheduler runner` (heartbeat Redis ghi trong vòng lặp chính mỗi 5 s, cũ hơn
+  15 s là hỏng).
+- Docker chỉ **đánh dấu** container unhealthy, không tự khởi động lại. Vì vậy mỗi process có
+  watchdog: event loop hoặc vòng lặp chính đứng quá `WATCHDOG_SECONDS` (backend) /
+  `WORKER_WATCHDOG_SECONDS` (worker), mặc định 120 s, thì process ghi log `watchdog.stall` và thoát
+  mã 70. Trong `backend`, `jobcrawler serve` thấy một process con thoát thì dừng các process còn
+  lại và thoát; `restart: unless-stopped` dựng lại container. Postgres / Redis / gateway mất kết
+  nối không làm process thoát (vòng lặp vẫn chạy, chỉ thử lại).
+- `docker compose ps`: cột STATUS ghi `(healthy)` / `(unhealthy)`; `docker inspect <container>` xem
+  lý do (output của lệnh healthcheck).
+
+## Log
+
+- `docker compose logs <service>` (log container xoay vòng 10 MB × 3); đặt `LOG_FORMAT=json` trong
+  `backend/.env`, `worker/.env` để máy đọc được. Bảng `logs` trong Postgres giữ log của lượt chạy
+  (trang lượt chạy).
+- Production: `LOG_DB_LEVEL=WARNING` (bảng `logs` chỉ giữ cảnh báo / lỗi; log đầy đủ ở
+  `docker compose logs`).
+- Độ trễ phát hiện, hàng đợi, worker: trang Tổng quan / Hàng đợi / Workers của giao diện
+  (`/api/crawl/status`).
+
+## Redis
+
+Compose một máy dùng **một** Redis (`REDIS_URL`) cho hàng đợi job, việc lấy trang của worker, khoá,
+cài đặt, số đo độ trễ, chặn đoán mật khẩu, heartbeat, rate limit và cache (trang `http:*`, robots,
+tìm nguồn, LLM, SERP, tổng quan). AOF mỗi giây, `noeviction`: đầy bộ nhớ thì lệnh ghi báo lỗi chứ
+không âm thầm xoá việc; cache có hạn (TTL) nên tự dọn.
+
+Có thể tách cache sang một Redis khác (`CACHE_REDIS_URL` trong `backend/.env`, nên `allkeys-lru`,
+không cần lưu đĩa) để cache đầy không chèn ép hàng đợi. Trống = dùng chung `REDIS_URL`.
+
+## Sao lưu Postgres
+
+Không có sao lưu tự động. Sao lưu tay (`pg_dump -Fc`, chạy được trên Windows lẫn Linux):
+
+```bash
+docker compose exec postgres pg_dump -U jobcrawler -Fc -f /tmp/jobcrawler.dump jobcrawler
+docker compose cp postgres:/tmp/jobcrawler.dump ./jobcrawler.dump
+```
+
+Khôi phục đè: dừng các thứ ghi vào DB (`docker compose stop backend worker`), chép file vào
+container (`docker compose cp ./jobcrawler.dump postgres:/tmp/jobcrawler.dump`), chạy
+`docker compose exec postgres pg_restore -U jobcrawler -d jobcrawler --clean --if-exists
+/tmp/jobcrawler.dump`, rồi `docker compose up -d`. Chép bản dump ra ngoài máy; production nên dùng
+Postgres quản lý (snapshot + PITR) — xem DEPLOY.md.
+
+## Mã hoá trường nhạy cảm
+
+Khoá API LLM / SERP và danh sách proxy chung (có mật khẩu) lưu trong DB dạng mã hoá AES-256-GCM
+(`enc:v1:…`). Khoá ở `ENCRYPTION_KEYS` (`backend/.env`); trống thì backend tự sinh một khoá lưu trên
+Redis — mất Redis là mất khoá, các giá trị đó phải nhập lại, nên production đặt `ENCRYPTION_KEYS` và
+sao lưu nó riêng (không cùng chỗ với bản dump Postgres). Đổi khoá: thêm khoá mới vào **cuối**
+(`ENCRYPTION_KEYS=cu,moi`), khởi động lại `backend` (mã hoá lại mọi giá trị bằng khoá mới), rồi
+mới bỏ khoá cũ. Thiếu khoá giải mã một giá trị thì backend ghi log `settings.decrypt_failed` và coi
+như chưa đặt cài đặt đó.
+
+## Thêm doanh nghiệp, dữ liệu mẫu
+
+Trang Doanh nghiệp: **Thêm doanh nghiệp** nhập tay từng doanh nghiệp (tên, MST, website, ghi chú —
+`POST /api/companies`; MST / website sai thì báo lỗi), **Nạp danh sách** nạp cả file CSV (dòng sai
+bị bỏ, báo trong kết quả). Cả hai không tạo trùng: đã có doanh nghiệp cùng MST, hoặc cùng tên mà
+không mâu thuẫn MST / website, thì chỉ bổ sung trường còn trống. Thêm tay ghi nhật ký
+`company.create`.
+
+`jobcrawler serve` thấy bảng `companies` trống (lần đầu chạy) thì nạp 50 doanh nghiệp lớn của Việt
+Nam (`backend/jobcrawler/data/demo_companies.csv`: tên + website, ghi chú "mẫu thử") để thử ngay;
+scheduler build chúng ở các nhịp sau. Tắt: `DEMO_COMPANIES=false` (production). File này tải được ở
+Nạp danh sách → "Tải CSV mẫu" (`GET /api/companies/import/sample.csv`, có BOM cho Excel): làm mẫu
+định dạng, hoặc nạp lại (không tạo trùng).
+
+## Bí mật
+
+Bí mật nằm trong `backend/.env` / `worker/.env` (không commit). Muốn để ở file riêng (Docker
+secrets, Vault…): mount mỗi giá trị thành một file `/run/secrets/<tên biến viết thường>`
+(`gateway_token`, `llm_api_key`, `ui_password`…; worker: `gateway_token`, `worker_proxies`), service
+tự đọc (`SECRETS_DIR`); biến môi trường / `.env` vẫn được ưu tiên nếu có.
 
 ## Bảo trì
 
 Tự động mỗi giờ (`MAINTENANCE_CRON`): lượt chạy treo → `failed`, đối chiếu cột tóm tắt doanh
 nghiệp, gộp việc trùng còn sót, xoá dữ liệu cũ (`failed_pages` 7 ngày, `source_fetches` / `logs`
-30 ngày; `audit_events` giữ mãi), huấn luyện từ điển nén và nén lại dần.
+30 ngày; `audit_events` giữ mãi), huấn luyện từ điển nén và nén lại dần. Sao lưu: xem
+[Sao lưu Postgres](#sao-lưu-postgres).
 
 ```bash
 uv run jobcrawler db maintain      # như cron
