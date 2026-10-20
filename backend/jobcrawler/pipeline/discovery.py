@@ -97,6 +97,8 @@ _CAREERS_SEGMENTS = frozenset(
     }
 )
 _CAREERS_HOSTS = ("careers.", "career.", "jobs.", "tuyendung.", "recruit.", "hr.")
+# Đoạn cuối của URL tin chi tiết: id số, hoặc slug kết thúc bằng id (`ke-toan-12`, `sales_29675`).
+_DETAIL_SLUG = re.compile(r"^\d+$|[a-z].*[-_]\d+$")
 # Bị chuyển tới trang lỗi có đường dẫn riêng (soft 404): /vi-VN/Error-404, /not-found.
 _ERROR_PAGE = re.compile(r"/(error|404|not-?found|page-not-found|khong-tim-thay)\b", re.I)
 _LOC = re.compile(r"<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)", re.IGNORECASE)
@@ -176,15 +178,35 @@ def careers_score(url: str, text: str, site: str) -> int:
     return score
 
 
+def detail_parent(url: str) -> str | None:
+    """URL tin chi tiết nằm dưới đoạn careers (`/tuyen-dung/ke-toan-12`, `/job/hn-sales-29675`):
+    trang danh sách cha (`/tuyen-dung`, `/job`); không phải thì None."""
+    segs = path_segments(url)
+    if len(segs) < 2 or not _DETAIL_SLUG.search(
+        strip_accents(segs[-1]).lower().removesuffix(".html")
+    ):
+        return None
+    for i, seg in enumerate(segs[:-1]):
+        if strip_accents(seg).lower().removesuffix(".html") in _CAREERS_SEGMENTS:
+            return normalize_url("/" + "/".join(segs[: i + 1]), url)
+    return None
+
+
 def careers_candidates(links: list[Link], site: str) -> list[Candidate]:
     best: dict[str, Candidate] = {}
     for link in links:
-        score = careers_score(link.url, link.text, site)
+        url, text = link.url, link.text
+        # Link tới một tin (trang careers liệt kê tin, trang chủ có "tin nổi bật"): thử trang danh
+        # sách cha. Không có LLM chọn, trang tin (có JobPosting) sẽ được nhận làm nguồn và doanh
+        # nghiệp chỉ còn đúng một tin.
+        if (parent := detail_parent(url)) is not None:
+            url, text = parent, ""
+        score = careers_score(url, text, site)
         if score < 2:
             continue
-        current = best.get(link.url)
+        current = best.get(url)
         if current is None or score > current.score:
-            best[link.url] = Candidate(link.url, link.text, score)
+            best[url] = Candidate(url, text, score)
     return sorted(best.values(), key=lambda c: -c.score)
 
 

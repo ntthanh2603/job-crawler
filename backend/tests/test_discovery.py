@@ -12,6 +12,7 @@ from jobcrawler.net.kv import MemoryKV
 from jobcrawler.pipeline.discovery import (
     brand_careers_site,
     careers_score,
+    detail_parent,
     discover,
     sources_for,
 )
@@ -74,6 +75,36 @@ async def test_base_vn_from_homepage_and_cache() -> None:
     refreshed = await discover(session(fetcher), kv, "base.vn", refresh=True)
     assert not refreshed.from_cache
     assert len(fetcher.calls) > calls
+
+
+def test_detail_parent() -> None:
+    assert detail_parent("https://acme.vn/tuyen-dung/ke-toan-tong-hop-12") == (
+        "https://acme.vn/tuyen-dung"
+    )
+    assert detail_parent("https://careers.base.vn/job/hn-sales-29675?ref=home") == (
+        "https://careers.base.vn/job"
+    )
+    assert (
+        detail_parent("https://acme.vn/vi/tuyen-dung/123.html") == "https://acme.vn/vi/tuyen-dung"
+    )
+    assert detail_parent("https://acme.vn/tuyen-dung") is None  # chính là trang danh sách
+    assert detail_parent("https://acme.vn/jobs?office=3") is None
+    assert detail_parent("https://acme.vn/tuyen-dung/ha-noi") is None  # không có id: trang con
+    assert detail_parent("https://acme.vn/tin-tuc/bai-viet-12") is None  # không dưới đoạn careers
+
+
+async def test_careers_site_without_llm_skips_job_pages() -> None:
+    """Trang careers chỉ có link tới từng tin (cùng điểm với link danh sách): không có LLM chọn
+    thì không nhận một trang tin làm nguồn, mà thử trang danh sách cha rồi chính trang careers."""
+    job = (
+        "https://careers.base.vn/job/hn-business-development-executive-junior-b2b-sales-1yoe-29675"
+    )
+    fetcher = FakeFetcher()
+    fetcher.add("https://careers.base.vn/", html("base_vn/careers.html"))
+    fetcher.add(job, html("base_vn/job_29675.html"))
+    result = await discover(session(fetcher), MemoryKV(), "https://careers.base.vn/")
+    assert result.careers_pages == ["https://careers.base.vn/"]
+    assert job not in [url for _, url, _ in fetcher.calls]
 
 
 async def test_momo_brand_domain_hops_and_render() -> None:

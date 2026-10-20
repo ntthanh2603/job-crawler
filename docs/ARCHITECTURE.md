@@ -166,8 +166,10 @@ sequenceDiagram
    chưa có profile, rồi mỗi profile đã map một `BoardProfileSource`, lọc theo KYC (mục 7).
 4. **Tìm nguồn trên website** (`pipeline/discovery.py`, ≤ `DISCOVERY_TIMEOUT_SECONDS`): trang chủ
    (thử cùng lúc domain trần / `www.`, https / http, và gốc đúng như người dùng nhập), link có từ
-   khoá tuyển dụng (LLM chọn khi nhiều) → sitemap → subdomain `careers.`/`tuyendung.`/`jobs.` →
-   đường dẫn phổ biến; mỗi ứng viên được mở để xác nhận. Build đêm và build lại khi bộ khung hỏng
+   khoá tuyển dụng (LLM chọn khi nhiều; link tới một tin như `/tuyen-dung/ke-toan-12` được thay
+   bằng trang danh sách cha, không nhận trang một tin làm nguồn) → sitemap → subdomain
+   `careers.`/`tuyendung.`/`jobs.` → đường dẫn phổ biến; mỗi ứng viên được mở để xác nhận. Build
+   đêm và build lại khi bộ khung hỏng
    tìm lại từ đầu (`BUILD_REFRESH_DISCOVERY`); lượt khác dùng cache 7 ngày.
 5. **Thu thập** (`pipeline/collect.py`, chế độ `build`): mỗi nguồn một task, chạy tới deadline;
    nguồn chưa xong bị huỷ nhưng tin đã yield vẫn giữ. Tin website/ATS đã tải chi tiết trong

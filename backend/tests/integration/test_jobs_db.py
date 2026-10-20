@@ -237,8 +237,13 @@ async def test_careers_details_are_reused_on_the_next_run(
         (BASE_JOB, "base_vn/job_29675.html"),
     ]:
         fetcher.add_file(url, CAREERS / name)
-    company = CompanyIn(name=f"Base Reuse {uuid4().hex[:6]}", website="https://careers.base.vn/")
-    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+    tag = uuid4().hex[:6]
+    company = CompanyIn(name=f"Base Reuse {tag}", website="https://careers.base.vn/")
+    # Prefix Redis riêng: kết quả tìm nguồn cache từ lần chạy trước (7 ngày) không quyết định test.
+    settings = settings_for(integration_settings).model_copy(
+        update={"redis_prefix": f"jc-test-{tag}"}
+    )
+    async with open_resources(settings, db_logs=False) as res:
         live = dataclasses.replace(res, http=fetcher)  # pyright: ignore[reportArgumentType]
 
         async def posting() -> JobPosting:
