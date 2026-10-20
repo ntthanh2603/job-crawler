@@ -692,6 +692,211 @@ export type JoinKeyStatusOut = {
   worker_id: string | null;
 };
 
+export type LiveOutTopic = typeof LiveOutTopic[keyof typeof LiveOutTopic];
+
+
+export const LiveOutTopic = {
+  workers: 'workers',
+  queue: 'queue',
+  run: 'run',
+} as const;
+
+export type QueueJobOutTrigger = typeof QueueJobOutTrigger[keyof typeof QueueJobOutTrigger] | null;
+
+
+export const QueueJobOutTrigger = {
+  nightly: 'nightly',
+  schedule: 'schedule',
+  error: 'error',
+  board: 'board',
+  new: 'new',
+  manual: 'manual',
+  continuation: 'continuation',
+} as const;
+
+export type QueueJobOut = {
+  attempts: number;
+  company_id: string | null;
+  continuation: number;
+  error: string | null;
+  function: string;
+  key: string;
+  label: string;
+  queued: number;
+  retries: number;
+  scheduled: number;
+  started: number;
+  status: string;
+  timeout: number;
+  trigger: QueueJobOutTrigger;
+};
+
+export type QueueOut = {
+  aborted: number;
+  active: number;
+  capacity: number;
+  complete: number;
+  error: string | null;
+  failed: number;
+  jobs: QueueJobOut[];
+  name: string;
+  page: number;
+  pages: number;
+  queued: number;
+  retried: number;
+  scheduled: number;
+  total: number;
+  workers: number;
+};
+
+export type QueuePageOut = {
+  queues: QueueOut[];
+};
+
+export type SourceCountOutcomes = {[key: string]: number};
+
+export type SourceCount = {
+  outcomes: SourceCountOutcomes;
+  source: string;
+  total: number;
+};
+
+/**
+ * Loại lượt chạy một doanh nghiệp.
+ */
+export type RunKind = typeof RunKind[keyof typeof RunKind];
+
+
+export const RunKind = {
+  build: 'build',
+  poll: 'poll',
+} as const;
+
+/**
+ * Vì sao lượt chạy được xếp.
+ */
+export type RunTrigger = typeof RunTrigger[keyof typeof RunTrigger];
+
+
+export const RunTrigger = {
+  nightly: 'nightly',
+  schedule: 'schedule',
+  error: 'error',
+  board: 'board',
+  new: 'new',
+  manual: 'manual',
+  continuation: 'continuation',
+} as const;
+
+export type RunOut = {
+  company_id: string;
+  duration_ms: number | null;
+  error: string | null;
+  finished_at: string | null;
+  incomplete_sources: string[];
+  jobs_accepted: number;
+  jobs_closed: number;
+  jobs_found: number;
+  jobs_new: number;
+  kind: RunKind;
+  run_id: string;
+  started_at: string;
+  status: string;
+  trigger: RunTrigger;
+};
+
+export type RunDetailOut = {
+  by_source: SourceCount[];
+  company_name: string | null;
+  failed_pages: FailedPageItem[];
+  fetches_total: number;
+  logs_total: number;
+  run: RunOut;
+};
+
+/**
+ * Cộng dồn các worker đang sống của một pool.
+ */
+export type WorkerPoolOut = {
+  http_inflight: number;
+  http_slots: number;
+  render_inflight: number;
+  render_slots: number;
+  workers: number;
+};
+
+export type WorkersSummaryOutPools = {[key: string]: WorkerPoolOut};
+
+export type WorkersSummaryOut = {
+  alive: number;
+  done: number;
+  draining: number;
+  failed: number;
+  gone: number;
+  http_inflight: number;
+  http_slots: number;
+  pools: WorkersSummaryOutPools;
+  render_inflight: number;
+  render_slots: number;
+};
+
+export type WorkerStats = {
+  bytes_in: number;
+  cpu_percent: number;
+  http_done: number;
+  http_failed: number;
+  http_inflight: number;
+  proxies_alive: number;
+  render_disabled_reason: string;
+  render_done: number;
+  render_failed: number;
+  render_inflight: number;
+  render_retry_at_ms: number;
+  rss_bytes: number;
+};
+
+export type WorkerStatusLabels = {[key: string]: string};
+
+export type WorkerStatus = {
+  alive: boolean;
+  completed: number;
+  draining: boolean;
+  dropped: number;
+  hostname: string;
+  http_slots: number;
+  labels: WorkerStatusLabels;
+  last_seen_ms: number;
+  leased: number;
+  local_proxies: number;
+  lost: number;
+  pool: string;
+  registered_at_ms: number;
+  render_slots: number;
+  started_at_ms: number;
+  stats: WorkerStats;
+  version: string;
+  worker_id: string;
+};
+
+export type WorkersPageOut = {
+  auth_enabled: boolean;
+  now_ms: number;
+  summary: WorkersSummaryOut;
+  workers: WorkerStatus[];
+};
+
+/**
+ * Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với
+ * `GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.
+ * `run` null khi không có lượt chạy này.
+ */
+export type LiveOut = {
+  queue: QueuePageOut | null;
+  run: RunDetailOut | null;
+  topic: LiveOutTopic;
+  workers: WorkersPageOut | null;
+};
+
 export type LogOutContext = { [key: string]: unknown };
 
 export type LogOut = {
@@ -756,33 +961,6 @@ export type RunsHourOut = {
   hour: string;
   total: number;
 };
-
-/**
- * Loại lượt chạy một doanh nghiệp.
- */
-export type RunKind = typeof RunKind[keyof typeof RunKind];
-
-
-export const RunKind = {
-  build: 'build',
-  poll: 'poll',
-} as const;
-
-/**
- * Vì sao lượt chạy được xếp.
- */
-export type RunTrigger = typeof RunTrigger[keyof typeof RunTrigger];
-
-
-export const RunTrigger = {
-  nightly: 'nightly',
-  schedule: 'schedule',
-  error: 'error',
-  board: 'board',
-  new: 'new',
-  manual: 'manual',
-  continuation: 'continuation',
-} as const;
 
 export type RecentRunOut = {
   company_id: string;
@@ -963,23 +1141,6 @@ export type PageOutPostingOut = {
   total: number;
 };
 
-export type RunOut = {
-  company_id: string;
-  duration_ms: number | null;
-  error: string | null;
-  finished_at: string | null;
-  incomplete_sources: string[];
-  jobs_accepted: number;
-  jobs_closed: number;
-  jobs_found: number;
-  jobs_new: number;
-  kind: RunKind;
-  run_id: string;
-  started_at: string;
-  status: string;
-  trigger: RunTrigger;
-};
-
 export type PageOutRunOut = {
   exact: boolean;
   items: RunOut[];
@@ -1051,58 +1212,6 @@ export type ProxyChecksOut = {
   results: ProxyCheckOut[];
 };
 
-export type QueueJobOutTrigger = typeof QueueJobOutTrigger[keyof typeof QueueJobOutTrigger] | null;
-
-
-export const QueueJobOutTrigger = {
-  nightly: 'nightly',
-  schedule: 'schedule',
-  error: 'error',
-  board: 'board',
-  new: 'new',
-  manual: 'manual',
-  continuation: 'continuation',
-} as const;
-
-export type QueueJobOut = {
-  attempts: number;
-  company_id: string | null;
-  continuation: number;
-  error: string | null;
-  function: string;
-  key: string;
-  label: string;
-  queued: number;
-  retries: number;
-  scheduled: number;
-  started: number;
-  status: string;
-  timeout: number;
-  trigger: QueueJobOutTrigger;
-};
-
-export type QueueOut = {
-  aborted: number;
-  active: number;
-  capacity: number;
-  complete: number;
-  error: string | null;
-  failed: number;
-  jobs: QueueJobOut[];
-  name: string;
-  page: number;
-  pages: number;
-  queued: number;
-  retried: number;
-  scheduled: number;
-  total: number;
-  workers: number;
-};
-
-export type QueuePageOut = {
-  queues: QueueOut[];
-};
-
 export type QueuedOut = {
   queued: boolean;
 };
@@ -1146,23 +1255,6 @@ export type ReviewSummaryOut = {
   precision: number | null;
   reviewed: number;
   unreviewed_active: number;
-};
-
-export type SourceCountOutcomes = {[key: string]: number};
-
-export type SourceCount = {
-  outcomes: SourceCountOutcomes;
-  source: string;
-  total: number;
-};
-
-export type RunDetailOut = {
-  by_source: SourceCount[];
-  company_name: string | null;
-  failed_pages: FailedPageItem[];
-  fetches_total: number;
-  logs_total: number;
-  run: RunOut;
 };
 
 export type SettingValue = string | number | boolean | string[] | {[key: string]: string | number} | null;
@@ -1274,77 +1366,6 @@ export type SettingsUpdateValues = { [key: string]: unknown };
 
 export type SettingsUpdate = {
   values: SettingsUpdateValues;
-};
-
-/**
- * Cộng dồn các worker đang sống của một pool.
- */
-export type WorkerPoolOut = {
-  http_inflight: number;
-  http_slots: number;
-  render_inflight: number;
-  render_slots: number;
-  workers: number;
-};
-
-export type WorkerStats = {
-  bytes_in: number;
-  cpu_percent: number;
-  http_done: number;
-  http_failed: number;
-  http_inflight: number;
-  proxies_alive: number;
-  render_disabled_reason: string;
-  render_done: number;
-  render_failed: number;
-  render_inflight: number;
-  render_retry_at_ms: number;
-  rss_bytes: number;
-};
-
-export type WorkerStatusLabels = {[key: string]: string};
-
-export type WorkerStatus = {
-  alive: boolean;
-  completed: number;
-  draining: boolean;
-  dropped: number;
-  hostname: string;
-  http_slots: number;
-  labels: WorkerStatusLabels;
-  last_seen_ms: number;
-  leased: number;
-  local_proxies: number;
-  lost: number;
-  pool: string;
-  registered_at_ms: number;
-  render_slots: number;
-  started_at_ms: number;
-  stats: WorkerStats;
-  version: string;
-  worker_id: string;
-};
-
-export type WorkersSummaryOutPools = {[key: string]: WorkerPoolOut};
-
-export type WorkersSummaryOut = {
-  alive: number;
-  done: number;
-  draining: number;
-  failed: number;
-  gone: number;
-  http_inflight: number;
-  http_slots: number;
-  pools: WorkersSummaryOutPools;
-  render_inflight: number;
-  render_slots: number;
-};
-
-export type WorkersPageOut = {
-  auth_enabled: boolean;
-  now_ms: number;
-  summary: WorkersSummaryOut;
-  workers: WorkerStatus[];
 };
 
 export type GetAuditParams = {

@@ -36,7 +36,7 @@ from jobcrawler.db.ids import uuid7
 from jobcrawler.logging import configure_logging, get_logger
 from jobcrawler.resources import open_resources
 from jobcrawler.watchdog import start_watchdog
-from jobcrawler.web import api, settings_api
+from jobcrawler.web import api, live, settings_api
 from jobcrawler.web import auth as auth_tokens
 from jobcrawler.web.auth import TokenAuth
 
@@ -288,7 +288,7 @@ class GuardMiddleware:
                 return value[:MAX_PROXY_USER_CHARS]
         return None
 
-    async def _token_user(self, headers: Headers) -> str | None:
+    async def _token_claims(self, headers: Headers) -> auth_tokens.Claims | None:
         auth = self.token_auth() if self.token_auth else None
         token = auth_tokens.token_from(headers)
         if auth is None or token is None:
@@ -303,7 +303,7 @@ class GuardMiddleware:
                     return None
             except Exception as exc:  # Redis lỗi: không khoá mọi người ở ngoài
                 log.warning("auth.revoked_check_failed", error=str(exc))
-        return claims.user
+        return claims
 
     @staticmethod
     def _same_origin(headers: Headers) -> bool:
@@ -324,13 +324,16 @@ class GuardMiddleware:
                 await json_error(401, "Cần đăng nhập SSO")(scope, receive, send)
                 return
         elif self.token_auth is not None:
-            user = await self._token_user(headers)
-            if user is None:
+            claims = await self._token_claims(headers)
+            if claims is None:
                 # `Bearer`: trình duyệt không bật hộp đăng nhập; giao diện nhận ra để chuyển tới
                 # trang đăng nhập (khác 401 của SSO).
                 challenge = {"WWW-Authenticate": BEARER_CHALLENGE}
                 await json_error(401, "Cần đăng nhập", challenge)(scope, receive, send)
                 return
+            user = claims.user
+            # Request dài (luồng SSE `web/live.py`) tự xét lại hạn / thu hồi của token này.
+            scope.setdefault("state", {})["auth_claims"] = claims
         else:
             user = self.username
         await self._pass(scope, receive, send, headers, user)
@@ -392,6 +395,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             elif settings.auth_mode == "none":
                 log.warning("ui.no_password", reason="chưa đặt UI_PASSWORD: không hỏi đăng nhập")
+            # Cập nhật trực tiếp (`GET /api/events`): task đọc chung của từng chủ đề.
+            app.state.live = live.LiveHub(live.resource_loader(res, settings))
             # Event loop đứng quá WATCHDOG_SECONDS (mọi request treo) thì process thoát (mã 70) để
             # Docker dựng lại (`jobcrawler.watchdog`).
             dog = start_watchdog("api", max_stall=settings.watchdog_seconds)
@@ -399,6 +404,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield
             finally:
                 dog.stop()
+                app.state.live.close()
+                app.state.live = None
 
     app = FastAPI(
         title="jobcrawler",
@@ -419,6 +426,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Chặn đoán mật khẩu ở `POST /api/auth/login`; khoá ký JWT có sau khi lifespan đọc Redis.
     app.state.throttle = LoginThrottle(redis, prefix=settings.redis_prefix)
     app.state.token_auth = None
+    app.state.live = None  # `live.LiveHub`, có sau khi lifespan mở tài nguyên
 
     def token_auth() -> auth_tokens.TokenAuth | None:
         return app.state.token_auth
@@ -449,6 +457,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(api.router)
     app.include_router(settings_api.router)
+    app.include_router(live.router)
     app.router.default = unknown_path
     return app
 

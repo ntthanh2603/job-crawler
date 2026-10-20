@@ -28,6 +28,7 @@ import {
 import { BarList, ShareBar, StackedColumns, type BarItem } from "@/components/charts"
 import { JobDelta, RunTags } from "@/components/crawl"
 import { DetectionSection } from "@/components/detection"
+import { useLiveQueue } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import type { ChartConfig } from "@/components/ui/chart"
 import { Label } from "@/components/ui/label"
@@ -512,6 +513,8 @@ export function OverviewPage() {
     { hours: Number(hours) || 0, storage },
     { query: { refetchInterval: auto ? 30_000 : false, placeholderData: (prev) => prev } },
   )
+  // Thẻ "Hàng đợi": số đếm trực tiếp (chung với thanh bên); chưa có thì lấy từ số liệu tổng quan.
+  const live = useLiveQueue().query.data
   const maintenance = usePostMaintenance({
     mutation: {
       onSuccess: (r) =>
@@ -542,7 +545,7 @@ export function OverviewPage() {
   const st = data?.stats
   const runs = st?.runs
   const totals = data?.charts.totals
-  const queues = st?.queues ?? []
+  const queues = live?.queues ?? st?.queues ?? []
   const active = queues.reduce((n, q) => n + q.active, 0)
   const queued = queues.reduce((n, q) => n + q.queued, 0)
   const workers = queues.reduce((n, q) => n + q.workers, 0)

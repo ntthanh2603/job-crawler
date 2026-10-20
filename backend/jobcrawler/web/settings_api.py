@@ -355,11 +355,14 @@ class DrainOut(ApiOut):
     draining: bool
 
 
-def _worker_auth(request: Request) -> WorkerAuth:
+def _worker_auth_of(res: Resources, base: Settings) -> WorkerAuth:
     """Xác thực worker dùng chung Redis với gateway (khoá tham gia nằm trên Redis chính)."""
-    res, base = _res(request), _base(request)
     token = base.gateway_token.get_secret_value() if base.gateway_token else None
     return WorkerAuth(res.redis, Keys(base.redis_prefix).base, static_token=token)
+
+
+def _worker_auth(request: Request) -> WorkerAuth:
+    return _worker_auth_of(_res(request), _base(request))
 
 
 def _summary(workers: list[WorkerStatus]) -> WorkersSummaryOut:
@@ -391,17 +394,22 @@ def _summary(workers: list[WorkerStatus]) -> WorkersSummaryOut:
     )
 
 
-@router.get("/workers")
-async def get_workers(request: Request) -> WorkersPageOut:
-    """Worker lấy trang đã biết (đang sống trước, kèm worker vừa rời) và số liệu tổng."""
-    res = _res(request)
+async def load_workers_page(res: Resources, base: Settings) -> WorkersPageOut:
+    """Như `GET /api/workers` (cũng là chủ đề `workers` của `web/live.py`). `base`: Settings gốc
+    của process API (GATEWAY_TOKEN chỉ đặt bằng biến môi trường)."""
     workers = await list_workers(res.redis, Keys(res.settings.redis_prefix), include_gone=True)
     return WorkersPageOut(
         workers=workers,
         summary=_summary(workers),
         now_ms=int(time.time() * 1000),
-        auth_enabled=_worker_auth(request).enabled,
+        auth_enabled=_worker_auth_of(res, base).enabled,
     )
+
+
+@router.get("/workers")
+async def get_workers(request: Request) -> WorkersPageOut:
+    """Worker lấy trang đã biết (đang sống trước, kèm worker vừa rời) và số liệu tổng."""
+    return await load_workers_page(_res(request), _base(request))
 
 
 @router.post("/workers/join-keys")

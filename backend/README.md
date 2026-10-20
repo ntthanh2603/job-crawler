@@ -62,6 +62,9 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
   proxy nằm trong `--forwarded-allow-ips` hoặc biến môi trường `FORWARDED_ALLOW_IPS` (uvicorn đọc
   từ môi trường process: `.env` chỉ có tác dụng khi compose nạp nó làm `env_file`; mặc định
   `127.0.0.1,::1`; nhận cả CIDR).
+- Cập nhật trực tiếp `GET /api/events` (Server-Sent Events, `jobcrawler/web/live.py`): luồng không
+  tự kết thúc, nên `jobcrawler api` dừng sau tối đa 5 s (`timeout_graceful_shutdown`) dù còn kết nối
+  mở. Proxy đứng trước không được đệm `text/event-stream` (xem `docs/DEPLOY.md`).
 - Đăng nhập (`jobcrawler/web/auth.py`): trang đăng nhập với `UI_USERNAME` / `UI_PASSWORD`,
   `POST /api/auth/login` trả JWT (HS256, ký bằng `JWT_SECRET`, trống = khoá tự sinh trên Redis) và
   đặt cookie httpOnly `jc_token`; script gọi API gửi `Authorization: Bearer <access_token>`.

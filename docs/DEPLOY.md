@@ -29,18 +29,26 @@ flowchart LR
 
 - **Một máy**: `docker-compose.yaml` ở gốc repo (5 container). Postgres / Redis quản lý: trỏ
   `DATABASE_URL` / `REDIS_URL` trong `backend/.env` tới đó, chỉ chạy `docker compose up -d backend
-  frontend`.
+frontend`.
 - **Máy worker** (chỉ cần ra Internet và tới gateway cổng 50051, không cần DB / Redis): `.env` gốc đặt
   `WORKER_GATEWAY_ADDR=<máy backend>:50051`, `WORKER_REPLICAS`; `worker/.env` đặt khoá tham gia
   (`WORKER_JOIN_KEY` một lần, hoặc `GATEWAY_TOKEN`), `GATEWAY_TLS`; rồi `docker compose up -d --no-deps
-  worker`. Máy backend mở gateway: `GATEWAY_PUBLISH=0.0.0.0:50051` + `GATEWAY_TOKEN` + TLS.
+worker`. Máy backend mở gateway: `GATEWAY_PUBLISH=0.0.0.0:50051` + `GATEWAY_TOKEN` + TLS.
 - **Runner thêm**: cùng image, cùng `backend/.env`, lệnh `jobcrawler runner --role poll` (hoặc `build`,
   `boards`). Mỗi process Python dùng tối đa một core: giữ CPU mỗi process ≤ ~70%.
 - **Gateway thêm**: `jobcrawler gateway` sau load balancer L4 (HTTP/2); không giữ trạng thái.
+- **Proxy / load balancer trước giao diện** (cập nhật trực tiếp `GET /api/events`, Server-Sent
+  Events): không đệm và không nén `text/event-stream` (nginx của `frontend` đã tắt cho đường này;
+  backend gửi `X-Accel-Buffering: no`), idle timeout > 15 s (backend gửi `: ping` mỗi 15 s; 60 s là
+  đủ). Không cần sticky session: replica API nào cũng đọc Redis / Postgres chung. Nên bật HTTP/2 ở
+  load balancer: mỗi tab giữ một kết nối SSE, HTTP/1.1 chỉ cho 6 kết nối mỗi origin (tab ẩn quá
+  60 s tự đóng kết nối). Proxy không giữ được kết nối lâu thì giao diện tự quay về poll định kỳ.
+  `jobcrawler api` dừng sau tối đa 5 s (`timeout_graceful_shutdown`) dù còn luồng mở; trình duyệt
+  tự nối lại.
 - **Image**: CI build và đẩy `jobcrawler-backend`, `-worker`, `-frontend` lên GHCR sau khi mọi kiểm
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
   Máy chạy đặt `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=…` trong `.env` gốc rồi `docker compose pull &&
-  docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. Phát hành: `task release VERSION=X.Y.Z`.
+docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. Phát hành: `task release VERSION=X.Y.Z`.
 - **Nâng cấp**: đẩy image → khởi động lại `backend` (migration chạy lúc khởi động, job đang chạy được
   xếp lại) → khởi động lại worker (làm nốt việc rồi thoát). Backend và worker khác phiên bản vẫn
   chạy được với nhau trong lúc chuyển: gateway mới giao được việc kiểu cũ còn trong stream, worker
@@ -52,13 +60,13 @@ flowchart LR
 10 doanh nghiệp thật (Shopee, VNG, VNPAY, MISA, ACB, KiotViet, Vinamilk, Base.vn, GHN, Katalon; 961
 việc, 1–10 trang mỗi nguồn):
 
-| Đại lượng                | Số đo                                                      |
-| ------------------------ | ---------------------------------------------------------- |
-| Request mỗi lượt poll    | 1–10, trung bình **6,5**                                   |
-| Thời gian một lượt poll  | 0,3–12 s, trung bình **7,3 s** (chủ yếu chờ rate limit 1 req/s / domain) |
-| CPU backend mỗi lượt     | trung bình **~140 ms** (lớn nhất ~0,5 s: 10 trang API)      |
-| Tin mới, T = 150 s       | 16/16 trong ≤ 180 s: trung vị 43 s, **P95 119 s**           |
-| Một lượt build           | ~76 s, ~130 request (LLM chạy được)                         |
+| Đại lượng               | Số đo                                                                    |
+| ----------------------- | ------------------------------------------------------------------------ |
+| Request mỗi lượt poll   | 1–10, trung bình **6,5**                                                 |
+| Thời gian một lượt poll | 0,3–12 s, trung bình **7,3 s** (chủ yếu chờ rate limit 1 req/s / domain) |
+| CPU backend mỗi lượt    | trung bình **~140 ms** (lớn nhất ~0,5 s: 10 trang API)                   |
+| Tin mới, T = 150 s      | 16/16 trong ≤ 180 s: trung vị 43 s, **P95 119 s**                        |
+| Một lượt build          | ~76 s, ~130 request (LLM chạy được)                                      |
 
 300 site giả (T = 30 s để dồn tải): 7,8 lượt poll / giây không lỗi; gateway ~6 ms CPU / request;
 worker ~10–20 ms CPU / request; Redis ~50 lệnh mỗi lượt poll / request; Postgres ~10 ms CPU mỗi lượt.
@@ -69,18 +77,18 @@ worker ~10–20 ms CPU / request; Redis ~50 lệnh mỗi lượt poll / request;
 lượt poll (6,5 trung bình; trần 10 trang bộ khung + trang tin mới), `d` = thời gian một lượt (≤ 10 s
 khi tính dư), `c` = CPU một lượt (0,14 s).
 
-| Đại lượng                    | Công thức                    |
-| ---------------------------- | ---------------------------- |
-| Lượt poll / giây             | N / T                        |
-| Lượt poll cùng lúc (slot runner poll) | N / T × d           |
-| CPU runner poll              | N / T × c                    |
-| Request / giây ban ngày      | N / T × F                    |
-| Slot worker HTTP             | request / giây × 0,7 s × 1,5 (dư) |
-| CPU gateway                  | request / giây × 6 ms        |
-| Lệnh Redis / giây            | 50 × (lượt poll + request) / giây |
-| Lượt build / giây ban đêm    | N / 21.600 (6 giờ)           |
-| Build cùng lúc ban đêm       | lượt build / giây × 76–170 s |
-| P95 độ trễ phát hiện         | ≈ 0,95 × T + d ≈ 152–162 s (không đổi theo N nếu đủ năng lực) |
+| Đại lượng                             | Công thức                                                     |
+| ------------------------------------- | ------------------------------------------------------------- |
+| Lượt poll / giây                      | N / T                                                         |
+| Lượt poll cùng lúc (slot runner poll) | N / T × d                                                     |
+| CPU runner poll                       | N / T × c                                                     |
+| Request / giây ban ngày               | N / T × F                                                     |
+| Slot worker HTTP                      | request / giây × 0,7 s × 1,5 (dư)                             |
+| CPU gateway                           | request / giây × 6 ms                                         |
+| Lệnh Redis / giây                     | 50 × (lượt poll + request) / giây                             |
+| Lượt build / giây ban đêm             | N / 21.600 (6 giờ)                                            |
+| Build cùng lúc ban đêm                | lượt build / giây × 76–170 s                                  |
+| P95 độ trễ phát hiện                  | ≈ 0,95 × T + d ≈ 152–162 s (không đổi theo N nếu đủ năng lực) |
 
 ## 4. Các mức scale
 
@@ -95,13 +103,13 @@ khi tính dư), `c` = CPU một lượt (0,14 s).
 Cấu hình đề xuất (máy worker HTTP = 2 vCPU / 4 GB, `WORKER_HTTP_SLOTS=64`, `WORKER_RENDER_SLOTS=0`;
 máy worker render = 4 vCPU / 8 GB, `WORKER_RENDER_SLOTS=6`, `WORKER_HTTP_SLOTS=16`):
 
-| Mức | Backend                                                                 | Worker                     | Postgres / Redis                                        |
-| --- | ----------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
-| S   | 1 máy 8 vCPU / 16 GB chạy cả compose (runner tự tính: poll 96, build 20) | 1 container trên cùng máy (64 HTTP + render) | trên cùng máy                       |
-| M   | 1 máy 8 vCPU: `backend` + 3 `runner --role poll` (× 70) + 2 `runner --role build` (× 10) | 3 máy HTTP + 1 máy render | 4 vCPU / 16 GB; Redis 2 vCPU / 4 GB          |
-| L   | 16 `runner-poll` × 50 (4 máy 4 vCPU), 8 `runner-build` × 10 (2 máy), 2 `scheduler`, 4 `gateway`, 2 `api` + `frontend` | 8–11 máy HTTP + 3–4 máy render | Postgres 8 vCPU / 32 GB + PgBouncer (+ bản sao đọc); Redis 4 vCPU / 8 GB, cache tách `CACHE_REDIS_URL` |
-| XL  | ~40 `runner-poll` × 60 (10 máy 4 vCPU), ~24 `runner-build` × 10, 12 `gateway` | 22–33 máy HTTP + 8–10 máy render | Postgres 16 vCPU / 64 GB + PgBouncer + bản sao đọc; Redis máy riêng CPU nhanh — **sát trần một Redis** (~100.000 lệnh đơn / giây), bắt buộc tách cache |
-| XXL | —                                                                       | —                          | **Chưa đạt với kiến trúc hiện tại**: một Redis không chịu nổi ~125.000 lệnh / giây. Cần chia hàng đợi / việc lấy trang ra nhiều Redis (shard theo doanh nghiệp) — chưa làm |
+| Mức | Backend                                                                                                               | Worker                                       | Postgres / Redis                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S   | 1 máy 8 vCPU / 16 GB chạy cả compose (runner tự tính: poll 96, build 20)                                              | 1 container trên cùng máy (64 HTTP + render) | trên cùng máy                                                                                                                                                              |
+| M   | 1 máy 8 vCPU: `backend` + 3 `runner --role poll` (× 70) + 2 `runner --role build` (× 10)                              | 3 máy HTTP + 1 máy render                    | 4 vCPU / 16 GB; Redis 2 vCPU / 4 GB                                                                                                                                        |
+| L   | 16 `runner-poll` × 50 (4 máy 4 vCPU), 8 `runner-build` × 10 (2 máy), 2 `scheduler`, 4 `gateway`, 2 `api` + `frontend` | 8–11 máy HTTP + 3–4 máy render               | Postgres 8 vCPU / 32 GB + PgBouncer (+ bản sao đọc); Redis 4 vCPU / 8 GB, cache tách `CACHE_REDIS_URL`                                                                     |
+| XL  | ~40 `runner-poll` × 60 (10 máy 4 vCPU), ~24 `runner-build` × 10, 12 `gateway`                                         | 22–33 máy HTTP + 8–10 máy render             | Postgres 16 vCPU / 64 GB + PgBouncer + bản sao đọc; Redis máy riêng CPU nhanh — **sát trần một Redis** (~100.000 lệnh đơn / giây), bắt buộc tách cache                     |
+| XXL | —                                                                                                                     | —                                            | **Chưa đạt với kiến trúc hiện tại**: một Redis không chịu nổi ~125.000 lệnh / giây. Cần chia hàng đợi / việc lấy trang ra nhiều Redis (shard theo doanh nghiệp) — chưa làm |
 
 Ghi chú:
 
@@ -118,16 +126,16 @@ Ghi chú:
 
 ## 5. Theo dõi và tăng bản
 
-| Dấu hiệu                                                   | Làm gì                                                              |
-| ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| Hàng đợi poll có việc chờ thường xuyên (trang Hàng đợi: đang chạy = tối đa) | thêm `runner-poll` hoặc tăng `RUNNER_POLL_CONCURRENCY` khi CPU còn |
-| CPU runner-poll > 70%                                      | thêm bản; hoặc giảm `PLAN_MAX_PAGES`                                 |
-| Trang Workers: slot HTTP đang dùng > 70% tổng              | thêm máy worker                                                     |
-| P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng | worker quá tải hoặc proxy chậm: thêm worker, đổi proxy             |
-| P95 cửa sổ phát hiện > 180 s nhưng hàng đợi rỗng           | lượt poll dài: giảm `POLL_INTERVAL_SECONDS` (120) hoặc `PLAN_MAX_PAGES` |
-| Hàng đợi build còn việc lúc 06:00                          | thêm `runner-build`, máy render; kiểm tra LLM; nới `BUILD_WINDOW`    |
-| Postgres CPU > 70% / chờ khoá                              | PgBouncer, máy lớn hơn, bản sao đọc cho `api`                        |
-| Redis CPU > 70%                                            | tách cache (`CACHE_REDIS_URL`), máy CPU nhanh hơn                    |
+| Dấu hiệu                                                                    | Làm gì                                                                  |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Hàng đợi poll có việc chờ thường xuyên (trang Hàng đợi: đang chạy = tối đa) | thêm `runner-poll` hoặc tăng `RUNNER_POLL_CONCURRENCY` khi CPU còn      |
+| CPU runner-poll > 70%                                                       | thêm bản; hoặc giảm `PLAN_MAX_PAGES`                                    |
+| Trang Workers: slot HTTP đang dùng > 70% tổng                               | thêm máy worker                                                         |
+| P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng                | worker quá tải hoặc proxy chậm: thêm worker, đổi proxy                  |
+| P95 cửa sổ phát hiện > 180 s nhưng hàng đợi rỗng                            | lượt poll dài: giảm `POLL_INTERVAL_SECONDS` (120) hoặc `PLAN_MAX_PAGES` |
+| Hàng đợi build còn việc lúc 06:00                                           | thêm `runner-build`, máy render; kiểm tra LLM; nới `BUILD_WINDOW`       |
+| Postgres CPU > 70% / chờ khoá                                               | PgBouncer, máy lớn hơn, bản sao đọc cho `api`                           |
+| Redis CPU > 70%                                                             | tách cache (`CACHE_REDIS_URL`), máy CPU nhanh hơn                       |
 
 ## 6. Kiểm chứng trước khi lên mức sau
 

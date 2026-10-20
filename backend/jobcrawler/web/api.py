@@ -1026,12 +1026,12 @@ async def post_enqueue(request: Request, body: EnqueueIn) -> EnqueueResultOut:
     return EnqueueResultOut.model_validate(dataclasses.asdict(result))
 
 
-@router.get("/runs/{run_id}")
-async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
-    async with res_of(request).sessionmaker() as session:
+async def load_run_detail(res: Resources, run_id: uuid.UUID) -> RunDetailOut | None:
+    """Tóm tắt lượt chạy như `GET /api/runs/{run_id}` (cũng là chủ đề `run` của `web/live.py`)."""
+    async with res.sessionmaker() as session:
         d = await queries.run_detail(session, run_id)
     if d is None:
-        raise HTTPException(404, "Không có lượt chạy này")
+        return None
     company = d.company
     return RunDetailOut(
         run=_run(d.run),
@@ -1043,6 +1043,14 @@ async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
         logs_total=d.logs,
         failed_pages=[_failed_item(f) for f in d.failed_pages],
     )
+
+
+@router.get("/runs/{run_id}")
+async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
+    detail = await load_run_detail(res_of(request), run_id)
+    if detail is None:
+        raise HTTPException(404, "Không có lượt chạy này")
+    return detail
 
 
 @router.get("/runs/{run_id}/fetches")
@@ -1513,15 +1521,12 @@ def _queue_job(job: dict[str, Any]) -> QueueJobOut:
 QUEUE_PAGE = 25
 
 
-@router.get("/queue")
-async def get_queue(
-    request: Request, page: int = 1, poll_page: int = 1, board_page: int = 1
+async def load_queue_page(
+    res: Resources, *, page: int = 1, poll_page: int = 1, board_page: int = 1
 ) -> QueuePageOut:
-    """Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang
-    chạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang
-    QUEUE_PAGE job)."""
+    """Ba queue như `GET /api/queue` (cũng là chủ đề `queue` của `web/live.py`)."""
     out: list[QueueOut] = []
-    queues = res_of(request).queues
+    queues = res.queues
     wanted_pages = ((queues.build, page), (queues.poll, poll_page), (queues.boards, board_page))
     for queue, wanted in wanted_pages:
         st = await stats.queue_stats(queue)
@@ -1539,13 +1544,25 @@ async def get_queue(
     # Job build / poll chỉ mang id doanh nghiệp: điền tên để hiện.
     ids = {j.company_id for q in out for j in q.jobs if j.company_id and not j.label}
     if ids:
-        async with res_of(request).sessionmaker() as session:
+        async with res.sessionmaker() as session:
             names = await queries.company_names(session, ids)
         for q in out:
             for j in q.jobs:
                 if not j.label and j.company_id:
                     j.label = names.get(j.company_id, "")
     return QueuePageOut(queues=out)
+
+
+@router.get("/queue")
+async def get_queue(
+    request: Request, page: int = 1, poll_page: int = 1, board_page: int = 1
+) -> QueuePageOut:
+    """Ba queue (build, poll, trang tuyển dụng): số job, runner, và một trang các job đang
+    chạy / đang chờ / hẹn giờ của mỗi queue (`page`, `poll_page`, `board_page`; mỗi trang
+    QUEUE_PAGE job)."""
+    return await load_queue_page(
+        res_of(request), page=page, poll_page=poll_page, board_page=board_page
+    )
 
 
 # --- lịch thu thập: bộ khung, poll, độ trễ phát hiện ----------------------------------------------

@@ -18,11 +18,11 @@ const normalize = (text: string) => text.replaceAll("\r\n", "\n").replace(/^impo
 describe("src/lib/gen/queries.ts", () => {
   it("khớp ../backend/openapi.json (không thì chạy npm run gen:api)", async () => {
     // Cùng cấu hình (và cùng spec) với orval.config.ts, chỉ ghi ra thư mục tạm.
-    const { output } = (config as unknown as Record<"api", { output: { override: object } }>).api
+    const { input, output } = (config as unknown as Record<"api", { input: object; output: { override: object } }>).api
     const target = join(tmp, "queries.ts")
     await generate(
       {
-        input: { target: resolve(ROOT, OPENAPI_SPEC) },
+        input: { ...input, target: resolve(ROOT, OPENAPI_SPEC) },
         output: {
           ...output,
           target,

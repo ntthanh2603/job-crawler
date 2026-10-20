@@ -23,6 +23,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
 
+import { LiveProvider, useLiveQueue } from "@/components/live"
 import { SettingsDialog, settingsSearch } from "@/components/settings-dialog"
 import { useTheme, type Theme } from "@/components/theme"
 import { Button } from "@/components/ui/button"
@@ -36,7 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { num } from "@/lib/format"
-import { useGetMe, useGetQueue, useLogout } from "@/lib/gen/queries"
+import { useGetMe, useLogout } from "@/lib/gen/queries"
 import { cn } from "@/lib/utils"
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; queue?: boolean }
@@ -138,9 +139,9 @@ function queueShortName(name: string) {
 }
 
 /** Số việc trong ba hàng đợi (build, poll, trang tuyển dụng), dùng cho mục "Hàng đợi" và dòng
- * trạng thái runner. */
+ * trạng thái runner: cập nhật trực tiếp, mất kết nối thì poll 15 giây. */
 function useQueueSummary() {
-  const query = useGetQueue(undefined, { query: { refetchInterval: 15_000, refetchOnWindowFocus: true } })
+  const { query } = useLiveQueue()
   const queues = query.data?.queues ?? []
   return {
     loaded: Boolean(query.data),
@@ -313,35 +314,37 @@ export function Layout() {
   }, [location.pathname])
 
   return (
-    <div className="min-h-svh lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
-      >
-        Bỏ qua tới nội dung
-      </a>
-      <aside className="sticky top-0 hidden h-svh border-r border-sidebar-border bg-sidebar lg:block">
-        <Sidebar />
-      </aside>
+    <LiveProvider>
+      <div className="min-h-svh lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
+        <a
+          href="#main"
+          className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+        >
+          Bỏ qua tới nội dung
+        </a>
+        <aside className="sticky top-0 hidden h-svh border-r border-sidebar-border bg-sidebar lg:block">
+          <Sidebar />
+        </aside>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <SheetContent title="Điều hướng" className="lg:hidden">
-          <Sidebar onNavigate={() => setOpen(false)} />
-        </SheetContent>
-      </Dialog>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <SheetContent title="Điều hướng" className="lg:hidden">
+            <Sidebar onNavigate={() => setOpen(false)} />
+          </SheetContent>
+        </Dialog>
 
-      <div className="min-w-0">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md lg:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Mở menu" aria-expanded={open}>
-            <Menu />
-          </Button>
-          <Brand />
-        </header>
-        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-16 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
-          <Outlet />
-        </main>
+        <div className="min-w-0">
+          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-md lg:hidden">
+            <Button variant="ghost" size="icon" onClick={() => setOpen(true)} aria-label="Mở menu" aria-expanded={open}>
+              <Menu />
+            </Button>
+            <Brand />
+          </header>
+          <main id="main" className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-16 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
+            <Outlet />
+          </main>
+        </div>
+        <SettingsDialog />
       </div>
-      <SettingsDialog />
-    </div>
+    </LiveProvider>
   )
 }

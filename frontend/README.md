@@ -71,6 +71,9 @@ Lúc khởi động, entrypoint của image nginx source `nginx/18-real-ip.envsh
   - Lỗi của API (401 kèm `WWW-Authenticate` khi đặt `UI_PASSWORD`, 403, 422...) tới thẳng trình
     duyệt; nginx không chặn hay thay.
   - Body tối đa 50 MB (nhập CSV; lớn hơn nhận 413), chờ API trả lời tối đa 120 s.
+  - `GET /api/events` (cập nhật trực tiếp, Server-Sent Events): location riêng không đệm, không
+    nén, giữ kết nối tới 1 giờ không có dữ liệu (backend gửi `: ping` mỗi 15 s). Giao diện mở bằng
+    `EventSource` (`src/lib/live.ts`, `src/components/live.tsx`); mất kết nối thì các trang poll.
   - Tên máy trong `API_UPSTREAM` phân giải lúc chạy (DNS của container, nhớ 10 s): API tạo lại với
     IP mới không cần khởi động lại `frontend`; API chưa sẵn sàng thì `/api/` trả 502, `/healthz` vẫn 200.
 - `/assets/` (tên file có hash) → `Cache-Control: public, max-age=31536000, immutable`; thiếu file

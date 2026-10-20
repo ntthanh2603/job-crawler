@@ -2241,6 +2241,58 @@
         "title": "KycStatus",
         "type": "string"
       },
+      "LiveOut": {
+        "description": "Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với\n`GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.\n`run` null khi không có lượt chạy này.",
+        "properties": {
+          "queue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueuePageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunDetailOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "topic": {
+            "enum": [
+              "workers",
+              "queue",
+              "run"
+            ],
+            "title": "Topic",
+            "type": "string"
+          },
+          "workers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkersPageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "topic",
+          "workers",
+          "queue",
+          "run"
+        ],
+        "title": "LiveOut",
+        "type": "object"
+      },
       "Location": {
         "properties": {
           "address_raw": {
@@ -7100,6 +7152,148 @@
         "summary": "Get Eval Server",
         "tags": [
           "api"
+        ]
+      }
+    },
+    "/api/events": {
+      "get": {
+        "description": "Luồng Server-Sent Events: mỗi sự kiện là một `LiveOut` (JSON trong `data`), gửi khi dữ\nliệu của chủ đề đổi. Dùng `EventSource` của trình duyệt (tự nối lại kèm `Last-Event-ID`).",
+        "operationId": "get_events",
+        "parameters": [
+          {
+            "description": "Chủ đề cần theo dõi; nhiều chủ đề thì lặp lại tham số.",
+            "in": "query",
+            "name": "topic",
+            "required": true,
+            "schema": {
+              "description": "Chủ đề cần theo dõi; nhiều chủ đề thì lặp lại tham số.",
+              "items": {
+                "enum": [
+                  "workers",
+                  "queue",
+                  "run"
+                ],
+                "type": "string"
+              },
+              "title": "Topic",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "poll_page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Poll Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "board_page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "title": "Board Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Lượt chạy của chủ đề `run`.",
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Lượt chạy của chủ đề `run`.",
+              "title": "Run Id"
+            }
+          },
+          {
+            "description": "Trình duyệt tự gửi khi nối lại: `id` của sự kiện cuối đã nhận.",
+            "in": "header",
+            "name": "last-event-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Trình duyệt tự gửi khi nối lại: `id` của sự kiện cuối đã nhận.",
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/LiveOut"
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Events",
+        "tags": [
+          "live"
         ]
       }
     },

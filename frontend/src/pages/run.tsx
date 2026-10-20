@@ -21,10 +21,11 @@ import {
   type Tone,
 } from "@/components/common"
 import { RunTags } from "@/components/crawl"
+import { LiveStatus, useLiveRun } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { getGetRunFetchesQueryOptions, getGetRunLogsQueryOptions, useGetRun } from "@/lib/gen/queries"
+import { getGetRunFetchesQueryOptions, getGetRunLogsQueryOptions } from "@/lib/gen/queries"
 import { ago, byCount, cap, companyName, dt, duration, failReason, hour, label, num, shortUrl, sourceLabel } from "@/lib/format"
 import type { RunDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -113,7 +114,8 @@ function RunProblems({ run }: { run: RunDetail["run"] }) {
 export function RunPage() {
   const { id = "" } = useParams()
   const [tab, setTab] = useTabParam(TABS, "fetches")
-  const query = useGetRun(id)
+  // Lượt đang chạy: tiến độ, số request / log và danh sách log cập nhật trực tiếp.
+  const { query, state } = useLiveRun(id)
 
   if (query.isError) return <ErrorState error={query.error} onRetry={() => query.refetch()} />
   if (!query.data) return <PageLoading />
@@ -144,6 +146,7 @@ export function RunPage() {
           <code className="truncate font-mono text-meta text-muted-foreground/80" title="Mã lượt chạy">
             {r.run_id}
           </code>
+          {r.status === "running" && <LiveStatus state={state} pollSeconds={5} />}
         </div>
       </PageHeader>
 

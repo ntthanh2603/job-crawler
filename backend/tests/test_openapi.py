@@ -46,16 +46,27 @@ NOT_JSON = {
 }
 
 
+# Luồng Server-Sent Events: `data` của mỗi sự kiện là JSON theo mô hình này.
+STREAMS = {"/api/events": "LiveOut"}
+
+
 def test_every_json_endpoint_has_a_response_model(spec: dict) -> None:
     untyped = []
     for path, ops in spec["paths"].items():
-        if path in NOT_JSON:
+        if path in NOT_JSON or path in STREAMS:
             continue
         for method, op in ops.items():
             schema = op["responses"]["200"]["content"]["application/json"]["schema"]
             if "$ref" not in schema and schema.get("type") != "array":
                 untyped.append(f"{method.upper()} {path}")
     assert untyped == []
+
+
+@pytest.mark.parametrize(("path", "model"), STREAMS.items())
+def test_event_streams_have_a_data_model(spec: dict, path: str, model: str) -> None:
+    content = spec["paths"][path]["get"]["responses"]["200"]["content"]
+    data = content["text/event-stream"]["itemSchema"]["properties"]["data"]
+    assert data["contentSchema"] == {"$ref": f"#/components/schemas/{model}"}
 
 
 def test_response_fields_are_required(spec: dict) -> None:

@@ -17,10 +17,11 @@ import {
   Tag,
 } from "@/components/common"
 import { JoinKeyDialog } from "@/components/join-key-dialog"
+import { LiveStatus, useLiveWorkers } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { drainWorker, getGetWorkersQueryKey, undrainWorker, useGetWorkers } from "@/lib/gen/queries"
+import { drainWorker, getGetWorkersQueryKey, undrainWorker } from "@/lib/gen/queries"
 import { ago, bytes, cap, dec, dt, num, pct } from "@/lib/format"
 import type { WorkerStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -320,7 +321,7 @@ function SlotHint({ used, total }: { used: number; total: number }): ReactNode {
 
 export function WorkersPage() {
   const client = useQueryClient()
-  const query = useGetWorkers({ query: { refetchInterval: 5_000, refetchOnWindowFocus: true } })
+  const { query, state } = useLiveWorkers()
   const drain = useMutation({
     mutationFn: (w: WorkerStatus) =>
       // orval không mã hoá tham số path; id worker do worker tự đặt nên mã hoá ở đây.
@@ -339,13 +340,16 @@ export function WorkersPage() {
     <>
       <PageHeader
         title="Workers lấy trang"
-        description="Các máy lấy trang (HTTP và trình duyệt) đang kết nối với backend. Tự làm mới mỗi 5 giây."
+        description="Các máy lấy trang (HTTP và trình duyệt) đang kết nối với backend."
         actions={
-          d?.auth_enabled && (
-            <Button onClick={() => setJoining(true)}>
-              <Plus /> Thêm worker
-            </Button>
-          )
+          <>
+            <LiveStatus state={state} pollSeconds={5} />
+            {d?.auth_enabled && (
+              <Button onClick={() => setJoining(true)}>
+                <Plus /> Thêm worker
+              </Button>
+            )}
+          </>
         }
       >
         {d && (

@@ -35,6 +35,10 @@ app.add_typer(proxies_app, name="proxies")
 app.add_typer(llm_app, name="llm")
 app.add_typer(queue_app, name="queue")
 
+# `jobcrawler api` dừng (SIGTERM, cài đặt cần khởi động lại): chờ request đang chạy tối đa chừng
+# này giây rồi cắt; luồng SSE không bao giờ tự xong. Phải ngắn hơn `serve.STOP_SECONDS`.
+API_SHUTDOWN_SECONDS = 5
+
 
 @app.callback()
 def _setup(
@@ -673,6 +677,9 @@ def api(
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips,
         log_level=get_settings().log_level.lower(),
+        # Luồng SSE (`GET /api/events`) không tự kết thúc: khi dừng, chờ request khác xong tối đa
+        # chừng này giây rồi cắt (trình duyệt tự nối lại), không thì uvicorn chờ mãi.
+        timeout_graceful_shutdown=API_SHUTDOWN_SECONDS,
     )
 
 

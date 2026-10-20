@@ -9,20 +9,20 @@ quy mô: [DEPLOY.md](DEPLOY.md).
 nghiệp — đúng nhà tuyển dụng, trường đã chuẩn hoá (lương, tỉnh/thành, cấp bậc…), gộp trùng giữa
 các nguồn — trong PostgreSQL, xem / export qua giao diện web.
 
-| Yêu cầu                    | Cách đạt                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------ |
-| Tin mới thấy trong **≤ 3 phút ở P95** (ban ngày) | poll mỗi doanh nghiệp mỗi 150 s; một lượt poll ≤ ~20 s → cửa sổ phát hiện ≤ ~170 s |
+| Yêu cầu                                                 | Cách đạt                                                                                                                            |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Tin mới thấy trong **≤ 3 phút ở P95** (ban ngày)        | poll mỗi doanh nghiệp mỗi 150 s; một lượt poll ≤ ~20 s → cửa sổ phát hiện ≤ ~170 s                                                  |
 | **Đêm**: dựng bộ khung mỗi doanh nghiệp, **3–10 trang** | build 00:00–06:00 đọc đủ site, ghi các trang / API cần theo dõi, chia ≤ 10 trang / doanh nghiệp, mỗi nguồn ≥ 3 trang khi site có đủ |
-| **Ngày**: chỉ gọi theo bộ khung, lỗi mới build lại | poll 06:00–24:00 chỉ đọc trang / API trong bộ khung, mở trang chi tiết của tin mới; bộ khung hỏng → build lại ngay |
-| **Proxy**: worker tải danh sách về, xoay dần | gateway gửi danh sách proxy chung xuống worker; worker giữ một proxy mỗi domain 10 phút rồi chuyển proxy kế tiếp |
+| **Ngày**: chỉ gọi theo bộ khung, lỗi mới build lại      | poll 06:00–24:00 chỉ đọc trang / API trong bộ khung, mở trang chi tiết của tin mới; bộ khung hỏng → build lại ngay                  |
+| **Proxy**: worker tải danh sách về, xoay dần            | gateway gửi danh sách proxy chung xuống worker; worker giữ một proxy mỗi domain 10 phút rồi chuyển proxy kế tiếp                    |
 
 Ba loại nguồn:
 
-| Nguồn                         | Ví dụ                                   | Cách lấy                                                  |
-| ----------------------------- | --------------------------------------- | --------------------------------------------------------- |
-| ATS có API công khai          | Greenhouse, Lever, Workday…             | adapter gọi API của ATS                                   |
+| Nguồn                          | Ví dụ                                   | Cách lấy                                                                           |
+| ------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------- |
+| ATS có API công khai           | Greenhouse, Lever, Workday…             | adapter gọi API của ATS                                                            |
 | Trang careers của doanh nghiệp | careers.shopee.vn, tuyendung.vcb.com.vn | parser chung: JSON-LD, link tin, JSON / API của trang SPA, LLM khi rule không thấy |
-| Trang tuyển dụng (job board)  | TopCV, VietnamWorks, ITviec…            | index cả trang, gắn tin vào doanh nghiệp qua profile nhà tuyển dụng |
+| Trang tuyển dụng (job board)   | TopCV, VietnamWorks, ITviec…            | index cả trang, gắn tin vào doanh nghiệp qua profile nhà tuyển dụng                |
 
 ```mermaid
 flowchart LR
@@ -45,20 +45,20 @@ Mỗi thư mục là một service tự đủ (mã, lockfile, `Dockerfile`, `Tas
 `backend/` (gói `jobcrawler`), `worker/` (gói `jobworker`, có Chromium), `frontend/` (React, nginx).
 `proto/` là hợp đồng gRPC dùng chung (backend và worker phụ thuộc theo đường dẫn `../proto`).
 
-| Container  | Lệnh               | Việc                                                                           |
-| ---------- | ------------------ | ------------------------------------------------------------------------------ |
-| `postgres` |                    | dữ liệu                                                                        |
+| Container  | Lệnh               | Việc                                                                                            |
+| ---------- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `postgres` |                    | dữ liệu                                                                                         |
 | `redis`    |                    | hàng đợi, việc lấy trang, khoá, rate limit, số đo, phiên bản cài đặt, cache (AOF, `noeviction`) |
-| `backend`  | `jobcrawler serve` | migration rồi 4 process con dưới đây; một process thoát → container thoát, Docker dựng lại |
-| `frontend` | nginx              | bản build React; `/api/` chuyển tới `backend`                                  |
-| `worker`   | `jobworker run`    | nhận việc qua gRPC, tải bằng curl_cffi / Chromium qua proxy, trả kết quả       |
+| `backend`  | `jobcrawler serve` | migration rồi 4 process con dưới đây; một process thoát → container thoát, Docker dựng lại      |
+| `frontend` | nginx              | bản build React; `/api/` chuyển tới `backend`                                                   |
+| `worker`   | `jobworker run`    | nhận việc qua gRPC, tải bằng curl_cffi / Chromium qua proxy, trả kết quả                        |
 
-| Process   | Lệnh                   | Việc                                                                          |
-| --------- | ---------------------- | ----------------------------------------------------------------------------- |
-| api       | `jobcrawler api`       | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `frontend`)                   |
-| gateway   | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc từ Redis Streams, nhận kết quả        |
-| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis        |
-| runner    | `jobcrawler runner`    | chạy job của 3 hàng đợi (`--role poll\|build\|boards` để tách vai)            |
+| Process   | Lệnh                   | Việc                                                                   |
+| --------- | ---------------------- | ---------------------------------------------------------------------- |
+| api       | `jobcrawler api`       | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `frontend`)            |
+| gateway   | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc từ Redis Streams, nhận kết quả |
+| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis |
+| runner    | `jobcrawler runner`    | chạy job của 3 hàng đợi (`--role poll\|build\|boards` để tách vai)     |
 
 Mỗi process có event loop và watchdog riêng (vòng lặp đứng quá `WATCHDOG_SECONDS` → thoát mã 70).
 Cài đặt = `backend/.env` (chỉ kết nối, bí mật hạ tầng, gateway, đăng nhập, log) + bảng `app_settings`
@@ -92,15 +92,15 @@ cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì bu
 
 Mỗi nguồn website / ATS một dòng: trang / API cần đọc lại và mã các tin lượt build thấy.
 
-| Trường (`spec`) | Ý nghĩa                                                                            |
-| --------------- | ---------------------------------------------------------------------------------- |
-| `listings`      | trang danh sách đã đọc (kể cả trang sau, "xem tất cả")                             |
-| `hubs`          | trang danh mục / theo tỉnh dẫn tới tin                                             |
-| `apis`          | API danh sách tin của trang SPA (cách phân trang, tổng số tin)                     |
-| `rendered`, `api_only` | trang phải mở bằng trình duyệt; trang mà API thay được (poll chỉ gọi API)   |
-| `ignored`, `indirect` | link không phải tin (poll không mở lại); tin chỉ tới được qua trang tin khác |
-| `ats`           | bảng tin ATS                                                                       |
-| `pages`         | **số trang một lượt poll được đọc ở nguồn này**                                    |
+| Trường (`spec`)        | Ý nghĩa                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `listings`             | trang danh sách đã đọc (kể cả trang sau, "xem tất cả")                       |
+| `hubs`                 | trang danh mục / theo tỉnh dẫn tới tin                                       |
+| `apis`                 | API danh sách tin của trang SPA (cách phân trang, tổng số tin)               |
+| `rendered`, `api_only` | trang phải mở bằng trình duyệt; trang mà API thay được (poll chỉ gọi API)    |
+| `ignored`, `indirect`  | link không phải tin (poll không mở lại); tin chỉ tới được qua trang tin khác |
+| `ats`                  | bảng tin ATS                                                                 |
+| `pages`                | **số trang một lượt poll được đọc ở nguồn này**                              |
 
 **Chia trang** (`services/plans.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10) trang
 mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) + số trang
@@ -166,6 +166,7 @@ trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của từng
 ## 6. Trang tuyển dụng và xử lý tin
 
 **Index trang tuyển dụng** (`pipeline/board_index.py`, mỗi trang một `BoardAdapter`):
+
 - **Đủ** (đêm): đọc toàn bộ danh sách, tải tin mới / đổi, tin vắng 2 lượt → gỡ; map profile mới.
 - **Đuôi** (ngày, mỗi 2 phút): 1–4 request tới phần mới nhất, tải tin chưa từng thấy.
 - Doanh nghiệp có profile vừa có tin mới → **poll ngay**. Lượt poll không gọi trang tuyển dụng theo
@@ -232,11 +233,11 @@ sequenceDiagram
 
 ### Proxy (`PROXY_MODE`)
 
-| Chế độ                      | Ai chọn proxy                      | Cách xoay                                                     |
-| --------------------------- | ---------------------------------- | ------------------------------------------------------------- |
-| `worker` "Worker tự xoay" (mặc định) | worker                    | danh sách: proxy riêng của máy (`WORKER_PROXIES`) nếu có, không thì **danh sách chung** gateway gửi xuống. Mỗi domain giữ một proxy `WORKER_PROXY_STICKY_SECONDS` (600 s) rồi sang proxy kế tiếp (vòng tròn, mỗi worker bắt đầu ở vị trí riêng); 403/407/429 → proxy nghỉ với domain đó 120 s; 5 lỗi kết nối liên tiếp → loại 10 phút |
-| `central` "Backend chọn"    | backend, từng request              | chọn theo điểm (thành công +1, bị chặn −5, lỗi −10), giữ theo domain 30 phút, trạng thái trên Redis; worker dùng đúng proxy được chỉ định |
-| `off`                       | không                              | đi thẳng                                                      |
+| Chế độ                               | Ai chọn proxy         | Cách xoay                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker` "Worker tự xoay" (mặc định) | worker                | danh sách: proxy riêng của máy (`WORKER_PROXIES`) nếu có, không thì **danh sách chung** gateway gửi xuống. Mỗi domain giữ một proxy `WORKER_PROXY_STICKY_SECONDS` (600 s) rồi sang proxy kế tiếp (vòng tròn, mỗi worker bắt đầu ở vị trí riêng); 403/407/429 → proxy nghỉ với domain đó 120 s; 5 lỗi kết nối liên tiếp → loại 10 phút |
+| `central` "Backend chọn"             | backend, từng request | chọn theo điểm (thành công +1, bị chặn −5, lỗi −10), giữ theo domain 30 phút, trạng thái trên Redis; worker dùng đúng proxy được chỉ định                                                                                                                                                                                             |
+| `off`                                | không                 | đi thẳng                                                                                                                                                                                                                                                                                                                              |
 
 Danh sách chung = bảng proxy ở trang Cài đặt (lưu mã hoá) + `PROXIES_FILE`. Gateway gửi kèm mã băm
 của danh sách trong phiên bản cấu hình: đổi danh sách → worker nhận bản mới trong khoảng 15 s và giữ
@@ -245,11 +246,11 @@ bảng proxy.
 
 ## 8. Hàng đợi (Redis Streams, `streamqueue.py`)
 
-| Job             | Hàng đợi            | Khoá                 | Giới hạn                       |
-| --------------- | ------------------- | -------------------- | ------------------------------ |
-| `build_company` | `jobcrawler-build`  | `build:<id>[:contN]` | timeout 180 s, `COMPANY_JOB_RETRIES` lần |
-| `poll_company`  | `jobcrawler-poll`   | `poll:<id>`          | `POLL_TIMEOUT_SECONDS` (90 s)  |
-| `index_board`, `tail_board` | `jobcrawler-boards` | `board:<trang>` | ngân sách thời gian của lượt |
+| Job                         | Hàng đợi            | Khoá                 | Giới hạn                                 |
+| --------------------------- | ------------------- | -------------------- | ---------------------------------------- |
+| `build_company`             | `jobcrawler-build`  | `build:<id>[:contN]` | timeout 180 s, `COMPANY_JOB_RETRIES` lần |
+| `poll_company`              | `jobcrawler-poll`   | `poll:<id>`          | `POLL_TIMEOUT_SECONDS` (90 s)            |
+| `index_board`, `tail_board` | `jobcrawler-boards` | `board:<trang>`      | ngân sách thời gian của lượt             |
 
 Mỗi hàng đợi một stream, consumer group `workers`, mỗi runner một consumer chỉ đọc khi còn slot. Khoá
 job bảo đảm mỗi doanh nghiệp chỉ một build và một poll đang chờ / chạy.
@@ -269,17 +270,17 @@ trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 
 ## 9. Dữ liệu (`db/`)
 
-| Bảng                                   | Nội dung                                                                        |
-| -------------------------------------- | ------------------------------------------------------------------------------- |
-| `companies`, `company_aliases`         | doanh nghiệp đầu vào + KYC + tóm tắt; tên chuẩn hoá để tra                       |
-| `company_schedules`                    | trạng thái lịch, mốc build / poll, lượt poll đủ gần nhất; fillfactor 70 (ghi mỗi lượt poll) |
-| `crawl_plans`                          | bộ khung từng nguồn, `active` / `broken` / `retired`, mã tin, lỗi                |
-| `source_profiles`, `job_postings`      | profile trên trang tuyển dụng; mỗi tin của mỗi nguồn (nội dung thô nén zstd)    |
-| `jobs`, `job_reviews`                  | việc đã gộp (`active` / `expired` / `removed`); kiểm tay                         |
-| `company_runs`, `source_fetches`, `failed_pages`, `logs` | lượt build / poll có thay đổi, từng request, trang parse lỗi, log |
-| `company_fences`                       | fencing token của khoá theo doanh nghiệp (tăng mỗi lượt build / poll giữ khoá) |
-| `board_index_runs`                     | lịch sử index trang tuyển dụng                                                  |
-| `app_settings`, `audit_events`, `compression_dicts` | cài đặt (trường bí mật mã hoá AES-256-GCM); nhật ký thao tác (chỉ ghi thêm); từ điển zstd |
+| Bảng                                                     | Nội dung                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `companies`, `company_aliases`                           | doanh nghiệp đầu vào + KYC + tóm tắt; tên chuẩn hoá để tra                                  |
+| `company_schedules`                                      | trạng thái lịch, mốc build / poll, lượt poll đủ gần nhất; fillfactor 70 (ghi mỗi lượt poll) |
+| `crawl_plans`                                            | bộ khung từng nguồn, `active` / `broken` / `retired`, mã tin, lỗi                           |
+| `source_profiles`, `job_postings`                        | profile trên trang tuyển dụng; mỗi tin của mỗi nguồn (nội dung thô nén zstd)                |
+| `jobs`, `job_reviews`                                    | việc đã gộp (`active` / `expired` / `removed`); kiểm tay                                    |
+| `company_runs`, `source_fetches`, `failed_pages`, `logs` | lượt build / poll có thay đổi, từng request, trang parse lỗi, log                           |
+| `company_fences`                                         | fencing token của khoá theo doanh nghiệp (tăng mỗi lượt build / poll giữ khoá)              |
+| `board_index_runs`                                       | lịch sử index trang tuyển dụng                                                              |
+| `app_settings`, `audit_events`, `compression_dicts`      | cài đặt (trường bí mật mã hoá AES-256-GCM); nhật ký thao tác (chỉ ghi thêm); từ điển zstd   |
 
 Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sách luôn phân trang ở server,
 đếm có giới hạn; index theo đúng truy vấn (trigram cho tên, BRIN theo thời gian).
@@ -289,11 +290,25 @@ Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sá
 - `frontend` (nginx) phục vụ bản build React và chuyển `/api/` tới API (FastAPI, `web/`). Một
   origin nên cookie và chống CSRF giữ nguyên.
 - **Đăng nhập** (`web/auth.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie httpOnly
-  `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP / 5 phút →
-  429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt `AUTH_PROXY_USER_HEADER`.
+  `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt `AUTH_PROXY_USER_HEADER`.
 - **Hợp đồng có kiểu**: mỗi endpoint trả một mô hình `...Out`; `backend/openapi.json` là bản commit
   của spec; orval sinh `frontend/src/lib/gen/queries.ts` (hàm, hook React Query, kiểu). `task api` làm
   cả hai; lệch thì test đỏ.
+- **Cập nhật trực tiếp** (`web/live.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
+  `GET /api/events?topic=…`, một kết nối mỗi tab cho mọi chủ đề — `workers` (trang Workers),
+  `queue` (trang Hàng đợi, thanh bên, thẻ Hàng đợi ở Tổng quan), `run` (trang lượt chạy khi lượt
+  build đang chạy: trạng thái, số log / request, danh sách log; lượt poll chỉ ghi khi xong). Mỗi
+  process API một task đọc chung mỗi chủ đề mỗi 2 s (Redis / Postgres, dùng lại hàm của endpoint
+  JSON), chỉ đẩy khi nội dung đổi (băm JSON) hoặc 30 s chưa gửi; nhiều replica tự đọc nên không cần
+  pub/sub hay sticky session. Sự kiện là `LiveOut` (trong spec,
+  orval bỏ endpoint, chỉ sinh kiểu); giao diện ghi vào cache React Query đúng khoá của hook orval.
+  `id` của sự kiện là dấu từng chủ đề: nối lại kèm `Last-Event-ID` thì chủ đề chưa đổi không gửi
+  lại; `retry: 3000`; `: ping` mỗi 15 s. Đăng nhập như mọi endpoint (cookie `jc_token`), luồng tự
+  dừng khi JWT hết hạn / bị thu hồi. Mất SSE (lỗi HTTP, API khởi động lại, hoặc 45 s không có sự
+  kiện nào — kết nối chết mà trình duyệt không báo) thì trang poll như cũ (Workers / Hàng đợi 5 s,
+  thanh bên 15 s) và thử nối lại 2 → 30 s; tab ẩn quá 60 s thì đóng kết nối.
+  Phần còn poll (đổi chậm hoặc số liệu tính sẵn): Tổng quan và độ trễ phát hiện 30 s, bộ khung
+  doanh nghiệp 15 s, trang tuyển dụng 30 s, proxy trong Cài đặt 15 s.
 - Mọi thao tác thay đổi trạng thái ghi `audit_events` (bí mật bị che). Giao diện chỉ hiện trạng thái
   và cài đặt, không hiện lệnh vận hành.
 

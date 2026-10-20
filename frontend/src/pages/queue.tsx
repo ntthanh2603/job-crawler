@@ -15,8 +15,8 @@ import {
   type Tone,
 } from "@/components/common"
 import { RunTags } from "@/components/crawl"
+import { LiveStatus, useLiveQueue } from "@/components/live"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useGetQueue } from "@/lib/gen/queries"
 import { ago, cap, hour, num, sourceLabel } from "@/lib/format"
 import type { QueueJob, QueueStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -213,7 +213,7 @@ function JobList({ jobs, now }: { jobs: QueueJob[]; now: number }) {
 export function QueuePage() {
   // Mỗi hàng đợi một trang riêng (API: `page` build, `poll_page` poll, `board_page` trang tuyển dụng).
   const [pages, setPages] = useState<Record<PageParam, number>>({ page: 1, poll_page: 1, board_page: 1 })
-  const query = useGetQueue(pages, { query: { refetchInterval: 5_000, placeholderData: (prev) => prev } })
+  const { query, state } = useLiveQueue(pages, 5_000)
   const now = query.dataUpdatedAt || Date.now()
 
   return (
@@ -221,15 +221,7 @@ export function QueuePage() {
       <PageHeader
         title="Hàng đợi"
         description="Việc đang chạy, đang chờ và hẹn giờ của từng hàng đợi."
-        actions={
-          <span className="inline-flex items-center gap-2 text-meta text-muted-foreground">
-            <span className="relative flex size-2">
-              <span className="absolute inset-0 animate-ping rounded-full bg-success opacity-50" />
-              <span className="relative size-2 rounded-full bg-success" />
-            </span>
-            Tự cập nhật mỗi 5 giây{query.dataUpdatedAt ? ` · ${hour(new Date(query.dataUpdatedAt).toISOString())}` : ""}
-          </span>
-        }
+        actions={<LiveStatus state={state} pollSeconds={5} updatedAt={query.dataUpdatedAt} />}
       />
       {query.isError && !query.data && <ErrorState error={query.error} onRetry={() => query.refetch()} />}
       {query.isLoading && <PageLoading />}
