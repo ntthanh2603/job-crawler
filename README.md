@@ -14,15 +14,22 @@ mới của một doanh nghiệp được thấy trong **3 phút ở P95** (ban 
 
 ## Cấu trúc repo
 
-| Thư mục     | Gói                | Việc                                                                                     |
-| ----------- | ------------------ | ---------------------------------------------------------------------------------------- |
-| `backend/`  | `jobcrawler`       | API + giao diện, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, DB   |
-| `worker/`   | `jobworker`        | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng |
-| `proto/`    | `jobcrawler-proto` | hợp đồng gRPC (`jcproto/v1/crawl.proto` + mã sinh sẵn)                                   |
-| `frontend/` |                    | React + shadcn/ui + Tailwind                                                             |
-| `deploy/`   |                    | compose cho máy backend / máy worker riêng; script khởi tạo Postgres của compose          |
+Mỗi khối là một service riêng: thư mục của nó có đủ mã, dependency + lockfile, công cụ (lint, kiểu,
+test), `Dockerfile`, `Taskfile.yml`, `.env.example` và README; chạy, test, build image độc lập với
+khối khác. Gốc repo chỉ gom lại (compose, Taskfile, CI, tài liệu).
 
-Workspace uv: `uv sync` cài cả ba gói vào `.venv` cùng công cụ dev.
+| Thư mục     | Service / gói              | Việc                                                                                         |
+| ----------- | -------------------------- | -------------------------------------------------------------------------------------------- |
+| `backend/`  | image `backend` (`jobcrawler`) | API JSON, gateway gRPC, runner (build / poll / trang tuyển dụng), scheduler, migrate, DB  |
+| `worker/`   | image `worker` (`jobworker`)   | lấy trang: nhận việc từ gateway qua gRPC, tải bằng curl_cffi / Chromium qua proxy riêng   |
+| `frontend/` | image `web` (nginx)            | giao diện React + shadcn/ui + Tailwind; nginx phục vụ bản build và chuyển `/api` tới `api` |
+| `proto/`    | thư viện `jobcrawler-proto`    | hợp đồng gRPC backend ↔ worker (`jcproto/v1/crawl.proto` + mã sinh sẵn), dùng chung        |
+| `deploy/`   |                                | compose cho máy backend / máy worker riêng; script khởi tạo Postgres của compose          |
+| `docs/`     |                                | kiến trúc, vận hành, triển khai                                                          |
+
+Backend và worker phụ thuộc `proto/` theo đường dẫn (`../proto`); image của chúng nhận `proto/`
+làm build context tên `proto`. Frontend sinh client API từ `backend/openapi.json` (backend sở hữu
+hợp đồng HTTP của mình).
 
 ## Cách hệ thống chạy
 
@@ -41,40 +48,42 @@ Workspace uv: `uv sync` cài cả ba gói vào `.venv` cùng công cụ dev.
 
 ## Chạy nhanh (một máy)
 
-Cần [uv](https://docs.astral.sh/uv/) và Docker.
+Cần [uv](https://docs.astral.sh/uv/), Node.js, Docker và [go-task](https://taskfile.dev).
 
 ```bash
-cp .env.example .env                 # điền LLM_*, SERP_* khi có
-uv sync
-docker compose build                 # image backend (không Chromium) + image worker (Chromium)
-docker compose up -d                 # postgres, redis, migrate, api, gateway, scheduler, runner ×3 vai, worker
-uv run jobcrawler import companies.csv   # nạp doanh nghiệp: được build ngay rồi poll theo lịch
+task setup                           # dependency của mọi service + .env, backend/.env, worker/.env
+                                     # (điền LLM_*, SERP_* trong backend/.env khi có)
+task up                              # build 3 image, chạy postgres, redis, migrate, api, web, gateway,
+                                     # scheduler, runner ×3 vai, worker
+task backend:cli -- import companies.csv   # nạp doanh nghiệp: được build ngay rồi poll theo lịch
 ```
 
-Giao diện: http://127.0.0.1:8000. Postgres / Redis mở ra host ở cổng 15432 / 16379, gateway gRPC ở
-`127.0.0.1:50051` (`GATEWAY_PUBLISH`).
+Giao diện: http://127.0.0.1:8000 (service `web`). Postgres / Redis mở ra host ở cổng 15432 / 16379,
+gateway gRPC ở `127.0.0.1:50051` (`GATEWAY_PUBLISH`); `api` chỉ nhận từ `web` trong mạng compose.
 
-Chạy backend trên máy (dev) cũng cần ít nhất một worker để lấy trang:
+Chạy các service trên máy (dev) — mỗi lệnh một cửa sổ, cần ít nhất một worker để lấy trang:
 
 ```bash
-docker compose up -d postgres redis
-uv run jobcrawler db upgrade
-uv run jobcrawler gateway            # cửa sổ 1
-uv run jobworker run                 # cửa sổ 2 (GATEWAY_ADDR=localhost:50051)
-uv run jobcrawler runner             # cửa sổ 3: cả ba vai build / poll / boards
-uv run jobcrawler scheduler          # cửa sổ 4
-uv run jobcrawler ui                 # cửa sổ 5
+task infra                           # Postgres + Redis
+task backend:migrate
+task backend:cli -- gateway          # gateway gRPC
+task worker:dev                      # worker (worker/.env: GATEWAY_ADDR=127.0.0.1:50051)
+task backend:cli -- runner           # cả ba vai build / poll / boards
+task backend:cli -- scheduler
+task backend:dev                     # API ở cổng 8000
+task frontend:dev                    # giao diện http://localhost:5173 (gọi API cổng 8000)
 ```
 
 ## Worker và proxy
 
 ```bash
 docker compose -f deploy/worker.compose.yaml --env-file deploy/worker.env up -d   # máy worker riêng
-uv run jobworker check               # thử kết nối gateway và từng proxy tại worker
+task worker:cli -- check             # thử kết nối gateway và từng proxy tại worker
 ```
 
 - `PROXY_MODE=worker` (mặc định): mỗi worker dùng proxy của mình (`WORKER_PROXIES` /
-  `WORKER_PROXIES_FILE`, định dạng như `config/proxies.example.txt`), gắn theo domain, nghỉ khi lỗi.
+  `WORKER_PROXIES_FILE`, định dạng như `worker/config/proxies.example.txt`), gắn theo domain, nghỉ
+  khi lỗi.
 - `PROXY_MODE=central`: backend chọn proxy từ danh sách chung (trang Cài đặt hoặc `PROXIES_FILE`).
 - `PROXY_MODE=off` / `jobcrawler --no-proxy …`: không proxy.
 - `WORKER_POOL` + `FETCH_ROUTES` (backend): định tuyến domain về nhóm worker riêng (vd. trang tuyển
@@ -83,6 +92,9 @@ uv run jobworker check               # thử kết nối gateway và từng prox
 Chi tiết biến môi trường: [worker/README.md](worker/README.md).
 
 ## Lệnh thường dùng
+
+Lệnh `jobcrawler` chạy trong `backend/` (`cd backend && uv run jobcrawler …`, hoặc từ gốc
+`task backend:cli -- …`), đọc `backend/.env`.
 
 ```bash
 uv run jobcrawler import companies.csv           # cột name (bắt buộc), tax_code, website, note
@@ -119,31 +131,27 @@ Tổng quan (độ trễ phát hiện tin mới P50/P95, độ tươi, lượt c
 Doanh nghiệp (bộ khung & lịch, Poll ngay / Build lại), Việc làm, Kiểm tay, Golden set, **Workers**
 (worker đang kết nối, slot, proxy), **Cài đặt** (lịch, runner, worker, proxy, HTTP, nguồn, trang
 tuyển dụng, LLM/SERP, xác minh, bảo trì — đổi ở giao diện có hiệu lực trong vài giây, mục nào cần
-khởi động lại được ghi rõ). Đặt `UI_PASSWORD` để hỏi đăng nhập.
-
-```bash
-cd frontend && npm install && npm run build   # bản build vào backend/jobcrawler/web/dist
-cd frontend && npm run dev                    # sửa giao diện: http://localhost:5173 (gọi API cổng 8000)
-```
+khởi động lại được ghi rõ), **Nhật ký thao tác**. Đặt `UI_PASSWORD` trong `backend/.env` để hỏi
+đăng nhập. Chi tiết build, nginx, client sinh từ OpenAPI: [frontend/README.md](frontend/README.md).
 
 ## Phát triển
 
-Lệnh gom trong `Taskfile.yml` ([go-task](https://taskfile.dev)); `task --list` để xem hết.
+Mỗi service có `Taskfile.yml` riêng; `Taskfile.yml` ở gốc gom lại theo tên service
+(`task --list` để xem hết). Trong thư mục một service, `task <lệnh>` chạy riêng service đó.
 
 ```bash
-task setup                       # uv sync + npm ci + .env từ .env.example
-task infra                       # chỉ Postgres + Redis
-task check                       # mọi thứ CI chạy: ruff, pyright, proto, pytest, test + build giao diện
-task test:unit                   # pytest bỏ test tích hợp
-task proto                       # sau khi sửa proto/jcproto/v1/crawl.proto
-task api                         # sau khi đổi mô hình trả về của API: spec + hook / kiểu (orval)
-task migration NAME="mô tả"      # sinh migration mới từ model
+task check                            # mọi thứ CI chạy, từng service (proto, backend, worker, frontend)
+task backend:check                    # chỉ backend: ruff, pyright, OpenAPI, pytest
+task backend:test:unit                # pytest backend bỏ test tích hợp
+task proto:gen                        # sau khi sửa proto/jcproto/v1/crawl.proto
+task api                              # sau khi đổi mô hình trả về của API: backend/openapi.json + client frontend
+task backend:migration NAME="mô tả"   # sinh migration mới từ model
 ```
 
 - Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
   `FakeChatClient`, worker dùng gateway giả + server HTTP cục bộ. Test tích hợp cần
   `TEST_DATABASE_URL` trỏ tới DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại).
-- CI (`.github/workflows/ci.yml`) chạy `task check` tương đương mỗi lần push lên `main`, kèm
-  build image; `audit.yml` kiểm lỗ hổng dependency mỗi tuần.
+- CI (`.github/workflows/ci.yml`) chạy kiểm tra của từng service (một job mỗi service) mỗi lần
+  push lên `main`, kèm build 3 image; `audit.yml` kiểm lỗ hổng dependency mỗi tuần.
 - Hook tuỳ chọn: `uvx pre-commit install -t pre-commit -t commit-msg` (ruff, gitleaks, kiểm tra
   commit message kiểu Conventional Commits).

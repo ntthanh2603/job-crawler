@@ -11,7 +11,7 @@
 // thập (robots, rate limit, retry, nhận diện trang chặn, parse) ở backend; worker chỉ tải trang qua
 // proxy và trả về nguyên văn.
 //
-// Sinh lại mã Python: `uv run python scripts/gen_proto.py`.
+// Sinh lại mã Python: `task gen` trong proto/ (hoặc `task proto:gen` ở gốc repo), xem README.md.
 
 syntax = "proto3";
 

@@ -1,0 +1,11 @@
+# Thư mục này là named build context `proto` của image backend và worker: chỉ cần pyproject.toml,
+# uv.lock và gói jcproto/ (mã sinh sẵn đã commit, không sinh lại khi build).
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests/
+scripts/
+Taskfile.yml

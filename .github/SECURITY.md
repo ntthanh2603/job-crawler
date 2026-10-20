@@ -30,8 +30,9 @@ báo được ghi công nếu muốn.
 - **Gateway gRPC** (`jobcrawler gateway`, cổng 50051): mở ra ngoài mạng nội bộ thì **bắt buộc**
   `GATEWAY_TOKEN` (worker gửi `authorization: Bearer …`) và TLS — `GATEWAY_TLS_CERT/KEY` hoặc load
   balancer có TLS (HTTP/2). Chỉ health check (`grpc.health.v1`) không cần token.
-- **Giao diện web / API** (`jobcrawler ui`): compose chỉ mở ở `127.0.0.1`; mở ra ngoài thì đặt
-  `UI_PASSWORD` và đặt sau reverse proxy có TLS.
+- **Giao diện web / API**: chỉ service `web` (nginx) mở cổng, compose chỉ mở ở `127.0.0.1`;
+  `api` (`jobcrawler api`) chỉ nhận từ `web` trong mạng nội bộ. Mở ra ngoài thì đặt `UI_PASSWORD`
+  (backend/.env) và đặt `web` sau reverse proxy có TLS.
 - **Postgres, Redis** chỉ mở ở `127.0.0.1` trên máy chạy compose (Redis không mật khẩu); ở triển
   khai nhiều máy chúng nằm trong mạng riêng, không bao giờ mở ra Internet.
 - **Worker** chỉ giữ `GATEWAY_TOKEN` và proxy của chính nó; không có thông tin DB, Redis, LLM, SERP.

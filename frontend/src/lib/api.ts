@@ -1,4 +1,4 @@
-// Gọi API FastAPI cùng origin (dev: Vite chuyển /api sang cổng 8000).
+// Gọi API FastAPI cùng origin (/api): khi dev Vite chuyển sang cổng 8000, trong image nginx chuyển tới backend.
 import { cap } from "@/lib/format"
 
 export class ApiError extends Error {

@@ -12,19 +12,32 @@ lô) song song `Heartbeat` → `Leave` khi dừng. Gateway mất kết nối th�
 
 ## Chạy
 
-```bash
-# Trên máy dev (từ thư mục gốc repo, venv chung của workspace)
-GATEWAY_ADDR=localhost:50051 uv run jobworker run
-uv run jobworker check      # kết nối gateway + IP đi ra qua từng proxy tại worker
-uv run jobworker version
+Worker là một service riêng: `pyproject.toml`, `uv.lock`, `.python-version`, `.venv` và
+`Taskfile.yml` riêng, mọi lệnh chạy trong `worker/`. Thứ duy nhất lấy từ ngoài thư mục này là hợp
+đồng gRPC `../proto` (gói `jobcrawler-proto`, cài dạng editable khi dev).
 
-# Docker (build từ thư mục gốc repo)
-docker build -f worker/Dockerfile -t jobcrawler-worker .
-docker run --init --env-file worker.env --stop-timeout 40 jobcrawler-worker
+```bash
+uv sync                     # tạo .venv kèm công cụ dev (hoặc `task setup`)
+cp .env.example .env        # rồi sửa GATEWAY_ADDR, GATEWAY_TOKEN, proxy...
+uv run jobworker run        # hoặc `task dev`
+uv run jobworker check      # kết nối gateway + IP đi ra qua từng proxy tại worker
+uv run jobworker version    # lệnh bất kỳ: `task cli -- version`
 ```
 
-Compose: đặt `init: true` (dọn process con của Chromium) và `stop_grace_period` lớn hơn
-`WORKER_SHUTDOWN_GRACE_SECONDS` vài giây.
+Docker: build context là `worker/`, cộng build context tên `proto` trỏ tới `proto/` (compose:
+`additional_contexts: {proto: ./proto}`). Image không chứa `config/` hay `.env`: proxy mount lúc
+chạy, biến truyền qua môi trường.
+
+```bash
+docker build --build-context proto=../proto -t jobcrawler-worker .
+docker run --init --stop-timeout 40 --env-file .env \
+  -e WORKER_PROXIES_FILE=/app/config/worker-proxies.txt -v ./config:/app/config:ro \
+  jobcrawler-worker
+```
+
+Compose: đặt `init: true` (dọn process con của Chromium), `stop_grace_period` lớn hơn
+`WORKER_SHUTDOWN_GRACE_SECONDS` vài giây, mount `./worker/config:/app/config:ro` và
+`WORKER_PROXIES_FILE=/app/config/worker-proxies.txt`.
 
 Dừng (SIGTERM / Ctrl-C): thôi xin việc, chờ việc đang chạy tối đa `WORKER_SHUTDOWN_GRACE_SECONDS`
 (kết quả vẫn được gửi), `Leave` rồi thoát. Tín hiệu lần hai: huỷ luôn việc đang chạy (backend nhận
@@ -33,7 +46,8 @@ mã 0.
 
 ## Biến môi trường
 
-Đọc từ môi trường và file `.env` ở thư mục chạy. Biến trống coi như không đặt.
+Đọc từ môi trường và file `.env` ở thư mục chạy (`worker/.env`, mẫu ở `.env.example`); biến môi
+trường thắng file. Biến trống coi như không đặt.
 
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
@@ -76,8 +90,8 @@ thì việc của nó được trả về backend ngay (`ERROR_KIND_WORKER_LOST`
 khác; kết quả tới muộn của worker đó bị bỏ.
 
 Cấu hình đẩy xuống từ backend nằm ở các biến `GATEWAY_HTTP_SLOTS`, `GATEWAY_RENDER_SLOTS`,
-`GATEWAY_IMPERSONATE`… của backend (hoặc trang Cài đặt), không trùng tên với biến `WORKER_*` ở đây,
-nên worker và backend đọc chung một `.env` được.
+`GATEWAY_IMPERSONATE`… trong `.env` của backend (hoặc trang Cài đặt), không trùng tên với biến
+`WORKER_*` ở đây. Riêng `GATEWAY_TOKEN` phải đặt cùng giá trị ở cả hai `.env`.
 
 ## Proxy
 
@@ -127,9 +141,11 @@ nếu domain trong pool cần Chromium.
 ## Phát triển
 
 ```bash
-uv run pytest worker/tests -q          # test Chromium tự bỏ qua khi chưa cài Chromium
-uv run ruff check worker && uv run pyright worker/
+task check                  # ruff format --check + ruff check + pyright + pytest, như CI
+uv run pytest -q            # test Chromium tự bỏ qua khi chưa cài (`playwright install chromium`)
+task fmt                    # ruff format + ruff check --fix
 ```
 
-Test dùng gateway giả trong process (`worker/tests/worker_fakes.py`), web server và forward proxy
-HTTP chạy ở thread. `worker/tests` không có `__init__.py` (backend đã có package `tests`).
+Test dùng gateway giả trong process (`tests/worker_fakes.py`), web server và forward proxy HTTP
+chạy ở thread. `tests/` không có `__init__.py`: pytest tự thêm thư mục đó vào `sys.path` để test
+import được `worker_fakes`.

@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "gen:api": "orval",
+    "gen:api:check": "vitest run src/lib/gen.test.ts",
     "test": "vitest",
     "test:run": "vitest run",
     "preview": "vite preview"

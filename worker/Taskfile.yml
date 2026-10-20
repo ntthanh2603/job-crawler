@@ -1,0 +1,57 @@
+# go-task v3 (https://taskfile.dev): `task --list` trong worker/ để xem các lệnh. Taskfile gốc repo
+# include file này (dir: worker). Chạy được trên Windows (Task dùng trình thông dịch shell riêng;
+# không dùng cú pháp chỉ có ở bash).
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Cài dependency (uv sync, kèm công cụ dev và ../proto dạng editable)
+    preconditions:
+      - sh: uv --version
+        msg: "Cần uv: https://docs.astral.sh/uv/"
+    cmds:
+      - uv sync
+
+  fmt:
+    desc: Định dạng + sửa lỗi lint tự sửa được (ruff)
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  lint:
+    desc: ruff format --check + ruff check
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+
+  typecheck:
+    desc: pyright
+    cmds:
+      - uv run pyright
+
+  test:
+    desc: "pytest (test Chromium tự bỏ qua khi chưa cài Chromium); thêm tham số sau --"
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  check:
+    desc: lint + typecheck + test (như CI) — chạy trước khi commit
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  dev:
+    desc: Chạy worker trên máy (đọc worker/.env; gateway mặc định localhost:50051)
+    cmds:
+      - uv run jobworker run
+
+  cli:
+    desc: "Lệnh jobworker bất kỳ, vd. `task cli -- check`, `task cli -- version`"
+    cmds:
+      - uv run jobworker {{.CLI_ARGS}}

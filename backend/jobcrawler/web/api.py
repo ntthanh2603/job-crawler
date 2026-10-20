@@ -1,7 +1,7 @@
 """API JSON (`/api/...`, tài liệu ở `/api/docs`) cho giao diện React và script ngoài.
 
 Mỗi endpoint trả một mô hình Pydantic (`...Out`): spec `/api/openapi.json` (bản commit ở
-`frontend/openapi.json`, `scripts/export_openapi.py`) mô tả đúng JSON trả về, kiểu TypeScript của
+`backend/openapi.json`, `scripts/export_openapi.py`) mô tả đúng JSON trả về, kiểu TypeScript của
 giao diện sinh từ spec đó.
 """
 

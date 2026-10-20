@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "gen_proto.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "gen.py"
 
 
 def test_generated_code_is_current() -> None:

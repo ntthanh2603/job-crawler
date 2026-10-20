@@ -24,6 +24,29 @@ def test_help_lists_commands() -> None:
     assert "llm" in result.output
     assert "fetch" in result.output
     assert "site" in result.output
+    assert "api" in result.output
+    assert "│ ui " not in result.output  # tên cũ của `api`: ẩn khỏi --help
+
+
+@pytest.mark.parametrize("command", ["api", "ui"])
+def test_api_serves_with_uvicorn_behind_proxy(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """`api` (và tên cũ `ui`) chạy uvicorn với proxy headers; IP proxy được tin chỉnh được."""
+    import uvicorn
+
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: calls.append({"app": app, **kw}))
+    result = runner.invoke(app, [command, "--host", "0.0.0.0", "--port", "8001"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, [command, "--forwarded-allow-ips", "172.16.0.0/12"])
+    assert result.exit_code == 0, result.output
+    first, second = calls
+    assert first["app"] == "jobcrawler.web.app:create_app"
+    assert (first["factory"], first["host"], first["port"]) == (True, "0.0.0.0", 8001)
+    assert (first["proxy_headers"], first["forwarded_allow_ips"]) == (True, None)
+    assert (second["host"], second["port"]) == ("127.0.0.1", 8000)
+    assert second["forwarded_allow_ips"] == "172.16.0.0/12"
 
 
 def test_infra_subcommands_have_check() -> None:

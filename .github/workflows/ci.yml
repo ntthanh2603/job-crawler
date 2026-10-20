@@ -1,6 +1,7 @@
 name: CI
 
 # Commit thẳng lên main (không có nhánh / PR): chạy mỗi lần push main, hoặc bấm tay.
+# Mỗi service một job, chạy trong thư mục của nó với lockfile / công cụ riêng (như `task <svc>:check`).
 on:
   push:
     branches: [main]
@@ -14,11 +15,43 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CI: "1"
+  UV_FROZEN: "1"
+
 jobs:
-  python:
-    name: Python (ruff, pyright, proto, pytest)
+  proto:
+    name: proto (ruff, pyright, mã sinh, pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: proto
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          # Cùng bản uv với các Dockerfile.
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: proto/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - name: Mã sinh khớp crawl.proto
+        run: uv run python scripts/gen.py --check
+      - run: uv run pytest -q
+
+  backend:
+    name: backend (ruff, pyright, OpenAPI, pytest + Postgres/Redis)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
     services:
       # Cùng image với docker-compose.yaml.
       postgres:
@@ -44,8 +77,6 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     env:
-      CI: "1"
-      UV_FROZEN: "1"
       # DB của app và DB test phải khác nhau; test tích hợp xoá + dựng lại schema của DB `*_test`.
       DATABASE_URL: postgresql+asyncpg://jobcrawler:jobcrawler@127.0.0.1:5432/jobcrawler
       TEST_DATABASE_URL: postgresql+asyncpg://jobcrawler:jobcrawler@127.0.0.1:5432/jobcrawler_test
@@ -54,42 +85,50 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
       - uses: astral-sh/setup-uv@v7
         with:
-          # Cùng bản uv với backend/Dockerfile, worker/Dockerfile.
           version: "0.12.5"
           enable-cache: true
-          cache-dependency-glob: uv.lock
-
-      - name: Install
-        run: uv sync --frozen
-
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
       # Như deploy/postgres/init/01-test-db.sql của compose (service container không mount được
       # file trong repo). Extension (pg_trgm, unaccent) do migration tạo.
-      - name: Create test database
+      - name: Tạo DB test
         run: >-
           docker exec ${{ job.services.postgres.id }}
           psql -U jobcrawler -d jobcrawler -c "CREATE DATABASE jobcrawler_test"
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - name: openapi.json khớp mô hình API
+        run: uv run python scripts/export_openapi.py --check
+      - run: uv run pytest -q
 
-      - name: Ruff format
-        run: uv run ruff format --check .
-
-      - name: Ruff lint
-        run: uv run ruff check .
-
-      - name: Pyright
-        run: uv run pyright
-
-      - name: Proto up to date
-        run: uv run python scripts/gen_proto.py --check
-
+  worker:
+    name: worker (ruff, pyright, pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: worker/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pyright
       # Test có marker `browser` tự bỏ qua khi không có Chromium của Playwright.
-      - name: Pytest
-        run: uv run pytest -q
+      - run: uv run pytest -q
 
   frontend:
-    name: Frontend (typecheck, test, build)
+    name: frontend (typecheck, client sinh từ OpenAPI, test, build)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -99,51 +138,48 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
       - uses: actions/setup-node@v7
         with:
-          # Cùng major với stage `ui` của backend/Dockerfile.
           node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Install
-        run: npm ci --no-audit --no-fund
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm run test:run --if-present
-
-      - name: Build
-        run: npm run build
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - name: Client sinh từ ../backend/openapi.json đã khớp
+        run: npm run gen:api:check --if-present
+      - run: npm run test:run
+      - run: npm run build
 
   docker:
-    name: Docker image (${{ matrix.image }})
+    name: image ${{ matrix.image }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Mỗi image build từ thư mục service của nó; backend / worker lấy thêm proto/ làm
+          # build context tên `proto` (như `additional_contexts` trong docker-compose.yaml).
           - image: backend
-            dockerfile: backend/Dockerfile
+            context: backend
+            contexts: proto=proto
           - image: worker
-            dockerfile: worker/Dockerfile
+            context: worker
+            contexts: proto=proto
+          - image: web
+            context: frontend
+            contexts: ""
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
       - uses: docker/setup-buildx-action@v4
-
       # Chỉ build để bắt lỗi Dockerfile / lockfile; không đẩy image đi đâu.
       - name: Build
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
+          context: ${{ matrix.context }}
+          build-contexts: ${{ matrix.contexts }}
           push: false
           tags: jobcrawler-${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}

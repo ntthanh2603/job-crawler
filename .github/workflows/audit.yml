@@ -15,9 +15,17 @@ permissions:
 
 jobs:
   python:
-    name: Python dependencies (pip-audit)
+    name: ${{ matrix.service }} dependencies (pip-audit)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # proto chỉ có grpcio + protobuf, đã nằm trong lock của cả hai service.
+        service: [backend, worker]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -27,9 +35,10 @@ jobs:
         with:
           version: "0.12.5"
 
-      # Chỉ dependency chạy thật (không dev, không gói của workspace) theo đúng bản trong uv.lock.
+      # Chỉ dependency chạy thật (không dev, không chính service, không gói cục bộ như ../proto)
+      # theo đúng bản trong uv.lock của service.
       - name: Export locked requirements
-        run: uv export --frozen --no-dev --no-emit-workspace --no-hashes -o requirements.txt
+        run: uv export --frozen --no-dev --no-emit-project --no-emit-local --no-hashes -o requirements.txt
 
       # File export đã đủ cây dependency đã ghim: không để pip resolve / build lại.
       - name: pip-audit

@@ -14,6 +14,7 @@ flowchart LR
     RD[(Redis 7, AOF)]
   end
   subgraph app["Máy ứng dụng × 2–3"]
+    WEB[web ×2 — nginx: giao diện + /api]
     API[api ×2]
     GW[gateway ×2]
     SCH[scheduler ×2 — 1 bản làm việc]
@@ -25,6 +26,8 @@ flowchart LR
     W1[jobworker ×n]
   end
   LB[Load balancer L4 / HTTP2 + TLS] --> GW
+  U[Người vận hành] -->|HTTPS| LB2[Load balancer HTTP + TLS] --> WEB
+  WEB -->|/api| API
   W1 -->|gRPC + token| LB
   app --> PG
   app --> RD
@@ -32,8 +35,9 @@ flowchart LR
 ```
 
 - **Máy dữ liệu**: Postgres + Redis (hoặc dịch vụ quản lý). Không chạy ứng dụng ở đây.
-- **Máy ứng dụng**: một image backend (`backend/Dockerfile`, ~0,9 GB, không có Chromium), file
-  `deploy/backend.compose.yaml`. `api` và `gateway` sau load balancer; `scheduler` chạy 2 bản để
+- **Máy ứng dụng**: image backend (`backend/Dockerfile`, ~0,9 GB, không có Chromium) và image `web`
+  (`frontend/Dockerfile`, nginx ~90 MB), file `deploy/backend.compose.yaml`. `web` (giao diện +
+  `/api` tới `api` cùng máy) và `gateway` sau load balancer; `scheduler` chạy 2 bản để
   dự phòng (chỉ một bản giữ khoá); runner tăng bản theo bảng ở mục 3.
 - **Máy worker**: image worker (`worker/Dockerfile`, Playwright + Chromium, ~3,9 GB), file
   `deploy/worker.compose.yaml`. Đặt gần nguồn proxy / IP sạch; chỉ cần ra Internet và tới gateway
@@ -55,7 +59,7 @@ job đang chạy được xếp lại) → khởi động lại worker (worker l
 | Tin mới trên site giả đặt cùng hệ thống, T = 150 s | **16/16 thấy trong ≤ 180 s**: trung vị 43 s, P95 119 s, lâu nhất 130 s |
 | Build một doanh nghiệp (LLM chạy được)      | ~76 s, ~130 request (cả lượt nối tiếp)                         |
 
-**300 doanh nghiệp giả** (`scripts/loadtest/fake_sites.py`, 8 tin mỗi site, 0,5 tin mới / giây
+**300 doanh nghiệp giả** (`backend/scripts/loadtest/fake_sites.py`, 8 tin mỗi site, 0,5 tin mới / giây
 trong 10 phút), T = 30 s để dồn tải:
 
 | Đại lượng                                   | Số đo                                                                 |
@@ -103,7 +107,7 @@ Cấu hình đề xuất (giữ CPU mỗi process ≤ ~70%: mỗi process Python
 | `runner-boards`  | 1–2                                                       | index đủ ban đêm, đuôi ban ngày                                                                |
 | `scheduler`      | 2 (dự phòng, một bản giữ khoá)                            | `SCHEDULER_BATCH=500`, tick 1 s → xếp được 500 job / giây                                      |
 | `gateway`        | **4 bản** sau load balancer L4 (2 máy × 2)                | ~440 request / giây × ~6 ms ≈ 2,6 core                                                         |
-| `api`            | 2                                                         | đặt `UI_PASSWORD`                                                                              |
+| `api` + `web`    | 2 mỗi loại (cùng máy ứng dụng)                            | đặt `UI_PASSWORD`; `web` sau load balancer, `api` chỉ nhận từ `web`                            |
 | **worker HTTP**  | **8–10 máy** 2 vCPU / 4 GB, `WORKER_HTTP_SLOTS=64`, `WORKER_RENDER_SLOTS=0` | ~440 request / giây × ~0,7 s ≈ 310 request cùng lúc; 640 slot, dư ~50%; CPU ~4–9 core tổng |
 | **worker render**| **3–4 máy** 4 vCPU / 8 GB, `WORKER_RENDER_SLOTS=6`, `WORKER_HTTP_SLOTS=16` | trang SPA chưa có API trong bộ khung + build đêm; ~300 MB RAM mỗi trang Chromium |
 | LLM (vLLM Qwen)  | theo GPU                                                  | ban ngày: xác minh tin mới; ban đêm: KYC hết hạn, chọn trang careers, xác minh / chuẩn hoá — đặt `LLM_REQUESTS_PER_MINUTE` theo năng lực; LLM lỗi làm build kéo dài (lượt nối tiếp) |
@@ -136,6 +140,7 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
 1. Đo độ trễ đầu-cuối trên site giả (không phụ thuộc site thật):
 
    ```bash
+   cd backend
    uv run python scripts/loadtest/sla_site.py --port 8765 --every 75 --count 16 --out sla.jsonl
    # nạp doanh nghiệp website http://<máy>:8765/, chờ build xong
    uv run python scripts/loadtest/sla_report.py sla.jsonl
@@ -145,6 +150,7 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
    `s<i>.<ip>.nip.io`):
 
    ```bash
+   cd backend
    uv run python scripts/loadtest/fake_sites.py --sites 2000 --churn 2 --wait 600 --duration 900 \
        --domain 192-168-65-254.nip.io --csv sites.csv --out churn.jsonl
    uv run jobcrawler import sites.csv
@@ -155,7 +161,7 @@ Mọi số trên đều có ở trang Tổng quan (độ trễ, độ tươi), H
    Nhân kết quả theo tỉ lệ `(10.000 / T_thật) / (số site / T_thử)`; xoá doanh nghiệp thử
    (`note = 'thử tải'`) sau khi đo.
 
-3. Trên dữ liệu lớn (truy vấn giao diện): `scripts/loadtest/seed.py` + `bench.py` (OPERATIONS.md).
+3. Trên dữ liệu lớn (truy vấn giao diện): `backend/scripts/loadtest/seed.py` + `bench.py` (OPERATIONS.md).
 
 ## 6. Bảo mật
 

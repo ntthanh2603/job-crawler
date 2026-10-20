@@ -1,9 +1,8 @@
-"""Phần web không cần DB: đăng nhập/CSRF, markdown an toàn, phục vụ bản build React."""
+"""Phần web không cần DB: đăng nhập/CSRF, markdown an toàn, app chỉ phục vụ API."""
 
 from __future__ import annotations
 
 import base64
-from pathlib import Path
 
 import httpx
 import pytest
@@ -79,14 +78,8 @@ def test_markdown_escapes_html_and_scripts() -> None:
     assert to_html(None) == to_html("") == ""
 
 
-def app_with_dist(tmp_path: Path, *, built: bool) -> httpx.AsyncClient:
-    dist = tmp_path / "dist"
-    if built:
-        (dist / "assets").mkdir(parents=True)
-        (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
-        (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
-        (dist / "favicon.svg").write_text("<svg/>", encoding="utf-8")
-    settings = Settings(ui_dist=dist, ui_password=SecretStr("x"))
+def api_client() -> httpx.AsyncClient:
+    settings = Settings(_env_file=None, ui_password=SecretStr("x"))  # pyright: ignore[reportCallIssue]
     # Không chạy lifespan: các route dưới đây không cần DB.
     app = create_app(settings)
     return httpx.AsyncClient(
@@ -96,28 +89,17 @@ def app_with_dist(tmp_path: Path, *, built: bool) -> httpx.AsyncClient:
     )
 
 
-@pytest.mark.parametrize("path", ["/", "/jobs/42", "/companies?q=x"])
-async def test_spa_routes_return_index(tmp_path: Path, path: str) -> None:
-    async with app_with_dist(tmp_path, built=True) as client:
+@pytest.mark.parametrize("path", ["/", "/jobs/42", "/assets/app.js", "/api/khong-co"])
+async def test_api_only_unknown_paths_are_json_404(path: str) -> None:
+    """Giao diện là service riêng: không trả index.html / file tĩnh, đường dẫn lạ là 404 JSON."""
+    async with api_client() as client:
         r = await client.get(path)
-        assert r.status_code == 200
-        assert r.text == "<div id=root></div>"
-        assert r.headers["cache-control"] == "no-cache"
+        assert r.status_code == 404
+        assert r.json() == {"detail": "Không có API này"}
+        assert (await client.post(path)).status_code == 404
 
 
-async def test_spa_static_files_and_api_404(tmp_path: Path) -> None:
-    async with app_with_dist(tmp_path, built=True) as client:
-        assert (await client.get("/assets/app.js")).text == "console.log(1)"
-        assert (await client.get("/favicon.svg")).text == "<svg/>"
-        # Không lọt ra ngoài thư mục build.
-        assert (await client.get("/..%2F..%2Fpyproject.toml")).text == "<div id=root></div>"
-        missing = await client.get("/api/khong-co")
-        assert missing.status_code == 404
-        assert missing.json() == {"detail": "Không có API này"}
-
-
-async def test_without_build_shows_instructions(tmp_path: Path) -> None:
-    async with app_with_dist(tmp_path, built=False) as client:
-        r = await client.get("/")
-        assert r.status_code == 503
-        assert "npm run build" in r.text
+async def test_known_path_with_wrong_method_is_405() -> None:
+    async with api_client() as client:
+        assert (await client.delete("/api/me")).status_code == 405
+        assert (await client.get("/healthz")).text == "ok"

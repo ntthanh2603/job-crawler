@@ -1,14 +1,17 @@
 // Sinh hàm gọi API + hook React Query + kiểu từ spec của backend (như console/ của open-asm):
-// openapi.json (bản commit, `scripts/export_openapi.py` ở gốc repo) → src/lib/gen/queries.ts.
-// `npm run gen:api` (hoặc `task api` ở gốc repo, ghi spec trước). File sinh ra không sửa tay.
+// ../backend/openapi.json (bản commit, backend ghi bằng `backend/scripts/export_openapi.py`)
+// → src/lib/gen/queries.ts. `npm run gen:api` (`task gen-api`). File sinh ra không sửa tay.
 //
 // `httpClient: "axios"` chỉ để chọn dạng sinh ra (hàm nhận `{ url, method, params, data }`, trả thẳng
 // dữ liệu); gọi thật qua `apiClient` (fetch) trong src/lib/api.ts, không dùng axios.
 import { defineConfig } from "orval"
 
+/** Spec do backend sở hữu (bên sinh hợp đồng); đường dẫn tính từ frontend/. */
+export const OPENAPI_SPEC = "../backend/openapi.json"
+
 export default defineConfig({
   api: {
-    input: { target: "./openapi.json" },
+    input: { target: OPENAPI_SPEC },
     output: {
       target: "src/lib/gen/queries.ts",
       clean: true,

@@ -12,13 +12,19 @@ lớn, và những việc cần làm khi đổi cấu hình. Giao diện web ch�
 | `postgres`      | dữ liệu (`shm_size: 512mb` — xem [Postgres](#postgres))                           | 1                        |
 | `redis`         | hàng đợi (Redis Streams), việc lấy trang của worker, cache, khoá, số đo, cài đặt  | 1                        |
 | `migrate`       | `jobcrawler db upgrade` mỗi lần `up` (không có việc thì thoát)                    | —                        |
-| `api`           | API + giao diện React, `127.0.0.1:${API_PORT:-8000}`                              | 1                        |
+| `api`           | API JSON (`jobcrawler api`), chỉ trong mạng compose                                | 1                        |
+| `web`           | giao diện React (nginx) + chuyển `/api/` tới `api`, `127.0.0.1:${WEB_PORT:-8000}`  | 1                        |
 | `gateway`       | gRPC cho worker, `${GATEWAY_PUBLISH:-127.0.0.1:50051}`                            | 1                        |
 | `scheduler`     | xếp build đêm / poll ngày mỗi giây (một bản giữ khoá làm việc)                    | 1                        |
 | `runner-poll`   | `poll_company` (50 lượt song song mỗi bản)                                        | `RUNNER_POLL_REPLICAS`   |
 | `runner-build`  | `build_company` (10 mỗi bản), cron bảo trì, cron số liệu tổng quan                | `RUNNER_BUILD_REPLICAS`  |
 | `runner-boards` | index trang tuyển dụng: đủ (00:30), đuôi (mỗi 2 phút, 6h–23h)                     | `RUNNER_BOARDS_REPLICAS` |
 | `worker`        | lấy trang (curl_cffi + Chromium) qua proxy của worker                             | `WORKER_REPLICAS`        |
+
+Mỗi service là một thư mục tự đủ (`backend/`, `worker/`, `frontend/`; `proto/` là thư viện dùng
+chung) với `.env` riêng: `backend/.env` cho mọi process backend, `worker/.env` cho worker, `.env`
+ở gốc chỉ cho biến của compose (cổng, số bản, tài khoản Postgres). Lệnh `jobcrawler …` chạy trong
+`backend/` (`cd backend && uv run jobcrawler …` hoặc `task backend:cli -- …`).
 
 Đổi mã nguồn: `docker compose build && docker compose up -d` (hoặc `task up`; migration chạy tự
 động). Image backend (`backend/Dockerfile`) không có Chromium; image worker (`worker/Dockerfile`)
@@ -62,6 +68,7 @@ Trang Tổng quan → "Độ trễ phát hiện tin mới" (API `/api/crawl/stat
 Đo đầu-cuối trên site giả (không phụ thuộc site thật có đăng tin):
 
 ```bash
+cd backend
 uv run python scripts/loadtest/sla_site.py --port 8765 --every 75 --count 16 --out sla.jsonl
 # nạp doanh nghiệp website http://host.docker.internal:8765/ (từ container), chờ build xong
 uv run python scripts/loadtest/sla_report.py sla.jsonl
@@ -100,7 +107,7 @@ uv run python scripts/loadtest/sla_report.py sla.jsonl
 
 ## Cài đặt sửa ở giao diện
 
-Trang Cài đặt ghi đè giá trị từ `.env` (bảng `app_settings`). Mỗi lần lưu tăng phiên bản trên Redis;
+Trang Cài đặt ghi đè giá trị từ `backend/.env` (bảng `app_settings`). Mỗi lần lưu tăng phiên bản trên Redis;
 mọi process (api, gateway, scheduler, runner) nạp lại trong ≤ 5 s. Mục ghi "Cần khởi động lại" chỉ
 có hiệu lực khi khởi động lại process dùng nó (endpoint LLM, cấu hình HTTP, proxy chung, cron, số
 job song song của runner). "Khôi phục" xoá giá trị ghi đè, về giá trị trong `.env` / mặc định. Các
@@ -157,7 +164,8 @@ Mục tiêu: mọi thao tác trên giao diện dưới ~300 ms khi có hàng tri
 - **Tổng quan không quét lại mỗi lần mở**: phân bố do cron tính mỗi 5 phút, lưu Redis.
 
 Đo truy vấn trên dữ liệu giả lập 100 nghìn doanh nghiệp / 1 triệu việc làm:
-`uv run python scripts/loadtest/seed.py` rồi `uv run python scripts/loadtest/bench.py --prepare`.
+`uv run python scripts/loadtest/seed.py` rồi `uv run python scripts/loadtest/bench.py --prepare`
+(trong `backend/`).
 
 ## Không có việc làm trùng
 
@@ -202,7 +210,8 @@ uv run jobcrawler db dedup         # điền dấu vân tay + gộp việc trùn
 `/dev/shm` mặc định của container (64 MB) không đủ cho truy vấn / VACUUM song song trên bảng
 lớn, nên compose đặt `shm_size: 512mb`. Schema dựng lại từ đầu ngày 19/10/2026
 (`0001_initial_schema`), sau đó `0002_audit_events`; migration mới sinh bằng
-`task migration NAME="…"` (`uv run jobcrawler db revision -m "…"`), không sửa revision đã chạy.
+`task backend:migration NAME="…"` (`uv run jobcrawler db revision -m "…"` trong `backend/`), không
+sửa revision đã chạy.
 
 ## Sự cố hay gặp
 

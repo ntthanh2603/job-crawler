@@ -1,0 +1,3 @@
+# Danh sách proxy thật (có thể chứa mật khẩu): chỉ commit file mẫu.
+config/*proxies*.txt
+!config/proxies.example.txt

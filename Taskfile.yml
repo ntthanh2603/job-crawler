@@ -1,6 +1,24 @@
 # go-task v3 (https://taskfile.dev): `task --list` để xem các lệnh. Chạy được trên Windows (Task
 # dùng trình thông dịch shell riêng; không dùng cú pháp chỉ có ở bash).
+#
+# Mỗi service có Taskfile riêng trong thư mục của nó và chạy độc lập (lockfile, công cụ, `.env`
+# riêng); file này chỉ gom lại: `task backend:test`, `task worker:dev`, `task frontend:build`,
+# `task proto:gen`… và các lệnh chạy trên mọi service (`task check`).
 version: "3"
+
+includes:
+  proto:
+    taskfile: ./proto/Taskfile.yml
+    dir: ./proto
+  backend:
+    taskfile: ./backend/Taskfile.yml
+    dir: ./backend
+  worker:
+    taskfile: ./worker/Taskfile.yml
+    dir: ./worker
+  frontend:
+    taskfile: ./frontend/Taskfile.yml
+    dir: ./frontend
 
 tasks:
   default:
@@ -11,31 +29,34 @@ tasks:
   # --- cài đặt ---------------------------------------------------------------------------------
 
   setup:
-    desc: Cài dependency Python (uv) + frontend (npm), tạo .env từ .env.example nếu chưa có
+    desc: Cài dependency của mọi service (uv cho proto / backend / worker, npm cho frontend), tạo các file .env
     preconditions:
       - sh: uv --version
         msg: "Cần uv: https://docs.astral.sh/uv/"
       - sh: npm --version
         msg: "Cần Node.js + npm (bản trong frontend/.nvmrc)"
     cmds:
-      - uv sync
-      - task: ui:install
+      - task: proto:setup
+      - task: backend:setup
+      - task: worker:setup
+      - task: frontend:setup
       - task: env
 
   env:
-    desc: Tạo .env từ .env.example (giữ nguyên nếu đã có)
+    desc: Tạo .env (compose), backend/.env, worker/.env từ file .env.example tương ứng (giữ nguyên file đã có)
     cmds:
-      - uv run --no-project python -c "import pathlib, shutil; p = pathlib.Path('.env'); p.exists() or shutil.copyfile('.env.example', p)"
+      - for: [".", "backend", "worker"]
+        cmd: uv run --no-project python -c "import pathlib, shutil; d = pathlib.Path('{{.ITEM}}'); p = d / '.env'; p.exists() or shutil.copyfile(d / '.env.example', p)"
 
   # --- docker compose --------------------------------------------------------------------------
 
   up:
-    desc: Build image và chạy cả stack (docker-compose.yaml)
+    desc: Build image (backend, worker, web) và chạy cả stack (docker-compose.yaml)
     cmds:
       - docker compose up -d --build
 
   infra:
-    desc: Chỉ Postgres + Redis (chạy backend trên máy / test tích hợp), chờ healthy
+    desc: Chỉ Postgres + Redis (chạy service trên máy / test tích hợp), chờ healthy
     cmds:
       - docker compose up -d --wait postgres redis
 
@@ -44,124 +65,57 @@ tasks:
     cmds:
       - docker compose down
 
-  # --- chất lượng mã ---------------------------------------------------------------------------
+  # --- chạy trên mọi service ------------------------------------------------------------------
 
   fmt:
-    desc: Định dạng + sửa lỗi lint tự sửa được (ruff)
+    desc: Định dạng + sửa lỗi lint tự sửa được (ruff) ở proto, backend, worker
     cmds:
-      - uv run ruff format .
-      - uv run ruff check --fix .
+      - task: proto:fmt
+      - task: backend:fmt
+      - task: worker:fmt
 
   lint:
-    desc: ruff format --check, ruff check, typecheck frontend
+    desc: Lint mọi service (ruff ở proto / backend / worker, tsc ở frontend)
     cmds:
-      - uv run ruff format --check .
-      - uv run ruff check .
-      - task: ui:typecheck
+      - task: proto:lint
+      - task: backend:lint
+      - task: worker:lint
+      - task: frontend:typecheck
 
   typecheck:
-    desc: pyright + tsc
+    desc: pyright ở proto / backend / worker, tsc ở frontend
     cmds:
-      - uv run pyright
-      - task: ui:typecheck
+      - task: proto:typecheck
+      - task: backend:typecheck
+      - task: worker:typecheck
+      - task: frontend:typecheck
 
   test:
-    desc: "pytest (tích hợp cần Postgres + Redis + TEST_DATABASE_URL kết thúc `_test`); thêm tham số sau --"
+    desc: "Test mọi service (test tích hợp của backend cần Postgres + Redis + TEST_DATABASE_URL kết thúc `_test`)"
     cmds:
-      - uv run pytest {{.CLI_ARGS}}
-
-  test:unit:
-    desc: pytest bỏ test tích hợp (không cần Postgres / Redis)
-    cmds:
-      - uv run pytest -m "not integration" {{.CLI_ARGS}}
+      - task: proto:test
+      - task: backend:test
+      - task: worker:test
+      - task: frontend:test
 
   check:
-    desc: Mọi thứ CI chạy (lint, typecheck, proto, test, build giao diện) — chạy trước khi commit
+    desc: Mọi thứ CI chạy, từng service một — chạy trước khi commit
     cmds:
-      - task: lint
-      - uv run pyright
       - task: proto:check
-      - task: api:check
-      - task: test
-      - task: ui:test
-      - task: ui:build
+      - task: backend:check
+      - task: worker:check
+      - task: frontend:check
 
-  # --- proto, spec API, DB ---------------------------------------------------------------------
-
-  proto:
-    desc: Sinh lại mã Python từ proto/jcproto/v1/*.proto
-    cmds:
-      - uv run python scripts/gen_proto.py
-
-  proto:check:
-    desc: Kiểm tra mã sinh từ proto đã khớp .proto
-    cmds:
-      - uv run python scripts/gen_proto.py --check
+  # --- hợp đồng API backend → frontend --------------------------------------------------------
 
   api:
-    desc: Ghi lại frontend/openapi.json từ mô hình trả về của API, rồi sinh hàm + hook + kiểu bằng orval (src/lib/gen/)
+    desc: Ghi lại backend/openapi.json từ mô hình trả về của API rồi sinh lại client của frontend (orval)
     cmds:
-      - uv run python scripts/export_openapi.py
-      - task: ui:gen-api
+      - task: backend:api
+      - task: frontend:gen-api
 
   api:check:
-    desc: Kiểm tra frontend/openapi.json và mã orval sinh ra đã khớp (pytest / Vitest cũng kiểm)
+    desc: Kiểm tra backend/openapi.json và client sinh ở frontend đã khớp
     cmds:
-      - uv run python scripts/export_openapi.py --check
-      - task: ui:gen-api:check
-
-  migrate:
-    desc: Áp migration Alembic lên DATABASE_URL
-    cmds:
-      - uv run jobcrawler db upgrade
-
-  migration:
-    desc: 'Sinh migration Alembic mới từ model (task migration NAME="mô tả")'
-    requires:
-      vars: [NAME]
-    cmds:
-      - uv run jobcrawler db revision -m "{{.NAME}}"
-
-  # --- giao diện (frontend/) -------------------------------------------------------------------
-
-  ui:install:
-    desc: npm ci trong frontend/
-    dir: frontend
-    cmds:
-      - npm ci --no-audit --no-fund
-
-  ui:dev:
-    desc: Vite dev server http://localhost:5173 (API ở cổng 8000)
-    dir: frontend
-    cmds:
-      - npm run dev
-
-  ui:build:
-    desc: Build giao diện vào backend/jobcrawler/web/dist
-    dir: frontend
-    cmds:
-      - npm run build
-
-  ui:typecheck:
-    desc: tsc -b
-    dir: frontend
-    cmds:
-      - npm run typecheck
-
-  ui:gen-api:
-    desc: Sinh src/lib/gen/queries.ts (orval) từ frontend/openapi.json (spec ghi bằng `task api`)
-    dir: frontend
-    cmds:
-      - npm run gen:api
-
-  ui:gen-api:check:
-    desc: Kiểm tra src/lib/gen/queries.ts đã khớp frontend/openapi.json
-    dir: frontend
-    cmds:
-      - npx vitest run src/lib/gen.test.ts
-
-  ui:test:
-    desc: Test giao diện một lượt (bỏ qua nếu chưa có script test:run)
-    dir: frontend
-    cmds:
-      - npm run test:run --if-present
+      - task: backend:api:check
+      - task: frontend:gen-api:check

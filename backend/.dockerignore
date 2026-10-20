@@ -1,0 +1,21 @@
+# Build context của image backend là thư mục này: image chỉ cần pyproject.toml, uv.lock, README.md
+# và gói jobcrawler/ (proto/ vào qua build context tên `proto`).
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.env
+.env.*
+!.env.example
+config/
+tests/
+scripts/
+out/
+golden/
+*.csv
+*.jsonl
+openapi.json
+Taskfile.yml
+Dockerfile
+.dockerignore

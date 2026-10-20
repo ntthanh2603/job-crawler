@@ -1,6 +1,7 @@
-"""Ứng dụng web (FastAPI): API JSON + phục vụ giao diện React (frontend/, build vào `dist/`).
+"""Ứng dụng web (FastAPI): chỉ API JSON (`/api/...`) và `/healthz`. Giao diện React là service
+riêng (nginx phục vụ bản build, chuyển `/api` tới đây).
 
-`jobcrawler ui` hoặc service `api` trong compose. Dùng chung `open_resources` và các hàm trong
+`jobcrawler api` hoặc service `api` trong compose. Dùng chung `open_resources` và các hàm trong
 `jobcrawler.services` như CLI; worker vẫn là process riêng, giao diện chỉ đưa job vào queue.
 
 Middleware, từ ngoài vào: `RequestIdMiddleware` (request id, log truy cập, lỗi chưa xử lý thành 500)
@@ -14,31 +15,23 @@ import base64
 import binascii
 import json
 import logging
-import os
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
-from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
-from starlette.responses import (
-    FileResponse,
-    HTMLResponse,
-    JSONResponse,
-    PlainTextResponse,
-    Response,
-)
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.websockets import WebSocketClose
 
 from jobcrawler.config import Settings, get_settings
 from jobcrawler.db.ids import uuid7
@@ -46,24 +39,14 @@ from jobcrawler.logging import configure_logging, get_logger
 from jobcrawler.resources import open_resources
 from jobcrawler.web import api, settings_api
 
-DEFAULT_DIST = Path(__file__).with_name("dist")
-NO_BUILD = """<!doctype html><meta charset="utf-8"><title>jobcrawler</title>
-<body style="font-family:system-ui;max-width:640px;margin:40px auto;line-height:1.6">
-<h1>Chưa build giao diện</h1>
-<p>Chạy <code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code> rồi tải lại trang,
-hoặc chạy dev server <code>npm run dev</code> (cổng 5173). API vẫn dùng được ở
-<a href="/api/docs">/api/docs</a>.</p></body>"""
-
 log = get_logger(__name__)
 
 PUBLIC_PATHS = ("/healthz",)
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 
 REQUEST_ID_HEADER = "X-Request-Id"
-# Log truy cập chỉ cho API: file tĩnh, trang SPA, /healthz (healthcheck vài giây một lần) là nhiễu.
+# Log truy cập chỉ cho API: /healthz (healthcheck vài giây một lần) là nhiễu.
 _ACCESS_LOG_PREFIX = "/api/"
-# File trong `assets/` của bản build Vite có hash nội dung trong tên: cache một năm, không hỏi lại.
-ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 # Chặn đoán mật khẩu: sai LOGIN_FAIL_LIMIT lần, mỗi lần cách lần trước không quá LOGIN_FAIL_WINDOW
 # giây (mỗi lần sai gia hạn bộ đếm), thì IP đó nhận 429 tới khi bộ đếm hết hạn.
 LOGIN_FAIL_LIMIT = 20
@@ -172,9 +155,9 @@ class LoginThrottle:
     trình duyệt chưa hỏi mật khẩu) không bị tính.
 
     IP là `request.client.host`. Sau reverse proxy, uvicorn chỉ lấy IP thật từ `X-Forwarded-For`
-    khi chạy với `proxy_headers` (`jobcrawler ui` bật sẵn) và IP của proxy nằm trong
-    `--forwarded-allow-ips` / `FORWARDED_ALLOW_IPS` (mặc định 127.0.0.1); không thì mọi người dùng
-    chung IP của proxy, tức chung một bộ đếm.
+    khi chạy với `proxy_headers` (`jobcrawler api` bật sẵn) và IP của proxy nằm trong
+    `--forwarded-allow-ips` / `FORWARDED_ALLOW_IPS` (mặc định 127.0.0.1,::1); không thì mọi người
+    dùng chung IP của proxy (nginx của giao diện), tức chung một bộ đếm.
 
     Redis lỗi hay chưa mở (`redis()` trả None) thì cho qua, chỉ log cảnh báo: Redis trục trặc không
     được khoá mọi người ở ngoài.
@@ -343,19 +326,13 @@ def operation_id(route: APIRoute) -> str:
     return route.name
 
 
-class AssetFiles(StaticFiles):
-    """`/assets` của bản build: tên file có hash nội dung nên cho trình duyệt cache lâu."""
-
-    def file_response(
-        self,
-        full_path: str | os.PathLike[str],
-        stat_result: os.stat_result,
-        scope: Scope,
-        status_code: int = 200,
-    ) -> Response:
-        response = super().file_response(full_path, stat_result, scope, status_code)
-        response.headers["Cache-Control"] = ASSET_CACHE_CONTROL
-        return response
+async def unknown_path(scope: Scope, receive: Receive, send: Send) -> None:
+    """Không route nào khớp đường dẫn (khác method thì router vẫn trả 405): 404 cùng dạng JSON,
+    lời tiếng Việt như mọi lỗi khác của API."""
+    if scope["type"] == "websocket":  # API không có websocket: đóng như router mặc định
+        await WebSocketClose()(scope, receive, send)
+        return
+    await json_error(404, "Không có API này")(scope, receive, send)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -363,7 +340,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # uvicorn --reload chạy app ở process con: cấu hình log lại ở đây.
     configure_logging(settings)
     # Log truy cập của uvicorn trùng `http.request` (có request id, thời gian xử lý, người dùng)
-    # và in cả từng file tĩnh: chỉ giữ cảnh báo.
+    # và in cả /healthz: chỉ giữ cảnh báo.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     @asynccontextmanager
@@ -379,7 +356,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Giao diện vận hành và API của jobcrawler.",
         lifespan=lifespan,
         docs_url="/api/docs",
-        # Bản commit ở frontend/openapi.json (scripts/export_openapi.py), giao diện sinh kiểu từ đó.
+        # Bản commit ở backend/openapi.json (scripts/export_openapi.py), giao diện sinh kiểu từ đó.
         openapi_url="/api/openapi.json",
         redoc_url=None,
         generate_unique_id_function=operation_id,
@@ -412,30 +389,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(api.router)
     app.include_router(settings_api.router)
-    dist = settings.ui_dist or DEFAULT_DIST
-    if (dist / "assets").is_dir():
-        app.mount("/assets", AssetFiles(directory=dist / "assets"), name="assets")
-
-    @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str) -> Response:
-        """Giao diện React: file tĩnh nếu có, còn lại trả index.html (router phía trình duyệt)."""
-        if path.startswith("api/"):
-            raise HTTPException(404, "Không có API này")
-        index = dist / "index.html"
-        if not index.is_file():
-            return HTMLResponse(NO_BUILD, status_code=503)
-        target = (dist / path).resolve()
-        if path and target.is_file() and dist.resolve() in target.parents:
-            return FileResponse(target)
-        # index.html không cache để bản build mới có hiệu lực ngay (file trong assets có hash).
-        return FileResponse(index, headers={"Cache-Control": "no-cache"})
-
+    app.router.default = unknown_path
     return app
 
 
 def openapi_document() -> str:
     """Spec như `/api/openapi.json`, dạng JSON khoá sắp xếp (diff gọn): bản commit ở
-    frontend/openapi.json (`scripts/export_openapi.py`). Không mở Postgres / Redis (lifespan không
+    backend/openapi.json (`scripts/export_openapi.py`). Không mở Postgres / Redis (lifespan không
     chạy), không đọc .env: spec chỉ phụ thuộc mã."""
     spec = create_app(Settings(_env_file=None)).openapi()  # pyright: ignore[reportCallIssue]
     return json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True) + "\n"

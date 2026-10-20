@@ -54,17 +54,20 @@ flowchart LR
 
 ## 2. Các process
 
-Repo là một workspace uv gồm ba gói: `backend/` (gói `jobcrawler`), `worker/` (gói `jobworker`),
-`proto/` (gói `jobcrawler-proto`: hợp đồng gRPC). Backend chạy cùng một image
-(`backend/Dockerfile`, không có Chromium), khác nhau ở lệnh; worker có image riêng
-(`worker/Dockerfile`, Playwright + Chromium).
+Mỗi khối là một service riêng, tự đủ trong thư mục của nó (mã, dependency + lockfile, công cụ,
+`Dockerfile`, `Taskfile.yml`, `.env`): `backend/` (gói `jobcrawler`, một image không có Chromium,
+các process khác nhau ở lệnh), `worker/` (gói `jobworker`, image Playwright + Chromium),
+`frontend/` (image `web`: nginx phục vụ bản build React, chuyển `/api/` tới `api`). `proto/` (gói
+`jobcrawler-proto`) là thư viện hợp đồng gRPC mà backend và worker cùng phụ thuộc theo đường dẫn
+`../proto`; image của chúng nhận nó làm build context tên `proto`.
 
 | Dịch vụ          | Lệnh                                  | Việc                                                                                                                                       |
 | ---------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `postgres`       |                                       | dữ liệu                                                                                                                                    |
 | `redis`          |                                       | ba hàng đợi job, hàng việc lấy trang của worker, rate limit, proxy pool, robots/HTTP/LLM/SERP cache, khoá, số đo độ trễ, phiên bản cài đặt |
 | `migrate`        | `jobcrawler db upgrade`               | chạy Alembic mỗi lần `up` rồi thoát                                                                                                        |
-| `api`            | `jobcrawler ui`                       | API JSON `/api/...` + giao diện React                                                                                                      |
+| `api`            | `jobcrawler api`                      | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `web`)                                                                                     |
+| `web`            | nginx (image `web`, `frontend/`)      | giao diện React; `/api/` chuyển tới `api` (giữ Host, ghi đè `X-Forwarded-For` bằng IP người dùng); cache file tĩnh                       |
 | `gateway`        | `jobcrawler gateway`                  | gRPC cho worker: giao việc lấy trang từ Redis Streams, nhận kết quả                                                                        |
 | `scheduler`      | `jobcrawler scheduler`                | mỗi giây xếp build đến hạn (đêm / doanh nghiệp mới / bộ khung hỏng) và poll đến hạn; một replica giữ khoá Postgres                          |
 | `runner-poll`    | `jobcrawler runner --role poll`       | queue `jobcrawler-poll`: `poll_company` (`RUNNER_POLL_CONCURRENCY` = 50 mỗi process)                                                       |
@@ -80,13 +83,18 @@ CLI (`jobcrawler …`, `backend/jobcrawler/entrypoints/cli.py`) dùng đúng cá
 Mọi process backend mở tài nguyên qua `resources.open_resources()` → `Resources`: engine +
 sessionmaker SQLAlchemy async, Redis, ba hàng đợi, `LLMClient`, `HttpClient` gửi request qua worker
 (`fetch: FetchClient`), `api_http` gọi thẳng API bên ngoài (SERP), proxy pool chung. Cài đặt hiện
-hành là env/.env cộng giá trị sửa ở trang Cài đặt, nạp lại khi đổi (`services/live_settings.py`).
+hành là env/`backend/.env` cộng giá trị sửa ở trang Cài đặt, nạp lại khi đổi
+(`services/live_settings.py`).
 
 ## 3. Bản đồ mã nguồn
 
 ```
+backend/                       service backend: pyproject.toml + uv.lock, Dockerfile, Taskfile.yml, .env.example
+  openapi.json                 hợp đồng HTTP (bản commit, scripts/export_openapi.py)
+  scripts/                     export_openapi.py, loadtest/ (seed + bench dữ liệu lớn, site giả đo độ trễ)
+  tests/                       unit + integration/
 backend/jobcrawler/
-  config.py            Settings (pydantic-settings, đọc .env)
+  config.py            Settings (pydantic-settings, đọc .env trong thư mục chạy = backend/)
   resources.py         mở/đóng tài nguyên dùng chung của một process
   schemas.py           kiểu dữ liệu: CompanyIn, RawJob, JobOut, enum trạng thái, RunKind, PlanStatus…
   queues.py, streamqueue.py   ba hàng đợi trên Redis Streams (consumer group, khoá job, cron)
@@ -99,14 +107,14 @@ backend/jobcrawler/
   services/            nghiệp vụ: companies (build), crawl (build/poll/xếp job), schedule, plans,
                        sla, app_settings, live_settings, boards, batch, stats, overview, maintenance…
   entrypoints/         cli.py, runner.py, scheduler.py, gateway.py
-  web/                 FastAPI (api.py, settings_api.py, queries.py, actions.py) phục vụ frontend/
+  web/                 FastAPI: chỉ API JSON (api.py, settings_api.py, queries.py, actions.py)
   db/                  models, migration Alembic (một migration 0001), nén zstd, UUIDv7
+worker/                service worker: pyproject.toml + uv.lock, Dockerfile, Taskfile.yml, .env.example,
+                       config/ (proxy mẫu), tests/
 worker/jobworker/      config, client gRPC, fetch (curl_cffi), browser (Playwright), proxy tại worker
-proto/jcproto/v1/      crawl.proto + mã sinh sẵn (`scripts/gen_proto.py`)
-frontend/              React + shadcn/ui + Tailwind (build vào backend/jobcrawler/web/dist);
-                       openapi.json (spec API, `scripts/export_openapi.py`) → orval → src/lib/gen/
-backend/tests, worker/tests, proto/tests
-scripts/loadtest/      seed + bench dữ liệu lớn, site giả đo độ trễ (sla_site, fake_sites, sla_report)
+proto/                 thư viện hợp đồng: jcproto/v1/crawl.proto + mã sinh sẵn, scripts/gen.py, tests/
+frontend/              service web: React + shadcn/ui + Tailwind (build vào frontend/dist), Dockerfile +
+                       nginx/ (image `web`), client sinh từ ../backend/openapi.json (orval → src/lib/gen/)
 ```
 
 Quy ước phụ thuộc: `sources/` chỉ biết `SourceSession` (bọc `Fetcher` + `LLMClient`), không biết
@@ -435,8 +443,10 @@ erDiagram
 
 ## 14. Giao diện web
 
-FastAPI (`web/app.py`, `web/api.py`, `web/settings_api.py`) phục vụ API `/api/...` (tài liệu
-`/api/docs`) và bản build React. Trang: Tổng quan (độ trễ phát hiện tin mới, độ tươi, lượt chạy,
+Service `web` (`frontend/`, nginx không root, cổng 8080) phục vụ bản build React và chuyển
+`/api/` tới service `api` — FastAPI (`web/app.py`, `web/api.py`, `web/settings_api.py`) chỉ phục
+vụ API `/api/...` (tài liệu `/api/docs`). Trình duyệt chỉ thấy một origin nên đăng nhập HTTP Basic
+và kiểm tra chống CSRF giữ nguyên (nginx giữ `Host`). Trang: Tổng quan (độ trễ phát hiện tin mới, độ tươi, lượt chạy,
 request), Hàng đợi (build / poll / trang tuyển dụng), Trang tuyển dụng (lượt đủ / đuôi), Doanh
 nghiệp (tab "Bộ khung & lịch": nguồn, trang/API trong bộ khung, mốc poll/build, nút Poll ngay /
 Build lại), Việc làm, Kiểm tay, Golden set, **Workers** (worker đang kết nối, slot, proxy, dừng nhận
@@ -452,7 +462,8 @@ Middleware, từ ngoài vào:
 - `GuardMiddleware`: HTTP Basic khi đặt `UI_PASSWORD` (sai 20 lần trong 5 phút từ một IP → 429
   kèm `Retry-After`, đếm trên Redis, Redis lỗi thì cho qua); request ghi từ site khác bị chặn.
   Mọi lỗi cùng dạng JSON `{"detail": ...}`.
-- File trong `/assets` (tên có hash) cache một năm; `index.html` không cache.
+- (nginx của `web`) File trong `/assets` (tên có hash) cache một năm; `index.html` không cache;
+  `X-Forwarded-For` ghi đè bằng IP người dùng (api tin header này để chặn đoán mật khẩu theo IP).
 
 Mọi thao tác thay đổi trạng thái (lưu cài đặt, build / poll ngay, xếp build, import, kiểm tay,
 index trang tuyển dụng, bảo trì, chấm golden set, dừng worker) ghi một dòng `audit_events`
@@ -474,8 +485,9 @@ Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
   đặt, JSON tự do như `kyc_evidence`, `changes`) không bị kiểm chặt: spec liệt kê các giá trị có
   thể có, giá trị lạ vẫn trả nguyên văn. Payload trang tổng quan là JSON cache trong Redis (mốc thời
   gian ghi bằng `str()`): mô hình giữ nguyên chuỗi đó.
-- `frontend/openapi.json` là bản commit của spec (`scripts/export_openapi.py`, khoá sắp xếp, dựng
-  app không cần Postgres / Redis). Như console/ của open-asm, **orval** (`frontend/orval.config.ts`,
+- `backend/openapi.json` là bản commit của spec — backend sở hữu hợp đồng HTTP của mình
+  (`backend/scripts/export_openapi.py`, khoá sắp xếp, dựng app không cần Postgres / Redis). Như
+  console/ của open-asm, **orval** (`frontend/orval.config.ts` đọc `../backend/openapi.json`,
   `npm run gen:api`) sinh `src/lib/gen/queries.ts` từ spec: kiểu của mọi schema, hàm gọi từng
   endpoint (`getJobs(params)`, `postEnqueue(body)`, tên theo `operationId`), hook React Query
   (`useGetJobs`, `usePostEnqueue`), khoá query (`getGetJobsQueryKey()` — gọi không tham số là tiền
@@ -514,14 +526,17 @@ Hợp đồng API ↔ giao diện có kiểu từ đầu tới cuối:
   gateway gRPC đầu-cuối với worker giả, index trang tuyển dụng (đủ, đuôi), API, cài đặt; payload
   các service dựng sẵn (tổng quan, độ trễ phát hiện, Cài đặt) không có trường ngoài mô hình trả về
   (`test_api_contract_db.py`).
-- **Hợp đồng API** (`tests/test_openapi.py`): `frontend/openapi.json` khớp mã, mọi endpoint JSON có
+- **Hợp đồng API** (`backend/tests/test_openapi.py`): `backend/openapi.json` khớp mã, mọi endpoint
+  JSON có
   mô hình trả về, mô hình chép từ dataclass của services không thiếu / thừa trường.
-- **Đo thật**: `scripts/loadtest/sla_site.py` + `sla_report.py` (độ trễ đầu-cuối trên site giả),
+- **Đo thật**: `backend/scripts/loadtest/sla_site.py` + `sla_report.py` (độ trễ đầu-cuối trên site
+  giả),
   `fake_sites.py` (hàng trăm site giả để thử tải poll).
 - **Frontend**: Vitest (`frontend/src/**/*.test.ts(x)`): hàm thuần (định dạng, mô hình trang Cài
   đặt, API client, bộ lọc URL, nhật ký), trang lỗi, mã orval sinh khớp `openapi.json`.
 - `TEST_DATABASE_URL` phải là DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại); khi
   `CI` được đặt mà thiếu DB thì test tích hợp báo lỗi thay vì bỏ qua.
-- Kiểm tra mỗi thay đổi: `task check` (ruff format/check, pyright, proto, spec API + kiểu sinh,
-  pytest, typecheck + test + build frontend) — cũng là việc CI (`.github/workflows/ci.yml`) chạy mỗi lần push lên
-  `main`.
+- Mỗi service kiểm riêng trong thư mục của nó (`task <service>:check`: ruff format/check, pyright,
+  pytest; proto thêm mã sinh khớp; backend thêm spec API; frontend typecheck + client sinh + test +
+  build); `task check` chạy cả bốn — cũng là việc CI (`.github/workflows/ci.yml`, một job mỗi
+  service + build 3 image) chạy mỗi lần push lên `main`.

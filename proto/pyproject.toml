@@ -1,3 +1,7 @@
+# Thư viện hợp đồng gRPC dùng chung (crawl.proto + mã Python sinh sẵn), đứng riêng: backend/ và
+# worker/ phụ thuộc qua đường dẫn `jobcrawler-proto = { path = "../proto" }`.
+# Lệnh chạy trong thư mục này: `uv sync`, `task --list` (xem README.md).
+
 [project]
 name = "jobcrawler-proto"
 version = "0.2.0"
@@ -5,7 +9,16 @@ description = "Hợp đồng gRPC giữa backend (gateway) và worker lấy tran
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "grpcio>=1.84.0",
-    "protobuf>=6.31",
+    "protobuf>=7.35.1,<8",
+]
+
+[dependency-groups]
+dev = [
+    # Sinh lại mã từ jcproto/v1/*.proto (`uv run python scripts/gen.py`).
+    "grpcio-tools>=1.84.0",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
 ]
 
 [build-system]
@@ -15,3 +28,29 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-root = ""
 module-name = "jcproto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Mã do protoc sinh: không định dạng / lint.
+extend-exclude = ["jcproto/v1/*_pb2*.py", "jcproto/v1/*_pb2*.pyi"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "PT", "RUF"]
+# RUF001-003: chuỗi/comment tiếng Việt có ký tự mà ruff coi là "ambiguous unicode".
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jcproto"]
+
+[tool.pyright]
+include = ["jcproto", "tests", "scripts"]
+# crawl_pb2_grpc.py do grpc_tools sinh, không có chú thích kiểu (crawl_pb2.pyi thì có).
+exclude = ["**/__pycache__", "**/dist", "jcproto/v1/*_pb2_grpc.py"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

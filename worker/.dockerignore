@@ -1,0 +1,15 @@
+# Image chỉ cần pyproject.toml, uv.lock và jobworker/ (proto lấy từ build context `proto`).
+.venv
+**/__pycache__
+**/.pytest_cache
+.ruff_cache
+tests/
+# Proxy / cấu hình riêng mount lúc chạy (compose: ./worker/config:/app/config:ro).
+config/
+.env
+.env.*
+Taskfile.yml
+README.md
+Dockerfile
+.dockerignore
+.gitignore

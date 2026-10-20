@@ -1,7 +1,9 @@
-"""Sinh mã Python từ proto/jcproto/v1/*.proto vào chính thư mục đó (commit cùng file .proto).
+"""Sinh mã Python từ jcproto/v1/*.proto vào chính thư mục đó (commit cùng file .proto).
 
-uv run python scripts/gen_proto.py           # sinh lại
-uv run python scripts/gen_proto.py --check   # chỉ kiểm tra mã đã khớp .proto (CI / test)
+Đường dẫn tính theo vị trí file này nên chạy được từ thư mục nào cũng được (thường là proto/):
+
+uv run python scripts/gen.py           # sinh lại
+uv run python scripts/gen.py --check   # chỉ kiểm tra mã đã khớp .proto (CI / test)
 """
 
 from __future__ import annotations
@@ -14,7 +16,8 @@ from pathlib import Path
 
 from grpc_tools import protoc
 
-ROOT = Path(__file__).resolve().parents[1] / "proto"
+# Gốc của gói proto (thư mục chứa jcproto/): cũng là gốc import của file .proto.
+ROOT = Path(__file__).resolve().parents[1]
 PROTOS = sorted((ROOT / "jcproto" / "v1").glob("*.proto"))
 GENERATED = ("_pb2.py", "_pb2.pyi", "_pb2_grpc.py")
 
@@ -49,6 +52,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="chỉ so sánh, không ghi")
     args = parser.parse_args()
+    if not PROTOS:
+        raise SystemExit(f"không thấy file .proto trong {ROOT / 'jcproto' / 'v1'}")
     with tempfile.TemporaryDirectory() as tmp:
         generate(Path(tmp))
         stale = []

@@ -1,4 +1,4 @@
-"""Hợp đồng API ↔ giao diện: spec commit ở frontend/openapi.json khớp mã, mọi endpoint JSON có
+"""Hợp đồng API ↔ giao diện: spec commit ở backend/openapi.json khớp mã, mọi endpoint JSON có
 mô hình trả về, mô hình chép từ dataclass của services không thiếu / thừa trường."""
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from jobcrawler.services import batch, evaluate, sla, stats
 from jobcrawler.web import actions, api
 from jobcrawler.web.app import openapi_document
 
-SPEC = Path(__file__).resolve().parents[2] / "frontend" / "openapi.json"
+SPEC = Path(__file__).resolve().parents[1] / "openapi.json"
 
 
 @pytest.fixture(scope="module")
@@ -25,7 +25,8 @@ def spec() -> dict:
 
 def test_committed_spec_is_up_to_date() -> None:
     assert SPEC.read_text(encoding="utf-8") == openapi_document(), (
-        "frontend/openapi.json đã cũ so với mã: chạy `task api` rồi commit cả kiểu sinh ra"
+        "backend/openapi.json đã cũ so với mã: chạy `task api` (backend/) rồi sinh lại kiểu của"
+        " giao diện"
     )
 
 

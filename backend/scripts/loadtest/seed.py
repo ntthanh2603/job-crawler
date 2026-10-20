@@ -1,6 +1,6 @@
 """Tạo DB jobcrawler_load với dữ liệu lớn giả lập để đo truy vấn.
 
-uv run python scripts/loadtest/seed.py   (từ thư mục dự án; xoá và tạo lại DB jobcrawler_load)
+uv run python scripts/loadtest/seed.py   (trong backend/; xoá và tạo lại DB jobcrawler_load)
 """
 
 import asyncio

@@ -1,0 +1,10 @@
+# Danh sách proxy chung khi PROXY_MODE=central (backend chọn proxy cho từng request, worker dùng
+# đúng proxy được chỉ định). Sao chép thành config/proxies.txt trong backend/ (PROXIES_FILE; file
+# đó không được commit). Mỗi dòng một proxy.
+# Dòng trống và phần sau dấu # bị bỏ qua. Các dạng được nhận:
+#   http://user:pass@1.2.3.4:8080
+#   https://1.2.3.4:8443
+#   socks5://user:pass@1.2.3.4:1080      (socks5h:// để DNS phân giải ở phía proxy)
+#   1.2.3.4:8080                         (mặc định http)
+#   1.2.3.4:8080:user:pass               (mặc định http)
+# Chromium (render) không dùng được SOCKS có mật khẩu: các proxy đó chỉ dùng cho HTTP thường.

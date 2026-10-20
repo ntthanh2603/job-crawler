@@ -1,0 +1,60 @@
+# go-task v3 (https://taskfile.dev): lệnh của giao diện. Chạy trong frontend/ (`task --list`) hoặc từ
+# gốc repo qua include `frontend` (dir: frontend). Chạy được trên Windows (Task dùng trình thông dịch
+# shell riêng; không dùng cú pháp chỉ có ở bash).
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Cài dependency theo package-lock.json (npm ci)
+    preconditions:
+      - sh: npm --version
+        msg: "Cần Node.js + npm (bản trong .nvmrc)"
+    cmds:
+      - npm ci --no-audit --no-fund
+
+  dev:
+    desc: Vite dev server http://localhost:5173, /api chuyển tới JOBCRAWLER_API (mặc định http://127.0.0.1:8000)
+    cmds:
+      - npm run dev
+
+  build:
+    desc: tsc + vite build vào dist/
+    cmds:
+      - npm run build
+
+  typecheck:
+    desc: tsc -b
+    cmds:
+      - npm run typecheck
+
+  test:
+    desc: Vitest một lượt (thêm tham số sau --)
+    cmds:
+      - npm run test:run -- {{.CLI_ARGS}}
+
+  gen-api:
+    desc: Sinh src/lib/gen/queries.ts (orval) từ ../backend/openapi.json
+    preconditions: &spec
+      - sh: test -f ../backend/openapi.json
+        msg: "Thiếu ../backend/openapi.json (spec do backend ghi và commit)"
+    cmds:
+      - npm run gen:api
+
+  gen-api:check:
+    desc: Kiểm tra src/lib/gen/queries.ts đã khớp ../backend/openapi.json
+    preconditions: *spec
+    cmds:
+      - npm run gen:api:check
+
+  check:
+    desc: Mọi thứ CI chạy cho giao diện (typecheck, test, gen-api:check, build)
+    cmds:
+      - task: typecheck
+      - task: test
+      - task: gen-api:check
+      - task: build

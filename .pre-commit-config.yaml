@@ -25,12 +25,12 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1024]
 
-  # Sửa proto/jcproto/v1/*.proto mà chưa sinh lại mã (`task proto`) thì không cho commit.
+  # Sửa proto/jcproto/v1/*.proto mà chưa sinh lại mã (`task proto:gen`) thì không cho commit.
   - repo: local
     hooks:
       - id: proto-generated
         name: proto đã sinh lại mã
-        entry: uv run python scripts/gen_proto.py --check
+        entry: uv run --directory proto python scripts/gen.py --check
         language: system
         files: ^proto/jcproto/v1/
         pass_filenames: false

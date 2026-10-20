@@ -1,8 +1,9 @@
-"""Ghi spec OpenAPI của API (như `/api/openapi.json`) ra frontend/openapi.json (commit cùng mã);
-giao diện sinh kiểu TypeScript từ file này (`npm run gen:api`, `task api`).
+"""Ghi spec OpenAPI của API (như `/api/openapi.json`) ra backend/openapi.json (commit cùng mã);
+giao diện (frontend/) sinh hàm + kiểu TypeScript từ `../backend/openapi.json` (`npm run gen:api`).
 
-uv run python scripts/export_openapi.py           # ghi lại
-uv run python scripts/export_openapi.py --check   # chỉ kiểm tra file đã khớp mã (CI / test)
+Chạy trong backend/:
+uv run python scripts/export_openapi.py           # ghi lại (task api)
+uv run python scripts/export_openapi.py --check   # chỉ kiểm tra đã khớp mã (task api:check, CI)
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from jobcrawler.web.app import openapi_document
 
-TARGET = Path(__file__).resolve().parents[1] / "frontend" / "openapi.json"
+TARGET = Path(__file__).resolve().parents[1] / "openapi.json"
 
 
 def main() -> int:
@@ -28,7 +29,7 @@ def main() -> int:
         print(f"{TARGET} đã khớp mã")
         return 0
     if args.check:
-        print(f"{TARGET} đã cũ: chạy `task api`", file=sys.stderr)
+        print(f"{TARGET} đã cũ: chạy `task api` trong backend/", file=sys.stderr)
         return 1
     TARGET.write_text(fresh, encoding="utf-8", newline="\n")
     print(f"đã ghi {TARGET}")

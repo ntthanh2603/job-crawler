@@ -1,0 +1,85 @@
+# go-task v3 (https://taskfile.dev): lệnh của service backend. Chạy trong backend/ (`task --list`)
+# hoặc từ gốc repo qua include `backend` (dir: backend), vd. `task backend:test`.
+# Chạy được trên Windows (Task dùng trình thông dịch shell riêng; không dùng cú pháp chỉ có ở bash).
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Tạo .venv và cài dependency (kèm công cụ dev) theo uv.lock
+    preconditions:
+      - sh: uv --version
+        msg: "Cần uv: https://docs.astral.sh/uv/"
+    cmds:
+      - uv sync
+
+  fmt:
+    desc: Định dạng + sửa lỗi lint tự sửa được (ruff)
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  lint:
+    desc: ruff format --check + ruff check
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+
+  typecheck:
+    desc: pyright
+    cmds:
+      - uv run pyright
+
+  test:
+    desc: "pytest (tích hợp cần Postgres + Redis + TEST_DATABASE_URL kết thúc `_test`); thêm tham số sau --"
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  test:unit:
+    desc: pytest bỏ test tích hợp (không cần Postgres / Redis)
+    cmds:
+      - uv run pytest -m "not integration" {{.CLI_ARGS}}
+
+  check:
+    desc: Mọi thứ CI chạy cho backend (lint, typecheck, spec OpenAPI, test) — chạy trước khi commit
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: api:check
+      - task: test
+
+  dev:
+    desc: API trên máy, tự nạp lại khi sửa code (http://127.0.0.1:8000/api/docs)
+    cmds:
+      - uv run jobcrawler api --reload --port 8000
+
+  migrate:
+    desc: Áp migration Alembic lên DATABASE_URL
+    cmds:
+      - uv run jobcrawler db upgrade
+
+  migration:
+    desc: 'Sinh migration Alembic mới từ model (task migration NAME="mô tả")'
+    requires:
+      vars: [NAME]
+    cmds:
+      - uv run jobcrawler db revision -m "{{.NAME}}"
+
+  api:
+    desc: Ghi lại openapi.json từ mô hình trả về của API (giao diện sinh kiểu từ file này)
+    cmds:
+      - uv run python scripts/export_openapi.py
+
+  api:check:
+    desc: Kiểm tra openapi.json đã khớp mã
+    cmds:
+      - uv run python scripts/export_openapi.py --check
+
+  cli:
+    desc: "Chạy CLI jobcrawler, tham số sau -- (vd. task cli -- queue info)"
+    cmds:
+      - uv run jobcrawler {{.CLI_ARGS}}

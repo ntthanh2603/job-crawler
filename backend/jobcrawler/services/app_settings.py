@@ -69,7 +69,6 @@ ENV_ONLY: frozenset[str] = frozenset(
         "gateway_tls_key",
         "ui_username",
         "ui_password",
-        "ui_dist",
         "log_level",
         "log_format",
         "log_db_level",

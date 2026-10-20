@@ -1,11 +1,10 @@
 """Middleware của web, không cần DB: request id + log truy cập, lỗi dạng JSON, chặn đoán mật khẩu
-HTTP Basic, cache file tĩnh có hash."""
+HTTP Basic."""
 
 from __future__ import annotations
 
 import base64
 from collections.abc import Iterator
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -316,17 +315,12 @@ async def test_no_password_means_no_throttle() -> None:
     assert redis.values == {}
 
 
-# --- create_app: lắp middleware, file tĩnh -----------------------------------------------------
+# --- create_app: lắp middleware ------------------------------------------------------------------
 
 
-def full_app(tmp_path: Path, redis: FakeRedis | None = None) -> tuple[FastAPI, httpx.AsyncClient]:
-    dist = tmp_path / "dist"
-    (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<div id=root></div>", encoding="utf-8")
-    (dist / "assets" / "app-1a2b3c.js").write_text("console.log(1)", encoding="utf-8")
+def full_app(redis: FakeRedis | None = None) -> tuple[FastAPI, httpx.AsyncClient]:
     settings = Settings(
         _env_file=None,  # pyright: ignore[reportCallIssue]
-        ui_dist=dist,
         ui_password=SecretStr("pw"),
         redis_prefix="jc-app",
     )
@@ -338,15 +332,14 @@ def full_app(tmp_path: Path, redis: FakeRedis | None = None) -> tuple[FastAPI, h
 
 
 @pytest.mark.usefixtures("clean_env")
-async def test_create_app_wires_request_id_json_errors_and_throttle(tmp_path: Path) -> None:
+async def test_create_app_wires_request_id_json_errors_and_throttle() -> None:
     redis = FakeRedis()
-    app, client = full_app(tmp_path, redis)
+    app, client = full_app(redis)
 
     async def boom() -> None:
         raise RuntimeError("hỏng")
 
     app.add_api_route("/api/boom", boom)
-    app.router.routes.insert(0, app.router.routes.pop())  # trước route SPA bắt mọi đường dẫn
     async with client:
         health = await client.get("/healthz")
         assert health.text == "ok"
@@ -365,21 +358,3 @@ async def test_create_app_wires_request_id_json_errors_and_throttle(tmp_path: Pa
             "detail": "Lỗi máy chủ",
             "request_id": error.headers["x-request-id"],
         }
-
-
-@pytest.mark.usefixtures("clean_env")
-async def test_hashed_assets_are_cached_long_but_index_is_not(tmp_path: Path) -> None:
-    _, client = full_app(tmp_path)  # không có Redis (lifespan chưa chạy): không chặn, vẫn chạy
-    async with client:
-        asset = await client.get("/assets/app-1a2b3c.js", headers=GOOD)
-        assert asset.text == "console.log(1)"
-        assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
-        etag = asset.headers["etag"]
-        cached = await client.get("/assets/app-1a2b3c.js", headers={**GOOD, "If-None-Match": etag})
-        assert cached.status_code == 304
-        assert cached.headers["cache-control"] == "public, max-age=31536000, immutable"
-        gone = await client.get("/assets/khong-co.js", headers=GOOD)
-        assert gone.status_code == 404
-        assert "immutable" not in gone.headers.get("cache-control", "")
-        index = await client.get("/jobs/1", headers=GOOD)
-        assert index.headers["cache-control"] == "no-cache"

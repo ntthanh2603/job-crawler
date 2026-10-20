@@ -580,14 +580,23 @@ def gateway_health(
 
 
 @app.command()
-def ui(
+def api(
     host: Annotated[str, typer.Option(help="Địa chỉ lắng nghe (0.0.0.0 trong container).")] = (
         "127.0.0.1"
     ),
     port: Annotated[int, typer.Option(help="Cổng.")] = 8000,
     reload: Annotated[bool, typer.Option(help="Tự nạp lại khi sửa code (dev).")] = False,
+    forwarded_allow_ips: Annotated[
+        str | None,
+        typer.Option(
+            help="IP / mạng (CIDR) của reverse proxy được tin X-Forwarded-For / -Proto, cách nhau"
+            " dấu phẩy, `*` = mọi IP. Trống = biến môi trường FORWARDED_ALLOW_IPS (uvicorn đọc),"
+            " không có thì 127.0.0.1,::1."
+        ),
+    ] = None,
 ) -> None:
-    """Giao diện web + API JSON (đăng nhập bằng UI_USERNAME / UI_PASSWORD nếu đặt)."""
+    """API JSON cho giao diện (service riêng) và script: `/api/...`, tài liệu ở `/api/docs`,
+    `/healthz`. Đăng nhập bằng UI_USERNAME / UI_PASSWORD nếu đặt."""
     import uvicorn
 
     uvicorn.run(
@@ -596,9 +605,17 @@ def ui(
         host=host,
         port=port,
         reload=reload,
+        # Sau nginx của giao diện: IP thật của client (chặn đoán mật khẩu theo IP) và scheme lấy từ
+        # header X-Forwarded-*, chỉ khi request tới từ IP trong forwarded_allow_ips.
         proxy_headers=True,
+        forwarded_allow_ips=forwarded_allow_ips,
         log_level=get_settings().log_level.lower(),
     )
+
+
+# Tên cũ (trước khi giao diện tách thành service riêng): giữ cho compose / script cũ, ẩn khỏi
+# --help.
+app.command("ui", hidden=True, deprecated=True, help="Tên cũ của `jobcrawler api`.")(api)
 
 
 # --- doanh nghiệp, queue -----------------------------------------------------------------------

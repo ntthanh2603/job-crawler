@@ -2,6 +2,11 @@ name: jobcrawler
 
 # Một máy chạy đủ hệ thống (dev / quy mô nhỏ). Triển khai nhiều máy và quy mô 10.000 doanh
 # nghiệp: docs/DEPLOY.md (worker ở máy khác dùng deploy/worker.compose.yaml).
+#
+# Mỗi service build từ thư mục của nó và đọc `.env` của nó: backend/ (api, gateway, scheduler,
+# runner, migrate — một image), worker/, frontend/ (image `web`: nginx phục vụ giao diện và chuyển
+# /api tới `api`). proto/ là thư viện hợp đồng gRPC, vào image backend / worker qua build context
+# tên `proto`. `.env` ở gốc chỉ cho biến của compose (cổng, số bản, tài khoản Postgres).
 
 # Log của container xoay vòng (mặc định json-file không giới hạn, đầy đĩa sau vài tuần).
 x-logging: &logging
@@ -13,10 +18,10 @@ x-logging: &logging
 x-backend: &backend
   image: jobcrawler-backend:latest
   env_file:
-    - path: .env
+    - path: backend/.env
       required: false
   environment: &backend_env
-    # Ghi đè URL trong .env (vốn trỏ localhost cho CLI trên host) bằng hostname nội bộ.
+    # Ghi đè URL trong backend/.env (vốn trỏ 127.0.0.1 cho CLI trên host) bằng hostname nội bộ.
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
     REDIS_URL: redis://redis:6379/0
   depends_on: &backend_deps
@@ -73,25 +78,51 @@ services:
   migrate:
     <<: *backend
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: backend
+      additional_contexts:
+        proto: proto
     command: ["jobcrawler", "db", "upgrade"]
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
-  # Giao diện web + API JSON. Chỉ mở ở 127.0.0.1; đặt UI_PASSWORD trong .env nếu mở ra ngoài.
+  # API JSON (/api/...). Không mở ra host: trình duyệt đi qua `web`. Đặt UI_PASSWORD trong
+  # backend/.env nếu mở `web` ra ngoài.
   api:
     <<: *backend
-    command: ["jobcrawler", "ui", "--host", "0.0.0.0", "--port", "8000"]
-    ports:
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+    command: ["jobcrawler", "api", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *backend_env
+      # Chỉ `web` (nginx) gọi tới được api: tin X-Forwarded-For của nó để chặn đoán mật khẩu theo
+      # IP thật của người dùng.
+      FORWARDED_ALLOW_IPS: "*"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
       interval: 15s
       timeout: 5s
       retries: 5
+
+  # Giao diện React (frontend/) trên nginx không root; /api/ chuyển tới `api` (giữ Host cho kiểm
+  # tra chống CSRF). Chỉ mở ở 127.0.0.1.
+  web:
+    image: jobcrawler-web:latest
+    build:
+      context: frontend
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8000}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
 
   # Gateway gRPC cho worker lấy trang. Worker ở máy khác nối vào GATEWAY_PUBLISH (mặc định chỉ
   # 127.0.0.1); mở ra ngoài thì đặt GATEWAY_TOKEN (và TLS, xem docs/DEPLOY.md).
@@ -136,23 +167,23 @@ services:
     deploy:
       replicas: ${RUNNER_BOARDS_REPLICAS:-1}
 
-  # Worker lấy trang (curl_cffi + Chromium). Proxy riêng của worker: config/worker-proxies.txt
-  # (WORKER_PROXIES_FILE) hoặc WORKER_PROXIES trong .env.
+  # Worker lấy trang (curl_cffi + Chromium). Cấu hình ở worker/.env; proxy riêng của worker:
+  # worker/config/worker-proxies.txt hoặc WORKER_PROXIES trong worker/.env.
   worker:
     image: jobcrawler-worker:latest
     build:
-      context: .
-      dockerfile: worker/Dockerfile
+      context: worker
+      additional_contexts:
+        proto: proto
     command: ["jobworker", "run"]
     env_file:
-      - path: .env
+      - path: worker/.env
         required: false
     environment:
       GATEWAY_ADDR: gateway:50051
-      WORKER_POOL: ${WORKER_POOL:-default}
-      WORKER_PROXIES_FILE: ${WORKER_PROXIES_FILE:-/app/config/worker-proxies.txt}
+      WORKER_PROXIES_FILE: /app/config/worker-proxies.txt
     volumes:
-      - ./config:/app/config:ro
+      - ./worker/config:/app/config:ro
     depends_on:
       gateway:
         condition: service_healthy

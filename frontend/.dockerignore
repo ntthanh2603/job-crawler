@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.env*
+*.tsbuildinfo
+*.log
+Dockerfile
+.dockerignore
+README.md
+Taskfile.yml

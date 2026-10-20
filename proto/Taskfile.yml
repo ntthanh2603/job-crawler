@@ -1,0 +1,58 @@
+# go-task v3 (https://taskfile.dev): lệnh của thư viện hợp đồng gRPC. Chạy trong proto/
+# (`task --list`) hoặc từ gốc repo qua include `proto` (dir: proto), vd. `task proto:gen`.
+# Chạy được trên Windows (Task dùng trình thông dịch shell riêng; không dùng cú pháp chỉ có ở bash).
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Tạo .venv và cài dependency (kèm công cụ dev) theo uv.lock
+    preconditions:
+      - sh: uv --version
+        msg: "Cần uv: https://docs.astral.sh/uv/"
+    cmds:
+      - uv sync
+
+  gen:
+    desc: Sinh lại mã Python từ jcproto/v1/*.proto (commit cùng file .proto)
+    cmds:
+      - uv run python scripts/gen.py
+
+  gen:check:
+    desc: Kiểm tra mã sinh sẵn đã khớp file .proto
+    cmds:
+      - uv run python scripts/gen.py --check
+
+  fmt:
+    desc: Định dạng + sửa lỗi lint tự sửa được (ruff)
+    cmds:
+      - uv run ruff format .
+      - uv run ruff check --fix .
+
+  lint:
+    desc: ruff format --check + ruff check
+    cmds:
+      - uv run ruff format --check .
+      - uv run ruff check .
+
+  typecheck:
+    desc: pyright
+    cmds:
+      - uv run pyright
+
+  test:
+    desc: pytest (thêm tham số sau --)
+    cmds:
+      - uv run pytest {{.CLI_ARGS}}
+
+  check:
+    desc: Mọi thứ CI chạy cho proto (lint, typecheck, gen:check, test)
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: gen:check
+      - task: test

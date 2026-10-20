@@ -1,3 +1,6 @@
+# Service độc lập: venv, uv.lock và cấu hình công cụ riêng; mọi lệnh chạy trong worker/
+# (`uv sync`, `uv run jobworker run`, `task --list`). Phụ thuộc duy nhất ngoài thư mục này là hợp
+# đồng gRPC ở ../proto (gói jobcrawler-proto, cài dạng editable khi dev).
 [project]
 name = "jobworker"
 version = "0.2.0"
@@ -7,7 +10,7 @@ dependencies = [
     "curl-cffi>=0.16",
     "grpcio>=1.84.0",
     "jobcrawler-proto",
-    # Khớp đúng tag image mcr.microsoft.com/playwright/python trong worker/Dockerfile.
+    # Khớp đúng tag image mcr.microsoft.com/playwright/python trong Dockerfile.
     "playwright==1.63.0",
     "pydantic>=2.14",
     "pydantic-settings>=2.16.0",
@@ -27,4 +30,44 @@ build-backend = "uv_build"
 module-root = ""
 
 [tool.uv.sources]
-jobcrawler-proto = { workspace = true }
+jobcrawler-proto = { path = "../proto", editable = true }
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "PT", "RUF"]
+# RUF001-003: chuỗi/comment tiếng Việt có ký tự mà ruff coi là "ambiguous unicode".
+# ASYNC109: `timeout` được chuyển xuống curl_cffi/Playwright để chính chúng áp dụng.
+ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jobworker", "jcproto"]
+
+[tool.pyright]
+include = ["jobworker", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+# tests/ không là package (không có __init__.py): pytest tự thêm tests/ vào sys.path để test
+# import được `worker_fakes`.
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "browser: cần Chromium của Playwright (`uv run playwright install chromium`)",
+]
+# Giống bộ lọc trong jobworker.main (pytest reset bộ lọc đặt lúc import).
+filterwarnings = ['ignore:\s*Proactor event loop:curl_cffi.utils.CurlCffiWarning']

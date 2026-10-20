@@ -1,19 +1,12 @@
 # syntax=docker/dockerfile:1
 
-# Backend (gói jobcrawler): API + giao diện, gateway gRPC, runner, scheduler, migrate — cùng một
-# image, khác lệnh chạy. Không có Chromium / curl_cffi: mọi request tới website đi qua worker.
-# Build từ THƯ MỤC GỐC repo (cần uv.lock, proto/, frontend/):
-#   docker build -f backend/Dockerfile -t jobcrawler-backend .
+# Backend (gói jobcrawler): API, gateway gRPC, runner, scheduler, migrate — cùng một image, khác
+# lệnh chạy. Không có Chromium / curl_cffi: mọi request tới website đi qua worker. Giao diện React
+# là image riêng (frontend/, nginx).
+# Build context là thư mục backend/, cộng build context tên `proto` (thư viện hợp đồng gRPC):
+#   docker build --build-context proto=../proto -t jobcrawler-backend .        # trong backend/
+#   compose: build: {context: ./backend, additional_contexts: {proto: ./proto}}
 
-# --- Giao diện React (frontend/) -------------------------------------------------------------------
-FROM node:22-slim AS ui
-WORKDIR /ui
-COPY frontend/package.json frontend/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
-COPY frontend/ ./
-RUN npm run build -- --outDir /ui/dist
-
-# --- Ứng dụng Python -------------------------------------------------------------------------------
 FROM python:3.12-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /usr/local/bin/
@@ -26,33 +19,29 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
 
-WORKDIR /app
+# Bố cục như trong repo để nguồn đường dẫn `../proto` của pyproject.toml trỏ đúng.
+WORKDIR /src/backend
 
-# Dependency trước để layer được cache khi chỉ sửa code. uv cần pyproject.toml của mọi member
-# workspace (kể cả worker) nhưng không cần mã nguồn của chúng.
+# Dependency trước để layer được cache khi chỉ sửa code: cần uv.lock, pyproject.toml và proto/
+# (gói cục bộ chưa cài ở bước này).
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=backend/pyproject.toml,target=backend/pyproject.toml \
-    --mount=type=bind,source=proto/pyproject.toml,target=proto/pyproject.toml \
-    --mount=type=bind,source=worker/pyproject.toml,target=worker/pyproject.toml \
-    uv sync --frozen --no-dev --package jobcrawler --no-install-workspace
+    --mount=type=bind,from=proto,target=/src/proto \
+    uv sync --frozen --no-dev --no-install-project --no-install-local
 
 COPY pyproject.toml uv.lock README.md ./
-COPY worker/pyproject.toml worker/
-COPY proto/pyproject.toml proto/
-COPY proto/jcproto proto/jcproto
-COPY backend/pyproject.toml backend/
-COPY backend/jobcrawler backend/jobcrawler
-# Gói của workspace luôn cài lại: cache của uv cho gói cục bộ chỉ theo pyproject.toml, không theo
-# mã nguồn, nên không ép thì image có thể mang mã cũ.
+COPY jobcrawler jobcrawler
+COPY --from=proto pyproject.toml /src/proto/
+COPY --from=proto jcproto /src/proto/jcproto
+# Gói cục bộ luôn cài lại: cache của uv cho gói cục bộ chỉ theo pyproject.toml, không theo mã
+# nguồn, nên không ép thì image có thể mang mã cũ. Cài xong (vào /opt/venv, không editable) thì bỏ
+# mã nguồn: WORKDIR là /src/backend, `python -c` / `python -m` ở đây sẽ import nhầm bản chưa biên
+# dịch thay vì gói đã cài.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package jobcrawler --no-editable \
-        --reinstall-package jobcrawler --reinstall-package jobcrawler-proto
-
-# Bản build giao diện cho `jobcrawler ui` (service api).
-COPY --from=ui /ui/dist /app/ui
-ENV UI_DIST=/app/ui
+    uv sync --frozen --no-dev --no-editable \
+        --reinstall-package jobcrawler --reinstall-package jobcrawler-proto \
+    && rm -rf jobcrawler /src/proto/jcproto
 
 RUN useradd --create-home --uid 1000 app
 USER app

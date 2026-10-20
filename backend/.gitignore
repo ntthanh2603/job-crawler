@@ -1,0 +1,7 @@
+# Riêng của service backend (gốc repo cũng có .gitignore chung).
+.venv/
+.env
+# Danh sách proxy thật (PROXIES_FILE); chỉ commit file mẫu.
+config/*proxies*.txt
+!config/proxies.example.txt
+out/

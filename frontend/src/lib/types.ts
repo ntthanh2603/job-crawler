@@ -1,6 +1,6 @@
 // Kiểu dữ liệu của API: alias tới kiểu orval sinh từ spec của backend (src/lib/gen/queries.ts ←
-// frontend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/web/api.py, settings_api.py;
-// `task api` sinh lại). Chỉ viết tay phần spec không tả được (JSON tự do lưu trong DB).
+// backend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/web/api.py, settings_api.py;
+// `npm run gen:api` sinh lại). Chỉ viết tay phần spec không tả được (JSON tự do lưu trong DB).
 import type * as S from "@/lib/gen/queries"
 
 /** Một trang danh sách. `exact = false`: có hơn `total` dòng (server đếm tối đa 10.000). */

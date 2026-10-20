@@ -2,7 +2,7 @@
 #
 #   docker compose -f deploy/worker.compose.yaml --env-file deploy/worker.env up -d
 #
-# worker.env (ví dụ):
+# worker.env (ví dụ, đủ biến ở worker/.env.example):
 #   GATEWAY_ADDR=crawl-gw.example.com:50051
 #   GATEWAY_TOKEN=<token giống GATEWAY_TOKEN của backend>
 #   GATEWAY_TLS=true
@@ -12,8 +12,8 @@
 #   WORKER_RENDER_SLOTS=2            # 0 = máy không chạy Chromium
 #   WORKER_PROXIES_FILE=/app/config/worker-proxies.txt
 #
-# Image: build từ gốc repo (`docker build -f worker/Dockerfile -t jobcrawler-worker .`) rồi đẩy
-# lên registry, hoặc build ngay trên máy worker.
+# Image: build từ gốc repo (`docker build --build-context proto=proto -t jobcrawler-worker worker`)
+# rồi đẩy lên registry, hoặc build ngay trên máy worker.
 name: jobcrawler-worker
 
 # Log của container xoay vòng (mặc định json-file không giới hạn).
@@ -37,7 +37,7 @@ services:
       WORKER_PROXIES_FILE: ${WORKER_PROXIES_FILE:-/app/config/worker-proxies.txt}
       LOG_FORMAT: ${LOG_FORMAT:-json}
     volumes:
-      - ../config:/app/config:ro
+      - ../worker/config:/app/config:ro
     deploy:
       replicas: ${WORKER_REPLICAS:-2}
       resources:
