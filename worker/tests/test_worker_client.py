@@ -219,6 +219,32 @@ async def test_heartbeat_sends_stats_and_drain(gateway: Gateway, web: WebServer)
     assert gw.leaves == ["test-worker"]
 
 
+async def test_heartbeat_reports_owed_tasks_and_cancels_revoked(
+    gateway: Gateway, web: WebServer
+) -> None:
+    gw, port = gateway
+    gw.config.heartbeat_seconds = 1
+    gw.add(http_task("slow", web.url("/slow"), timeout_seconds=10))
+    run = start(port)
+    try:
+        # Việc đang chạy được kể trong Heartbeat để gateway đối soát.
+        await gw.wait_for(lambda: any(list(h.task_ids) == ["slow"] for h in gw.heartbeats))
+        assert all(h.reports_tasks for h in gw.heartbeats)
+        # Gateway đã thu hồi việc (đã trả worker_lost cho backend): worker huỷ ngay, không chờ
+        # trang chậm (3 s) tải xong.
+        gw.revoke.add("slow")
+        [result] = await gw.wait_results(1, timeout=2.5)
+        assert result.error_kind == crawl_pb2.ERROR_KIND_OTHER
+        assert result.error == "gateway đã thu hồi việc"
+        # Complete xong thì thôi kể việc này.
+        seen = len(gw.heartbeats)
+        await gw.wait_for(
+            lambda: len(gw.heartbeats) > seen and list(gw.heartbeats[-1].task_ids) == []
+        )
+    finally:
+        await run.stop()
+
+
 async def test_auth_metadata(gateway: Gateway, web: WebServer) -> None:
     gw, port = gateway
     gw.token = "bí mật".encode().hex()

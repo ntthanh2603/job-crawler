@@ -263,20 +263,26 @@ class WorkerStats(_message.Message):
     def __init__(self, http_done: _Optional[int] = ..., http_failed: _Optional[int] = ..., render_done: _Optional[int] = ..., render_failed: _Optional[int] = ..., http_inflight: _Optional[int] = ..., render_inflight: _Optional[int] = ..., bytes_in: _Optional[int] = ..., cpu_percent: _Optional[float] = ..., rss_bytes: _Optional[int] = ..., proxies_alive: _Optional[int] = ..., render_disabled_reason: _Optional[str] = ..., render_retry_at_ms: _Optional[int] = ...) -> None: ...
 
 class HeartbeatRequest(_message.Message):
-    __slots__ = ("worker_id", "stats")
+    __slots__ = ("worker_id", "stats", "task_ids", "reports_tasks")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     STATS_FIELD_NUMBER: _ClassVar[int]
+    TASK_IDS_FIELD_NUMBER: _ClassVar[int]
+    REPORTS_TASKS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
     stats: WorkerStats
-    def __init__(self, worker_id: _Optional[str] = ..., stats: _Optional[_Union[WorkerStats, _Mapping]] = ...) -> None: ...
+    task_ids: _containers.RepeatedScalarFieldContainer[str]
+    reports_tasks: bool
+    def __init__(self, worker_id: _Optional[str] = ..., stats: _Optional[_Union[WorkerStats, _Mapping]] = ..., task_ids: _Optional[_Iterable[str]] = ..., reports_tasks: _Optional[bool] = ...) -> None: ...
 
 class HeartbeatResponse(_message.Message):
-    __slots__ = ("config_version", "drain")
+    __slots__ = ("config_version", "drain", "revoked_task_ids")
     CONFIG_VERSION_FIELD_NUMBER: _ClassVar[int]
     DRAIN_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_TASK_IDS_FIELD_NUMBER: _ClassVar[int]
     config_version: int
     drain: bool
-    def __init__(self, config_version: _Optional[int] = ..., drain: _Optional[bool] = ...) -> None: ...
+    revoked_task_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, config_version: _Optional[int] = ..., drain: _Optional[bool] = ..., revoked_task_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class LeaveRequest(_message.Message):
     __slots__ = ("worker_id",)

@@ -219,6 +219,49 @@ async def test_redis_lease_one_holder_renew_release_expire(integration_settings:
         await redis.aclose()
 
 
+async def test_redis_lease_lost_cancels_the_body(integration_settings: Settings) -> None:
+    from jobcrawler.locks import LeaseLost, RedisLease
+
+    settings = tagged(integration_settings)
+    redis = Redis.from_url(settings.redis_url)
+    key = f"{settings.redis_prefix}:lock:test-lost"
+    try:
+        lease = RedisLease(redis, key, ttl=1)
+        cleaned: list[bool] = []
+
+        async def work() -> None:
+            async with lease.hold() as held:
+                assert held
+                await redis.set(key, "process-khac")  # khoá đã hết hạn, process khác lấy
+                try:
+                    await asyncio.sleep(10)
+                finally:
+                    cleaned.append(True)
+
+        t0 = time.monotonic()
+        with pytest.raises(LeaseLost):
+            await work()
+        assert time.monotonic() - t0 < 2  # huỷ ở lần gia hạn kế tiếp (ttl/3)
+        assert cleaned == [True]
+        assert await redis.get(key) == b"process-khac"  # không nhả khoá của người khác
+        # Huỷ từ ngoài vẫn là CancelledError, không bị đổi thành LeaseLost.
+        other = RedisLease(redis, f"{key}:2", ttl=5)
+
+        async def hold_forever() -> None:
+            async with other.hold():
+                await asyncio.sleep(10)
+
+        job = asyncio.create_task(hold_forever())
+        await asyncio.sleep(0.1)
+        job.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await job
+        assert await redis.get(f"{key}:2") is None
+    finally:
+        await redis.delete(key, f"{key}:2")
+        await redis.aclose()
+
+
 async def test_only_one_scheduler_leads(
     integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

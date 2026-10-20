@@ -5,6 +5,7 @@ lại."""
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from collections.abc import AsyncIterator
@@ -12,9 +13,10 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from jobcrawler.config import Settings
+from jobcrawler.db import fencing
 from jobcrawler.db.models import Company, CompanyRun, CompanySchedule, CrawlPlan, Job
 from jobcrawler.fakes import FakeFetcher
 from jobcrawler.queues import drop_queue
@@ -258,6 +260,45 @@ async def test_poll_skips_while_company_is_building(env: tuple[Resources, Site, 
         assert held
         outcome = await crawl.poll_company(res, company_id)
     assert outcome.status == "skipped"
+
+
+async def test_company_lock_fences_writes_of_stale_holder(
+    env: tuple[Resources, Site, UUID],
+) -> None:
+    res, _site, company_id = env
+
+    async def write(error: str) -> None:
+        async with res.sessionmaker.begin() as s:
+            await s.execute(update(Company).where(Company.id == company_id).values(note=error))
+
+    async def last_error() -> str | None:
+        async with res.sessionmaker() as s:
+            row = await s.get(Company, company_id)
+            return row.note if row else None
+
+    async with crawl.company_lock(res, company_id, ttl=30) as held:
+        assert held
+        fence = fencing.current()
+        assert fence is not None
+        old_token = fence[1]
+        await write("lượt cũ")  # còn giữ khoá: ghi được
+    # Lượt mới giữ khoá (token tăng): lượt cũ (process đứng quá hạn khoá rồi chạy tiếp) không ghi
+    # được nữa, kể cả từ task con.
+    new_token = await fencing.next_token(res.sessionmaker, company_id)
+    assert new_token == old_token + 1
+    with fencing.fenced(company_id, old_token):
+        with pytest.raises(fencing.FencedOut):
+            await write("lượt cũ ghi đè")
+        with pytest.raises(fencing.FencedOut):
+            await asyncio.create_task(write("task con của lượt cũ"))
+    with fencing.fenced(company_id, new_token):
+        await write("lượt mới")
+    assert await last_error() == "lượt mới"
+    # Không trong khối `fenced`: không kiểm (API, CLI...).
+    await write("ngoài khoá")
+    assert await last_error() == "ngoài khoá"
+    # Doanh nghiệp không tồn tại: không có token, không chặn.
+    assert await fencing.next_token(res.sessionmaker, uuid4()) is None
 
 
 async def test_scheduler_tick_builds_new_and_polls_ready(

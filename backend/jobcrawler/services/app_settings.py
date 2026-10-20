@@ -1655,6 +1655,15 @@ def _cross_errors(s: Settings) -> list[tuple[tuple[str, ...], str]]:
                 f"hơn timeout cứng ({_num(s.company_timeout_seconds)} giây)",
             )
         )
+    if s.gateway_worker_ttl_seconds < 3 * s.gateway_heartbeat_seconds:
+        out.append(
+            (
+                ("gateway_worker_ttl_seconds", "gateway_heartbeat_seconds"),
+                f"Hạn báo sống của worker ({_num(s.gateway_worker_ttl_seconds)} giây) phải ít nhất "
+                f"gấp 3 nhịp báo sống ({_num(s.gateway_heartbeat_seconds)} giây): worker lỡ một "
+                "nhịp không bị coi là đã chết",
+            )
+        )
     if s.compression_dict_delay_seconds and (
         s.compression_dict_delay_seconds <= s.compression_dict_refresh_seconds
     ):

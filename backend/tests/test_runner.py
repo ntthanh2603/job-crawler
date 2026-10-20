@@ -149,6 +149,43 @@ async def test_partial_build_enqueues_a_continuation(
     assert kwargs["scheduled"] >= datetime.now(UTC).timestamp() + 50
 
 
+async def test_build_is_skipped_while_another_run_holds_the_company(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    called: list[Any] = []
+
+    async def fake_process(*args: Any, **kwargs: Any) -> CompanyResult:
+        called.append(args)
+        raise AssertionError("không được chạy khi không giữ khoá")
+
+    @asynccontextmanager
+    async def busy_lock(*_args: Any, **kwargs: Any) -> AsyncIterator[bool]:
+        assert kwargs["wait"] > Settings().poll_timeout_seconds  # chờ lượt poll đang chạy xong
+        yield False
+
+    monkeypatch.setattr(companies, "process_company", fake_process)
+    monkeypatch.setattr(crawl, "company_lock", busy_lock)
+    settings = Settings()
+    res = SimpleNamespace(settings=settings, sessionmaker=FakeSession)
+    ctx: Any = {"settings": settings, "resources": res}
+    out = await runner.build_company(ctx, company_id=str(UUID(int=2)))
+    assert out["status"] == "skipped"
+    assert "đang có lượt" in out["error"]
+    assert called == []
+
+
+@pytest.mark.parametrize(
+    ("watchdog", "reclaim", "limit"),
+    [(120, 60, 30), (20, 60, 20), (0, 60, 0), (120, 300, 120)],
+)
+def test_runner_watchdog_fires_before_reclaim(
+    watchdog: float, reclaim: float, limit: float, clean_env: None
+) -> None:
+    # Runner đứng phải tự thoát trước khi job của nó bị runner khác thu hồi và chạy lại.
+    settings = Settings(watchdog_seconds=watchdog, queue_reclaim_seconds=reclaim)
+    assert runner.stall_limit(settings) == limit
+
+
 async def test_bad_company_id_is_reported_not_raised(clean_env: None) -> None:
     ctx: Any = {"settings": Settings(), "resources": SimpleNamespace()}
     assert "error" in await runner.build_company(ctx, company_id="khong-phai-uuid")

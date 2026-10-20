@@ -12,6 +12,7 @@ import zstandard
 
 from jcproto.v1 import crawl_pb2
 from jobcrawler.config import Settings
+from jobcrawler.gateway import remote
 from jobcrawler.gateway.dispatch import (
     NoWorkerError,
     choose_pool,
@@ -251,7 +252,8 @@ LOST = crawl_pb2.FetchResult(
 )
 
 
-async def test_remote_resubmits_once_when_worker_is_lost() -> None:
+async def test_remote_resubmits_once_when_worker_is_lost(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(remote, "LOST_RESUBMIT_DELAY_SECONDS", 0)
     client = FakeClient(LOST, crawl_pb2.FetchResult(status=200, body=b"<div/>"))
     raw = await RemoteRenderer(cast(Any, client)).render(
         URL, proxy=None, timeout=30, wait_until="load"
@@ -400,6 +402,12 @@ def test_worker_config_carries_the_shared_proxy_list() -> None:
     for mode in ("central", "off"):
         config = worker_config(_settings(proxy_mode=mode, proxies=lines))
         assert (list(config.shared_proxies), config.shared_proxies_hash) == ([], "")
+
+
+def test_worker_ttl_must_cover_three_heartbeats() -> None:
+    with pytest.raises(ValueError, match="GATEWAY_WORKER_TTL_SECONDS"):
+        _settings(gateway_worker_ttl_seconds=20, gateway_heartbeat_seconds=7)
+    assert _settings(gateway_worker_ttl_seconds=21, gateway_heartbeat_seconds=7)
 
 
 def test_queue_max_wait_must_exceed_grace() -> None:

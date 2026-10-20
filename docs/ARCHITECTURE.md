@@ -129,8 +129,19 @@ poll đầu tiên lúc 06:00 thấy.
 6. **Chốt chặn đóng nhầm**: mất ≥ 30% tin (≥ 3 tin, nguồn ≥ 5 tin) trong một lượt → không đóng, đếm
    như lỗi; lặp 3 lượt → build lại, lượt build đọc đủ mới đóng đúng.
 
-Build và poll của cùng doanh nghiệp không chạy chồng (khoá Redis; poll gặp build thì bỏ lượt). Lượt
-poll đi làn ưu tiên ở hàng việc lấy trang, nên build ban ngày không làm chậm poll.
+Build và poll của cùng doanh nghiệp không chạy chồng (`crawl.company_lock`):
+
+- Khoá Redis `<prefix>:lock:company:<id>` (`locks.RedisLease`, 60 s, tự gia hạn mỗi 20 s). Poll gặp
+  khoá thì bỏ lượt; build chờ tối đa `POLL_TIMEOUT_SECONDS` + 15 s, vẫn không giữ được (lượt build
+  khác đang chạy) thì bỏ lượt (`skipped`, scheduler xếp lại khi còn cần) — không chạy chồng.
+- Mất khoá giữa chừng (process đứng quá 60 s, Redis mất) → lượt bị huỷ ở lần gia hạn kế tiếp
+  (`LeaseLost`).
+- **Fencing token** (`db/fencing.py`, bảng `company_fences`): mỗi lần giữ khoá, token của doanh
+  nghiệp tăng một trong Postgres; mọi commit trong lượt kiểm `fence = token` (`SELECT … FOR SHARE`)
+  ngay trước commit. Lượt cũ đã mất khoá mà vẫn chạy tiếp (GC, máy ngủ) bị từ chối (`FencedOut`,
+  rollback) từ lúc lượt mới lấy token — không ghi đè được dữ liệu mới hơn.
+
+Lượt poll đi làn ưu tiên ở hàng việc lấy trang, nên build ban ngày không làm chậm poll.
 
 **Độ trễ phát hiện** (`services/sla.py`): mỗi lượt poll đủ ghi **cửa sổ phát hiện** = lúc xong − lúc
 bắt đầu lượt poll đủ trước (độ trễ xấu nhất của tin đăng ngay sau lượt trước) vào histogram Redis
@@ -145,8 +156,9 @@ trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của từng
   `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp, xếp job. Hàng đợi còn quá
   `BUILD_QUEUE_MAX_BACKLOG` / `POLL_QUEUE_MAX_BACKLOG` việc chờ thì không xếp thêm.
 - Chỉ một scheduler làm việc: lease Redis `<prefix>:lock:scheduler` (`locks.RedisLease`, 30 s, gia
-  hạn mỗi nhịp). Bảo trì cũng giữ lease. Không dùng khoá advisory theo phiên Postgres (hỏng sau
-  PgBouncer chế độ transaction).
+  hạn mỗi nhịp; hai scheduler chồng nhau trong chốc lát vô hại vì job có khoá duy nhất). Bảo trì giữ
+  lease bằng `hold()`: mất lease thì lượt bảo trì bị huỷ. Không dùng khoá advisory theo phiên
+  Postgres (hỏng sau PgBouncer chế độ transaction).
 - Trạng thái lịch: `new`, `ready`, `no_sources`, `broken`, `paused`.
 - Cron (theo `CRAWL_TIMEZONE`): bảo trì mỗi giờ, số liệu tổng quan 5 phút, index trang tuyển dụng
   đủ 00:30, đuôi mỗi 2 phút (6h–23h).
@@ -184,7 +196,7 @@ sequenceDiagram
   H->>H: robots.txt → HTTP cache → rate limit theo domain
   H->>R: XADD gw:fetch:<pool>:http|render[:hi]
   W->>G: Lease(slot trống)
-  G->>R: đọc làn :hi trước, ghi gw:inflight:<worker>
+  G->>R: script Lua: lấy làn :hi trước + ghi gw:inflight:<worker>
   G-->>W: FetchTask[]
   W->>W: tải qua proxy (curl_cffi / Chromium)
   W->>G: Complete(kết quả, body zstd)
@@ -196,7 +208,18 @@ sequenceDiagram
   backend; worker không giữ trạng thái. Gateway không nhớ gì ngoài Redis → chạy nhiều bản sau load
   balancer.
 - **Ưu tiên poll**: việc của lượt poll vào làn `:hi`, Lease đọc trước.
-- **Worker rời / quá hạn báo sống** → gateway trả `worker_lost` cho việc nó đang giữ, backend gửi lại.
+- **Giao việc nguyên tử**: một script Lua lấy entry khỏi stream (XRANGE + XDEL) và ghi
+  `gw:inflight:<worker>` (task_id → hạn + mốc giao) cùng lúc, nên gateway chết giữa chừng không làm
+  mất việc. Chưa có việc thì Lease chờ bằng XREAD BLOCK (chỉ để thức dậy). Mỗi việc giao tối đa một
+  lần (at-most-once); mất thì backend gửi lại.
+- **Worker rời / quá hạn báo sống** → gateway trả `worker_lost` cho việc nó đang giữ, backend gửi lại
+  (sau 0,5–1 s, một lần; sau đó là retry của `HttpClient`). Prune từng worker trong Lua và chỉ khi nó
+  vẫn quá hạn: worker vừa đăng ký lại không bị trả oan việc mới.
+- **Đối soát qua Heartbeat**: worker kể mọi việc còn nợ kết quả (`task_ids`). Việc đã giao quá 60 s
+  mà worker không kể (lời trả Lease không tới worker) → `worker_lost`; việc worker kể mà gateway đã
+  thu hồi → `revoked_task_ids`, worker huỷ ngay. Worker cũ không kể việc thì không đối soát.
+- **Đồng hồ**: hạn báo sống, mốc giao việc, hạn của việc so theo `TIME` của Redis, không theo đồng
+  hồ từng máy. `GATEWAY_WORKER_TTL_SECONDS` phải ≥ 3 × `GATEWAY_HEARTBEAT_SECONDS`.
 - **Pool**: worker khai `WORKER_POOL`; `FETCH_ROUTES` định tuyến domain → pool (vd. trang tuyển dụng qua
   proxy dân cư); pool không có worker thì về `default`; không có worker nào → lỗi `no_worker` ngay.
 - **Đăng ký**: `Register` trả `WorkerConfig` (slot trần, impersonate, heartbeat, danh sách proxy
@@ -229,8 +252,18 @@ bảng proxy.
 | `index_board`, `tail_board` | `jobcrawler-boards` | `board:<trang>` | ngân sách thời gian của lượt |
 
 Mỗi hàng đợi một stream, consumer group `workers`, mỗi runner một consumer chỉ đọc khi còn slot. Khoá
-job bảo đảm mỗi doanh nghiệp chỉ một build và một poll đang chờ / chạy. Runner chết → entry im quá
-`QUEUE_RECLAIM_SECONDS` (60 s) bị runner khác thu hồi. Số job song song mỗi runner
+job bảo đảm mỗi doanh nghiệp chỉ một build và một poll đang chờ / chạy.
+
+- **Báo sống / thu hồi**: runner báo sống mỗi `QUEUE_RECLAIM_SECONDS` / 6 (hạn theo `TIME` của Redis)
+  và làm mới idle của entry đang chạy; entry im quá `QUEUE_RECLAIM_SECONDS` (60 s) bị runner khác thu
+  hồi, chạy lại nếu còn lượt. Id entry đổi mỗi lần xếp lại và mọi chuyển trạng thái so id đó (Lua),
+  nên lượt cũ không ghi đè trạng thái job.
+- **Lượt bị thu hồi tự dừng**: lần báo sống chỉ làm mới entry mà hash job còn ghi đúng entry + runner;
+  entry không còn là của mình thì runner huỷ lượt đó (`queue.job_revoked`).
+- **Runner đứng tự thoát trước khi bị thu hồi**: watchdog của runner dùng min(`WATCHDOG_SECONDS`,
+  `QUEUE_RECLAIM_SECONDS` / 2).
+
+Số job song song mỗi runner
 (`RUNNER_*_CONCURRENCY`, 0 = tự tính: poll 12 / CPU trong [20, 100], build 2,5 / CPU và ≤ 2 / GiB
 trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 
@@ -244,6 +277,7 @@ trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 | `source_profiles`, `job_postings`      | profile trên trang tuyển dụng; mỗi tin của mỗi nguồn (nội dung thô nén zstd)    |
 | `jobs`, `job_reviews`                  | việc đã gộp (`active` / `expired` / `removed`); kiểm tay                         |
 | `company_runs`, `source_fetches`, `failed_pages`, `logs` | lượt build / poll có thay đổi, từng request, trang parse lỗi, log |
+| `company_fences`                       | fencing token của khoá theo doanh nghiệp (tăng mỗi lượt build / poll giữ khoá) |
 | `board_index_runs`                     | lịch sử index trang tuyển dụng                                                  |
 | `app_settings`, `audit_events`, `compression_dicts` | cài đặt (trường bí mật mã hoá AES-256-GCM); nhật ký thao tác (chỉ ghi thêm); từ điển zstd |
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from jobcrawler.config import Settings
+from jobcrawler.db.fencing import GatedSession
 
 
 def _json(value: Any) -> str:
@@ -29,4 +30,5 @@ def create_engine(settings: Settings) -> AsyncEngine:
 
 
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False)
+    # GatedSession: commit trong khối `fencing.fenced` kiểm fencing token của doanh nghiệp.
+    return async_sessionmaker(engine, expire_on_commit=False, sync_session_class=GatedSession)

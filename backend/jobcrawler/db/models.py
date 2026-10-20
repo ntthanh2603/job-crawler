@@ -514,6 +514,19 @@ class CompanySchedule(Base):
     updated_at: Mapped[datetime] = _updated_at()
 
 
+class CompanyFence(Base):
+    """Fencing token của khoá theo doanh nghiệp (`db/fencing.py`): tăng mỗi lần một lượt build /
+    poll giữ khoá; commit của lượt mang token cũ hơn bị từ chối. Bảng riêng, một dòng nhỏ mỗi doanh
+    nghiệp, để `SELECT … FOR SHARE` lúc commit không tranh khoá dòng với `company_schedules`."""
+
+    __tablename__ = "company_fences"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True
+    )
+    fence: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+
+
 class AppSetting(Base):
     """Cài đặt sửa ở giao diện (trang Cài đặt), đè lên giá trị từ biến môi trường / .env."""
 

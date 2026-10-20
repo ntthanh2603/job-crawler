@@ -97,6 +97,12 @@ Worker rời (`Leave`) khi còn việc chưa trả, hoặc quá `GATEWAY_WORKER_
 thì việc của nó được trả về backend ngay (`ERROR_KIND_WORKER_LOST`) để backend gửi lại cho worker
 khác; kết quả tới muộn của worker đó bị bỏ.
 
+Mỗi `Heartbeat` kể các việc worker còn nợ kết quả (`task_ids`: đang chạy, hoặc đã xong mà
+`Complete` chưa được nhận). Gateway đối soát: việc đã giao hơn 60 s mà worker không kể (lời trả
+`Lease` không tới worker, hoặc `Complete` thử lại hết lượt vẫn hỏng) được trả `ERROR_KIND_WORKER_LOST`
+cho backend; việc worker kể mà gateway đã thu hồi (worker từng quá hạn báo sống) được báo lại trong
+`revoked_task_ids` và worker huỷ ngay (`worker.task_revoked`).
+
 Cấu hình đẩy xuống từ backend nằm ở các biến `GATEWAY_HTTP_SLOTS`, `GATEWAY_RENDER_SLOTS`,
 `GATEWAY_IMPERSONATE`… trong `.env` của backend (hoặc trang Cài đặt), không trùng tên với biến
 `WORKER_*` ở đây. Riêng `GATEWAY_TOKEN` (nếu worker vào bằng khoá cố định) phải đặt cùng giá trị ở

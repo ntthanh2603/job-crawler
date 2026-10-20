@@ -16,15 +16,14 @@ Poll (`poll_company`) — ban ngày, mỗi POLL_INTERVAL_SECONDS:
 5. Bộ khung không còn đúng (trang chính 404/410, API không còn trả tin, trang danh sách trống, lỗi
    tạm lặp lại POLL_MAX_FAILURES lần) → nguồn `broken`, doanh nghiệp được build lại ngay.
 
-Build và poll cùng một doanh nghiệp không chạy chồng nhau (khoá Redis theo doanh nghiệp).
+Build và poll cùng một doanh nghiệp không chạy chồng nhau (khoá Redis theo doanh nghiệp, tự gia
+hạn); lượt đã mất khoá không ghi được DB nữa (fencing token, `db/fencing.py`).
 """
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import re
-import secrets
 import time
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
@@ -37,6 +36,7 @@ import structlog
 from sqlalchemy import insert, select, tuple_, update
 
 from jobcrawler.config import Settings
+from jobcrawler.db import fencing
 from jobcrawler.db.ids import uuid7
 from jobcrawler.db.models import (
     Company,
@@ -47,6 +47,7 @@ from jobcrawler.db.models import (
     JobPosting,
 )
 from jobcrawler.gateway.dispatch import priority_fetches
+from jobcrawler.locks import RedisLease
 from jobcrawler.logging import get_logger
 from jobcrawler.pipeline import store
 from jobcrawler.pipeline.collect import CollectResult, SourceReport, collect
@@ -109,34 +110,37 @@ def poll_key(company_id: UUID) -> str:
 
 # --- khoá theo doanh nghiệp --------------------------------------------------------------------
 
-_UNLOCK = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  return redis.call('DEL', KEYS[1])
-end
-return 0
-"""
+# Khoá tự gia hạn mỗi ttl/3 khi đang giữ: runner chết thì khoá tự hết hạn sau chừng này giây.
+COMPANY_LOCK_TTL_SECONDS = 60.0
+# Build chờ lượt poll đang chạy thêm chừng này giây ngoài POLL_TIMEOUT_SECONDS (job poll bị huỷ ở
+# timeout + CANCEL_GRACE_SECONDS của runner, lúc đó khoá được nhả).
+BUILD_LOCK_EXTRA_WAIT_SECONDS = 15.0
+
+
+class CompanyBusyError(RuntimeError):
+    """Build không giữ được khoá doanh nghiệp trong thời gian chờ: lượt khác đang chạy."""
 
 
 @asynccontextmanager
 async def company_lock(
-    res: Resources, company_id: UUID, *, ttl: float, wait: float = 0
+    res: Resources,
+    company_id: UUID,
+    *,
+    ttl: float = COMPANY_LOCK_TTL_SECONDS,
+    wait: float = 0,
 ) -> AsyncIterator[bool]:
     """Khoá Redis theo doanh nghiệp (build / poll không chạy chồng). Trả True nếu giữ được khoá
-    trong `wait` giây; khoá tự hết hạn sau `ttl` giây (runner chết giữa chừng)."""
+    trong `wait` giây. Đang giữ thì khoá tự gia hạn; mất khoá giữa chừng (process đứng quá `ttl`)
+    thì khối bị huỷ và ném `LeaseLost`. Mọi commit DB trong khối kèm fencing token của lượt giữ
+    khoá (`db/fencing.py`): lượt cũ đã mất khoá không ghi đè được dữ liệu của lượt mới."""
     key = f"{res.settings.redis_prefix}:lock:company:{company_id}"
-    token = secrets.token_hex(8)
-    deadline = time.monotonic() + wait
-    held = False
-    while True:
-        held = bool(await res.redis.set(key, token, nx=True, px=int(ttl * 1000)))
-        if held or time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(0.5)
-    try:
-        yield held
-    finally:
-        if held:
-            await res.redis.eval(_UNLOCK, 1, key, token)  # pyright: ignore[reportGeneralTypeIssues]
+    async with RedisLease(res.redis, key, ttl=ttl).hold(wait=wait) as held:
+        if not held:
+            yield False
+            return
+        token = await fencing.next_token(res.sessionmaker, company_id)
+        with fencing.fenced(company_id, token):
+            yield True
 
 
 # --- build ---------------------------------------------------------------------------------------
@@ -173,10 +177,13 @@ async def build_company(
             and continuation == 0
             and trigger in (RunTrigger.NIGHTLY, RunTrigger.ERROR)
         )
-    # Chờ lượt poll đang chạy (nếu có) xong; khoá hết hạn cùng lắm sau timeout của poll.
+    # Chờ lượt poll đang chạy (nếu có) xong. Không giữ được khoá (lượt build khác đang chạy) thì
+    # không chạy chồng: `CompanyBusyError`, lượt chạy job ghi `skipped`.
     async with company_lock(
-        res, company_id, ttl=s.company_timeout_seconds + 30, wait=s.poll_timeout_seconds
-    ):
+        res, company_id, wait=s.poll_timeout_seconds + BUILD_LOCK_EXTRA_WAIT_SECONDS
+    ) as held:
+        if not held:
+            raise CompanyBusyError(f"doanh nghiệp {company_id} đang có lượt build / poll khác")
         result = await companies.process_company(
             res,
             company_in,
@@ -381,7 +388,7 @@ async def poll_company(
     t0 = time.monotonic()
     started_at = datetime.now(UTC)
     outcome = PollOutcome(company_id=company_id, status="skipped")
-    async with company_lock(res, company_id, ttl=s.poll_timeout_seconds + 15) as held:
+    async with company_lock(res, company_id) as held:
         if not held:
             outcome.error = "doanh nghiệp đang được build"
             return outcome
@@ -392,6 +399,8 @@ async def poll_company(
         ):
             try:
                 outcome = await _poll(res, company_id, trigger, queued_at, started_at, t0)
+            except fencing.FencedOut:
+                raise  # lượt khác đã giữ khoá: không ghi gì thêm
             except Exception as exc:
                 log.exception("poll.error")
                 outcome = PollOutcome(

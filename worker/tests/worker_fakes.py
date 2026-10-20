@@ -38,6 +38,7 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         self.metadata: list[dict[str, str]] = []
         self.known: set[str] = set()
         self.drain = False
+        self.revoke: set[str] = set()  # task_id gateway báo đã thu hồi (khi worker kể ở Heartbeat)
         self.not_found_leases = 0  # số lần Lease tiếp theo trả NOT_FOUND
         # Khoá tham gia (GATEWAY_TOKEN / khoá một lần). `worker_token`: đặt thì Register trả token
         # riêng này và mọi lời gọi khác phải dùng nó (như gateway thật khi bật xác thực).
@@ -140,7 +141,10 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         if request.worker_id not in self.known:
             await context.abort(grpc.StatusCode.NOT_FOUND, "worker không rõ")
         self.heartbeats.append(request)
-        return crawl_pb2.HeartbeatResponse(config_version=self.config.version, drain=self.drain)
+        revoked = [t for t in request.task_ids if t in self.revoke]
+        return crawl_pb2.HeartbeatResponse(
+            config_version=self.config.version, drain=self.drain, revoked_task_ids=revoked
+        )
 
     async def Leave(self, request: Any, context: Any) -> crawl_pb2.LeaveResponse:
         await self._auth(context)

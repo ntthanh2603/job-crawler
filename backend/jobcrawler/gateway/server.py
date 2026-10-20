@@ -7,6 +7,9 @@ worker gọi replica nào cũng được.
 
 Complete chỉ nhận kết quả của việc worker còn giữ. Worker rời (Leave) hoặc quá hạn báo sống (prune)
 thì việc nó còn giữ được trả về backend ngay với `ERROR_KIND_WORKER_LOST` để backend thử lại.
+Heartbeat kèm danh sách việc worker còn nợ kết quả (`task_ids`): việc đã giao mà worker không kể
+(lời trả Lease bị mất) cũng được trả `worker_lost`; việc worker kể mà gateway đã thu hồi thì báo lại
+(`revoked_task_ids`) để worker huỷ, không tải tiếp vô ích.
 
 Cấu hình đẩy xuống worker lấy từ `settings_provider` mỗi CONFIG_CACHE_SECONDS (đổi ở trang Cài
 đặt thì worker nhận ở lần Lease / Heartbeat sau qua `config_version`).
@@ -34,9 +37,9 @@ from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobcrawler.config import Settings
 from jobcrawler.gateway.dispatch import (
     complete_results,
-    delete_consumer,
-    ensure_groups,
     lease_tasks,
+    reconcile_worker,
+    release_expired_worker,
     release_worker,
 )
 from jobcrawler.gateway.registry import (
@@ -46,7 +49,6 @@ from jobcrawler.gateway.registry import (
     WorkerStatus,
     add_counts,
     expired_workers,
-    prune,
     remove_worker,
     save_worker,
     touch_worker,
@@ -66,6 +68,19 @@ STOP_GRACE_SECONDS = 10.0
 _WORKER_ID = re.compile(r"^[A-Za-z0-9_.:@-]{1,128}$", re.ASCII)
 _POOL = re.compile(r"^[A-Za-z0-9_.-]{1,64}$", re.ASCII)
 _INT32_MAX = 2**31 - 1
+
+# (JSON `WorkerStatus` nếu worker còn trong hạn báo sống theo đồng hồ Redis, đang drain 0/1).
+# KEYS: workers, worker:<id>, drain. ARGV: worker_id.
+_LOOKUP = """
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local draining = redis.call('SISMEMBER', KEYS[3], ARGV[1])
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score or tonumber(score) <= now then
+  return {'', draining}
+end
+return {redis.call('GET', KEYS[2]) or '', draining}
+"""
 
 SettingsProvider = Callable[[], Settings]
 
@@ -166,14 +181,16 @@ class CrawlGateway:
 
     async def _lookup(self, worker_id: str) -> tuple[bytes | None, bool]:
         """(JSON `WorkerStatus` nếu worker còn trong hạn báo sống, đang drain)."""
-        async with self.redis.pipeline(transaction=False) as pipe:
-            pipe.zscore(self.keys.workers, worker_id)
-            pipe.get(self.keys.worker(worker_id))
-            pipe.sismember(self.keys.drain, worker_id)
-            score, raw, draining = await pipe.execute()
-        if score is None or score <= _now_ms() or raw is None:
-            return None, bool(draining)
-        return raw, bool(draining)
+        found: Any = await self.redis.eval(  # pyright: ignore[reportGeneralTypeIssues]
+            _LOOKUP,
+            3,
+            self.keys.workers,
+            self.keys.worker(worker_id),
+            self.keys.drain,
+            worker_id,
+        )
+        raw, draining = found
+        return (raw or None), bool(draining)
 
     async def _authorize(self, context: grpc.aio.ServicerContext, worker_id: str) -> str | None:
         """Lease / Complete / Heartbeat / Leave: token riêng của đúng worker này. Trả token (để
@@ -256,7 +273,6 @@ class CrawlGateway:
             started_at_ms=info.started_at_ms,
             registered_at_ms=_now_ms(),
         )
-        await ensure_groups(self.redis, self.keys, pool)
         await save_worker(self.redis, self.keys, status, ttl=settings.gateway_worker_ttl_seconds)
         log.info(
             "gateway.register",
@@ -352,7 +368,20 @@ class CrawlGateway:
             **{name: getattr(stats, name) for name in WorkerStats.model_fields}
         )
         await save_worker(self.redis, self.keys, status, ttl=settings.gateway_worker_ttl_seconds)
-        return crawl_pb2.HeartbeatResponse(config_version=config.version, drain=draining)
+        revoked: list[str] = []
+        if request.reports_tasks:  # worker cũ không kể việc: không đối soát
+            lost, revoked = await reconcile_worker(
+                self.redis, self.keys, worker_id, request.task_ids
+            )
+            if lost:
+                ttl = settings.gateway_worker_ttl_seconds
+                await add_counts(self.redis, self.keys, worker_id, ttl=ttl, lost=lost)
+                log.warning("gateway.worker_lost", worker_id=worker_id, tasks=lost, reason="orphan")
+            if revoked:
+                log.info("gateway.revoked", worker_id=worker_id, tasks=len(revoked))
+        return crawl_pb2.HeartbeatResponse(
+            config_version=config.version, drain=draining, revoked_task_ids=revoked
+        )
 
     @_redis_guard
     async def Leave(
@@ -360,38 +389,36 @@ class CrawlGateway:
     ) -> crawl_pb2.LeaveResponse:
         worker_id = request.worker_id
         await self._authorize(context, worker_id)
-        raw = await self.redis.get(self.keys.worker(worker_id))
         await remove_worker(self.redis, self.keys, worker_id)
         lost = await self._release(worker_id, reason="leave")
-        if raw is not None:
-            pool = json.loads(raw).get("pool") or DEFAULT_POOL
-            await delete_consumer(self.redis, self.keys, pool, worker_id)
         log.info("gateway.leave", worker_id=worker_id, lost=lost)
         return crawl_pb2.LeaveResponse()
 
-    async def _release(self, worker_id: str, *, reason: str) -> int:
-        """Trả `worker_lost` cho việc worker còn giữ (backend thử lại ngay); đếm vào `lost`."""
-        lost = await release_worker(self.redis, self.keys, worker_id)
+    async def _count_lost(self, worker_id: str, lost: int, *, reason: str) -> None:
         if lost:
             ttl = self.settings().gateway_worker_ttl_seconds
             await add_counts(self.redis, self.keys, worker_id, ttl=ttl, lost=lost)
             log.warning("gateway.worker_lost", worker_id=worker_id, tasks=lost, reason=reason)
+
+    async def _release(self, worker_id: str, *, reason: str) -> int:
+        """Trả `worker_lost` cho việc worker còn giữ (backend thử lại ngay); đếm vào `lost`."""
+        lost = await release_worker(self.redis, self.keys, worker_id)
+        await self._count_lost(worker_id, lost, reason=reason)
         return lost
 
     async def prune(self) -> list[str]:
-        """Bỏ worker quá hạn báo sống (consumer của nó trong stream, việc nó còn giữ). Trả id đã
-        bỏ."""
-        expired = await expired_workers(self.redis, self.keys)
-        if not expired:
-            return []
-        raws = await self.redis.mget([self.keys.worker(w) for w in expired])
-        for worker_id, raw in zip(expired, raws, strict=True):
-            pool = (json.loads(raw).get("pool") if raw else None) or DEFAULT_POOL
-            await delete_consumer(self.redis, self.keys, pool, worker_id)
-            await self._release(worker_id, reason="expired")
-        await prune(self.redis, self.keys)
-        log.info("gateway.prune", workers=expired)
-        return expired
+        """Bỏ worker quá hạn báo sống và trả `worker_lost` cho việc nó còn giữ; worker vừa
+        Register lại giữa lúc đó thì để nguyên. Trả id đã bỏ."""
+        pruned: list[str] = []
+        for worker_id in await expired_workers(self.redis, self.keys):
+            lost = await release_expired_worker(self.redis, self.keys, worker_id)
+            if lost is None:  # vừa báo sống / đăng ký lại
+                continue
+            await self._count_lost(worker_id, lost, reason="expired")
+            pruned.append(worker_id)
+        if pruned:
+            log.info("gateway.prune", workers=pruned)
+        return pruned
 
 
 # --- server --------------------------------------------------------------------------------------

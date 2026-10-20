@@ -205,6 +205,43 @@ async def test_dead_worker_job_is_reclaimed_and_rerun(queues: Any) -> None:
     assert w.stats["retried"] == 1
 
 
+async def test_reclaimed_job_is_revoked_on_the_worker_still_running_it(queues: Any) -> None:
+    # Worker vẫn sống nhưng job của nó đã bị thu hồi (vd. event loop từng đứng quá ngưỡng): lần báo
+    # sống kế tiếp phát hiện entry không còn là của mình và huỷ lượt cũ; lượt mới chạy bình thường.
+    queue: StreamQueue = await queues(reclaim_seconds=3)
+    await queue.enqueue("work", key="k", timeout=30, retries=2)
+    cancelled: list[int] = []
+
+    async def work(ctx: dict[str, Any]) -> str:
+        attempt = ctx["job"].attempts
+        if attempt == 1:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cancelled.append(attempt)
+                raise
+        return f"lượt {attempt}"
+
+    w = StreamWorker(queue, functions=[("work", work)], concurrency=1)
+    task = asyncio.create_task(w.start())
+    try:
+        await until(lambda: _all_status(queue, ["k"], "active"))
+        job = await queue.job("k")
+        assert job is not None
+        assert job.entry is not None
+        # Runner khác thu hồi entry (như `reclaim`): job xếp lại với entry mới.
+        assert await queue._release_job("k", job.entry, "recover", error="test") == "retried"  # pyright: ignore[reportPrivateUsage]
+        waited = await until(lambda: _all_status(queue, ["k"], "complete"))
+    finally:
+        await stop(w, task)
+    assert cancelled == [1]
+    assert waited < 3  # trong một nhịp báo sống (1 s), không chờ hết lượt cũ (30 s)
+    done = await queue.job("k")
+    assert done is not None
+    assert (done.attempts, done.result) == (2, "lượt 2")
+    assert (w.stats["revoked"], w.stats["complete"]) == (1, 1)
+
+
 async def test_active_job_without_pending_entry_is_recovered(queues: Any) -> None:
     """Mất PEL (vd. AOF cụt đoạn cuối): job còn `active`, entry không còn trong group."""
     queue: StreamQueue = await queues(reclaim_seconds=3)

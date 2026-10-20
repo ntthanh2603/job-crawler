@@ -398,6 +398,11 @@ class Settings(BaseSettings):
                 "PLAN_MIN_PAGES không được lớn hơn PLAN_MAX_PAGES "
                 f"({self.plan_min_pages} > {self.plan_max_pages})"
             )
+        if self.gateway_worker_ttl_seconds < 3 * self.gateway_heartbeat_seconds:
+            raise ValueError(
+                "GATEWAY_WORKER_TTL_SECONDS phải ít nhất gấp 3 GATEWAY_HEARTBEAT_SECONDS "
+                f"({self.gateway_worker_ttl_seconds} < 3 × {self.gateway_heartbeat_seconds})"
+            )
         if self.fetch_queue_max_wait_seconds <= self.fetch_queue_grace_seconds:
             raise ValueError(
                 "FETCH_QUEUE_MAX_WAIT_SECONDS phải lớn hơn FETCH_QUEUE_GRACE_SECONDS "

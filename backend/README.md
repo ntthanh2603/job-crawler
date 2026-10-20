@@ -119,8 +119,9 @@ giao diện, proxy ghi đè header người dùng. Gọi thẳng được api th
 
 Docker không tự khởi động lại container `unhealthy`, nên `api`, `gateway`, `scheduler`, `runner` tự
 canh mình (`jobcrawler/watchdog.py`): event loop không quay được quá `WATCHDOG_SECONDS` giây (mặc
-định 120; `0` = tắt), hoặc vòng lặp chính (nhịp scheduler, vòng nhận việc của bất kỳ vai runner
-nào) không quay vòng nào quá ngần ấy, thì log `watchdog.stall` (`what` = `event_loop` |
+định 120; `0` = tắt; runner dùng min(`WATCHDOG_SECONDS`, `QUEUE_RECLAIM_SECONDS` / 2) để tự thoát
+trước khi job nó giữ bị runner khác thu hồi), hoặc vòng lặp chính (nhịp scheduler, vòng nhận việc
+của bất kỳ vai runner nào) không quay vòng nào quá ngần ấy, thì log `watchdog.stall` (`what` = `event_loop` |
 `main_loop`, kèm stack của event loop) rồi thoát với mã **70**; `jobcrawler serve` thấy process con
 thoát thì dừng các process còn lại và thoát, `restart: unless-stopped` dựng lại container. Vòng
 lặp lỗi vẫn tính là quay: mất Postgres / Redis không làm thoát (healthcheck vẫn báo hỏng như cũ). Dừng có chủ đích (SIGTERM, Ctrl+C) tắt watchdog trước khi dọn dẹp. Dự phòng khi mã C

@@ -42,7 +42,10 @@ flowchart LR
   Máy chạy đặt `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=…` trong `.env` gốc rồi `docker compose pull &&
   docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. Phát hành: `task release VERSION=X.Y.Z`.
 - **Nâng cấp**: đẩy image → khởi động lại `backend` (migration chạy lúc khởi động, job đang chạy được
-  xếp lại) → khởi động lại worker (làm nốt việc rồi thoát).
+  xếp lại) → khởi động lại worker (làm nốt việc rồi thoát). Backend và worker khác phiên bản vẫn
+  chạy được với nhau trong lúc chuyển: gateway mới giao được việc kiểu cũ còn trong stream, worker
+  cũ không kể việc trong Heartbeat thì gateway không đối soát. Bỏ ngược về bản trước revision `0003`
+  (bảng `company_fences`) thì không cần hạ schema: bản cũ không đọc bảng này.
 
 ## 2. Số đo (19/10/2026, Docker Desktop 12 vCPU)
 

@@ -173,6 +173,12 @@ def test_prepare_maps_cross_field_errors_to_changed_keys() -> None:
         a.prepare(s, {}, {"company_deadline_seconds": 200, "company_timeout_seconds": 150})
     assert set(exc.value.errors) == {"company_deadline_seconds", "company_timeout_seconds"}
 
+    # Nhịp báo sống của worker dài quá hạn sống / 3: worker lỡ một nhịp là bị coi như đã chết.
+    with pytest.raises(SettingsError) as exc:
+        a.prepare(s, {}, {"gateway_heartbeat_seconds": 11})
+    assert set(exc.value.errors) == {"gateway_heartbeat_seconds"}
+    assert "gấp 3" in exc.value.errors["gateway_heartbeat_seconds"]
+
     # Đổi cả hai cùng lúc cho hợp lệ thì được.
     ok = a.prepare(s, {}, {"poll_deadline_seconds": 100, "poll_timeout_seconds": 120})
     assert (ok.after.poll_deadline_seconds, ok.after.poll_timeout_seconds) == (100, 120)

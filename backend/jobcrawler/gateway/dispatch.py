@@ -3,12 +3,19 @@
 - Mỗi pool / loại việc hai stream (`Keys.streams(pool, "http" | "render")`): stream ưu tiên
   (`:hi`, việc gửi khi `fetch_priority` > 0, tức lượt poll) và stream thường. Gateway giao hết việc
   ưu tiên rồi mới tới việc thường (ưu tiên tuyệt đối: poll chạy ban ngày, build ban đêm). Entry
-  `{t: FetchTask protobuf}`, consumer group `workers`, mỗi worker là một consumer. Gateway đọc hộ
-  worker bằng XREADGROUP NOACK rồi XDEL ngay: mỗi việc giao tối đa một lần.
-- Cùng lượt XDEL, gateway ghi việc đã giao vào `Keys.inflight(worker)` (task_id → deadline_ms) và
-  cộng số entry đã lấy vào `Keys.progress(pool, kind)`. Complete chỉ nhận kết quả của việc worker
-  còn giữ; worker rời (Leave) hoặc quá hạn báo sống (prune) thì gateway trả `ERROR_KIND_WORKER_LOST`
-  cho từng việc nó còn giữ để backend thử lại ngay thay vì chờ hết hạn.
+  `{t: FetchTask protobuf, id: task_id, d: deadline_ms}`; stream chỉ chứa việc chưa giao.
+- Giao việc là MỘT script Lua (`_LEASE`): XRANGE lấy entry đầu stream, XDEL, ghi việc vào
+  `Keys.inflight(worker)` (task_id → `<deadline_ms>:<leased_ms>`), cộng `Keys.progress(pool, kind)`.
+  Không có lúc nào việc đã rời stream mà chưa được ghi là worker đang giữ (gateway chết giữa chừng
+  không làm mất việc); mỗi việc giao tối đa một lần. Chưa có việc thì chờ bằng XREAD BLOCK (không
+  lấy gì, chỉ để thức dậy) rồi chạy lại script. Entry kiểu cũ (chỉ có `t`) vẫn giao được, phần ghi
+  `inflight` của chúng làm ngoài script.
+- Complete chỉ nhận kết quả của việc worker còn giữ (HDEL khỏi `inflight`). Worker rời (Leave),
+  quá hạn báo sống (prune), hoặc báo sống mà không còn kể việc đã giao quá ORPHAN_GRACE_MS (lời trả
+  Lease không tới worker) thì gateway trả `ERROR_KIND_WORKER_LOST` cho việc đó để backend thử lại
+  ngay thay vì chờ hết hạn. Việc worker kể là đang giữ mà gateway đã thu hồi thì báo lại để worker
+  huỷ (`HeartbeatResponse.revoked_task_ids`).
+- Mốc hạn sống / mốc giao việc theo đồng hồ Redis (`TIME`), không theo đồng hồ từng gateway.
 - `task_id` = `<client_id>.<seq>`: gateway đọc `client_id` từ đó rồi LPUSH `FetchResult` vào
   `Keys.reply(client_id)` (hết hạn sau REPLY_TTL_SECONDS), nên gateway không giữ trạng thái.
 - `FetchClient` (mỗi process backend một cái): XADD việc, một task nền BRPOP list kết quả của
@@ -37,7 +44,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from google.protobuf.message import DecodeError
 from redis.asyncio import Redis
-from redis.exceptions import RedisError, ResponseError
+from redis.exceptions import RedisError
 
 from jcproto.v1 import crawl_pb2
 from jobcrawler.gateway.registry import DEFAULT_POOL, Keys, live_capacity
@@ -51,7 +58,6 @@ log = get_logger(__name__)
 
 Kind = Literal["http", "render"]
 KINDS: tuple[Kind, ...] = ("http", "render")
-GROUP = "workers"
 REPLY_TTL_SECONDS = 120  # list kết quả của process backend đã chết tự biến mất
 REPLY_BATCH = 100  # sau BRPOP, RPOP thêm tối đa chừng này kết quả một lượt
 LIVE_CACHE_SECONDS = 2.0  # cache danh sách worker sống khi định tuyến
@@ -59,7 +65,11 @@ LIVE_RETRY_SECONDS = 0.25  # không thấy worker: hỏi lại Redis nếu cache
 # Hash việc worker đang giữ sống quá hạn muộn nhất của các việc trong đó chừng này (worker chạy quá
 # timeout tối đa TASK_GUARD_SECONDS = 30 s rồi mới trả kết quả).
 INFLIGHT_TTL_MARGIN_MS = 120_000
+# Việc đã giao chừng này ms mà worker (vẫn báo sống) không kể là đang giữ: lời trả Lease không tới
+# worker. Lớn hơn hạn một lời gọi Heartbeat của worker (15 s) cộng độ trễ mạng.
+ORPHAN_GRACE_MS = 60_000
 WORKER_LOST_ERROR = "worker đã rời / quá hạn báo sống khi đang giữ việc"
+ORPHAN_ERROR = "worker không nhận được việc (lời trả Lease bị mất)"
 _TASK_ID = re.compile(r"^([A-Za-z0-9_-]{1,128})\.(\d{1,20})$", re.ASCII)
 
 # Mức ưu tiên của việc lấy trang gửi trong context hiện tại (> 0: stream `:hi`, gateway giao trước).
@@ -150,46 +160,127 @@ def choose_pool(
 
 # --- phía gateway --------------------------------------------------------------------------------
 
+# Mốc hiện tại (ms) theo đồng hồ Redis, đặt ở đầu các script cần.
+_NOW = """
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+"""
 
-async def ensure_group(redis: Redis, stream: str) -> None:
-    """Tạo consumer group (kèm stream) nếu chưa có; id `0` để việc xếp trước đó vẫn được giao."""
+# Giao tối đa ARGV[1] việc đầu stream cho một worker, nguyên tử. KEYS: stream, inflight, progress.
+# ARGV: số việc, lề TTL của inflight (ms). Trả {số entry đã lấy, số việc quá hạn, blob, cờ, ...};
+# cờ '1' = đã ghi inflight, '0' = entry kiểu cũ (không có `id`): gateway tự ghi.
+_LEASE = (
+    _NOW
+    + """
+local entries = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', tonumber(ARGV[1]))
+if #entries == 0 then
+  return {0, 0}
+end
+local out = {#entries, 0}
+local ids = {}
+local latest = -1
+for _, e in ipairs(entries) do
+  ids[#ids + 1] = e[1]
+  local f = e[2]
+  local blob, id, d = nil, nil, 0
+  for i = 1, #f, 2 do
+    if f[i] == 't' then blob = f[i + 1]
+    elseif f[i] == 'id' then id = f[i + 1]
+    elseif f[i] == 'd' then d = tonumber(f[i + 1]) or 0 end
+  end
+  if blob then
+    if d > 0 and d <= now then
+      out[2] = out[2] + 1
+    elseif id then
+      redis.call('HSET', KEYS[2], id, d .. ':' .. now)
+      if d > latest then latest = d end
+      out[#out + 1] = blob
+      out[#out + 1] = '1'
+    else
+      out[#out + 1] = blob
+      out[#out + 1] = '0'
+    end
+  end
+end
+redis.call('XDEL', KEYS[1], unpack(ids))
+redis.call('INCRBY', KEYS[3], #entries)
+if latest >= 0 then
+  -- Chỉ kéo dài, không rút ngắn hạn của hash (việc giao trước có thể hạn muộn hơn).
+  local at = math.max(now, latest) + tonumber(ARGV[2])
+  redis.call('PEXPIREAT', KEYS[2], at, 'NX')
+  redis.call('PEXPIREAT', KEYS[2], at, 'GT')
+end
+return out
+"""
+)
+
+# Prune một worker: chỉ khi nó VẪN quá hạn báo sống (có thể vừa Register lại). KEYS: workers,
+# inflight. ARGV: worker_id. Trả nil nếu worker còn sống, không thì [task_id, giá trị, ...] việc
+# nó còn giữ (đã xoá khỏi inflight, worker đã bỏ khỏi danh sách sống).
+_PRUNE_ONE = (
+    _NOW
+    + """
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if score and tonumber(score) > now then
+  return false
+end
+redis.call('ZREM', KEYS[1], ARGV[1])
+local held = redis.call('HGETALL', KEYS[2])
+redis.call('DEL', KEYS[2])
+return held
+"""
+)
+
+# Đối soát việc worker báo đang giữ (Heartbeat) với `inflight`. KEYS: inflight. ARGV: grace (ms),
+# rồi task_id worker kể. Việc trong inflight mà worker không kể, đã giao quá grace → xoá, trả về
+# (worker không có việc đó). Việc worker kể mà inflight không có → gateway đã thu hồi: worker huỷ.
+# Trả {{task_id, giá trị, ...} mất, {task_id, ...} thu hồi}.
+_RECONCILE = (
+    _NOW
+    + """
+local grace = tonumber(ARGV[1])
+local reported = {}
+local revoked = {}
+for i = 2, #ARGV do
+  reported[ARGV[i]] = true
+  if redis.call('HEXISTS', KEYS[1], ARGV[i]) == 0 then
+    revoked[#revoked + 1] = ARGV[i]
+  end
+end
+local lost = {}
+local held = redis.call('HGETALL', KEYS[1])
+for i = 1, #held, 2 do
+  local id, value = held[i], held[i + 1]
+  if not reported[id] then
+    local leased = tonumber(string.match(value, ':(%d+)$') or '')
+    if leased and leased + grace <= now then
+      redis.call('HDEL', KEYS[1], id)
+      lost[#lost + 1] = id
+      lost[#lost + 1] = value
+    end
+  end
+end
+return {lost, revoked}
+"""
+)
+
+
+def _deadline_of(value: Any) -> int:
+    """Giá trị trong `inflight`: `<deadline_ms>:<leased_ms>` (bản cũ: `<deadline_ms>`)."""
     try:
-        await redis.xgroup_create(stream, GROUP, id="0", mkstream=True)
-    except ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
+        return int(_text(value).split(":", 1)[0] or 0)
+    except ValueError:
+        return 0
 
 
-async def ensure_groups(redis: Redis, keys: Keys, pool: str) -> None:
-    """Consumer group cho mọi stream của pool (http / render, ưu tiên / thường)."""
-    for kind in KINDS:
-        for stream in keys.streams(pool, kind):
-            await ensure_group(redis, stream)
-
-
-async def delete_consumer(redis: Redis, keys: Keys, pool: str, consumer: str) -> None:
-    """Bỏ consumer của worker đã rời (NOACK nên không còn entry nào đang giữ)."""
-    for kind in KINDS:
-        for stream in keys.streams(pool, kind):
-            with contextlib.suppress(ResponseError):  # NOGROUP: stream đã bị xoá
-                await redis.xgroup_delconsumer(stream, GROUP, consumer)
-
-
-def _entries(resp: Any) -> list[tuple[str, list[tuple[Any, Any]]]]:
-    """Kết quả XREADGROUP (RESP2: list, RESP3: dict) → [(stream, [(id, fields)])]."""
-    if not resp:
-        return []
-    out: list[tuple[str, list[tuple[Any, Any]]]] = []
-    items = resp.items() if isinstance(resp, dict) else resp
-    for stream, entries in items:
-        if entries and isinstance(entries[0], list):  # RESP3: [[(id, fields), ...]]
-            entries = entries[0]
-        out.append((_text(stream), list(entries or [])))
-    return out
+async def redis_now_ms(redis: Redis) -> int:
+    """Mốc hiện tại (ms) theo đồng hồ Redis (chung cho mọi gateway / backend)."""
+    seconds, micros = await redis.time()
+    return int(seconds) * 1000 + int(micros) // 1000
 
 
 class _Lease:
-    """Một lần Lease của worker `consumer`: đọc stream theo thứ tự ưu tiên tới khi hết slot."""
+    """Một lần Lease của worker `consumer`: lấy việc theo thứ tự ưu tiên tới khi hết slot."""
 
     def __init__(
         self, redis: Redis, keys: Keys, pool: str, consumer: str, slots: dict[Kind, int]
@@ -201,69 +292,50 @@ class _Lease:
         self.slots = slots
         # render trước http (như trước đây); mỗi loại: stream ưu tiên trước stream thường.
         self.lanes: dict[Kind, tuple[str, str]] = {k: keys.streams(pool, k) for k in slots}
-        self.kind_of: dict[str, Kind] = {s: k for k, lane in self.lanes.items() for s in lane}
         self.tasks: list[crawl_pb2.FetchTask] = []
 
     def open_streams(self) -> list[str]:
         return [s for kind, lane in self.lanes.items() if self.slots[kind] > 0 for s in lane]
 
-    async def read(self, want: Mapping[str, int], *, block_ms: int | None) -> bool:
-        """Một lần XREADGROUP NOACK (`want`: stream → số entry tối đa; nhiều stream thì COUNT là số
-        nhỏ nhất), rồi một pipeline: XDEL entry đã đọc, ghi việc giao vào `inflight` của worker,
-        cộng bộ đếm tiến độ. Việc quá `deadline_ms` bị bỏ. Trả True nếu đã lấy được entry nào."""
-        try:
-            resp = await self.redis.xreadgroup(
-                GROUP,
-                self.consumer,
-                dict.fromkeys(want, ">"),
-                count=min(want.values()),
-                block=block_ms,
-                noack=True,
-            )
-        except ResponseError as exc:
-            if "NOGROUP" not in str(exc):
-                raise
-            for stream in want:
-                await ensure_group(self.redis, stream)
+    async def take(self, kind: Kind, stream: str) -> bool:
+        """Một lần `_LEASE` trên `stream` cho tối đa `slots[kind]` việc. Việc quá `deadline_ms`
+        bị bỏ. Trả True nếu đã lấy được entry nào khỏi stream."""
+        inflight = self.keys.inflight(self.consumer)
+        resp: Any = await self.redis.eval(  # pyright: ignore[reportGeneralTypeIssues]
+            _LEASE,
+            3,
+            stream,
+            inflight,
+            self.keys.progress(self.pool, kind),
+            self.slots[kind],
+            INFLIGHT_TTL_MARGIN_MS,
+        )
+        consumed, expired = int(resp[0]), int(resp[1])
+        if not consumed:
             return False
-        now = _now_ms()
-        expired = 0
-        held: dict[str, int] = {}
-        consumed: Counter[Kind] = Counter()
-        async with self.redis.pipeline(transaction=False) as pipe:
-            for stream, entries in _entries(resp):
-                if not entries:
+        legacy: dict[str, str] = {}
+        latest = now = _now_ms()
+        for blob, recorded in zip(resp[2::2], resp[3::2], strict=True):
+            try:
+                task = crawl_pb2.FetchTask.FromString(blob)
+            except DecodeError:
+                log.warning("gateway.bad_task", stream=stream)
+                continue
+            if _text(recorded) != "1":  # entry kiểu cũ: hạn nằm trong protobuf
+                if task.deadline_ms and task.deadline_ms <= now:
+                    expired += 1
                     continue
-                kind = self.kind_of[stream]
-                consumed[kind] += len(entries)
-                pipe.xdel(stream, *[entry_id for entry_id, _ in entries])
-                for _, fields in entries:
-                    blob = (fields or {}).get(b"t") or (fields or {}).get("t")
-                    if not blob:
-                        continue
-                    try:
-                        task = crawl_pb2.FetchTask.FromString(blob)
-                    except DecodeError:
-                        log.warning("gateway.bad_task", stream=stream)
-                        continue
-                    if task.deadline_ms and task.deadline_ms <= now:
-                        expired += 1
-                        continue
-                    self.tasks.append(task)
-                    self.slots[kind] -= 1
-                    held[task.task_id] = task.deadline_ms
-            if not consumed:
-                return False
-            if held:
-                key = self.keys.inflight(self.consumer)
-                pipe.hset(key, mapping=held)
-                # Chỉ kéo dài, không rút ngắn hạn của hash (việc giao trước có thể hạn muộn hơn).
-                expire_at = max(now, *held.values()) + INFLIGHT_TTL_MARGIN_MS
-                pipe.pexpireat(key, expire_at, nx=True)
-                pipe.pexpireat(key, expire_at, gt=True)
-            for kind, n in consumed.items():
-                pipe.incrby(self.keys.progress(self.pool, kind), n)
-            await pipe.execute()
+                legacy[task.task_id] = f"{task.deadline_ms}:{now}"
+                latest = max(latest, task.deadline_ms)
+            self.tasks.append(task)
+            self.slots[kind] -= 1
+        if legacy:
+            expire_at = latest + INFLIGHT_TTL_MARGIN_MS
+            async with self.redis.pipeline(transaction=False) as pipe:
+                pipe.hset(inflight, mapping=legacy)
+                pipe.pexpireat(inflight, expire_at, nx=True)
+                pipe.pexpireat(inflight, expire_at, gt=True)
+                await pipe.execute()
         if expired:
             log.info("gateway.expired", consumer=self.consumer, tasks=expired)
         return True
@@ -272,9 +344,7 @@ class _Lease:
         """Lấy (không chờ) cho đủ slot: mỗi loại việc hết stream ưu tiên rồi tới stream thường."""
         for kind, lane in self.lanes.items():
             for stream in lane:
-                while self.slots[kind] > 0 and await self.read(
-                    {stream: self.slots[kind]}, block_ms=None
-                ):
+                while self.slots[kind] > 0 and await self.take(kind, stream):
                     pass
 
 
@@ -290,9 +360,9 @@ async def lease_tasks(
 ) -> list[crawl_pb2.FetchTask]:
     """Lấy tối đa `render` việc render và `http` việc HTTP của `pool` cho worker `consumer`.
 
-    Đọc ngay (không chờ) trước, mỗi loại việc stream ưu tiên trước; chưa có việc nào thì chờ tối
-    đa `wait_ms` trên các stream còn slot, có việc thì lấy thêm cho đủ slot. Việc đã quá
-    `deadline_ms` bị bỏ (không giao). Việc giao được ghi vào `Keys.inflight(consumer)`.
+    Lấy ngay (không chờ) trước, mỗi loại việc stream ưu tiên trước; chưa có việc nào thì chờ tối
+    đa `wait_ms` tới khi một stream còn slot có entry rồi lấy lại. Việc đã quá `deadline_ms` bị bỏ
+    (không giao). Việc giao được ghi vào `Keys.inflight(consumer)` cùng lúc rời stream.
     """
     wanted: tuple[tuple[Kind, int], ...] = (("render", render), ("http", http))
     slots: dict[Kind, int] = {kind: n for kind, n in wanted if n > 0}
@@ -306,11 +376,10 @@ async def lease_tasks(
         streams = lease.open_streams()
         if left_ms < 1 or not streams:
             break
-        # Chờ việc đầu tiên trên mọi stream còn slot (BLOCK 0 là chờ mãi: luôn ≥ 1 ms). COUNT 1:
-        # Redis trả ngay sau lệnh XADD đầu tiên nên thường chỉ một stream có việc; phần còn lại lấy
-        # bằng `top_up` theo đúng thứ tự ưu tiên.
-        if await lease.read(dict.fromkeys(streams, 1), block_ms=max(1, left_ms)):
-            await lease.top_up()
+        # Chờ tới khi một stream có entry (id 0-0: stream đang có entry thì trả ngay; BLOCK 0 là
+        # chờ mãi nên luôn ≥ 1 ms). XREAD không lấy gì: việc lấy bằng `_LEASE` theo thứ tự ưu tiên.
+        await redis.xread(dict.fromkeys(streams, "0-0"), count=1, block=max(1, left_ms))
+        await lease.top_up()
     return lease.tasks
 
 
@@ -355,31 +424,75 @@ async def complete_results(
     return accepted, malformed, len(valid) - len(kept)
 
 
-async def release_worker(redis: Redis, keys: Keys, worker_id: str) -> int:
-    """Worker rời / quá hạn báo sống: trả `ERROR_KIND_WORKER_LOST` cho mọi việc nó còn giữ (backend
-    thử lại ngay) rồi xoá danh sách đó. HGETALL + DEL trong một transaction: Complete chạy song song
-    hoặc nhận kết quả trước (việc không còn trong danh sách), hoặc bị bỏ. Việc đã quá hạn (backend
-    thôi chờ) thì không trả. Trả số việc đã trả về backend."""
-    key = keys.inflight(worker_id)
-    async with redis.pipeline(transaction=True) as pipe:
-        pipe.hgetall(key)
-        pipe.delete(key)
-        held, _ = await pipe.execute()
-    now = _now_ms()
+async def _report_lost(
+    redis: Redis, keys: Keys, worker_id: str, held: Mapping[Any, Any], error: str
+) -> int:
+    """Trả `ERROR_KIND_WORKER_LOST` cho các việc `held` (task_id → giá trị inflight) để backend
+    thử lại ngay; việc đã quá hạn (backend thôi chờ) thì không trả. Trả số việc đã trả."""
+    now = await redis_now_ms(redis)
     lost = [
         crawl_pb2.FetchResult(
             task_id=_text(task_id),
             error_kind=crawl_pb2.ERROR_KIND_WORKER_LOST,
-            error=WORKER_LOST_ERROR,
+            error=error,
             worker_id=worker_id,
         )
-        for task_id, deadline in (held or {}).items()
-        if not int(deadline) or int(deadline) > now
+        for task_id, value in held.items()
+        if not (deadline := _deadline_of(value)) or deadline > now
     ]
     if not lost:
         return 0
     accepted, _ = await push_results(redis, keys, lost)
     return accepted
+
+
+def _pairs(flat: Any) -> dict[Any, Any]:
+    items = list(flat or [])
+    return dict(zip(items[::2], items[1::2], strict=True))
+
+
+async def release_worker(redis: Redis, keys: Keys, worker_id: str) -> int:
+    """Worker rời: trả `ERROR_KIND_WORKER_LOST` cho mọi việc nó còn giữ (backend thử lại ngay) rồi
+    xoá danh sách đó. HGETALL + DEL trong một transaction: Complete chạy song song hoặc nhận kết quả
+    trước (việc không còn trong danh sách), hoặc bị bỏ. Trả số việc đã trả về backend."""
+    key = keys.inflight(worker_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hgetall(key)
+        pipe.delete(key)
+        held, _ = await pipe.execute()
+    return await _report_lost(redis, keys, worker_id, held or {}, WORKER_LOST_ERROR)
+
+
+async def release_expired_worker(redis: Redis, keys: Keys, worker_id: str) -> int | None:
+    """Prune một worker quá hạn báo sống: bỏ khỏi danh sách sống và trả `worker_lost` cho việc nó
+    còn giữ — chỉ khi nó VẪN quá hạn (một script Lua: worker vừa Register lại thì giữ nguyên, việc
+    mới giao cho nó không bị trả oan). Trả None nếu worker còn sống, không thì số việc đã trả."""
+    held = await redis.eval(  # pyright: ignore[reportGeneralTypeIssues]
+        _PRUNE_ONE, 2, keys.workers, keys.inflight(worker_id), worker_id
+    )
+    if held is None:
+        return None
+    return await _report_lost(redis, keys, worker_id, _pairs(held), WORKER_LOST_ERROR)
+
+
+async def reconcile_worker(
+    redis: Redis,
+    keys: Keys,
+    worker_id: str,
+    reported: Iterable[str],
+    *,
+    grace_ms: int | None = None,
+) -> tuple[int, list[str]]:
+    """Đối soát việc worker kể là đang giữ (Heartbeat) với `inflight`: việc đã giao quá `grace_ms`
+    mà worker không kể (lời trả Lease không tới) → trả `worker_lost` cho backend; việc worker kể mà
+    gateway không còn ghi nhận → worker phải huỷ. Trả (số việc đã trả về backend, task_id thu
+    hồi)."""
+    grace = ORPHAN_GRACE_MS if grace_ms is None else grace_ms
+    lost, revoked = await redis.eval(  # pyright: ignore[reportGeneralTypeIssues]
+        _RECONCILE, 1, keys.inflight(worker_id), grace, *reported
+    )
+    returned = await _report_lost(redis, keys, worker_id, _pairs(lost), ORPHAN_ERROR)
+    return returned, [_text(t) for t in revoked or []]
 
 
 # --- phía backend --------------------------------------------------------------------------------
@@ -497,7 +610,8 @@ class FetchClient:
                     pipe.get(progress)
                     pipe.xadd(
                         stream,
-                        {"t": task.SerializeToString()},
+                        # `id` / `d` để gateway ghi việc đang giữ ngay trong script giao việc.
+                        {"t": task.SerializeToString(), "id": task.task_id, "d": task.deadline_ms},
                         maxlen=self.maxlen,
                         approximate=True,
                     )

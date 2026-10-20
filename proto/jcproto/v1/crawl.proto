@@ -2,10 +2,11 @@
 //
 // Worker là client: đăng ký (Register), xin việc (Lease, long-poll), trả kết quả (Complete), báo
 // sống (Heartbeat), rời đi (Leave). Việc nằm trong Redis Streams phía backend: mỗi pool hai stream
-// (http, render) cộng một stream ưu tiên cho mỗi loại (`:hi`), consumer group `workers`, mỗi worker
-// là một consumer. Gateway ghi việc worker đang giữ vào Redis (chỉ nhận kết quả của việc worker còn
-// giữ; worker rời / chết thì trả ERROR_KIND_WORKER_LOST cho backend ngay). Gateway không giữ trạng
-// thái trong process nên chạy được nhiều replica sau một load balancer HTTP/2.
+// (http, render) cộng một stream ưu tiên cho mỗi loại (`:hi`). Gateway lấy việc khỏi stream và ghi
+// việc worker đang giữ vào Redis trong cùng một script (chỉ nhận kết quả của việc worker còn giữ;
+// worker rời / chết / không còn kể việc trong Heartbeat thì trả ERROR_KIND_WORKER_LOST cho backend
+// ngay). Gateway không giữ trạng thái trong process nên chạy được nhiều replica sau một load
+// balancer HTTP/2.
 //
 // Một việc là MỘT request (HTTP qua curl_cffi, hoặc mở trang bằng Chromium). Toàn bộ logic thu
 // thập (robots, rate limit, retry, nhận diện trang chặn, parse) ở backend; worker chỉ tải trang qua
@@ -176,11 +177,19 @@ message WorkerStats {
 message HeartbeatRequest {
   string worker_id = 1;
   WorkerStats stats = 2;
+  // Việc worker còn nợ kết quả: đang chạy, hoặc đã xong mà Complete chưa được gateway nhận. Gateway
+  // đối soát với việc đã giao: việc giao đã lâu mà worker không kể (lời trả Lease không tới worker)
+  // được trả ERROR_KIND_WORKER_LOST cho backend.
+  repeated string task_ids = 3;
+  bool reports_tasks = 4;          // true: `task_ids` đầy đủ (worker cũ không gửi → không đối soát)
 }
 
 message HeartbeatResponse {
   int64 config_version = 1;
   bool drain = 2;
+  // Việc worker kể ở `task_ids` mà gateway không còn ghi nhận là của worker này (đã trả
+  // ERROR_KIND_WORKER_LOST, đã quá hạn): worker huỷ, kết quả của chúng sẽ bị bỏ.
+  repeated string revoked_task_ids = 3;
 }
 
 message LeaveRequest {

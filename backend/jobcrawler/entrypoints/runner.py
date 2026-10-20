@@ -89,14 +89,19 @@ async def build_company(
     cid = _as_uuid(company_id)
     if cid is None:
         return {"error": f"company_id không hợp lệ: {company_id!r}"}
-    result = await crawl.build_company(
-        res,
-        cid,
-        trigger=RunTrigger(trigger),
-        continuation=continuation,
-        queued_at=job_ready_at(ctx.get("job")),
-        refresh=refresh,
-    )
+    try:
+        result = await crawl.build_company(
+            res,
+            cid,
+            trigger=RunTrigger(trigger),
+            continuation=continuation,
+            queued_at=job_ready_at(ctx.get("job")),
+            refresh=refresh,
+        )
+    except crawl.CompanyBusyError as exc:
+        # Lượt khác của doanh nghiệp đang chạy: không chạy chồng; scheduler xếp lại khi còn cần.
+        log.warning("company.build_skipped", company_id=company_id, error=str(exc))
+        return {"status": "skipped", "error": str(exc)}
     return result.model_dump(mode="json", exclude={"jobs"})
 
 
@@ -226,6 +231,15 @@ FUNCTIONS: dict[Role, list[Any]] = {
 }
 
 
+def stall_limit(settings: Settings) -> float:
+    """Ngưỡng watchdog của runner: WATCHDOG_SECONDS nhưng không quá nửa QUEUE_RECLAIM_SECONDS, để
+    process đứng tự thoát TRƯỚC khi job nó giữ bị runner khác thu hồi và chạy lại (không có lượt
+    "zombie" chạy tiếp song song với lượt mới). WATCHDOG_SECONDS=0 thì vẫn tắt."""
+    if settings.watchdog_seconds <= 0:
+        return 0.0
+    return min(settings.watchdog_seconds, settings.queue_reclaim_seconds / 2)
+
+
 def build_worker(settings: Settings, role: Role) -> StreamWorker:
     worker = StreamWorker(
         make_queue(settings, queue_name(settings, role)),
@@ -261,7 +275,7 @@ async def run_runner(settings: Settings, roles: Sequence[Role] = ROLES) -> None:
             concurrency={w.queue.name: w.concurrency for w in workers},
         )
         # Watchdog: mỗi vai một vòng lặp chính, vai nào đứng cũng làm process thoát.
-        dog = start_watchdog(beat.component, max_stall=res.settings.watchdog_seconds, parts=roles)
+        dog = start_watchdog(beat.component, max_stall=stall_limit(res.settings), parts=roles)
 
         def shutdown() -> None:
             dog.stop()  # dừng có chủ đích: lượt làm nốt job không bị watchdog giết

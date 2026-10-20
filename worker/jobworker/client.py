@@ -2,7 +2,11 @@
 
 - Lease chỉ xin đúng số slot còn trống (HTTP / render); hết slot thì chờ việc đang chạy xong.
 - Kết quả gộp lô (16 kết quả, ~50 ms hoặc ~8 MiB) rồi Complete; gateway mất kết nối thì thử lại vài
-  lần rồi bỏ: backend tự hết hạn chờ và thử lại request (chấp nhận at-most-once).
+  lần rồi bỏ (chấp nhận at-most-once): việc đó thôi được kể trong Heartbeat nên gateway trả
+  `worker_lost` cho backend, backend thử lại request.
+- Heartbeat kể mọi việc còn nợ kết quả (`task_ids`: đang chạy hoặc chưa Complete xong); gateway
+  đối soát với việc đã giao và trả lại `revoked_task_ids` = việc nó đã thu hồi (worker từng quá hạn
+  báo sống, đã trả `worker_lost`): worker huỷ việc đó ngay thay vì tải tiếp vô ích.
 - `config_version` trong Lease/Heartbeat khác bản đang dùng → Register lại để lấy cấu hình mới.
   NOT_FOUND / FAILED_PRECONDITION (gateway không biết worker này) → Register lại.
 - UNAVAILABLE và lỗi kết nối → thử lại với backoff 0.5 s → 30 s, process không bao giờ tự thoát.
@@ -29,6 +33,7 @@ import signal
 import socket
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -312,6 +317,10 @@ class Worker:
         self._http_inflight = 0
         self._render_inflight = 0
         self._tasks: set[asyncio.Task[None]] = set()
+        self._jobs: dict[str, asyncio.Task[None]] = {}  # task_id → việc đang chạy
+        # Việc còn nợ kết quả (đang chạy / chờ Complete): kể trong Heartbeat để gateway đối soát.
+        self._owed: set[str] = set()
+        self._revoked: set[str] = set()  # việc gateway đã thu hồi khi đang chạy
         self._results: asyncio.Queue[crawl_pb2.FetchResult | None] = asyncio.Queue()
 
     # --- điều khiển -------------------------------------------------------------------------
@@ -600,7 +609,25 @@ class Worker:
             self._http_inflight += 1
         job = asyncio.create_task(self._run_task(task, render), name=f"task-{task.task_id}")
         self._tasks.add(job)
-        job.add_done_callback(self._tasks.discard)
+        self._owed.add(task.task_id)
+        self._jobs[task.task_id] = job
+
+        def done(finished: asyncio.Task[None], task_id: str = task.task_id) -> None:
+            self._tasks.discard(finished)
+            self._jobs.pop(task_id, None)
+            self._revoked.discard(task_id)
+
+        job.add_done_callback(done)
+
+    def _revoke(self, task_ids: Iterable[str]) -> None:
+        """Gateway đã thu hồi các việc này (kết quả sẽ bị bỏ): huỷ việc còn đang chạy."""
+        for task_id in task_ids:
+            job = self._jobs.get(task_id)
+            if job is None or job.done() or task_id in self._revoked:
+                continue
+            self._revoked.add(task_id)
+            log.info("worker.task_revoked", task_id=task_id)
+            job.cancel()
 
     def _pick_proxy(
         self, task: crawl_pb2.FetchTask, *, browser: bool
@@ -676,11 +703,13 @@ class Worker:
         try:
             result = await self._execute(task, render)
         except asyncio.CancelledError:
-            # Dừng cưỡng bức: vẫn trả kết quả để backend thử lại ngay thay vì chờ hết hạn.
+            # Dừng cưỡng bức: vẫn trả kết quả để backend thử lại ngay thay vì chờ hết hạn. Việc
+            # gateway thu hồi: kết quả gửi đi sẽ bị bỏ, chỉ để xoá khỏi danh sách nợ.
+            revoked = task.task_id in self._revoked
             result = failure(
                 task,
                 crawl_pb2.ERROR_KIND_OTHER,
-                "worker dừng khi đang tải",
+                "gateway đã thu hồi việc" if revoked else "worker dừng khi đang tải",
                 worker_id=self.worker_id,
             )
         except Exception as exc:
@@ -750,6 +779,14 @@ class Worker:
                 log.exception("worker.complete_error", results=len(batch))
 
     async def _send_results(self, batch: list[crawl_pb2.FetchResult]) -> None:
+        """Complete một lô (thử lại vài lần). Xong — gateway nhận hoặc đã bỏ cuộc — thì thôi kể các
+        việc này trong Heartbeat: gateway trả `worker_lost` cho việc chưa nhận được kết quả."""
+        try:
+            await self._complete(batch)
+        finally:
+            self._owed.difference_update(result.task_id for result in batch)
+
+    async def _complete(self, batch: list[crawl_pb2.FetchResult]) -> None:
         request = crawl_pb2.CompleteRequest(worker_id=self.worker_id, results=batch)
         for attempt in range(COMPLETE_ATTEMPTS):
             try:
@@ -818,10 +855,14 @@ class Worker:
             if self._need_register:
                 continue
             try:
+                request = crawl_pb2.HeartbeatRequest(
+                    worker_id=self.worker_id,
+                    stats=self.stats(),
+                    task_ids=sorted(self._owed),
+                    reports_tasks=True,
+                )
                 resp: crawl_pb2.HeartbeatResponse = await self._call(
-                    self._stub.Heartbeat,
-                    crawl_pb2.HeartbeatRequest(worker_id=self.worker_id, stats=self.stats()),
-                    timeout=RPC_TIMEOUT_SECONDS,
+                    self._stub.Heartbeat, request, timeout=RPC_TIMEOUT_SECONDS
                 )
             except grpc.aio.AioRpcError as exc:
                 if exc.code() in REREGISTER_CODES or exc.code() in AUTH_CODES:
@@ -837,6 +878,7 @@ class Worker:
                 log.exception("worker.heartbeat_error")
                 continue
             self.health.ok()
+            self._revoke(resp.revoked_task_ids)
             if resp.drain:
                 self._begin_drain("heartbeat")
             self._check_version(resp.config_version)

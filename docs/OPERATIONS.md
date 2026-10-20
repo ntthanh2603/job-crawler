@@ -142,6 +142,13 @@ Trang Cài đặt → **Proxy**.
   trả `request_id` để tra log.
 - **Nhật ký thao tác**: ai lưu cài đặt / bấm build / thêm doanh nghiệp…, giá trị trước → sau (bí mật
   bị che). Chỉ ghi thêm, bảo trì không dọn.
+- **Log về chia việc** (cảnh báo bất thường, không cần làm gì nếu chỉ thỉnh thoảng):
+  `queue.job_revoked` (runner tự huỷ lượt đã bị runner khác thu hồi — runner đó từng đứng / mất
+  Redis), `lock.lost` + `LeaseLost` (lượt mất khoá doanh nghiệp / bảo trì giữa chừng), `FencedOut`
+  (lượt cũ bị chặn ghi DB vì lượt mới đã giữ khoá), `company.build_skipped` (build gặp lượt khác
+  đang chạy), `gateway.worker_lost` với `reason=orphan` (worker không nhận được việc đã giao) và
+  `gateway.revoked`. Lặp lại thường xuyên → xem runner / worker đó có bị đứng (CPU, swap, GC) hay mạng
+  tới Redis / gateway chập chờn.
 - **Bảo trì tự động** mỗi giờ: lượt chạy treo → `failed`, gộp việc trùng còn sót, xoá dữ liệu cũ
   (`failed_pages` 7 ngày, `source_fetches` / `logs` 30 ngày), nén lại dần. Tay:
   `jobcrawler db maintain`, `db reclean` (sau khi đổi luật làm sạch), `db dedup`,

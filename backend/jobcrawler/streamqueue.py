@@ -13,7 +13,15 @@ Khoá Redis (`sq:<queue>:…`):
 Worker chết (OOM, kill): entry còn trong PEL của consumer đó. Worker sống làm mới idle của entry
 mình đang chạy mỗi lần báo sống (XCLAIM JUSTID); entry idle quá `reclaim_seconds` bị XAUTOCLAIM thu
 hồi: chạy lại nếu còn lượt (`retries` = số lần chạy tối đa), hết lượt thì `failed`. Mọi
-chuyển trạng thái chạy trong Lua và so `entry`, nên entry cũ (đã thu hồi) không ghi đè job mới.
+chuyển trạng thái chạy trong Lua và so `entry` (id entry đổi mỗi lần xếp lại: đóng vai fencing
+token của lượt chạy), nên lượt cũ (đã thu hồi) không ghi đè trạng thái job mới.
+
+Lượt bị thu hồi khi worker vẫn sống (event loop đứng quá `reclaim_seconds`, mất Redis) tự dừng: mỗi
+lần báo sống, Lua chỉ làm mới entry mà hash job còn ghi đúng `entry` + worker + `active`; entry
+không còn là của mình thì worker huỷ lượt đó (`queue.job_revoked`) và không ghi gì về job nữa.
+
+Mốc dùng để xét sống / thu hồi (hạn báo sống, `started`) theo đồng hồ của Redis (`TIME`), không
+theo đồng hồ từng máy: máy lệch giờ không làm job bị thu hồi sớm.
 """
 
 from __future__ import annotations
@@ -27,7 +35,7 @@ import socket
 import time
 import uuid
 from collections import Counter
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from typing import Any
@@ -98,20 +106,52 @@ end
 return #due
 """
 
-# Worker nhận entry. KEYS: job, queued, active, stream. ARGV: key, entry, now (ms), worker, group.
-_START = """
+# Mốc hiện tại (ms) theo đồng hồ Redis, đặt ở đầu các script cần.
+_NOW = """
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+"""
+
+# Worker nhận entry. KEYS: job, queued, active, stream. ARGV: key, entry, worker, group.
+_START = (
+    _NOW
+    + """
 if redis.call('HGET', KEYS[1], 'status') ~= 'queued'
     or redis.call('HGET', KEYS[1], 'entry') ~= ARGV[2] then
-  redis.call('XACK', KEYS[4], ARGV[5], ARGV[2])
+  redis.call('XACK', KEYS[4], ARGV[4], ARGV[2])
   redis.call('XDEL', KEYS[4], ARGV[2])
   return false
 end
 redis.call('ZREM', KEYS[2], ARGV[1])
-redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1])
+redis.call('ZADD', KEYS[3], now, ARGV[1])
 redis.call('HINCRBY', KEYS[1], 'attempts', 1)
-redis.call('HSET', KEYS[1], 'status', 'active', 'started', ARGV[3], 'worker', ARGV[4])
+redis.call('HSET', KEYS[1], 'status', 'active', 'started', now, 'worker', ARGV[3])
 return redis.call('HGETALL', KEYS[1])
 """
+)
+
+# Báo sống: ghi thông tin + hạn sống của worker, làm mới idle (XCLAIM JUSTID) của entry worker còn
+# giữ thật (hash job: `active`, đúng `entry`, đúng worker); trả các entry không còn là của worker.
+# KEYS: workers, worker:<id>, stream. ARGV: worker, info, ttl (ms), group, tiền tố khoá job, rồi
+# từng cặp entry, khoá job.
+_BEAT = (
+    _NOW
+    + """
+redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
+redis.call('ZADD', KEYS[1], now + tonumber(ARGV[3]), ARGV[1])
+local lost = {}
+for i = 6, #ARGV, 2 do
+  local entry = ARGV[i]
+  local cur = redis.call('HMGET', ARGV[5] .. ARGV[i + 1], 'status', 'entry', 'worker')
+  if cur[1] == 'active' and cur[2] == entry and cur[3] == ARGV[1] then
+    redis.call('XCLAIM', KEYS[3], ARGV[4], ARGV[1], 0, entry, 'JUSTID')
+  else
+    lost[#lost + 1] = entry
+  end
+end
+return lost
+"""
+)
 
 # Trả entry: `done` (xong / lỗi hẳn), `retry` (xếp lại cuối stream), `recover` (thu hồi từ worker
 # chết: chạy lại nếu còn lượt). KEYS: job, active, queued, stream. ARGV: key, entry, mode, now (ms),
@@ -271,6 +311,7 @@ class StreamQueue:
         self._schedule = self._redis.register_script(_SCHEDULE)
         self._start = self._redis.register_script(_START)
         self._release = self._redis.register_script(_RELEASE)
+        self._beat = self._redis.register_script(_BEAT)
         await self.ensure_group()
 
     async def disconnect(self) -> None:
@@ -284,6 +325,11 @@ class StreamQueue:
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def now_ms(self) -> int:
+        """Mốc hiện tại (ms) theo đồng hồ Redis (chung cho mọi máy)."""
+        seconds, micros = await self.redis.time()
+        return int(seconds) * 1000 + int(micros) // 1000
 
     # --- phía xếp việc ---------------------------------------------------------------------------
 
@@ -328,7 +374,7 @@ class StreamQueue:
         """Số job theo trạng thái, runner đang sống, và (nếu `jobs`) một trang job theo thứ tự
         đang chạy → đang chờ → hẹn giờ."""
         r = self.redis
-        now = _now_ms()
+        now = await self.now_ms()
         async with r.pipeline(transaction=False) as pipe:
             pipe.zremrangebyscore(self._workers, "-inf", now)
             pipe.zrange(self._workers, 0, -1)
@@ -403,7 +449,7 @@ class StreamQueue:
             return None
         raw = await self._start(
             keys=[self._job_key(key), self._queued, self._active, self.stream],
-            args=[key, entry, _now_ms(), worker_id, GROUP],
+            args=[key, entry, worker_id, GROUP],
         )
         if not raw:
             return None
@@ -464,16 +510,18 @@ class StreamQueue:
         return int(moved)
 
     async def beat(
-        self, worker_id: str, info: dict[str, Any], ttl: float, entries: Sequence[str]
-    ) -> None:
-        """Báo worker còn sống và làm mới idle các entry nó đang chạy (để không bị thu hồi)."""
-        r = self.redis
-        async with r.pipeline(transaction=False) as pipe:
-            pipe.set(self._worker_key(worker_id), dump_json(info), px=int(ttl * 1000))
-            pipe.zadd(self._workers, {worker_id: _now_ms() + int(ttl * 1000)})
-            await pipe.execute()
-        if entries:
-            await r.xclaim(self.stream, GROUP, worker_id, 0, list(entries), justid=True)
+        self, worker_id: str, info: dict[str, Any], ttl: float, running: Mapping[str, str]
+    ) -> list[str]:
+        """Báo worker còn sống và làm mới idle các entry nó đang chạy (`running`: entry → khoá
+        job) để không bị thu hồi. Trả các entry không còn là của worker (đã bị thu hồi / xếp lại):
+        worker phải dừng lượt chạy đó."""
+        args: list[Any] = [worker_id, dump_json(info), int(ttl * 1000), GROUP, self._job_prefix]
+        for entry, key in running.items():
+            args += [entry, key]
+        lost = await self._beat(
+            keys=[self._workers, self._worker_key(worker_id), self.stream], args=args
+        )
+        return [str(entry) for entry in lost or []]
 
     async def leave(self, worker_id: str) -> None:
         r = self.redis
@@ -508,9 +556,10 @@ class StreamQueue:
                 out[await self._release_job(key, entry, "recover", error=error)] += 1
             if start in ("0-0", b"0-0"):
                 break
-        alive = set(await r.zrangebyscore(self._workers, _now_ms(), "+inf"))
+        now = await self.now_ms()
+        alive = set(await r.zrangebyscore(self._workers, now, "+inf"))
         # Job `active` mà worker đã chết nhưng entry không còn trong PEL (vd. AOF mất đoạn cuối).
-        cutoff = _now_ms() - int(self.reclaim_seconds * 1000)
+        cutoff = now - int(self.reclaim_seconds * 1000)
         for key in await r.zrangebyscore(self._active, "-inf", cutoff):
             fields = ["status", "worker", "entry"]
             status, worker, entry = await r.hmget(self._job_key(key), fields)  # pyright: ignore[reportGeneralTypeIssues]
@@ -587,11 +636,13 @@ class StreamWorker:
         self.on_iteration = on_iteration
         self.id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self.context: dict[str, Any] = {"worker": self, "queue": queue}
-        self.stats: Counter[str] = Counter(complete=0, failed=0, retried=0, aborted=0)
+        self.stats: Counter[str] = Counter(complete=0, failed=0, retried=0, aborted=0, revoked=0)
         self.heartbeat = max(1.0, queue.reclaim_seconds / 6)
         self._started = datetime.now(UTC).isoformat()
         self._running: dict[str, asyncio.Task[None]] = {}  # entry → lượt chạy
         self._inner: dict[str, asyncio.Task[Any]] = {}  # entry → hàm job
+        self._keys: dict[str, str] = {}  # entry → khoá job (báo sống kiểm quyền giữ)
+        self._revoked: set[str] = set()  # entry bị thu hồi khi đang chạy: huỷ, không ghi gì
         self._stop = asyncio.Event()
         self._slot = asyncio.Event()
         self._stopping = False
@@ -676,6 +727,7 @@ class StreamWorker:
                     log.exception("queue.start_error", queue=self.queue.name, key=key)
                     continue
                 if job is not None:
+                    self._keys[entry] = job.key
                     self._running[entry] = asyncio.create_task(self._run(entry, job))
 
     async def _run(self, entry: str, job: StreamJob) -> None:
@@ -691,8 +743,22 @@ class StreamWorker:
 
             task = asyncio.create_task(call())
             self._inner[entry] = task
+            if entry in self._revoked:  # bị thu hồi trước cả khi kịp chạy
+                task.cancel()
             done, _ = await asyncio.wait({task}, timeout=job.timeout or None)
-            if not done:
+            # Từ đây chỉ còn ghi kết quả: báo sống thôi xét entry này (không báo nhầm "bị thu hồi"
+            # khi chính mình vừa ghi xong trạng thái job).
+            self._keys.pop(entry, None)
+            if entry in self._revoked:
+                # Lượt đã bị thu hồi (job đã xếp lại / `failed` ở nơi khác): chờ huỷ xong, không
+                # ghi gì về job.
+                if not done:
+                    task.cancel()
+                await asyncio.wait({task}, timeout=self.cancel_deadline)
+                if task.done() and not task.cancelled():
+                    task.exception()  # đã xem: không cảnh báo "exception was never retrieved"
+                self.stats["revoked"] += 1
+            elif not done:
                 task.cancel()
                 await asyncio.wait({task}, timeout=self.cancel_deadline)
                 await self._fail(job, f"quá timeout {job.timeout} s")
@@ -713,6 +779,8 @@ class StreamWorker:
         finally:
             self._inner.pop(entry, None)
             self._running.pop(entry, None)
+            self._keys.pop(entry, None)
+            self._revoked.discard(entry)
             self._slot.set()
 
     async def _fail(self, job: StreamJob, error: str) -> None:
@@ -749,7 +817,17 @@ class StreamWorker:
             },
         }
         # Hạn báo sống = ngưỡng thu hồi: worker im lặng chừng đó mới bị coi là đã chết.
-        await self.queue.beat(self.id, info, self.queue.reclaim_seconds, list(self._running))
+        lost = await self.queue.beat(self.id, info, self.queue.reclaim_seconds, dict(self._keys))
+        for entry in lost:
+            if entry not in self._running or entry in self._revoked:
+                continue
+            # Bị thu hồi khi vẫn đang chạy (event loop từng đứng, mất Redis quá ngưỡng): lượt mới
+            # đã / sẽ chạy ở nơi khác, lượt này dừng ngay.
+            self._revoked.add(entry)
+            log.warning("queue.job_revoked", queue=self.queue.name, key=self._keys.get(entry))
+            inner = self._inner.get(entry)
+            if inner is not None:
+                inner.cancel()
 
     async def _schedule(self) -> None:
         await self.queue.schedule()

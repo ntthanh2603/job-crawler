@@ -22,7 +22,7 @@ from redis.asyncio import Redis
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobcrawler.config import Settings
-from jobcrawler.gateway import registry
+from jobcrawler.gateway import dispatch, registry
 from jobcrawler.gateway.dispatch import (
     DispatchError,
     FetchClient,
@@ -81,6 +81,7 @@ def make_settings(prefix: str, **kw: Any) -> Settings:
         "gateway_token": None,
         "fetch_queue_grace_seconds": 5,
         "gateway_worker_ttl_seconds": 10,
+        "gateway_heartbeat_seconds": 3,
         "proxy_mode": "worker",
     }
     return Settings(**{**base, **kw})
@@ -466,10 +467,12 @@ async def test_lease_waits_then_returns_new_task(redis: Redis, prefix: str) -> N
 
 
 async def queue_task(redis: Redis, keys: registry.Keys, task_id: str, **kw: Any) -> None:
+    """Việc vào stream như `FetchClient.submit` ghi (`t` + `id` + `d`)."""
     task = http_task(f"https://x.example.vn/{task_id}")
     task.task_id = task_id
     task.deadline_ms = kw.pop("deadline_ms", int(time.time() * 1000) + 60_000)
-    await redis.xadd(keys.stream("default", "http", **kw), {"t": task.SerializeToString()})
+    fields = {"t": task.SerializeToString(), "id": task_id, "d": task.deadline_ms}
+    await redis.xadd(keys.stream("default", "http", **kw), fields)  # pyright: ignore[reportArgumentType]
 
 
 async def replies(redis: Redis, keys: registry.Keys, client_id: str) -> list[Any]:
@@ -488,7 +491,10 @@ async def test_complete_accepts_only_tasks_the_worker_holds(redis: Redis, prefix
         await queue_task(redis, keys, "c-1.1")
         [task] = (await worker.lease(wait_ms=0)).tasks
         held = await redis.hgetall(keys.inflight(worker.worker_id))  # pyright: ignore[reportGeneralTypeIssues]
-        assert held == {b"c-1.1": str(task.deadline_ms).encode()}
+        deadline, leased = held[b"c-1.1"].decode().split(":")
+        assert list(held) == [b"c-1.1"]
+        assert int(deadline) == task.deadline_ms
+        assert abs(int(leased) - time.time() * 1000) < 5000
         ttl = await redis.pttl(keys.inflight(worker.worker_id))
         assert task.deadline_ms - time.time() * 1000 < ttl <= task.deadline_ms + 130_000
 
@@ -579,8 +585,6 @@ async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
         await redis.zadd(keys.workers, {worker.worker_id: int(time.time() * 1000) - 1})
         assert await gw.servicer.prune() == [worker.worker_id]
         assert await registry.live_pools(redis, keys) == {}
-        for stream in (*keys.streams("default", "http"), *keys.streams("default", "render")):
-            assert await redis.xinfo_consumers(stream, "workers") == []
         lost = await replies(redis, keys, "c-1")
         assert sorted(r.task_id for r in lost) == ["c-1.1", "c-1.2"]
         assert all(r.error_kind == crawl_pb2.ERROR_KIND_WORKER_LOST for r in lost)
@@ -597,6 +601,91 @@ async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
         assert info.value.code() == grpc.StatusCode.NOT_FOUND
         await worker.register()  # đăng ký lại thì nhận việc tiếp
         assert not (await worker.lease(wait_ms=0)).drain
+
+
+async def test_prune_skips_worker_that_registered_again(redis: Redis, prefix: str) -> None:
+    # Prune đọc danh sách quá hạn, worker kịp Register lại và nhận việc mới trước khi prune xử lý
+    # tới nó: việc mới không bị trả `worker_lost` oan.
+    settings = make_settings(prefix)
+    keys = registry.Keys(prefix)
+    async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
+        await redis.zadd(keys.workers, {worker.worker_id: int(time.time() * 1000) - 1})
+        assert await registry.expired_workers(redis, keys) == [worker.worker_id]
+        await worker.register()
+        await queue_task(redis, keys, "c-1.1")
+        assert len((await worker.lease(wait_ms=0)).tasks) == 1
+        assert await dispatch.release_expired_worker(redis, keys, worker.worker_id) is None
+        assert await gw.servicer.prune() == []
+        assert await redis.hexists(keys.inflight(worker.worker_id), "c-1.1")  # pyright: ignore[reportGeneralTypeIssues]
+        assert await replies(redis, keys, "c-1") == []
+        assert await registry.live_pools(redis, keys) == {"default": 1}
+
+
+async def test_lease_drops_expired_and_records_in_one_step(redis: Redis, prefix: str) -> None:
+    settings = make_settings(prefix)
+    keys = registry.Keys(prefix)
+    stream = keys.stream("default", "http")
+    async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
+        now = int(time.time() * 1000)
+        await queue_task(redis, keys, "c-1.1", deadline_ms=now - 10)
+        await queue_task(redis, keys, "c-1.2")
+        # Entry kiểu cũ (chỉ `t`) vẫn được giao và ghi là worker đang giữ.
+        legacy = http_task("https://x.example.vn/legacy")
+        legacy.task_id = "c-1.3"
+        legacy.deadline_ms = now + 60_000
+        await redis.xadd(stream, {"t": legacy.SerializeToString()})
+        resp = await worker.lease(wait_ms=0)
+        assert sorted(t.task_id for t in resp.tasks) == ["c-1.2", "c-1.3"]
+        assert await redis.xlen(stream) == 0
+        held = await redis.hgetall(keys.inflight(worker.worker_id))  # pyright: ignore[reportGeneralTypeIssues]
+        assert sorted(held) == [b"c-1.2", b"c-1.3"]
+        assert await redis.get(keys.progress("default", "http")) == b"3"
+
+
+async def test_heartbeat_reconciles_tasks_the_worker_holds(
+    redis: Redis, prefix: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(prefix)
+    keys = registry.Keys(prefix)
+    async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
+        for task_id in ("c-1.1", "c-1.2"):
+            await queue_task(redis, keys, task_id)
+        assert len((await worker.lease(wait_ms=0)).tasks) == 2
+
+        def beat(*task_ids: str, reports: bool = True) -> Any:
+            return worker.stub.Heartbeat(
+                crawl_pb2.HeartbeatRequest(
+                    worker_id=worker.worker_id, task_ids=task_ids, reports_tasks=reports
+                )
+            )
+
+        # Vừa giao (chưa quá ORPHAN_GRACE_MS): worker chưa kể cũng chưa coi là mất.
+        resp = await beat("c-1.1")
+        assert list(resp.revoked_task_ids) == []
+        assert await redis.hlen(keys.inflight(worker.worker_id)) == 2  # pyright: ignore[reportGeneralTypeIssues]
+
+        monkeypatch.setattr(dispatch, "ORPHAN_GRACE_MS", 0)
+        # Worker cũ (không kể việc): không đối soát.
+        await beat(reports=False)
+        assert await redis.hlen(keys.inflight(worker.worker_id)) == 2  # pyright: ignore[reportGeneralTypeIssues]
+        # Worker không có c-1.2 (lời trả Lease không tới): trả `worker_lost` để backend gửi lại;
+        # worker kể c-1.9 mà gateway không ghi nhận: thu hồi.
+        resp = await beat("c-1.1", "c-1.9")
+        assert list(resp.revoked_task_ids) == ["c-1.9"]
+        [lost] = await replies(redis, keys, "c-1")
+        assert (lost.task_id, lost.error_kind) == ("c-1.2", crawl_pb2.ERROR_KIND_WORKER_LOST)
+        assert lost.error == dispatch.ORPHAN_ERROR
+        held = await redis.hgetall(keys.inflight(worker.worker_id))  # pyright: ignore[reportGeneralTypeIssues]
+        assert list(held) == [b"c-1.1"]
+        status = await registry.load_worker(redis, keys, worker.worker_id)
+        assert status is not None
+        assert status.lost == 1
+        # Kết quả muộn của việc đã trả `worker_lost`: bỏ; việc còn giữ: nhận.
+        resp = await worker.complete(
+            crawl_pb2.FetchResult(task_id="c-1.2", status=200),
+            crawl_pb2.FetchResult(task_id="c-1.1", status=200),
+        )
+        assert (resp.accepted, resp.dropped) == (1, 1)
 
 
 async def test_config_follows_settings_provider(redis: Redis, prefix: str) -> None:

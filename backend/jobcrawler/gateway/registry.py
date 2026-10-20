@@ -1,7 +1,8 @@
 """Danh sách worker lấy trang đang kết nối (Redis), dùng chung cho gateway, backend và giao diện.
 
 Khoá Redis (tiền tố `<REDIS_PREFIX>:gw`):
-- `workers`: sorted set worker_id → hạn báo sống (ms epoch). Quá hạn = đã rời / đã chết.
+- `workers`: sorted set worker_id → hạn báo sống (ms epoch, theo đồng hồ Redis `TIME`: gateway /
+  backend lệch giờ không làm worker bị coi là chết sớm). Quá hạn = đã rời / đã chết.
 - `worker:<id>`: JSON `WorkerStatus` (thông tin lúc đăng ký + số liệu lần báo sống gần nhất),
   TTL = hạn báo sống × 10 để trang Workers vẫn thấy worker vừa rời một lúc.
 - `drain`: set worker_id được yêu cầu dừng nhận việc (làm nốt rồi rời).
@@ -10,8 +11,9 @@ Khoá Redis (tiền tố `<REDIS_PREFIX>:gw`):
   song song, nhiều gateway), cùng TTL với `worker:<id>`; `load_worker` / `list_workers` ghép vào
   `WorkerStatus`.
 - `totals`: hash cùng các trường, cộng dồn mọi worker, không TTL (chỉ tăng).
-- `inflight:<id>`: hash task_id → deadline_ms của việc worker đang giữ (Lease ghi, Complete xoá;
-  worker rời / quá hạn báo sống thì gateway trả `ERROR_KIND_WORKER_LOST` cho từng việc còn lại).
+- `inflight:<id>`: hash task_id → `<deadline_ms>:<leased_ms>` của việc worker đang giữ (Lease ghi
+  cùng lúc lấy việc khỏi stream, Complete xoá; worker rời / quá hạn báo sống / không còn kể việc
+  trong Heartbeat thì gateway trả `ERROR_KIND_WORKER_LOST` cho việc đó).
 - `fetch:<pool>:<kind>[:hi]`: stream việc lấy trang (`:hi`: việc ưu tiên, giao trước).
 - `progress:<pool>:<kind>`: số entry gateway đã lấy khỏi stream của pool / loại việc (INCRBY mỗi
   Lease); backend thấy số này tăng thì hàng việc còn chạy, chờ tiếp.
@@ -31,6 +33,28 @@ DEFAULT_POOL = "default"
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+async def redis_now_ms(redis: Redis) -> int:
+    """Mốc hiện tại (ms) theo đồng hồ Redis: mốc chung để xét hạn báo sống."""
+    seconds, micros = await redis.time()
+    return int(seconds) * 1000 + int(micros) // 1000
+
+
+# Gia hạn báo sống theo đồng hồ Redis. KEYS: workers, worker:<id>, count:<id>. ARGV: worker_id,
+# hạn báo sống (ms), thời gian giữ thông tin (ms), JSON thông tin (rỗng: không ghi lại).
+_ALIVE = """
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+if ARGV[4] ~= '' then
+  redis.call('SET', KEYS[2], ARGV[4], 'PX', ARGV[3])
+else
+  redis.call('PEXPIRE', KEYS[2], ARGV[3])
+end
+redis.call('ZADD', KEYS[1], now + tonumber(ARGV[2]), ARGV[1])
+redis.call('PEXPIRE', KEYS[3], ARGV[3])
+return now
+"""
 
 
 class Keys:
@@ -121,25 +145,30 @@ class WorkerStatus(BaseModel):
     draining: bool = False
 
 
+async def _alive(redis: Redis, keys: Keys, worker_id: str, ttl: float, data: str) -> None:
+    await redis.eval(  # pyright: ignore[reportGeneralTypeIssues]
+        _ALIVE,
+        3,
+        keys.workers,
+        keys.worker(worker_id),
+        keys.counts(worker_id),
+        worker_id,
+        int(ttl * 1000),
+        int(ttl * 10_000),
+        data,
+    )
+
+
 async def save_worker(redis: Redis, keys: Keys, status: WorkerStatus, *, ttl: float) -> None:
     """Ghi thông tin worker và gia hạn báo sống `ttl` giây."""
-    now = _now_ms()
-    status.last_seen_ms = now
+    status.last_seen_ms = _now_ms()
     data = status.model_dump(mode="json", exclude={"alive", "draining"})
-    async with redis.pipeline(transaction=False) as pipe:
-        pipe.set(keys.worker(status.worker_id), json.dumps(data), px=int(ttl * 10_000))
-        pipe.zadd(keys.workers, {status.worker_id: now + int(ttl * 1000)})
-        pipe.pexpire(keys.counts(status.worker_id), int(ttl * 10_000))
-        await pipe.execute()
+    await _alive(redis, keys, status.worker_id, ttl, json.dumps(data))
 
 
 async def touch_worker(redis: Redis, keys: Keys, worker_id: str, *, ttl: float) -> None:
     """Gia hạn báo sống `ttl` giây, không ghi lại JSON (mỗi lần Lease)."""
-    async with redis.pipeline(transaction=False) as pipe:
-        pipe.zadd(keys.workers, {worker_id: _now_ms() + int(ttl * 1000)})
-        pipe.pexpire(keys.worker(worker_id), int(ttl * 10_000))
-        pipe.pexpire(keys.counts(worker_id), int(ttl * 10_000))
-        await pipe.execute()
+    await _alive(redis, keys, worker_id, ttl, "")
 
 
 COUNT_FIELDS = ("leased", "completed", "dropped", "lost")
@@ -204,7 +233,7 @@ async def list_workers(
 ) -> list[WorkerStatus]:
     """Worker đã biết (sống trước, theo pool rồi id). `include_gone`: kèm worker vừa rời (còn
     trong TTL của `worker:<id>`)."""
-    now = _now_ms()
+    now = await redis_now_ms(redis)
     members: list[tuple[Any, float]] = await redis.zrange(keys.workers, 0, -1, withscores=True)
     expiry = {_text(m): int(score) for m, score in members}
     draining = {_text(m) for m in await redis.smembers(keys.drain)}  # pyright: ignore[reportGeneralTypeIssues]
@@ -235,7 +264,7 @@ async def list_workers(
 
 async def live_pools(redis: Redis, keys: Keys) -> dict[str, int]:
     """Số worker còn sống theo pool."""
-    alive = await redis.zrangebyscore(keys.workers, _now_ms(), "+inf")
+    alive = await redis.zrangebyscore(keys.workers, await redis_now_ms(redis), "+inf")
     if not alive:
         return {}
     raws = await redis.mget([keys.worker(_text(w)) for w in alive])
@@ -250,7 +279,7 @@ async def live_pools(redis: Redis, keys: Keys) -> dict[str, int]:
 async def live_capacity(redis: Redis, keys: Keys) -> dict[str, dict[str, int]]:
     """Số worker còn sống theo pool và loại việc: `http` (mọi worker), `render` (worker đăng ký
     `render_slots` > 0)."""
-    alive = await redis.zrangebyscore(keys.workers, _now_ms(), "+inf")
+    alive = await redis.zrangebyscore(keys.workers, await redis_now_ms(redis), "+inf")
     if not alive:
         return {}
     raws = await redis.mget([keys.worker(_text(w)) for w in alive])
@@ -267,13 +296,9 @@ async def live_capacity(redis: Redis, keys: Keys) -> dict[str, dict[str, int]]:
 
 
 async def expired_workers(redis: Redis, keys: Keys) -> list[str]:
-    """Worker quá hạn báo sống nhưng chưa bị `prune`."""
-    return [_text(w) for w in await redis.zrangebyscore(keys.workers, "-inf", _now_ms())]
-
-
-async def prune(redis: Redis, keys: Keys) -> int:
-    """Bỏ worker quá hạn báo sống khỏi danh sách sống. Trả số worker bị bỏ."""
-    return int(await redis.zremrangebyscore(keys.workers, "-inf", _now_ms()))
+    """Worker quá hạn báo sống nhưng chưa bị prune (`dispatch.release_expired_worker`)."""
+    now = await redis_now_ms(redis)
+    return [_text(w) for w in await redis.zrangebyscore(keys.workers, "-inf", now)]
 
 
 async def request_drain(redis: Redis, keys: Keys, worker_id: str, *, drain: bool = True) -> None:

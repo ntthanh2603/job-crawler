@@ -4,15 +4,19 @@ Một request = một `FetchTask`. Proxy: backend chỉ định (PROXY_MODE=cent
 thì ghi vào `task.proxy`; không thì worker tự chọn proxy của mình (PROXY_MODE=worker) hoặc đi
 thẳng (`direct`, PROXY_MODE=off).
 
-Worker giữ việc mà rời / chết (`ERROR_KIND_WORKER_LOST`, gateway báo): gửi lại ngay
-LOST_RESUBMITS lần (cả việc render, vốn không được `HttpClient` thử lại); vẫn mất thì là
+Worker giữ việc mà rời / chết / không nhận được việc (`ERROR_KIND_WORKER_LOST`, gateway báo): gửi
+lại sau LOST_RESUBMIT_DELAY_SECONDS (ngẫu nhiên ×1–2, để việc của một worker vừa chết không dồn
+lại cùng một lúc) tối đa LOST_RESUBMITS lần (cả việc render, vốn không được `HttpClient` thử lại);
+vẫn mất thì là
 `TransportError("other", "worker_lost: ...")`, `HttpClient.fetch` thử lại như lỗi kết nối nhưng
 không tính lỗi cho proxy.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json as jsonlib
+import random
 from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlencode
@@ -40,6 +44,7 @@ _ERROR_KINDS: dict[int, TransportErrorKind] = {
 }
 MIN_BODY_LIMIT = 64 * 1024 * 1024
 LOST_RESUBMITS = 1
+LOST_RESUBMIT_DELAY_SECONDS = 0.5
 
 
 def encode_body(
@@ -153,8 +158,9 @@ class _Remote:
         for _ in range(LOST_RESUBMITS):
             if result.error_kind != crawl_pb2.ERROR_KIND_WORKER_LOST:
                 break
-            # Việc chưa chạy xong ở worker đã mất: gửi lại (task_id, deadline mới) ngay.
+            # Việc chưa chạy xong ở worker đã mất: gửi lại (task_id, deadline mới).
             log.info("fetch.worker_lost", url=task.url, worker_id=result.worker_id)
+            await asyncio.sleep(LOST_RESUBMIT_DELAY_SECONDS * random.uniform(1.0, 2.0))
             result = await self.client.submit(task)
         return to_raw_response(result, task.url, max_body=self._max_body)
 
