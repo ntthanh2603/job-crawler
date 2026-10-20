@@ -19,9 +19,10 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
 
-from jobcrawler.logging import get_logger
-from jobcrawler.net.kv import KeyValueStore
-from jobcrawler.net.urls import (
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.pages import Link, extract_links, node_text, parse
+from jobcrawler.common.text import strip_accents
+from jobcrawler.common.urls import (
     host_of,
     normalize_url,
     parse_domain_input,
@@ -30,8 +31,8 @@ from jobcrawler.net.urls import (
     same_site,
     strip_www,
 )
-from jobcrawler.pages import Link, extract_links, node_text, parse
 from jobcrawler.prompts import careers_pick
+from jobcrawler.services.net.kv import KeyValueStore
 from jobcrawler.sources import ats
 from jobcrawler.sources.ats.ref import AtsRef
 from jobcrawler.sources.base import Source, SourceError, SourceSession
@@ -43,7 +44,6 @@ from jobcrawler.sources.careers import (
     listing_links,
     scan_with_render,
 )
-from jobcrawler.text import strip_accents
 
 log = get_logger(__name__)
 

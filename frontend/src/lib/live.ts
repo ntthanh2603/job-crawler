@@ -1,4 +1,4 @@
-// Cập nhật trực tiếp qua Server-Sent Events (`GET /api/events`, backend/jobcrawler/web/live.py).
+// Cập nhật trực tiếp qua Server-Sent Events (`GET /api/events`, backend/jobcrawler/modules/live/live.py).
 //
 // Một EventSource mỗi tab mang mọi chủ đề mà các trang đang mở cần (trình duyệt chỉ mở 6 kết nối
 // HTTP/1.1 tới một origin). Mỗi sự kiện là một `LiveOut`, ghi thẳng vào cache React Query đúng khoá

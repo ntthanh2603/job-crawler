@@ -19,8 +19,8 @@ import pytest
 from dotenv import dotenv_values
 from sqlalchemy import make_url
 
-from jobcrawler.config import Settings
-from jobcrawler.db import migrate
+from jobcrawler.common.config import Settings
+from jobcrawler.database import migrate
 
 pytestmark = pytest.mark.integration
 

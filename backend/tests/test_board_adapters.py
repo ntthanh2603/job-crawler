@@ -12,10 +12,10 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
-from jobcrawler.schemas import ExtractionMethod
+from jobcrawler.common.schemas import ExtractionMethod
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
 from jobcrawler.sources import boards
 from jobcrawler.sources.base import SourceSession
 from jobcrawler.sources.boards.base import (

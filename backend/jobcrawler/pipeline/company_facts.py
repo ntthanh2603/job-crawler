@@ -16,10 +16,10 @@ from typing import Literal
 from rapidfuzz import fuzz
 from selectolax.lexbor import LexborHTMLParser, LexborNode
 
-from jobcrawler.net.urls import registrable_domain, same_site
-from jobcrawler.pages import Link, meta_content, node_text, parse
+from jobcrawler.common.pages import Link, meta_content, node_text, parse
+from jobcrawler.common.text import fold, normalize_company_name, strip_accents
+from jobcrawler.common.urls import registrable_domain, same_site
 from jobcrawler.sources import jsonld
-from jobcrawler.text import fold, normalize_company_name, strip_accents
 
 Kind = Literal["website", "registry", "other"]
 HIDDEN = "[liên hệ đã ẩn]"

@@ -9,11 +9,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import make_url, select, text
 
-from jobcrawler.config import Settings
-from jobcrawler.db import compress
-from jobcrawler.db.compress import Codec, Kind, TrainOptions
-from jobcrawler.db.models import JobPosting
-from jobcrawler.resources import open_resources
+from jobcrawler.common.config import Settings
+from jobcrawler.database import compress
+from jobcrawler.database.compress import Codec, Kind, TrainOptions
+from jobcrawler.database.models import JobPosting
+from jobcrawler.services.resources import open_resources
 
 from ..test_compress import samples
 

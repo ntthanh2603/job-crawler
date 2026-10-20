@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.text import (
+from jobcrawler.common.text import (
     company_match_key,
     distinctive_key,
     normalize_company_name,

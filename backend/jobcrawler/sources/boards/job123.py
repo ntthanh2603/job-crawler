@@ -19,8 +19,8 @@ import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import clean_text, parse
+from jobcrawler.common.pages import clean_text, parse
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.base import SourceError, SourceSession
 from jobcrawler.sources.boards.base import (
     BoardEntry,

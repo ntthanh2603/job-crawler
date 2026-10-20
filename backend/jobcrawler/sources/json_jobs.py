@@ -25,9 +25,9 @@ from datetime import datetime
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import parse
-from jobcrawler.schemas import ExtractionMethod, RawJob
+from jobcrawler.common.pages import parse
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.base import parse_datetime
 from jobcrawler.sources.jsonld import external_id_for_url
 

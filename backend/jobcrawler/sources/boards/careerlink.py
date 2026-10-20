@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import re
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import parse
+from jobcrawler.common.pages import parse
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.boards.base import ListingBoard, ProfileRef
 
 

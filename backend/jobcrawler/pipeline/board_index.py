@@ -39,12 +39,19 @@ from sqlalchemy import case, func, insert, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from jobcrawler.db.models import BoardIndexRun, FailedPage, JobPosting, SourceFetch, SourceProfile
-from jobcrawler.llm import LLMClient
-from jobcrawler.logging import get_logger
-from jobcrawler.net.http import Fetcher, FetchResult
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import JobStatus, RunStatus
+from jobcrawler.common.text import company_match_key
+from jobcrawler.database.models import (
+    BoardIndexRun,
+    FailedPage,
+    JobPosting,
+    SourceFetch,
+    SourceProfile,
+)
 from jobcrawler.pipeline.profiles import map_profiles
-from jobcrawler.schemas import JobStatus, RunStatus
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import Fetcher, FetchResult
 from jobcrawler.sources.base import (
     FetchRecord,
     SourceError,
@@ -59,7 +66,6 @@ from jobcrawler.sources.boards.base import (
     ListingState,
     ProfileRef,
 )
-from jobcrawler.text import company_match_key
 
 log = get_logger(__name__)
 

@@ -21,16 +21,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from jobcrawler.llm import LLMClient
-from jobcrawler.logging import get_logger
-from jobcrawler.net.http import Fetcher, FetchResult
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.text import strip_accents
+from jobcrawler.common.urls import normalize_url
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import Fetcher, FetchResult
 from jobcrawler.sources.plan import PlanSpec
-from jobcrawler.text import strip_accents
 
 if TYPE_CHECKING:
-    from jobcrawler.config import Settings
+    from jobcrawler.common.config import Settings
 
 log = get_logger(__name__)
 

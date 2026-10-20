@@ -12,8 +12,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from jobcrawler.net.urls import host_of
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.urls import host_of
 from jobcrawler.sources.ats.ref import RESERVED_SUBDOMAINS, AtsRef, AtsSpec
 from jobcrawler.sources.base import (
     Source,

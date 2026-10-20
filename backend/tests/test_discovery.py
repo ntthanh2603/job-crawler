@@ -5,10 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
-from jobcrawler.net.kv import MemoryKV
+from jobcrawler.common.schemas import FetchOutcome
 from jobcrawler.pipeline.discovery import (
     brand_careers_site,
     careers_score,
@@ -16,7 +13,10 @@ from jobcrawler.pipeline.discovery import (
     discover,
     sources_for,
 )
-from jobcrawler.schemas import FetchOutcome
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.sources.ats.greenhouse import GreenhouseSource
 from jobcrawler.sources.base import SourceSession
 from jobcrawler.sources.careers import CareersSource

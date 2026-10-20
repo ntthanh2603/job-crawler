@@ -14,11 +14,11 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
    service đó.
 3. **Không sửa tay mã sinh từ proto** (`proto/jcproto/v1/*_pb2*.py[i]`): sửa `crawl.proto` rồi
    `task proto:gen`, commit cả `.proto` lẫn mã sinh. Tương tự **spec API** (`backend/openapi.json`,
-   `frontend/src/lib/gen/` do orval sinh): sửa mô hình trả về (`...Out` trong `web/api.py`,
-   `web/settings_api.py`) rồi `task api`, commit cả hai.
+   `frontend/src/lib/gen/` do orval sinh): sửa mô hình trả về (`...Out` trong
+   `modules/*/schemas.py`) rồi `task api`, commit cả hai.
 4. **Schema chỉ đổi bằng revision Alembic mới** (`task backend:migration NAME="mô tả"` =
    `jobcrawler db revision`), xem lại file sinh ra trước khi commit. Không sửa revision đã áp dụng.
-5. **Test không gọi mạng ngoài**: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
+5. **Test không gọi mạng ngoài**: nguồn dùng `jobcrawler.services.fakes.FakeFetcher`, LLM dùng
    `FakeChatClient`, worker dùng gateway giả (`worker/tests/worker_fakes.py`) + server HTTP cục bộ.
 6. **Không commit bí mật**: mọi `.env` (gốc, `backend/`, `worker/`), file proxy
    (`proxies.txt`, `*/config/*proxies*.txt` trừ file `.example`), chứng chỉ / khoá TLS.
@@ -43,7 +43,7 @@ triển khai: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 | Thư mục                | Nội dung                                                                              |
 | ---------------------- | ------------------------------------------------------------------------------------- |
-| `backend/`             | service backend (gói `jobcrawler`, một image): API JSON (`jobcrawler/web/`), gateway gRPC (`gateway/`), runner / scheduler, DB (`db/`), pipeline, nguồn (`sources/`), CLI (`entrypoints/cli.py`); `scripts/` (export OpenAPI, loadtest); `openapi.json` |
+| `backend/`             | service backend (gói `jobcrawler`, một image): chia như `core-api/src` của open-asm: `bootstrap/` (CLI `cli.py`, app FastAPI `app.py`, process gateway / runner / scheduler), `modules/<tính năng>/` (`router.py`, `schemas.py`, service), `services/` (hạ tầng: Redis, HTTP / proxy, LLM), `database/` (model, Alembic), `common/`, `pipeline/`, `sources/`; `scripts/` (export OpenAPI, loadtest); `openapi.json` |
 | `worker/`              | service worker (gói `jobworker`): lấy trang (curl_cffi + Chromium, proxy riêng), gọi gateway qua gRPC; `config/` proxy mẫu |
 | `frontend/`            | service web: React + Vite + Tailwind + shadcn/ui, image nginx (`nginx/`) phục vụ bản build và chuyển `/api` tới backend |
 | `proto/`               | thư viện hợp đồng gRPC dùng chung: `jcproto/v1/crawl.proto` + mã sinh sẵn, `scripts/gen.py` |
@@ -108,7 +108,7 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
    chỉ cho `ENV_ONLY` (kết nối / bí mật hạ tầng / gateway / đăng nhập / log, không trả ra API).
    Mục `live=False` đọc lúc khởi động: `jobcrawler serve` tự khởi động lại process con khi chúng
    đổi (bộ đếm Redis `settings:restart`); cài đặt mới thêm vào `GROUPS` của
-   `services/app_settings.py`, không thêm vào `backend/.env.example`.
+   `modules/settings/app_settings.py`, không thêm vào `backend/.env.example`.
 4. **Cron** (`MAINTENANCE_CRON`, `BOARD_INDEX_CRON`, `BOARD_TAIL_CRON`…) và khung build / poll tính
    theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh), không phải UTC. Windows cần gói `tzdata` (đã có).
 5. **Image Docker phải `--reinstall-package`** chính service và `jobcrawler-proto`: cache của uv cho
@@ -130,20 +130,21 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
     major lúc chạy (`protobuf>=7.35.1,<8`): nâng bản thì `task proto:gen` rồi commit lại, không thì
     `proto:gen:check` (CI) đỏ. ruff / pyright bỏ qua file `*_pb2*`.
 12. **Test tích hợp chập chờn trên Windows** (`WinError 64` khi nối Redis): chạy lại riêng file đó.
-13. **Endpoint mới trả mô hình `...Out`** (gốc `ApiOut`), không trả `dict`: test bắt endpoint JSON
-    không có mô hình. Mô hình chép từ dataclass của services thì thêm vào `MIRRORS` trong
-    `tests/test_openapi.py`. Trường lấy từ Redis / JSON tự do (không có ràng buộc ở DB) đừng kiểm
-    bằng enum / `Literal`: giá trị lạ làm endpoint lỗi 500 — dùng `known_values(...)` để spec vẫn
-    liệt kê giá trị.
+13. **Endpoint mới trả mô hình `...Out`** (gốc `ApiOut` ở `common/api.py`), không trả `dict`: test
+    bắt endpoint JSON không có mô hình. Endpoint đặt ở `modules/<tính năng>/router.py`, mô hình ở
+    `schemas.py` cùng module; router mới phải ghi vào `ROUTERS` của `bootstrap/app.py`. Mô hình chép
+    từ dataclass của service thì thêm vào `MIRRORS` trong `tests/test_openapi.py`. Trường lấy từ
+    Redis / JSON tự do (không có ràng buộc ở DB) đừng kiểm bằng enum / `Literal`: giá trị lạ làm
+    endpoint lỗi 500 — dùng `known_values(...)` để spec vẫn liệt kê giá trị.
 14. **Giao diện gọi API qua hàm / hook orval sinh** (`@/lib/gen/queries`, như open-asm), không
     `fetch` tay. orval không mã hoá tham số path: id tự do phải `encodeURIComponent`.
     openapi-typescript / hey-api không chạy được với TypeScript 7 (cần API compiler của TS 5).
-15. **Đăng nhập là JWT** (`web/auth.py`): test gọi API có `UI_PASSWORD` thì tự ký token
+15. **Đăng nhập là JWT** (`modules/auth/auth.py`): test gọi API có `UI_PASSWORD` thì tự ký token
     (`app.state.token_auth.issue()`) và gửi `Authorization: Bearer` — không còn HTTP Basic.
     Trường bí mật / proxy của `app_settings` lưu mã hoá (`secretbox`, `app_settings.SENSITIVE`):
     đọc bảng thẳng thì giải mã bằng `secretbox.current()`; thêm cài đặt bí mật mới (kind `secret`)
     là tự được mã hoá.
-16. **Worker xác thực bằng token riêng** (`gateway/worker_auth.py`): `GATEWAY_TOKEN` / khoá một lần
+16. **Worker xác thực bằng token riêng** (`modules/gateway/worker_auth.py`): `GATEWAY_TOKEN` / khoá một lần
     chỉ để `Register`; RPC khác cần `worker_token` đúng `worker_id`. Worker giả trong test gateway
     phải đổi metadata sang `RegisterResponse.worker_token` sau khi đăng ký.
 17. **Khoá phân tán dùng `locks.RedisLease`** (scheduler leader, bảo trì), không dùng khoá advisory

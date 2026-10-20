@@ -6,8 +6,8 @@ import random
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from jobcrawler.db import compress
-from jobcrawler.db.compress import (
+from jobcrawler.database import compress
+from jobcrawler.database.compress import (
     HEADER_SIZE,
     Codec,
     CorruptValueError,

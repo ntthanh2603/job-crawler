@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from jobcrawler.pages import parse
+from jobcrawler.common.pages import parse
 from jobcrawler.sources.boards.base import ProfilePage, SitemapBoard
 
 _BRAND = re.compile(r"^https://www\.topcv\.vn/brand/(?P<slug>[^/?]+)$")

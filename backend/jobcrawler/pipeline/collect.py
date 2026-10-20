@@ -18,10 +18,10 @@ from dataclasses import dataclass, field
 
 import structlog
 
-from jobcrawler.llm import LLMClient
-from jobcrawler.logging import get_logger
-from jobcrawler.net.http import Fetcher
-from jobcrawler.schemas import FetchOutcome, RawJob
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import FetchOutcome, RawJob
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import Fetcher
 from jobcrawler.sources.base import (
     FetchRecord,
     KnownJobs,

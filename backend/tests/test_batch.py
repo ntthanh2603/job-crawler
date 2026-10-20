@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from jobcrawler.services import batch
-from jobcrawler.services.batch import CsvFormatError, clean_tax_code, parse_companies_csv
+from jobcrawler.modules.companies import batch
+from jobcrawler.modules.companies.batch import CsvFormatError, clean_tax_code, parse_companies_csv
 
 
 def test_parse_spec_columns() -> None:

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.net.proxy_pool import (
+from jobcrawler.services.net.kv import MemoryKV
+from jobcrawler.services.net.proxy_pool import (
     NoProxyAvailableError,
     Proxy,
     ProxyParseError,

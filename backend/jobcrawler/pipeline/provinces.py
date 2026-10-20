@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from functools import cache
 
-from jobcrawler.text import fold
+from jobcrawler.common.text import fold
 
 # Tên chuẩn → cách viết khác (đã bỏ dấu, viết thường; tên chuẩn tự được thêm).
 PROVINCES: dict[str, tuple[str, ...]] = {

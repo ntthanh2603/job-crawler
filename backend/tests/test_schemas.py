@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from jobcrawler.schemas import CompanyIn, JobLevel, JobOut
+from jobcrawler.common.schemas import CompanyIn, JobLevel, JobOut
 
 
 def test_company_in_cleans_blanks() -> None:

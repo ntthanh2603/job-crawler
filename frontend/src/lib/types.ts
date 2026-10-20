@@ -1,5 +1,5 @@
 // Kiểu dữ liệu của API: alias tới kiểu orval sinh từ spec của backend (src/lib/gen/queries.ts ←
-// backend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/web/api.py, settings_api.py;
+// backend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/modules/*/schemas.py;
 // `npm run gen:api` sinh lại). Chỉ viết tay phần spec không tả được (JSON tự do lưu trong DB).
 import type * as S from "@/lib/gen/queries"
 
@@ -61,7 +61,7 @@ export type Stats = S.StatsOut
 
 export type Pair = [string, number]
 
-/** Phân bố trên job đang mở / doanh nghiệp — tính sẵn bằng cron (services/overview.py). */
+/** Phân bố trên job đang mở / doanh nghiệp — tính sẵn bằng cron (modules/overview/overview.py). */
 export type Charts = S.ChartsOut
 
 export type Overview = S.OverviewOut
@@ -152,7 +152,7 @@ export type CrawlStatus = S.CrawlStatusOut
 export type AuditChange = { before: unknown; after: unknown }
 
 /** `actor`: tên đăng nhập, `system` (CLI, cron) hoặc `anonymous`; `action`: tên có chấm, ổn định
- * (`settings.update`, `company.build`...). `changes` là JSON tự do: dạng ghi ở services/audit.py. */
+ * (`settings.update`, `company.build`...). `changes` là JSON tự do: dạng ghi ở modules/audit/audit.py. */
 export type AuditEvent = Omit<S.AuditEventOut, "changes"> & { changes: Record<string, AuditChange> | null }
 
 /** Một trang nhật ký; `next` = id truyền vào `before` để lấy trang sau, `null` khi đã hết. */

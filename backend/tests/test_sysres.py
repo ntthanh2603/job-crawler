@@ -1,12 +1,12 @@
-"""`jobcrawler.sysres`: số job song song tự động của runner theo CPU / RAM."""
+"""`jobcrawler.common.sysres`: số job song song tự động của runner theo CPU / RAM."""
 
 from __future__ import annotations
 
 import pytest
 
-from jobcrawler import sysres
-from jobcrawler.config import Settings
-from jobcrawler.entrypoints.runner import concurrency
+from jobcrawler.bootstrap.runner import concurrency
+from jobcrawler.common import sysres
+from jobcrawler.common.config import Settings
 
 GIB = 1024**3
 

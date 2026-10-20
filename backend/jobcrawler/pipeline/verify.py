@@ -25,10 +25,10 @@ from uuid import UUID
 
 from rapidfuzz import fuzz
 
-from jobcrawler.llm import LLMClient, cache_key, cached_structured
-from jobcrawler.logging import get_logger
-from jobcrawler.net.kv import KeyValueStore
-from jobcrawler.net.urls import host_of, path_segments, registrable_domain
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import ExtractionMethod
+from jobcrawler.common.text import fold, normalize_company_name
+from jobcrawler.common.urls import host_of, path_segments, registrable_domain
 from jobcrawler.pipeline import provinces
 from jobcrawler.pipeline.dedup import (
     Signatures,
@@ -39,8 +39,8 @@ from jobcrawler.pipeline.dedup import (
 )
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.prompts import job_verify
-from jobcrawler.schemas import ExtractionMethod
-from jobcrawler.text import fold, normalize_company_name
+from jobcrawler.services.llm import LLMClient, cache_key, cached_structured
+from jobcrawler.services.net.kv import KeyValueStore
 
 log = get_logger(__name__)
 

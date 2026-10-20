@@ -5,10 +5,10 @@ import contextlib
 import time
 from collections.abc import AsyncIterator
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.pipeline.collect import collect
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.base import FetchRecord, Source, SourceError, SourceLimits, SourceSession
 
 

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import re
 
-from jobcrawler.net.urls import host_of, normalize_url, same_site
-from jobcrawler.pages import clean_text, parse
+from jobcrawler.common.pages import clean_text, parse
+from jobcrawler.common.urls import host_of, normalize_url, same_site
 from jobcrawler.sources.boards.base import ProfileRef, SitemapBoard, is_social_host
 
 

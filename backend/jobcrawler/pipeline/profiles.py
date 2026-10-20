@@ -23,15 +23,15 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, CompanyAlias, SourceProfile
-from jobcrawler.llm import LLMClient
-from jobcrawler.logging import get_logger
-from jobcrawler.net.urls import parse_domain_input, registrable_domain
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import KycStatus
+from jobcrawler.common.text import branch_of, company_match_key
+from jobcrawler.common.urls import parse_domain_input, registrable_domain
+from jobcrawler.database.models import Company, CompanyAlias, SourceProfile
 from jobcrawler.pipeline.company_facts import names_match
 from jobcrawler.pipeline.kyc import trigram_compatible
 from jobcrawler.prompts import profile_match
-from jobcrawler.schemas import KycStatus
-from jobcrawler.text import branch_of, company_match_key
+from jobcrawler.services.llm import LLMClient
 
 log = get_logger(__name__)
 

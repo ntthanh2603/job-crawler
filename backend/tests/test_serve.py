@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from jobcrawler.entrypoints.serve import Supervisor, child_commands
+from jobcrawler.bootstrap.serve import Supervisor, child_commands
 
 
 class FakeProc:
@@ -55,7 +55,7 @@ def _supervisor(procs: dict[str, FakeProc], **kw: object) -> Supervisor:
 def test_child_commands() -> None:
     cmds = child_commands("0.0.0.0", 8000)
     assert list(cmds) == ["api", "gateway", "scheduler", "runner"]
-    assert cmds["api"][:3] == [sys.executable, "-m", "jobcrawler.entrypoints.cli"]
+    assert cmds["api"][:3] == [sys.executable, "-m", "jobcrawler.bootstrap.cli"]
     assert cmds["api"][3:] == ["api", "--host", "0.0.0.0", "--port", "8000"]
     assert cmds["runner"][3:] == ["runner"]
 

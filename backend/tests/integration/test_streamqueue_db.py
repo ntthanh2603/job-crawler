@@ -13,9 +13,9 @@ from uuid import uuid4
 import pytest
 from redis.asyncio import Redis
 
-from jobcrawler.config import Settings
-from jobcrawler.queues import drop_queue
-from jobcrawler.streamqueue import GROUP, CronJob, StreamQueue, StreamWorker
+from jobcrawler.common.config import Settings
+from jobcrawler.services.redis.queues import drop_queue
+from jobcrawler.services.redis.streamqueue import GROUP, CronJob, StreamQueue, StreamWorker
 
 pytestmark = pytest.mark.integration
 

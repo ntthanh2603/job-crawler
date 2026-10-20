@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
 from jobcrawler.pipeline.normalize import NormalizedJob, normalize_job
-from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources import boards
 
 FIXTURES = Path(__file__).parent / "fixtures"

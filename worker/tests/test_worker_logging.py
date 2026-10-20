@@ -1,4 +1,4 @@
-"""Log của worker không lộ mật khẩu proxy / token (cùng quy tắc với `jobcrawler.logging`)."""
+"""Log của worker không lộ mật khẩu proxy / token (cùng quy tắc với `jobcrawler.common.logging`)."""
 
 from __future__ import annotations
 

@@ -14,8 +14,9 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import (
+from jobcrawler.bootstrap.app import create_app
+from jobcrawler.common.config import Settings
+from jobcrawler.database.models import (
     Company,
     CompanyAlias,
     CompanyRun,
@@ -26,9 +27,8 @@ from jobcrawler.db.models import (
     SourceFetch,
     SourceProfile,
 )
-from jobcrawler.queues import drop_queue, make_queue
-from jobcrawler.services import maintenance
-from jobcrawler.web.app import create_app
+from jobcrawler.modules.maintenance import maintenance
+from jobcrawler.services.redis.queues import drop_queue, make_queue
 
 pytestmark = pytest.mark.integration
 
@@ -547,7 +547,7 @@ async def test_create_company_by_hand(web: Seed) -> None:
 
 
 async def test_import_sample_csv(web: Seed) -> None:
-    from jobcrawler.services import batch
+    from jobcrawler.modules.companies import batch
 
     r = await web.client.get("/api/companies/import/sample.csv")
     assert r.status_code == 200

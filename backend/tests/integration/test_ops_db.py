@@ -14,14 +14,15 @@ from uuid import uuid4
 import pytest
 from redis.asyncio import Redis
 
-from jobcrawler import heartbeat
-from jobcrawler.config import Settings
-from jobcrawler.entrypoints import runner, scheduler
-from jobcrawler.net.http import FetchResult
-from jobcrawler.queues import drop_queue
-from jobcrawler.resources import open_resources
-from jobcrawler.schemas import FetchOutcome
-from jobcrawler.services import crawl, overview, schedule, sla
+from jobcrawler.bootstrap import runner, scheduler
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.modules.crawl import crawl, schedule, sla
+from jobcrawler.modules.overview import overview
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.redis import heartbeat
+from jobcrawler.services.redis.queues import drop_queue
+from jobcrawler.services.resources import open_resources
 
 pytestmark = pytest.mark.integration
 
@@ -187,7 +188,7 @@ async def test_cache_keys_go_to_cache_redis(integration_settings: Settings) -> N
 
 
 async def test_redis_lease_one_holder_renew_release_expire(integration_settings: Settings) -> None:
-    from jobcrawler.locks import RedisLease
+    from jobcrawler.services.redis.locks import RedisLease
 
     settings = tagged(integration_settings)
     redis = Redis.from_url(settings.redis_url)
@@ -220,7 +221,7 @@ async def test_redis_lease_one_holder_renew_release_expire(integration_settings:
 
 
 async def test_redis_lease_lost_cancels_the_body(integration_settings: Settings) -> None:
-    from jobcrawler.locks import LeaseLost, RedisLease
+    from jobcrawler.services.redis.locks import LeaseLost, RedisLease
 
     settings = tagged(integration_settings)
     redis = Redis.from_url(settings.redis_url)

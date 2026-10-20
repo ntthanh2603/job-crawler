@@ -10,20 +10,20 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from jobcrawler.fakes import FakeRenderer, FakeTransport, response
-from jobcrawler.net.direct import DirectTransport
-from jobcrawler.net.http import (
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.services.fakes import FakeRenderer, FakeTransport, response
+from jobcrawler.services.net.direct import DirectTransport
+from jobcrawler.services.net.http import (
     CapturedJson,
     HttpClient,
     HttpConfig,
     decode_body,
     parse_retry_after,
 )
-from jobcrawler.net.http import TransportError as TErr
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.net.proxy_pool import ProxyPool, parse_proxy_line
-from jobcrawler.net.ratelimit import MemoryRateLimiter
-from jobcrawler.schemas import FetchOutcome
+from jobcrawler.services.net.http import TransportError as TErr
+from jobcrawler.services.net.kv import MemoryKV
+from jobcrawler.services.net.proxy_pool import ProxyPool, parse_proxy_line
+from jobcrawler.services.net.ratelimit import MemoryRateLimiter
 
 from .conftest import FakeClock
 

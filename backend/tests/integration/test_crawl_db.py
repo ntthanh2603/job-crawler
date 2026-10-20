@@ -15,13 +15,8 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import delete, func, select, update
 
-from jobcrawler.config import Settings
-from jobcrawler.db import fencing
-from jobcrawler.db.models import Company, CompanyRun, CompanySchedule, CrawlPlan, Job
-from jobcrawler.fakes import FakeFetcher
-from jobcrawler.queues import drop_queue
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import (
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import (
     JobStatus,
     KycStatus,
     PlanStatus,
@@ -29,7 +24,12 @@ from jobcrawler.schemas import (
     RunTrigger,
     ScheduleState,
 )
-from jobcrawler.services import crawl, sla
+from jobcrawler.database import fencing
+from jobcrawler.database.models import Company, CompanyRun, CompanySchedule, CrawlPlan, Job
+from jobcrawler.modules.crawl import crawl, sla
+from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.redis.queues import drop_queue
+from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
 
 pytestmark = pytest.mark.integration
@@ -304,7 +304,7 @@ async def test_company_lock_fences_writes_of_stale_holder(
 async def test_scheduler_tick_builds_new_and_polls_ready(
     env: tuple[Resources, Site, UUID],
 ) -> None:
-    from jobcrawler.services import schedule
+    from jobcrawler.modules.crawl import schedule
 
     res, _site, company_id = env
     now = datetime.now(UTC)

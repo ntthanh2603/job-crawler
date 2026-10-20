@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from jobcrawler import config
-from jobcrawler.config import Settings, parse_window
+from jobcrawler.common import config
+from jobcrawler.common.config import Settings, parse_window
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

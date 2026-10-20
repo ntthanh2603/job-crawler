@@ -3,7 +3,8 @@
 Mọi event đi qua `redact_secrets` trước renderer: mật khẩu trong URL (proxy tại worker hay đi kèm
 `user:pass@`), token `Bearer`, tham số bí mật trong query string và giá trị của khoá có tên giống bí
 mật (`password`, `token`, `authorization`...) được thay bằng `***`, kể cả trong thông điệp lỗi của
-traceback. Cùng quy tắc với `jobcrawler.logging` của backend (worker không phụ thuộc jobcrawler).
+traceback. Cùng quy tắc với `jobcrawler.common.logging` của backend (worker không phụ thuộc
+jobcrawler).
 """
 
 from __future__ import annotations

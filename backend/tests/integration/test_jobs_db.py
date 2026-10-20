@@ -13,16 +13,16 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from typer.testing import CliRunner
 
-from jobcrawler.config import Settings, get_settings
-from jobcrawler.db.models import Company, Job, JobPosting
-from jobcrawler.fakes import FakeFetcher
+from jobcrawler.common.config import Settings, get_settings
+from jobcrawler.common.schemas import CompanyIn, JobOut, JobStatus
+from jobcrawler.database.models import Company, Job, JobPosting
+from jobcrawler.modules.crawl.companies import process_company
+from jobcrawler.modules.jobs import export as export_service
+from jobcrawler.modules.maintenance import maintenance
 from jobcrawler.pipeline import dedup, store
 from jobcrawler.pipeline.verify import Verdict
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import CompanyIn, JobOut, JobStatus
-from jobcrawler.services import export as export_service
-from jobcrawler.services import maintenance
-from jobcrawler.services.companies import process_company
+from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
 
 from ..boards_fake import FakeBoard, fake_site
@@ -406,7 +406,7 @@ async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
 def test_cli_export(
     integration_settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from jobcrawler.entrypoints.cli import app
+    from jobcrawler.bootstrap.cli import app
 
     monkeypatch.setenv("DATABASE_URL", integration_settings.database_url)
     monkeypatch.setenv("REDIS_PREFIX", f"jctest:{uuid4().hex[:8]}")

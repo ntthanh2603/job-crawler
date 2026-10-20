@@ -7,11 +7,11 @@ import dataclasses
 import json
 from typing import Any
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import CapturedJson
-from jobcrawler.schemas import RawJob
-from jobcrawler.services.crawl import suspicious_drop
+from jobcrawler.common.schemas import RawJob
+from jobcrawler.modules.crawl.crawl import suspicious_drop
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import CapturedJson
 from jobcrawler.sources.base import KnownJobs, SourceSession
 from jobcrawler.sources.careers import CareersSource
 from jobcrawler.sources.plan import PlanSpec

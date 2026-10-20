@@ -17,17 +17,17 @@ from pydantic import SecretStr
 from structlog.testing import LogCapture
 from structlog.typing import EventDict
 
-from jobcrawler.config import Settings
-from jobcrawler.web import api as web_api
-from jobcrawler.web import app as web_app
-from jobcrawler.web.app import (
+from jobcrawler.bootstrap import app as web_app
+from jobcrawler.bootstrap.app import (
     LOGIN_FAIL_LIMIT,
     LOGIN_FAIL_WINDOW,
     GuardMiddleware,
     RequestIdMiddleware,
     create_app,
 )
-from jobcrawler.web.auth import COOKIE, TokenAuth
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.auth import router as auth_api
+from jobcrawler.modules.auth.auth import COOKIE, TokenAuth
 
 PREFIX = "jc-test"
 Logs = list[EventDict]
@@ -98,7 +98,7 @@ def _clean_contextvars() -> Iterator[None]:
 
 @pytest.fixture
 def logs(monkeypatch: pytest.MonkeyPatch) -> Logs:
-    """Event log của `jobcrawler.web.app` (kèm contextvars như cấu hình thật)."""
+    """Event log của `jobcrawler.bootstrap.app` (kèm contextvars như cấu hình thật)."""
     capture = LogCapture()
     logger = structlog.wrap_logger(
         None,
@@ -107,7 +107,7 @@ def logs(monkeypatch: pytest.MonkeyPatch) -> Logs:
         cache_logger_on_first_use=False,
     )
     monkeypatch.setattr(web_app, "log", logger)
-    monkeypatch.setattr(web_api, "log", logger)
+    monkeypatch.setattr(auth_api, "log", logger)
     return capture.entries
 
 

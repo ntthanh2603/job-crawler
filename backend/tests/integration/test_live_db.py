@@ -3,6 +3,7 @@ của endpoint JSON tương ứng và đẩy khi Redis / DB đổi."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -14,12 +15,12 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 from redis.asyncio import Redis
 
-from jobcrawler.config import Settings
-from jobcrawler.gateway import registry
-from jobcrawler.queues import drop_queue
-from jobcrawler.web import live
-from jobcrawler.web.app import create_app
-from jobcrawler.web.auth import COOKIE
+from jobcrawler.bootstrap.app import create_app
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.auth.auth import COOKIE
+from jobcrawler.modules.gateway import registry
+from jobcrawler.modules.live import live
+from jobcrawler.services.redis.queues import drop_queue
 
 from ..test_live import FAST, SseStream
 from .test_web_db import seed
@@ -106,7 +107,14 @@ async def test_topics_match_json_endpoints_and_push_changes(web: Web) -> None:
 
         # Việc mới vào hàng đợi build: sự kiện queue mới, không phải tải lại.
         await res.queues.build.enqueue("build_company", key=f"live-{web.tag}", name="Web live")
-        while (event := (await s.next_data()).json)["topic"] != "queue":
-            pass
-        build = event["queue"]["queues"][0]
+        # Số đếm và danh sách job đọc bằng hai lệnh Redis: lần đọc chen giữa lúc xếp job có thể
+        # thấy một nửa (lần đọc sau, ~2 s ở production, đã khớp) — chờ bản đủ cả hai.
+        async with asyncio.timeout(10):
+            while True:
+                event = (await s.next_data()).json
+                if event["topic"] != "queue":
+                    continue
+                build = event["queue"]["queues"][0]
+                if build["queued"] and build["jobs"]:
+                    break
         assert (build["queued"], [j["label"] for j in build["jobs"]]) == (1, ["Web live"])

@@ -1,4 +1,4 @@
-"""`services.proxies`: danh sách proxy chung và kiểm tra theo id."""
+"""`modules.proxies.proxies`: danh sách proxy chung và kiểm tra theo id."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.config import Settings
-from jobcrawler.net.proxy_pool import parse_proxy_line
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.proxies import proxies as svc
 from jobcrawler.services import health
-from jobcrawler.services import proxies as svc
+from jobcrawler.services.net.proxy_pool import parse_proxy_line
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

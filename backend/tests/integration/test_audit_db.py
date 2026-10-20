@@ -17,13 +17,15 @@ from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import delete, select, update
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import AppSetting, AuditEvent, Company, Job, Log
-from jobcrawler.gateway import registry
-from jobcrawler.queues import drop_queue
-from jobcrawler.resources import Resources
-from jobcrawler.services import app_settings, audit, maintenance
-from jobcrawler.web.app import create_app
+from jobcrawler.bootstrap.app import create_app
+from jobcrawler.common.config import Settings
+from jobcrawler.database.models import AppSetting, AuditEvent, Company, Job, Log
+from jobcrawler.modules.audit import audit
+from jobcrawler.modules.gateway import registry
+from jobcrawler.modules.maintenance import maintenance
+from jobcrawler.modules.settings import app_settings
+from jobcrawler.services.redis.queues import drop_queue
+from jobcrawler.services.resources import Resources
 
 pytestmark = pytest.mark.integration
 

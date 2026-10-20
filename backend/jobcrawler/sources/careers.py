@@ -26,10 +26,8 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlsplit
 
-from jobcrawler.logging import get_logger
-from jobcrawler.net.http import CapturedJson, FetchResult, WaitUntil
-from jobcrawler.net.urls import host_of, normalize_url, path_segments, same_site
-from jobcrawler.pages import (
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.pages import (
     PAGE_PARAMS,
     Link,
     clean_text,
@@ -43,8 +41,11 @@ from jobcrawler.pages import (
     page_number,
     parse,
 )
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.text import strip_accents
+from jobcrawler.common.urls import host_of, normalize_url, path_segments, same_site
 from jobcrawler.prompts import job_detail, job_listing
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.services.net.http import CapturedJson, FetchResult, WaitUntil
 from jobcrawler.sources import json_jobs, jsonld
 from jobcrawler.sources.base import (
     Source,
@@ -55,7 +56,6 @@ from jobcrawler.sources.base import (
     transient_failure,
 )
 from jobcrawler.sources.plan import ApiSpec
-from jobcrawler.text import strip_accents
 
 log = get_logger(__name__)
 

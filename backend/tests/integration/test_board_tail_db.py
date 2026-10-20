@@ -9,16 +9,22 @@ from typing import Any
 import pytest
 from sqlalchemy import delete, func, select, update
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import BoardIndexRun, Company, CompanyAlias, JobPosting, SourceProfile
-from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import JobStatus, KycStatus, RunStatus
+from jobcrawler.database.models import (
+    BoardIndexRun,
+    Company,
+    CompanyAlias,
+    JobPosting,
+    SourceProfile,
+)
+from jobcrawler.modules.boards import boards as board_service
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import JobStatus, KycStatus, RunStatus
-from jobcrawler.services import boards as board_service
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
 from jobcrawler.sources.base import SourceSession
 from jobcrawler.sources.boards.base import BoardAdapter

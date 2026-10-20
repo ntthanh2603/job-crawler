@@ -1,4 +1,5 @@
-"""Watchdog trong process (`jobcrawler.watchdog`): event loop / vòng lặp chính đứng thì thoát mã 70.
+"""Watchdog trong process (`jobcrawler.common.watchdog`): event loop / vòng lặp chính đứng thì thoát
+mã 70.
 
 Không thoát thật: `exit_fn` giả ghi lại mã thoát. Test có luồng canh thật dùng `max_stall` vài trăm
 ms và chặn event loop bằng `time.sleep` có chủ đích.
@@ -18,14 +19,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from jobcrawler import logging as jlog
-from jobcrawler import streamqueue, watchdog
-from jobcrawler.config import Settings
-from jobcrawler.entrypoints import scheduler
-from jobcrawler.heartbeat import Heartbeat
-from jobcrawler.services import app_settings
-from jobcrawler.streamqueue import StreamWorker
-from jobcrawler.watchdog import EXIT_CODE, Stall, Watchdog, start_watchdog
+from jobcrawler.bootstrap import scheduler
+from jobcrawler.common import logging as jlog
+from jobcrawler.common import watchdog
+from jobcrawler.common.config import Settings
+from jobcrawler.common.watchdog import EXIT_CODE, Stall, Watchdog, start_watchdog
+from jobcrawler.modules.settings import app_settings
+from jobcrawler.services.redis import streamqueue
+from jobcrawler.services.redis.heartbeat import Heartbeat
+from jobcrawler.services.redis.streamqueue import StreamWorker
 
 from .conftest import FakeClock
 

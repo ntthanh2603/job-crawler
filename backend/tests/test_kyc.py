@@ -6,14 +6,14 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
+from jobcrawler.common.schemas import CompanyIn, KycStatus
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.company_facts import SiteFacts
 from jobcrawler.prompts import kyc_pick
-from jobcrawler.schemas import CompanyIn, KycStatus
-from jobcrawler.serp import SERPER_URL, SerpClient
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.serp import SERPER_URL, SerpClient
 from jobcrawler.sources.base import FetchRecord
 
 FIXTURES = Path(__file__).parent / "fixtures"

@@ -10,10 +10,10 @@ import pytest
 from redis.asyncio import Redis
 from typer.testing import CliRunner
 
-from jobcrawler import heartbeat, streamqueue
-from jobcrawler.entrypoints.cli import app
-from jobcrawler.heartbeat import Heartbeat, check, heartbeat_key, runner_component
-from jobcrawler.streamqueue import StreamWorker
+from jobcrawler.bootstrap.cli import app
+from jobcrawler.services.redis import heartbeat, streamqueue
+from jobcrawler.services.redis.heartbeat import Heartbeat, check, heartbeat_key, runner_component
+from jobcrawler.services.redis.streamqueue import StreamWorker
 
 from .conftest import FakeClock
 
@@ -193,7 +193,7 @@ runner = CliRunner()
 
 @pytest.fixture
 def fake_redis(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> Iterator[FakeRedis]:
-    from jobcrawler.config import get_settings
+    from jobcrawler.common.config import get_settings
 
     fake = FakeRedis()
     monkeypatch.setenv("REDIS_PREFIX", PREFIX)

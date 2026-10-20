@@ -15,8 +15,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol
 
-from jobcrawler.logging import get_logger
-from jobcrawler.schemas import RawJob
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import RawJob
+from jobcrawler.common.text import normalize_company_name
 from jobcrawler.sources.base import (
     Source,
     SourceError,
@@ -25,7 +26,6 @@ from jobcrawler.sources.base import (
     transient_failure,
 )
 from jobcrawler.sources.boards.base import BoardAdapter
-from jobcrawler.text import normalize_company_name
 
 log = get_logger(__name__)
 

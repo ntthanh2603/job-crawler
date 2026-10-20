@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.net.ratelimit import MemoryRateLimiter
+from jobcrawler.services.net.ratelimit import MemoryRateLimiter
 
 from .conftest import FakeClock
 

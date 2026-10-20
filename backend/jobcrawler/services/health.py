@@ -8,14 +8,14 @@ import secrets
 import time
 from dataclasses import dataclass
 
-from jobcrawler.gateway.dispatch import DispatchError
-from jobcrawler.llm import LLMResult
-from jobcrawler.logging import get_logger
-from jobcrawler.net.http import FetchResult, TransportError, decode_body
-from jobcrawler.net.kv import RedisKV
-from jobcrawler.net.proxy_pool import Proxy, ProxyPool
+from jobcrawler.common.logging import get_logger
+from jobcrawler.modules.gateway.dispatch import DispatchError
 from jobcrawler.prompts import healthcheck
-from jobcrawler.resources import Resources, central_proxies, make_proxy_pool
+from jobcrawler.services.llm import LLMResult
+from jobcrawler.services.net.http import FetchResult, TransportError, decode_body
+from jobcrawler.services.net.kv import RedisKV
+from jobcrawler.services.net.proxy_pool import Proxy, ProxyPool
+from jobcrawler.services.resources import Resources, central_proxies, make_proxy_pool
 
 log = get_logger(__name__)
 

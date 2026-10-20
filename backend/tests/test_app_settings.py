@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from jobcrawler.config import Settings
-from jobcrawler.services import app_settings as a
-from jobcrawler.services.app_settings import SettingsError
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.settings import app_settings as a
+from jobcrawler.modules.settings.app_settings import SettingsError
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

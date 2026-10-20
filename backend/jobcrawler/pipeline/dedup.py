@@ -33,11 +33,11 @@ from uuid import UUID
 from datasketch import MinHash
 from rapidfuzz import fuzz
 
-from jobcrawler.net.urls import normalize_url
+from jobcrawler.common.schemas import EmploymentType, ExtractionMethod, JobLevel, Location, WorkMode
+from jobcrawler.common.text import fold
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.pipeline import provinces as province_names
 from jobcrawler.pipeline.normalize import NormalizedJob
-from jobcrawler.schemas import EmploymentType, ExtractionMethod, JobLevel, Location, WorkMode
-from jobcrawler.text import fold
 
 TITLE_THRESHOLD = 90.0
 JD_THRESHOLD = 0.8

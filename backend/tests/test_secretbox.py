@@ -1,4 +1,4 @@
-"""`jobcrawler.secretbox`: mã hoá trường nhạy cảm (AES-256-GCM), đổi khoá, khoá tự sinh."""
+"""`jobcrawler.services.secretbox`: mã hoá trường nhạy cảm (AES-256-GCM), đổi khoá, khoá tự sinh."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from jobcrawler import secretbox
-from jobcrawler.config import Settings
-from jobcrawler.secretbox import DecryptError, SecretBox
+from jobcrawler.common.config import Settings
+from jobcrawler.services import secretbox
+from jobcrawler.services.secretbox import DecryptError, SecretBox
 
 
 def test_roundtrip_is_randomized_and_bound_to_field() -> None:

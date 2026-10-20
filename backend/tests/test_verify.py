@@ -9,11 +9,11 @@ from uuid import UUID
 
 import pytest
 
-from jobcrawler.fakes import FakeChatClient
-from jobcrawler.llm import LLMClient
+from jobcrawler.common.schemas import ExtractionMethod
 from jobcrawler.pipeline import verify
 from jobcrawler.pipeline.verify import CompanyContext, check_rules, employer_score, verify_jobs
-from jobcrawler.schemas import ExtractionMethod
+from jobcrawler.services.fakes import FakeChatClient
+from jobcrawler.services.llm import LLMClient
 
 from .jobs_fixtures import NOW, board_job, normalized, raw_job
 
@@ -348,7 +348,7 @@ async def test_every_decision_has_reasons_on_real_board_jobs() -> None:
 
 
 async def test_llm_answers_are_cached_per_company_and_content() -> None:
-    from jobcrawler.net.kv import MemoryKV
+    from jobcrawler.services.net.kv import MemoryKV
 
     kv = MemoryKV()
     job = normalized(raw_job(method=ExtractionMethod.LLM))

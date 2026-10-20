@@ -153,7 +153,7 @@ task frontend:e2e                     # test E2E (Playwright) trên stack đang 
 task release VERSION=1.2.0            # tag + CI đẩy image có phiên bản lên GHCR
 ```
 
-- Test không gọi mạng ngoài: nguồn dùng `jobcrawler.fakes.FakeFetcher`, LLM dùng
+- Test không gọi mạng ngoài: nguồn dùng `jobcrawler.services.fakes.FakeFetcher`, LLM dùng
   `FakeChatClient`, worker dùng gateway giả + server HTTP cục bộ. Test tích hợp cần
   `TEST_DATABASE_URL` trỏ tới DB tên kết thúc bằng `_test` (schema bị xoá và dựng lại).
 - CI (`.github/workflows/ci.yml`): pull request chỉ kiểm tra — mỗi service một job (format, lint,

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.net.robots import RobotsCache, parse_robots, robots_url
+from jobcrawler.services.net.kv import MemoryKV
+from jobcrawler.services.net.robots import RobotsCache, parse_robots, robots_url
 
 from .conftest import FakeClock
 

@@ -23,6 +23,21 @@ Cần: Postgres 16 (pgvector/pg_trgm), Redis 7, ít nhất một worker nối v�
 dùng chung với worker nằm ở `../proto` (gói `jobcrawler-proto`, phụ thuộc qua đường dẫn, cài dạng
 editable khi dev).
 
+## Bố cục mã
+
+Gói `jobcrawler/` chia như `core-api/src` của open-asm (chi tiết: `docs/ARCHITECTURE.md` mục 2):
+
+| Thư mục                | Nội dung                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `bootstrap/`           | điểm vào: CLI (`cli.py`, script `jobcrawler`), `serve`, app FastAPI (`app.py`), `gateway`, `runner`, `scheduler` |
+| `modules/<tính năng>/` | `router.py` (API), `schemas.py` (mô hình vào / ra), `queries.py`, `actions.py` và service của tính năng (`crawl/`, `companies/`, `jobs/`, `boards/`, `settings/`, `gateway/`…) |
+| `pipeline/`, `sources/` | logic thu thập (KYC → tìm nguồn → thu thập → chuẩn hoá → xác minh → gộp → lưu) và nguồn tin |
+| `services/`            | hạ tầng dùng chung: `Resources`, `redis/` (hàng đợi, khoá, heartbeat), `net/` (HttpClient, proxy), LLM, SERP, mã hoá, fake cho test |
+| `database/`            | model SQLAlchemy, phiên, migration Alembic (`database/alembic/`)                 |
+| `common/`              | cấu hình, log, DTO, phần chung của API, tiện ích                                 |
+
+API mới: thêm `router.py` vào module rồi ghi vào `ROUTERS` của `bootstrap/app.py`.
+
 ## Chạy trên máy
 
 Mọi lệnh chạy trong thư mục `backend/` (venv `.venv`, `uv.lock`, `.env` đều ở đây). Cần
@@ -45,7 +60,7 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
 ## Cấu hình
 
 - Cài đặt nằm trong Postgres (bảng `app_settings`), sửa ở trang Cài đặt của giao diện (danh mục,
-  giải thích, kiểm tra: `jobcrawler/services/app_settings.py`). `.env` (`.env.example`) chỉ cho
+  giải thích, kiểm tra: `jobcrawler/modules/settings/app_settings.py`). `.env` (`.env.example`) chỉ cho
   kết nối, bí mật hạ tầng, tên queue, gateway, đăng nhập, watchdog, log (`ENV_ONLY`).
 - Mọi field vẫn đọc được từ biến môi trường, rồi file `.env` trong thư mục đang chạy (=
   `backend/`), rồi file bí mật (dưới); giá trị trong DB thắng. Trang Cài đặt chép giá trị đặt bằng
@@ -54,24 +69,24 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
   con khi lưu đổi chúng; chạy từng lệnh riêng thì tự khởi động lại.
 - Danh sách proxy chung: bảng proxy của trang Cài đặt (cài đặt `proxies`, trong DB, mã hoá) và/hoặc
   `config/proxies.txt` (`PROXIES_FILE`, mẫu `config/proxies.example.txt`). `PROXY_MODE=worker`:
-  gateway gửi danh sách xuống worker trong `WorkerConfig.shared_proxies` (`gateway/server.py`),
+  gateway gửi danh sách xuống worker trong `WorkerConfig.shared_proxies` (`modules/gateway/server.py`),
   worker tự xoay; `PROXY_MODE=central`: backend chọn cho từng request. `GET /api/proxies`: trạng
-  thái từng proxy; `POST /api/proxies/check`: kiểm tra qua worker (`jobcrawler/services/proxies.py`).
+  thái từng proxy; `POST /api/proxies/check`: kiểm tra qua worker (`jobcrawler/modules/proxies/`).
 - API sau reverse proxy (nginx của giao diện): `jobcrawler api` bật `proxy_headers` của uvicorn;
   IP thật của client (dùng để chặn đoán mật khẩu) chỉ được lấy từ `X-Forwarded-For` khi IP của
   proxy nằm trong `--forwarded-allow-ips` hoặc biến môi trường `FORWARDED_ALLOW_IPS` (uvicorn đọc
   từ môi trường process: `.env` chỉ có tác dụng khi compose nạp nó làm `env_file`; mặc định
   `127.0.0.1,::1`; nhận cả CIDR).
-- Cập nhật trực tiếp `GET /api/events` (Server-Sent Events, `jobcrawler/web/live.py`): luồng không
+- Cập nhật trực tiếp `GET /api/events` (Server-Sent Events, `jobcrawler/modules/live/live.py`): luồng không
   tự kết thúc, nên `jobcrawler api` dừng sau tối đa 5 s (`timeout_graceful_shutdown`) dù còn kết nối
   mở. Proxy đứng trước không được đệm `text/event-stream` (xem `docs/DEPLOY.md`).
-- Đăng nhập (`jobcrawler/web/auth.py`): trang đăng nhập với `UI_USERNAME` / `UI_PASSWORD`,
+- Đăng nhập (`jobcrawler/modules/auth/`): trang đăng nhập với `UI_USERNAME` / `UI_PASSWORD`,
   `POST /api/auth/login` trả JWT (HS256, ký bằng `JWT_SECRET`, trống = khoá tự sinh trên Redis) và
   đặt cookie httpOnly `jc_token`; script gọi API gửi `Authorization: Bearer <access_token>`.
   `POST /api/auth/logout` thu hồi phiên. Để trống mật khẩu thì không hỏi (chỉ dùng khi cổng chỉ
   mở ở 127.0.0.1). Hoặc SSO qua proxy (dưới).
 - Trường nhạy cảm của trang Cài đặt (khoá API, proxy chung) lưu mã hoá AES-256-GCM
-  (`jobcrawler/secretbox.py`, khoá `ENCRYPTION_KEYS`).
+  (`jobcrawler/services/secretbox.py`, khoá `ENCRYPTION_KEYS`).
 - Production: `LOG_DB_LEVEL=WARNING` (bảng `logs` chỉ giữ cảnh báo / lỗi), `LOG_FORMAT=json`.
 
 ### Bí mật từ file (Docker secrets)
@@ -121,7 +136,7 @@ giao diện, proxy ghi đè header người dùng. Gọi thẳng được api th
 ### Watchdog
 
 Docker không tự khởi động lại container `unhealthy`, nên `api`, `gateway`, `scheduler`, `runner` tự
-canh mình (`jobcrawler/watchdog.py`): event loop không quay được quá `WATCHDOG_SECONDS` giây (mặc
+canh mình (`jobcrawler/common/watchdog.py`): event loop không quay được quá `WATCHDOG_SECONDS` giây (mặc
 định 120; `0` = tắt; runner dùng min(`WATCHDOG_SECONDS`, `QUEUE_RECLAIM_SECONDS` / 2) để tự thoát
 trước khi job nó giữ bị runner khác thu hồi), hoặc vòng lặp chính (nhịp scheduler, vòng nhận việc
 của bất kỳ vai runner nào) không quay vòng nào quá ngần ấy, thì log `watchdog.stall` (`what` = `event_loop` |

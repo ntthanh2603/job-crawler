@@ -1,8 +1,8 @@
-"""Phân vị từ histogram của số đo poll (services/sla.py)."""
+"""Phân vị từ histogram của số đo poll (modules/crawl/sla.py)."""
 
 from __future__ import annotations
 
-from jobcrawler.services import sla
+from jobcrawler.modules.crawl import sla
 
 
 def test_bucket_edges() -> None:

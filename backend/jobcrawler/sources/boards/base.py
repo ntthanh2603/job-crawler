@@ -32,9 +32,8 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel, Field, field_validator
 from selectolax.lexbor import LexborHTMLParser
 
-from jobcrawler.logging import get_logger
-from jobcrawler.net.urls import host_of, normalize_url, same_site
-from jobcrawler.pages import (
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.pages import (
     Link,
     clean_text,
     extract_links,
@@ -42,10 +41,11 @@ from jobcrawler.pages import (
     next_page_urls,
     parse,
 )
-from jobcrawler.schemas import FetchOutcome, RawJob
+from jobcrawler.common.schemas import FetchOutcome, RawJob
+from jobcrawler.common.text import normalize_company_name
+from jobcrawler.common.urls import host_of, normalize_url, same_site
 from jobcrawler.sources import jsonld
 from jobcrawler.sources.base import SourceError, SourceSession, parse_datetime, text_or_none
-from jobcrawler.text import normalize_company_name
 
 log = get_logger(__name__)
 

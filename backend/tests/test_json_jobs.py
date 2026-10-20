@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
 from jobcrawler.pipeline.dedup import _apply_key  # pyright: ignore[reportPrivateUsage]
-from jobcrawler.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources.json_jobs import (
     JsonDoc,
     embedded_json,

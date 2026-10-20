@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.base import SourceLimits, SourceSession, failed_page_rows
 
 

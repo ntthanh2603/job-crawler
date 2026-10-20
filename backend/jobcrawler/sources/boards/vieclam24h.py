@@ -19,8 +19,8 @@ import json
 import re
 from typing import Any
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import parse
+from jobcrawler.common.pages import parse
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.pipeline.company_facts import valid_tax_code
 from jobcrawler.sources.boards.base import BoardJob, ListingBoard, ProfileRef
 

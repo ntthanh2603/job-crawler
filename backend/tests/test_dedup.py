@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 
+from jobcrawler.common.schemas import ExtractionMethod, WorkMode
 from jobcrawler.pipeline.dedup import (
     cluster_jobs,
     jd_minhash,
@@ -14,7 +15,6 @@ from jobcrawler.pipeline.dedup import (
     stored_fingerprint,
     title_similarity,
 )
-from jobcrawler.schemas import ExtractionMethod, WorkMode
 
 from .jobs_fixtures import NOW, board_job, normalized, raw_job
 

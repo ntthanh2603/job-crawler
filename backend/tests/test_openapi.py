@@ -10,10 +10,33 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from jobcrawler.db import compress
-from jobcrawler.services import batch, evaluate, health, proxies, sla, stats
-from jobcrawler.web import actions, api, settings_api
-from jobcrawler.web.app import openapi_document
+from jobcrawler.bootstrap.app import openapi_document
+from jobcrawler.database import compress
+from jobcrawler.modules.companies import batch
+from jobcrawler.modules.companies.actions import CreateOutcome, ImportOutcome
+from jobcrawler.modules.companies.schemas import (
+    CompanyCreatedOut,
+    EnqueueResultOut,
+    ImportOutcomeOut,
+)
+from jobcrawler.modules.crawl import sla
+from jobcrawler.modules.crawl.schemas import FreshnessOut, PollStatsOut
+from jobcrawler.modules.evaluate import evaluate
+from jobcrawler.modules.evaluate.schemas import CompanyEvalOut, SourceEvalOut
+from jobcrawler.modules.jobs.schemas import SourceReviewOut
+from jobcrawler.modules.overview import stats
+from jobcrawler.modules.overview.schemas import (
+    BoardStatsOut,
+    QueueStatsOut,
+    RunStatsOut,
+    SourceStatsOut,
+    StatsOut,
+    StorageStatsOut,
+    TargetOut,
+)
+from jobcrawler.modules.proxies import proxies
+from jobcrawler.modules.proxies.schemas import ProxyCheckOut, ProxyStatusOut
+from jobcrawler.services import health
 
 SPEC = Path(__file__).resolve().parents[1] / "openapi.json"
 
@@ -92,23 +115,23 @@ def test_response_fields_are_required(spec: dict) -> None:
 
 # Mô hình trả về chép trường từ dataclass của services (+ property tính thêm).
 MIRRORS: list[tuple[type[BaseModel], type, set[str]]] = [
-    (api.QueueStatsOut, stats.QueueStats, set()),
-    (api.RunStatsOut, stats.RunStats, set()),
-    (api.SourceStatsOut, stats.SourceStats, set()),
-    (api.BoardStatsOut, stats.BoardStats, set()),
-    (api.TargetOut, stats.Target, set()),
-    (api.StatsOut, stats.Stats, set()),
-    (api.StorageStatsOut, compress.StorageStats, set()),
-    (api.PollStatsOut, sla.PollStats, set()),
-    (api.FreshnessOut, sla.Freshness, set()),
-    (api.ImportOutcomeOut, actions.ImportOutcome, set()),
-    (api.CompanyCreatedOut, actions.CreateOutcome, set()),
-    (api.EnqueueResultOut, batch.EnqueueResult, set()),
-    (api.CompanyEvalOut, evaluate.CompanyEval, {"precision", "recall"}),
-    (api.SourceEvalOut, evaluate.SourceEval, {"precision", "recall"}),
-    (api.SourceReviewOut, evaluate.SourceReview, {"precision"}),
-    (settings_api.ProxyStatusOut, proxies.ProxyStatus, set()),
-    (settings_api.ProxyCheckOut, health.ProxyCheck, set()),
+    (QueueStatsOut, stats.QueueStats, set()),
+    (RunStatsOut, stats.RunStats, set()),
+    (SourceStatsOut, stats.SourceStats, set()),
+    (BoardStatsOut, stats.BoardStats, set()),
+    (TargetOut, stats.Target, set()),
+    (StatsOut, stats.Stats, set()),
+    (StorageStatsOut, compress.StorageStats, set()),
+    (PollStatsOut, sla.PollStats, set()),
+    (FreshnessOut, sla.Freshness, set()),
+    (ImportOutcomeOut, ImportOutcome, set()),
+    (CompanyCreatedOut, CreateOutcome, set()),
+    (EnqueueResultOut, batch.EnqueueResult, set()),
+    (CompanyEvalOut, evaluate.CompanyEval, {"precision", "recall"}),
+    (SourceEvalOut, evaluate.SourceEval, {"precision", "recall"}),
+    (SourceReviewOut, evaluate.SourceReview, {"precision"}),
+    (ProxyStatusOut, proxies.ProxyStatus, set()),
+    (ProxyCheckOut, health.ProxyCheck, set()),
 ]
 
 

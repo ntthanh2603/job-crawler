@@ -65,13 +65,23 @@ Cài đặt = `backend/.env` (chỉ kết nối, bí mật hạ tầng, gateway,
 (mọi thứ khác, sửa ở trang Cài đặt, nạp lại ≤ 5 s). Cài đặt chỉ đọc lúc khởi động (`live=False`)
 thì `jobcrawler serve` tự khởi động lại các process con khi chúng đổi.
 
-Mã nguồn backend (`backend/jobcrawler/`): `sources/` (nguồn tin, chỉ biết `SourceSession`, không
-biết DB) → `pipeline/` (logic: KYC, tìm nguồn, thu thập, chuẩn hoá, xác minh, gộp, lưu) →
-`services/` (ghép pipeline với `Resources`: build, poll, lịch, cài đặt…) → `entrypoints/`, `web/`
-(chỉ gọi `services/`). `gateway/` (gRPC + Redis), `net/` (HttpClient, proxy pool, rate limit),
-`db/` (model, migration, nén zstd).
+Mã nguồn backend (`backend/jobcrawler/`) chia như `core-api/src` của open-asm:
 
-## 3. Build đêm (`services/crawl.build_company`)
+| Thư mục                | Nội dung                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `bootstrap/`           | điểm vào process: CLI `jobcrawler` (`cli.py`), `serve`, ứng dụng FastAPI (`app.py`: middleware, ghép router), `gateway`, `runner`, `scheduler` |
+| `modules/<tính năng>/` | `router.py` (API `/api/...`), `schemas.py` (mô hình `...Out` / `...In`), `queries.py` (truy vấn cho giao diện), `actions.py` (thao tác của API) và service: `companies/`, `crawl/` (build, poll, bộ khung, lịch, độ trễ phát hiện), `jobs/`, `runs/`, `boards/`, `queue/`, `overview/`, `maintenance/`, `evaluate/`, `audit/`, `auth/`, `meta/`, `settings/`, `proxies/`, `gateway/` (gRPC cho worker + API Workers), `live/` (SSE) |
+| `pipeline/`            | logic: KYC, tìm nguồn, thu thập, chuẩn hoá, xác minh, gộp, lưu                  |
+| `sources/`             | nguồn tin (ATS, careers, trang tuyển dụng), chỉ biết `SourceSession`, không biết DB |
+| `services/`            | hạ tầng dùng chung: `resources.py` (`Resources`), `redis/` (hàng đợi Streams, khoá, heartbeat), `net/` (HttpClient, proxy pool, rate limit, robots), LLM, SERP, mã hoá, fake cho test |
+| `database/`            | model, phiên, migration Alembic, ID, nén zstd, fencing token                    |
+| `common/`              | cấu hình, log, DTO dùng chung, phần chung của API (`api.py`, `pagination.py`), tiện ích văn bản / HTML / URL |
+| `prompts/`             | prompt LLM (mỗi prompt một file, kèm schema output)                             |
+
+Chiều gọi: `sources/` → `pipeline/` → service trong `modules/` (ghép pipeline với `Resources`) →
+`router.py` của module và `bootstrap/`; router chỉ gọi service / `queries` / `actions` của module.
+
+## 3. Build đêm (`modules/crawl/crawl.build_company`)
 
 Mỗi doanh nghiệp một lượt trong `BUILD_WINDOW` (00:00–06:00, `CRAWL_TIMEZONE`), rải đều theo pha
 cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì build ngay, bất kể giờ. Deadline mềm
@@ -102,13 +112,13 @@ Mỗi nguồn website / ATS một dòng: trang / API cần đọc lại và mã 
 | `ats`                  | bảng tin ATS                                                                 |
 | `pages`                | **số trang một lượt poll được đọc ở nguồn này**                              |
 
-**Chia trang** (`services/plans.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10) trang
-mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) + số trang
-API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday: 20 tin / trang). Chia theo thứ tự: mỗi nguồn
-tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho nguồn careers (site
-thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
+**Chia trang** (`modules/crawl/plans.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10)
+trang mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) + số
+trang API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday: 20 tin / trang). Chia theo thứ tự: mỗi
+nguồn tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho nguồn careers
+(site thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
 
-## 4. Poll ngày (`services/crawl.poll_company`)
+## 4. Poll ngày (`modules/crawl/crawl.poll_company`)
 
 Trong `POLL_WINDOW` (06:00–24:00), mỗi doanh nghiệp mỗi `POLL_INTERVAL_SECONDS` (150 s) ±
 `POLL_JITTER_SECONDS` (10 s). Ngoài khung không poll: tin đăng ban đêm được lượt build đêm hoặc lượt
@@ -136,19 +146,19 @@ Build và poll của cùng doanh nghiệp không chạy chồng (`crawl.company_
   khác đang chạy) thì bỏ lượt (`skipped`, scheduler xếp lại khi còn cần) — không chạy chồng.
 - Mất khoá giữa chừng (process đứng quá 60 s, Redis mất) → lượt bị huỷ ở lần gia hạn kế tiếp
   (`LeaseLost`).
-- **Fencing token** (`db/fencing.py`, bảng `company_fences`): mỗi lần giữ khoá, token của doanh
+- **Fencing token** (`database/fencing.py`, bảng `company_fences`): mỗi lần giữ khoá, token của doanh
   nghiệp tăng một trong Postgres; mọi commit trong lượt kiểm `fence = token` (`SELECT … FOR SHARE`)
   ngay trước commit. Lượt cũ đã mất khoá mà vẫn chạy tiếp (GC, máy ngủ) bị từ chối (`FencedOut`,
   rollback) từ lúc lượt mới lấy token — không ghi đè được dữ liệu mới hơn.
 
 Lượt poll đi làn ưu tiên ở hàng việc lấy trang, nên build ban ngày không làm chậm poll.
 
-**Độ trễ phát hiện** (`services/sla.py`): mỗi lượt poll đủ ghi **cửa sổ phát hiện** = lúc xong − lúc
-bắt đầu lượt poll đủ trước (độ trễ xấu nhất của tin đăng ngay sau lượt trước) vào histogram Redis
-theo phút. P95 ≈ 0,95 × T + thời gian một lượt ≈ 142 + 10–20 s. Trang Tổng quan hiện P50 / P95, %
-trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của từng doanh nghiệp).
+**Độ trễ phát hiện** (`modules/crawl/sla.py`): mỗi lượt poll đủ ghi **cửa sổ phát hiện** = lúc xong
+− lúc bắt đầu lượt poll đủ trước (độ trễ xấu nhất của tin đăng ngay sau lượt trước) vào histogram
+Redis theo phút. P95 ≈ 0,95 × T + thời gian một lượt ≈ 142 + 10–20 s. Trang Tổng quan hiện P50 /
+P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của từng doanh nghiệp).
 
-## 5. Lịch và scheduler (`services/schedule.py`)
+## 5. Lịch và scheduler (`modules/crawl/schedule.py`)
 
 - Mỗi doanh nghiệp có pha cố định trong [0, 1): build đêm lúc `đầu BUILD_WINDOW + pha × độ dài`
   (10.000 doanh nghiệp / 6 giờ ≈ 0,46 lượt / giây), poll đầu ngày lúc `đầu POLL_WINDOW + pha × T`.
@@ -186,7 +196,7 @@ hình / hình thức.
 nộp → một việc. Bản chuẩn: ATS / careers > trang tuyển dụng đủ JD > mới nhất. Index duy nhất trong DB
 chặn hai việc đang mở y hệt.
 
-## 7. Lấy trang qua worker (`gateway/`, `worker/`)
+## 7. Lấy trang qua worker (`modules/gateway/`, `worker/`)
 
 ```mermaid
 sequenceDiagram
@@ -244,7 +254,7 @@ của danh sách trong phiên bản cấu hình: đổi danh sách → worker nh
 sức khoẻ của các proxy còn lại. Proxy chung giữ đúng id của backend nên `source_fetches.proxy_id` khớp
 bảng proxy.
 
-## 8. Hàng đợi (Redis Streams, `streamqueue.py`)
+## 8. Hàng đợi (Redis Streams, `services/redis/streamqueue.py`)
 
 | Job                         | Hàng đợi            | Khoá                 | Giới hạn                                 |
 | --------------------------- | ------------------- | -------------------- | ---------------------------------------- |
@@ -268,7 +278,7 @@ Số job song song mỗi runner
 (`RUNNER_*_CONCURRENCY`, 0 = tự tính: poll 12 / CPU trong [20, 100], build 2,5 / CPU và ≤ 2 / GiB
 trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 
-## 9. Dữ liệu (`db/`)
+## 9. Dữ liệu (`database/`)
 
 | Bảng                                                     | Nội dung                                                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -287,14 +297,16 @@ Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sá
 
 ## 10. Web và API
 
-- `frontend` (nginx) phục vụ bản build React và chuyển `/api/` tới API (FastAPI, `web/`). Một
-  origin nên cookie và chống CSRF giữ nguyên.
-- **Đăng nhập** (`web/auth.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie httpOnly
-  `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt `AUTH_PROXY_USER_HEADER`.
+- `frontend` (nginx) phục vụ bản build React và chuyển `/api/` tới API (FastAPI, ghép router
+  `modules/*/router.py` ở `bootstrap/app.py`). Một origin nên cookie và chống CSRF giữ nguyên.
+- **Đăng nhập** (`modules/auth/auth.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie
+  httpOnly `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP
+  / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt
+  `AUTH_PROXY_USER_HEADER`.
 - **Hợp đồng có kiểu**: mỗi endpoint trả một mô hình `...Out`; `backend/openapi.json` là bản commit
   của spec; orval sinh `frontend/src/lib/gen/queries.ts` (hàm, hook React Query, kiểu). `task api` làm
   cả hai; lệch thì test đỏ.
-- **Cập nhật trực tiếp** (`web/live.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
+- **Cập nhật trực tiếp** (`modules/live/live.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
   `GET /api/events?topic=…`, một kết nối mỗi tab cho mọi chủ đề — `workers` (trang Workers),
   `queue` (trang Hàng đợi, thanh bên, thẻ Hàng đợi ở Tổng quan), `run` (trang lượt chạy khi lượt
   build đang chạy: trạng thái, số log / request, danh sách log; lượt poll chỉ ghi khi xong). Mỗi

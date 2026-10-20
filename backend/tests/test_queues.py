@@ -3,11 +3,11 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from jobcrawler.config import Settings
-from jobcrawler.db.ids import uuid7
+from jobcrawler.common.config import Settings
+from jobcrawler.database.ids import uuid7
 from jobcrawler.pipeline.board_index import IndexStats
-from jobcrawler.queues import Queues, make_queue
-from jobcrawler.streamqueue import StreamJob, StreamQueue, dump_json
+from jobcrawler.services.redis.queues import Queues, make_queue
+from jobcrawler.services.redis.streamqueue import StreamJob, StreamQueue, dump_json
 
 
 def test_job_results_with_uuid_are_json() -> None:

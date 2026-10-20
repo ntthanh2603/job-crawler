@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from jobcrawler.schemas import ExtractionMethod
+from jobcrawler.common.schemas import ExtractionMethod
 from jobcrawler.sources import jsonld
 from jobcrawler.sources.base import parse_datetime
 

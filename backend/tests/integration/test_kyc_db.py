@@ -15,18 +15,18 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun, SourceFetch
-from jobcrawler.db.session import create_engine, create_sessionmaker
-from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
-from jobcrawler.llm import LLMClient
-from jobcrawler.logging import configure_logging
-from jobcrawler.net.http import FetchResult
+from jobcrawler.common.config import Settings
+from jobcrawler.common.logging import configure_logging
+from jobcrawler.common.schemas import CompanyIn, KycEvidence, KycStatus, RunStatus
+from jobcrawler.database.models import Company, CompanyAlias, CompanyRun, SourceFetch
+from jobcrawler.database.session import create_engine, create_sessionmaker
+from jobcrawler.modules.crawl.companies import process_company
 from jobcrawler.pipeline import kyc
-from jobcrawler.resources import open_resources
-from jobcrawler.schemas import CompanyIn, KycEvidence, KycStatus, RunStatus
-from jobcrawler.serp import SERPER_URL
-from jobcrawler.services.companies import process_company
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.resources import open_resources
+from jobcrawler.services.serp import SERPER_URL
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 

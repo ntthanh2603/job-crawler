@@ -8,8 +8,10 @@ import openai
 import pytest
 from pydantic import BaseModel
 
-from jobcrawler.fakes import FakeChatClient
-from jobcrawler.llm import (
+from jobcrawler.prompts import Prompt
+from jobcrawler.prompts.healthcheck import PROMPT as HEALTHCHECK
+from jobcrawler.services.fakes import FakeChatClient
+from jobcrawler.services.llm import (
     MAX_RATE_LIMIT_RETRIES,
     TRUNCATION_MARK,
     LLMClient,
@@ -18,9 +20,7 @@ from jobcrawler.llm import (
     retry_after,
     truncate,
 )
-from jobcrawler.net.ratelimit import MemoryRateLimiter
-from jobcrawler.prompts import Prompt
-from jobcrawler.prompts.healthcheck import PROMPT as HEALTHCHECK
+from jobcrawler.services.net.ratelimit import MemoryRateLimiter
 
 from .conftest import FakeClock
 

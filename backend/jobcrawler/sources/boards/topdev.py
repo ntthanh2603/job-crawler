@@ -25,11 +25,11 @@ from typing import Any
 
 from selectolax.lexbor import LexborHTMLParser
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import clean_text, meta_content, node_text, parse
-from jobcrawler.schemas import RawJob
+from jobcrawler.common.pages import clean_text, meta_content, node_text, parse
+from jobcrawler.common.schemas import RawJob
+from jobcrawler.common.text import fold
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.boards.base import BoardJob, ProfileRef, SitemapBoard
-from jobcrawler.text import fold
 
 _LD_HEADING = re.compile(
     r"<br\s*/?>\s*(Your role &(?:amp;)? responsibilities|Your skills &(?:amp;)? qualifications|"

@@ -1,4 +1,4 @@
-"""Khung giờ build/poll và cách rải doanh nghiệp (services/schedule.py)."""
+"""Khung giờ build/poll và cách rải doanh nghiệp (modules/crawl/schedule.py)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from jobcrawler.config import Settings
-from jobcrawler.db.ids import uuid7
-from jobcrawler.services import schedule
-from jobcrawler.services.schedule import Window
+from jobcrawler.common.config import Settings
+from jobcrawler.database.ids import uuid7
+from jobcrawler.modules.crawl import schedule
+from jobcrawler.modules.crawl.schedule import Window
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

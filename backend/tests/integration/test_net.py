@@ -18,14 +18,14 @@ import pytest
 from redis.asyncio import Redis
 from typer.testing import CliRunner
 
-from jobcrawler.config import Settings, get_settings
-from jobcrawler.gateway.remote import RemoteRenderer, RemoteTransport
-from jobcrawler.net.direct import DirectTransport
-from jobcrawler.net.http import HttpClient, HttpConfig, TransportError
-from jobcrawler.net.kv import RedisKV
-from jobcrawler.net.proxy_pool import ProxyPool, parse_proxy_line
-from jobcrawler.net.ratelimit import RedisRateLimiter
-from jobcrawler.schemas import FetchOutcome
+from jobcrawler.common.config import Settings, get_settings
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.modules.gateway.remote import RemoteRenderer, RemoteTransport
+from jobcrawler.services.net.direct import DirectTransport
+from jobcrawler.services.net.http import HttpClient, HttpConfig, TransportError
+from jobcrawler.services.net.kv import RedisKV
+from jobcrawler.services.net.proxy_pool import ProxyPool, parse_proxy_line
+from jobcrawler.services.net.ratelimit import RedisRateLimiter
 
 from .conftest import _env
 from .servers import Site, closed_port, serve_proxy, serve_site
@@ -168,7 +168,7 @@ async def test_direct_transport_maps_connection_errors() -> None:
 async def test_open_resources_proxy_modes(
     tmp_path: Path, site: Site, test_database_url: str, redis: tuple[Redis, str]
 ) -> None:
-    from jobcrawler.resources import open_resources
+    from jobcrawler.services.resources import open_resources
 
     _, prefix = redis
     proxies_file = tmp_path / "proxies.txt"
@@ -202,7 +202,7 @@ async def test_open_resources_proxy_modes(
 def test_cli_proxies_check_reads_list_in_any_mode_and_needs_worker(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_database_url: str
 ) -> None:
-    from jobcrawler.entrypoints.cli import app
+    from jobcrawler.bootstrap.cli import app
 
     with serve_proxy() as live:
         proxies_file = tmp_path / "proxies.txt"
@@ -228,7 +228,7 @@ def test_cli_proxies_check_reads_list_in_any_mode_and_needs_worker(
 def test_cli_proxies_check_without_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_database_url: str
 ) -> None:
-    from jobcrawler.entrypoints.cli import app
+    from jobcrawler.bootstrap.cli import app
 
     monkeypatch.setenv("PROXIES_FILE", str(tmp_path / "none.txt"))
     monkeypatch.setenv("DATABASE_URL", test_database_url)

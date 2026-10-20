@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jobcrawler.pages import (
+from jobcrawler.common.pages import (
     extract_links,
     html_to_markdown,
     looks_like_spa_shell,

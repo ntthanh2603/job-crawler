@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.net.blocking import detect_block
+from jobcrawler.services.net.blocking import detect_block
 
 URL = "https://careers.example.vn/jobs"
 BIG_PAGE = "<html><body>" + "<p>Mô tả công việc</p>" * 2000 + "</body></html>"

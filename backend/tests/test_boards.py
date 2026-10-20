@@ -8,12 +8,13 @@ from uuid import UUID
 
 import pytest
 
-from jobcrawler.db.models import Company, SourceProfile
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.text import company_match_key, normalize_company_name
+from jobcrawler.database.models import Company, SourceProfile
 from jobcrawler.pipeline.board_index import _Existing, blocked_profiles, plan_fetches
 from jobcrawler.pipeline.profiles import decide
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.base import SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.boards.base import (
     BoardEntry,
@@ -22,7 +23,6 @@ from jobcrawler.sources.boards.base import (
     sitemap_body,
 )
 from jobcrawler.sources.boards.profile_source import BoardProfileSource
-from jobcrawler.text import company_match_key, normalize_company_name
 
 from .boards_fake import HOME, FakeBoard, fake_site, job_page, sitemap_index, urlset
 
@@ -382,9 +382,9 @@ def _company(
 
 
 def test_profile_policy_by_kyc_status() -> None:
-    from jobcrawler.schemas import KycStatus
-    from jobcrawler.services import boards as board_service
-    from jobcrawler.services.companies import profile_policy
+    from jobcrawler.common.schemas import KycStatus
+    from jobcrawler.modules.boards import boards as board_service
+    from jobcrawler.modules.crawl.companies import profile_policy
 
     assert profile_policy(KycStatus.VERIFIED, name_profiles=True) == "all"
     assert profile_policy(KycStatus.NOT_FOUND, name_profiles=True) == "exact_name"

@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from sqlalchemy import make_url
 
-from jobcrawler.db.migrate import alembic_config
+from jobcrawler.database.migrate import alembic_config
 
 pytestmark = pytest.mark.integration
 

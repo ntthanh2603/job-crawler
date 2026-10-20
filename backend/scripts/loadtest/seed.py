@@ -9,9 +9,9 @@ import time
 import asyncpg
 from sqlalchemy import make_url
 
-from jobcrawler.config import get_settings
-from jobcrawler.db import migrate
-from jobcrawler.db.compress import CODEC, Kind, dumps
+from jobcrawler.common.config import get_settings
+from jobcrawler.database import migrate
+from jobcrawler.database.compress import CODEC, Kind, dumps
 
 _url = make_url(get_settings().database_url)
 ADMIN = _url.set(drivername="postgresql").render_as_string(hide_password=False)

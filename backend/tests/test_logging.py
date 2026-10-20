@@ -9,8 +9,8 @@ from uuid import UUID, uuid4
 import pytest
 import structlog
 
-from jobcrawler import logging as jlog
-from jobcrawler.config import Settings
+from jobcrawler.common import logging as jlog
+from jobcrawler.common.config import Settings
 
 
 class FakeWriter:

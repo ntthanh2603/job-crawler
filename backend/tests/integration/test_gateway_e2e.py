@@ -21,9 +21,10 @@ from grpc_health.v1 import health_pb2, health_pb2_grpc
 from redis.asyncio import Redis
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
-from jobcrawler.config import Settings
-from jobcrawler.gateway import dispatch, registry
-from jobcrawler.gateway.dispatch import (
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.modules.gateway import dispatch, registry
+from jobcrawler.modules.gateway.dispatch import (
     DispatchError,
     FetchClient,
     NoReplyError,
@@ -31,14 +32,13 @@ from jobcrawler.gateway.dispatch import (
     priority_fetches,
     push_results,
 )
-from jobcrawler.gateway.remote import RemoteRenderer, RemoteTransport
-from jobcrawler.gateway.server import GatewayServer
-from jobcrawler.net.http import HttpClient, HttpConfig
-from jobcrawler.net.kv import MemoryKV, RedisKV
-from jobcrawler.net.proxy_pool import ProxyPool, parse_proxy_line
-from jobcrawler.net.ratelimit import MemoryRateLimiter
-from jobcrawler.schemas import FetchOutcome
+from jobcrawler.modules.gateway.remote import RemoteRenderer, RemoteTransport
+from jobcrawler.modules.gateway.server import GatewayServer
 from jobcrawler.services import health
+from jobcrawler.services.net.http import HttpClient, HttpConfig
+from jobcrawler.services.net.kv import MemoryKV, RedisKV
+from jobcrawler.services.net.proxy_pool import ProxyPool, parse_proxy_line
+from jobcrawler.services.net.ratelimit import MemoryRateLimiter
 
 from .conftest import _env
 from .servers import Site, closed_port, serve_proxy, serve_site
@@ -974,7 +974,7 @@ async def test_fetch_client_close_fails_pending_tasks(redis: Redis, prefix: str)
 
 
 async def test_run_gateway_entrypoint(redis: Redis, prefix: str) -> None:
-    from jobcrawler.entrypoints.gateway import run_gateway
+    from jobcrawler.bootstrap.gateway import run_gateway
 
     port = closed_port()
     settings = make_settings(prefix, gateway_host="127.0.0.1", gateway_port=port)

@@ -28,13 +28,9 @@ from urllib.parse import urljoin
 import ftfy
 from markdown_it import MarkdownIt
 
-from jobcrawler.llm import LLMClient, cache_key, cached_structured
-from jobcrawler.logging import get_logger
-from jobcrawler.net.kv import KeyValueStore
-from jobcrawler.pages import html_to_markdown
-from jobcrawler.pipeline import provinces
-from jobcrawler.prompts import job_fields
-from jobcrawler.schemas import (
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.pages import html_to_markdown
+from jobcrawler.common.schemas import (
     EmploymentType,
     ExperienceYears,
     JobLevel,
@@ -44,8 +40,12 @@ from jobcrawler.schemas import (
     SalaryPeriod,
     WorkMode,
 )
+from jobcrawler.common.text import fold, strip_accents
+from jobcrawler.pipeline import provinces
+from jobcrawler.prompts import job_fields
+from jobcrawler.services.llm import LLMClient, cache_key, cached_structured
+from jobcrawler.services.net.kv import KeyValueStore
 from jobcrawler.sources.base import VN_TZ, parse_datetime
-from jobcrawler.text import fold, strip_accents
 
 log = get_logger(__name__)
 
@@ -223,7 +223,7 @@ _STAR_RUN = re.compile(r"\(\*+\)|\*+")
 _LITERAL_STAR_OK = re.compile(r"\(\*+\)|(?<=[^\W_])\*")
 # Ký hiệu đầu dòng của markdown (tiêu đề, danh sách): không xét khi tìm dấu sao vỡ.
 _LINE_MARK = re.compile(r"^\s*(?:#{1,6}|[-+*]|\d{1,3}[.)])\s+")
-# Cùng luật CommonMark với lúc hiển thị (web/markdown.py).
+# Cùng luật CommonMark với lúc hiển thị (common/markdown.py).
 _INLINE_MD = MarkdownIt("commonmark")
 
 

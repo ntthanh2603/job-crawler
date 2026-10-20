@@ -10,8 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from jobcrawler.common.schemas import RawJob
 from jobcrawler.prompts.base import Prompt
-from jobcrawler.schemas import RawJob
 
 _EVIDENCE = "Trích nguyên văn (ngắn) đoạn trong tin cho thấy giá trị này; không có thì null"
 

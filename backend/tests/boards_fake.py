@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 
-from jobcrawler.fakes import FakeFetcher
+from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.sources.boards.base import SitemapBoard
 
 HOME = "https://board.test/"

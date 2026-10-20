@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 
-from jobcrawler.pages import clean_text, parse
+from jobcrawler.common.pages import clean_text, parse
 from jobcrawler.pipeline.company_facts import tax_codes_in
 from jobcrawler.sources.boards.base import ProfileRef, SitemapBoard
 

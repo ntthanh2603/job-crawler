@@ -6,8 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from jobcrawler.fakes import FakeChatClient
-from jobcrawler.llm import LLMClient
+from jobcrawler.common.schemas import EmploymentType, JobLevel, SalaryPeriod, WorkMode
 from jobcrawler.pipeline import normalize, provinces
 from jobcrawler.pipeline.normalize import (
     CONTACT_MASK,
@@ -23,7 +22,8 @@ from jobcrawler.pipeline.normalize import (
     split_sections,
     to_markdown,
 )
-from jobcrawler.schemas import EmploymentType, JobLevel, SalaryPeriod, WorkMode
+from jobcrawler.services.fakes import FakeChatClient
+from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.ats import greenhouse, lever
 
 from .jobs_fixtures import NOW, board_job, board_jobs, load_json, normalized, raw_job
@@ -573,7 +573,7 @@ def test_normalize_title(title: str, key: str) -> None:
 
 @pytest.mark.parametrize(("name", "raw"), board_jobs(), ids=[n for n, _ in board_jobs()])
 def test_board_fixture_jobs_normalize(name: str, raw: object) -> None:
-    from jobcrawler.schemas import RawJob
+    from jobcrawler.common.schemas import RawJob
 
     assert isinstance(raw, RawJob)
     job = normalized(raw)
@@ -716,7 +716,7 @@ def test_units_keep_old_province_names() -> None:
 async def test_classify_unclear_caches_answers_including_unknown() -> None:
     import time
 
-    from jobcrawler.net.kv import MemoryKV
+    from jobcrawler.services.net.kv import MemoryKV
 
     kv = MemoryKV()
     reply = {"level": "unknown", "employment_type": "unknown", "work_mode": "unknown"}

@@ -8,12 +8,12 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.config import Settings
-from jobcrawler.net.http import FetchResult
-from jobcrawler.queues import Queues
-from jobcrawler.resources import open_redis, wire_network
-from jobcrawler.schemas import FetchOutcome
-from jobcrawler.services import overview
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.modules.overview import overview
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.redis.queues import Queues
+from jobcrawler.services.resources import open_redis, wire_network
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

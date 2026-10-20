@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.net.urls import (
+from jobcrawler.common.urls import (
     normalize_url,
     parse_domain_input,
     registrable_domain,

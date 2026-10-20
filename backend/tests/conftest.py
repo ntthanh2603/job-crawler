@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from jobcrawler.config import Settings
+from jobcrawler.common.config import Settings
 
 
 @pytest.fixture

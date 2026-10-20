@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from alembic.script import ScriptDirectory
 
-from jobcrawler.db.migrate import alembic_config
-from jobcrawler.db.models import Base
+from jobcrawler.database.migrate import alembic_config
+from jobcrawler.database.models import Base
 
 
 def _script() -> ScriptDirectory:

@@ -16,9 +16,9 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from jobcrawler.config import get_settings
-from jobcrawler.db.models import JobPosting
-from jobcrawler.db.session import create_engine, create_sessionmaker
+from jobcrawler.common.config import get_settings
+from jobcrawler.database.models import JobPosting
+from jobcrawler.database.session import create_engine, create_sessionmaker
 
 
 def tail_key(url: str) -> str:

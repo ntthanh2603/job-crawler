@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jobcrawler.fakes import FakeFetcher
-from jobcrawler.net.http import Fetcher
-from jobcrawler.schemas import FetchOutcome
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.net.http import Fetcher
 
 
 async def _use(fetcher: Fetcher, url: str) -> str:

@@ -47,7 +47,7 @@ dependencies = [
 ]
 
 [project.scripts]
-jobcrawler = "jobcrawler.entrypoints.cli:main"
+jobcrawler = "jobcrawler.bootstrap.cli:main"
 
 [dependency-groups]
 dev = [
@@ -80,7 +80,7 @@ ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109"]
 
 [tool.ruff.lint.per-file-ignores]
 # Migration sinh bởi Alembic có CHECK constraint dài trên một dòng.
-"jobcrawler/db/alembic/versions/*" = ["E501"]
+"jobcrawler/database/alembic/versions/*" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["jobcrawler", "jcproto"]

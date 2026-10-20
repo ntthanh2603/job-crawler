@@ -9,11 +9,11 @@ from uuid import UUID
 
 import pytest
 
-from jobcrawler.config import Settings
-from jobcrawler.entrypoints import runner
-from jobcrawler.schemas import CompanyResult, RunStatus, RunTrigger
-from jobcrawler.services import companies, crawl
-from jobcrawler.streamqueue import StreamWorker
+from jobcrawler.bootstrap import runner
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import CompanyResult, RunStatus, RunTrigger
+from jobcrawler.modules.crawl import companies, crawl
+from jobcrawler.services.redis.streamqueue import StreamWorker
 
 
 def test_build_role_runs_builds_maintenance_and_overview(clean_env: None) -> None:

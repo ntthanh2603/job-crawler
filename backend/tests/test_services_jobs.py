@@ -6,12 +6,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.schemas import ExtractionMethod, RawJob
-from jobcrawler.services.jobs import website_jobs
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
+from jobcrawler.modules.crawl.website import website_jobs
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.sources.base import Source, SourceSession
 
 FIXTURES = Path(__file__).parent / "fixtures" / "careers"

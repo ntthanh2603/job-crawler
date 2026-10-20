@@ -9,8 +9,10 @@ from uuid import UUID
 import pytest
 from sqlalchemy import delete, func, select, text, update
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import (
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import CompanyIn, FetchOutcome, JobStatus, KycStatus, RunStatus
+from jobcrawler.common.text import normalize_company_name
+from jobcrawler.database.models import (
     BoardIndexRun,
     Company,
     CompanyAlias,
@@ -18,17 +20,15 @@ from jobcrawler.db.models import (
     JobPosting,
     SourceProfile,
 )
-from jobcrawler.fakes import FakeChatClient, FakeFetcher, fetch_result
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import FetchResult
+from jobcrawler.modules.boards import boards as board_service
+from jobcrawler.modules.crawl.companies import process_company
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import CompanyIn, FetchOutcome, JobStatus, KycStatus, RunStatus
-from jobcrawler.services import boards as board_service
-from jobcrawler.services.companies import process_company
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
-from jobcrawler.text import normalize_company_name
 
 from ..boards_fake import HOME, FakeBoard, fake_site, job_page
 
@@ -385,7 +385,7 @@ async def test_serp_lookup_adopts_profile_on_board(
     """Chưa có profile trên trang: tìm bằng SERP `site:`, mở trang profile, map bằng rule."""
     from pydantic import SecretStr
 
-    from jobcrawler.serp import SERPER_URL
+    from jobcrawler.services.serp import SERPER_URL
 
     monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
     settings = settings_for(integration_settings).model_copy(

@@ -1,5 +1,6 @@
-"""Cập nhật trực tiếp (`GET /api/events`, `web/live.py`) không cần DB: dữ liệu từ loader giả, đọc
-luồng SSE qua ASGI từng phần (httpx.ASGITransport chờ hết body nên không đọc được luồng vô hạn)."""
+"""Cập nhật trực tiếp (`GET /api/events`, `modules/live/live.py`) không cần DB: dữ liệu từ loader
+giả, đọc luồng SSE qua ASGI từng phần (httpx.ASGITransport chờ hết body nên không đọc được luồng vô
+hạn)."""
 
 from __future__ import annotations
 
@@ -17,13 +18,13 @@ import pytest
 from fastapi import FastAPI
 from pydantic import SecretStr
 
-from jobcrawler.config import Settings
-from jobcrawler.gateway.registry import WorkerStatus
-from jobcrawler.web import live
-from jobcrawler.web.api import QueueOut, QueuePageOut
-from jobcrawler.web.app import create_app
-from jobcrawler.web.auth import COOKIE, TokenAuth
-from jobcrawler.web.settings_api import WorkersPageOut, WorkersSummaryOut
+from jobcrawler.bootstrap.app import create_app
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.auth.auth import COOKIE, TokenAuth
+from jobcrawler.modules.gateway.registry import WorkerStatus
+from jobcrawler.modules.gateway.schemas import WorkersPageOut, WorkersSummaryOut
+from jobcrawler.modules.live import live
+from jobcrawler.modules.queue.schemas import QueueOut, QueuePageOut
 
 PASSWORD = "x"
 FAST: dict[live.LiveTopic, float] = {"workers": 0.02, "queue": 0.02, "run": 0.02}

@@ -6,8 +6,8 @@ from uuid import UUID
 
 import pytest
 
-from jobcrawler.services import evaluate
-from jobcrawler.services.evaluate import (
+from jobcrawler.modules.evaluate import evaluate
+from jobcrawler.modules.evaluate.evaluate import (
     CompanyEval,
     EvalReport,
     GoldenError,

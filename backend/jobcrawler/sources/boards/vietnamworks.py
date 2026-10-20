@@ -24,9 +24,10 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime
 from typing import Any
 
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.pages import parse
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.pages import parse
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.text import strip_accents
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.base import (
     SourceError,
     SourceSession,
@@ -44,7 +45,6 @@ from jobcrawler.sources.boards.base import (
     SitemapBoard,
     reached_known,
 )
-from jobcrawler.text import strip_accents
 
 API = "https://ms.vietnamworks.com/job-search/v1.0/search"
 PAGE_SIZE = 100

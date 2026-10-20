@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from jobcrawler.web.app import openapi_document
+from jobcrawler.bootstrap.app import openapi_document
 
 TARGET = Path(__file__).resolve().parents[1] / "openapi.json"
 

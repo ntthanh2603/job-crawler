@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import func, select
 
-from jobcrawler.config import Settings
-from jobcrawler.db import migrate
-from jobcrawler.db.models import Company, CompanyRun, Log, SourceFetch
-from jobcrawler.fakes import FakeFetcher
-from jobcrawler.logging import configure_logging
-from jobcrawler.resources import open_resources
-from jobcrawler.schemas import CompanyIn, RunStatus
-from jobcrawler.services.companies import process_company
+from jobcrawler.common.config import Settings
+from jobcrawler.common.logging import configure_logging
+from jobcrawler.common.schemas import CompanyIn, RunStatus
+from jobcrawler.database import migrate
+from jobcrawler.database.models import Company, CompanyRun, Log, SourceFetch
+from jobcrawler.modules.crawl.companies import process_company
+from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.resources import open_resources
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 

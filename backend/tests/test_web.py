@@ -10,10 +10,10 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from jobcrawler.config import Settings
-from jobcrawler.web.app import GuardMiddleware, create_app
-from jobcrawler.web.auth import TokenAuth
-from jobcrawler.web.markdown import to_html
+from jobcrawler.bootstrap.app import GuardMiddleware, create_app
+from jobcrawler.common.config import Settings
+from jobcrawler.common.markdown import to_html
+from jobcrawler.modules.auth.auth import TokenAuth
 
 
 async def whoami(request: Request) -> PlainTextResponse:

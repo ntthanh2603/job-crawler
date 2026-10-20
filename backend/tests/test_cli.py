@@ -8,7 +8,7 @@ import pytest
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 from typer.testing import CliRunner
 
-from jobcrawler.entrypoints.cli import app
+from jobcrawler.bootstrap.cli import app
 
 runner = CliRunner()
 
@@ -42,7 +42,7 @@ def test_api_serves_with_uvicorn_behind_proxy(
     result = runner.invoke(app, [command, "--forwarded-allow-ips", "172.16.0.0/12"])
     assert result.exit_code == 0, result.output
     first, second = calls
-    assert first["app"] == "jobcrawler.web.app:create_app"
+    assert first["app"] == "jobcrawler.bootstrap.app:create_app"
     assert (first["factory"], first["host"], first["port"]) == (True, "0.0.0.0", 8001)
     assert (first["proxy_headers"], first["forwarded_allow_ips"]) == (True, None)
     assert (second["host"], second["port"]) == ("127.0.0.1", 8000)
@@ -100,7 +100,7 @@ def test_reviewed_sample_gives_precision(tmp_path: Path) -> None:
 
 
 def test_no_proxy_flag_disables_proxies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from jobcrawler.config import get_settings
+    from jobcrawler.common.config import get_settings
 
     monkeypatch.delenv("PROXY_MODE", raising=False)  # để monkeypatch dọn lại sau test
     get_settings.cache_clear()
@@ -163,8 +163,8 @@ class _Health:
 
 
 def _gateway_settings(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
-    from jobcrawler.config import Settings
-    from jobcrawler.entrypoints import cli
+    from jobcrawler.bootstrap import cli
+    from jobcrawler.common.config import Settings
 
     fields: dict[str, Any] = {
         "gateway_host": "0.0.0.0",
@@ -251,6 +251,6 @@ def test_gateway_health_uses_tls_when_configured(
     ],
 )
 def test_local_gateway_addr(host: str, expected: str) -> None:
-    from jobcrawler.entrypoints.cli import _local_gateway_addr
+    from jobcrawler.bootstrap.cli import _local_gateway_addr
 
     assert _local_gateway_addr(host, 50051) == expected

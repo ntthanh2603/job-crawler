@@ -11,14 +11,15 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from jobcrawler.config import Settings
-from jobcrawler.db.ids import uuid7
-from jobcrawler.db.models import Company, CompanyAlias, CompanyRun
-from jobcrawler.queues import drop_queue
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import CompanyIn, RunStatus, RunTrigger
-from jobcrawler.services import batch, crawl
-from jobcrawler.streamqueue import StreamWorker
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import CompanyIn, RunStatus, RunTrigger
+from jobcrawler.database.ids import uuid7
+from jobcrawler.database.models import Company, CompanyAlias, CompanyRun
+from jobcrawler.modules.companies import batch
+from jobcrawler.modules.crawl import crawl
+from jobcrawler.services.redis.queues import drop_queue
+from jobcrawler.services.redis.streamqueue import StreamWorker
+from jobcrawler.services.resources import Resources, open_resources
 
 pytestmark = pytest.mark.integration
 

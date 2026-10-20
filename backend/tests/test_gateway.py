@@ -11,9 +11,9 @@ import pytest
 import zstandard
 
 from jcproto.v1 import crawl_pb2
-from jobcrawler.config import Settings
-from jobcrawler.gateway import remote
-from jobcrawler.gateway.dispatch import (
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.gateway import remote
+from jobcrawler.modules.gateway.dispatch import (
     NoWorkerError,
     choose_pool,
     fetch_priority,
@@ -22,18 +22,18 @@ from jobcrawler.gateway.dispatch import (
     parse_task_id,
     priority_fetches,
 )
-from jobcrawler.gateway.registry import Keys
-from jobcrawler.gateway.remote import (
+from jobcrawler.modules.gateway.registry import Keys
+from jobcrawler.modules.gateway.remote import (
     RemoteRenderer,
     RemoteTransport,
     encode_body,
     proxy_id_of,
     to_raw_response,
 )
-from jobcrawler.gateway.server import config_version, worker_config
-from jobcrawler.gateway.worker_auth import bearer
-from jobcrawler.net.http import CapturedJson, TransportError
-from jobcrawler.net.proxy_pool import parse_proxy_line
+from jobcrawler.modules.gateway.server import config_version, worker_config
+from jobcrawler.modules.gateway.worker_auth import bearer
+from jobcrawler.services.net.http import CapturedJson, TransportError
+from jobcrawler.services.net.proxy_pool import parse_proxy_line
 
 URL = "https://careers.example.vn/jobs"
 

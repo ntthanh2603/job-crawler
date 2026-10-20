@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.fakes import FakeChatClient, FakeFetcher
-from jobcrawler.llm import LLMClient
-from jobcrawler.net.http import CapturedJson
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.pages import Link
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.pages import Link
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.net.http import CapturedJson
+from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.sources.base import KnownJobs, SourceLimits, SourceSession
 from jobcrawler.sources.careers import (
     CareersSource,

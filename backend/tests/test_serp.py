@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from jobcrawler.fakes import FakeFetcher, fetch_result
-from jobcrawler.net.http import FetchResult
-from jobcrawler.net.kv import MemoryKV
-from jobcrawler.schemas import FetchOutcome
-from jobcrawler.serp import (
+from jobcrawler.common.schemas import FetchOutcome
+from jobcrawler.services.fakes import FakeFetcher, fetch_result
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.net.kv import MemoryKV
+from jobcrawler.services.serp import (
     BRAVE_URL,
     DISABLED,
     SERPER_URL,

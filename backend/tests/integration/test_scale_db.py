@@ -16,17 +16,21 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select, text
 
-from jobcrawler.config import Settings
-from jobcrawler.db.models import CompanyRun, FailedPage, Job, Log, SourceFetch
-from jobcrawler.entrypoints import runner as runner_mod
-from jobcrawler.fakes import FakeFetcher
-from jobcrawler.net.http import FetchResult
-from jobcrawler.queues import drop_queue, make_queue
-from jobcrawler.resources import Resources, open_resources
-from jobcrawler.schemas import CompanyIn, FetchOutcome, RunStatus
-from jobcrawler.services import batch, companies, evaluate, maintenance, stats
+from jobcrawler.bootstrap import runner as runner_mod
+from jobcrawler.common.config import Settings
+from jobcrawler.common.schemas import CompanyIn, FetchOutcome, RunStatus
+from jobcrawler.database.models import CompanyRun, FailedPage, Job, Log, SourceFetch
+from jobcrawler.modules.companies import batch
+from jobcrawler.modules.crawl import companies
+from jobcrawler.modules.evaluate import evaluate
+from jobcrawler.modules.maintenance import maintenance
+from jobcrawler.modules.overview import stats
+from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.net.http import FetchResult
+from jobcrawler.services.redis.queues import drop_queue, make_queue
+from jobcrawler.services.redis.streamqueue import StreamWorker
+from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
-from jobcrawler.streamqueue import StreamWorker
 
 pytestmark = pytest.mark.integration
 

@@ -10,7 +10,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from jobcrawler.schemas import ExtractionMethod, RawJob
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
 from jobcrawler.sources.ats.ref import RESERVED_SUBDOMAINS, AtsRef, AtsSpec
 from jobcrawler.sources.base import (
     Source,

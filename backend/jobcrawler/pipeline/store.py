@@ -20,8 +20,19 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from jobcrawler.db.models import Company, Job, JobPosting
-from jobcrawler.logging import get_logger
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import (
+    EmploymentType,
+    ExperienceYears,
+    JobLevel,
+    JobOut,
+    JobStatus,
+    Location,
+    Salary,
+    SalaryPeriod,
+    WorkMode,
+)
+from jobcrawler.database.models import Company, Job, JobPosting
 from jobcrawler.pipeline import provinces
 from jobcrawler.pipeline.dedup import (
     TITLE_THRESHOLD,
@@ -36,17 +47,6 @@ from jobcrawler.pipeline.dedup import (
 )
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.pipeline.verify import EXPIRED, Verdict
-from jobcrawler.schemas import (
-    EmploymentType,
-    ExperienceYears,
-    JobLevel,
-    JobOut,
-    JobStatus,
-    Location,
-    Salary,
-    SalaryPeriod,
-    WorkMode,
-)
 
 log = get_logger(__name__)
 

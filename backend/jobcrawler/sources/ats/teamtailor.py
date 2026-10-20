@@ -11,8 +11,8 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import AsyncIterator
 
-from jobcrawler.net.urls import normalize_url, site_root
-from jobcrawler.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
+from jobcrawler.common.urls import normalize_url, site_root
 from jobcrawler.sources.ats.ref import RESERVED_SUBDOMAINS, AtsRef, AtsSpec
 from jobcrawler.sources.base import (
     Source,

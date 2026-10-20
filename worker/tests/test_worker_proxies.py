@@ -214,7 +214,8 @@ def test_browser_skips_socks_with_auth() -> None:
 def test_shared_proxies_use_backend_ids() -> None:
     proxies = shared_proxies(["http://u:p@10.0.0.1:8080", "10.0.0.2:3128", "rác", "10.0.0.2:3128"])
     assert [p.url for p in proxies] == ["http://u:p@10.0.0.1:8080", "http://10.0.0.2:3128"]
-    # Cùng cách tính với backend (`net/proxy_pool.py`): sha1(url)[:10], không có tiền tố `w:`.
+    # Cùng cách tính với backend (`services/net/proxy_pool.py`): sha1(url)[:10], không có tiền tố
+    # `w:`.
     assert proxies[1].id == hashlib.sha1(b"http://10.0.0.2:3128").hexdigest()[:10]
 
 

@@ -8,9 +8,9 @@ from typing import Any
 
 from extruct.jsonld import JsonLdExtractor
 
-from jobcrawler.logging import get_logger
-from jobcrawler.net.urls import normalize_url
-from jobcrawler.schemas import ExtractionMethod, RawJob
+from jobcrawler.common.logging import get_logger
+from jobcrawler.common.schemas import ExtractionMethod, RawJob
+from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.base import join_nonempty, parse_datetime, text_or_none
 
 log = get_logger(__name__)

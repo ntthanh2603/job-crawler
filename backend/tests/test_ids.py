@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from jobcrawler.db.ids import NIL, uuid7
+from jobcrawler.database.ids import NIL, uuid7
 
 
 def test_uuid7_layout_and_time_order() -> None:
