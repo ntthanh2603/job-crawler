@@ -137,6 +137,23 @@ def load_proxies(path: Path) -> list[Proxy]:
     return list(proxies.values())
 
 
+def central_proxies(lines: Sequence[str], path: Path) -> list[Proxy]:
+    """Danh sách proxy chung: dòng nhập ở trang Cài đặt (PROXIES) rồi PROXIES_FILE, bỏ trùng.
+    PROXY_MODE=central: pool của backend; PROXY_MODE=worker: gateway gửi xuống worker."""
+    found: dict[str, Proxy] = {}
+    for line in lines:
+        try:
+            proxy = parse_proxy_line(line)
+        except ProxyParseError as exc:
+            log.warning("proxy.invalid_line", source="PROXIES", error=str(exc))
+            continue
+        if proxy is not None:
+            found.setdefault(proxy.id, proxy)
+    for proxy in load_proxies(path):
+        found.setdefault(proxy.id, proxy)
+    return list(found.values())
+
+
 @dataclass(frozen=True, slots=True)
 class ProxyState:
     proxy: Proxy

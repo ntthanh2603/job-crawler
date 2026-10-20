@@ -52,10 +52,11 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
   biến môi trường vào DB (`POST /api/settings/import-env`).
 - Cài đặt chỉ đọc lúc khởi động (`live=False`): `jobcrawler serve` tự khởi động lại các process
   con khi lưu đổi chúng; chạy từng lệnh riêng thì tự khởi động lại.
-- `PROXY_MODE=central`: danh sách proxy chung ở bảng proxy của trang Cài đặt (cài đặt `proxies`,
-  trong DB) và/hoặc `config/proxies.txt` (`PROXIES_FILE`, mẫu `config/proxies.example.txt`).
-  `GET /api/proxies`: trạng thái xoay vòng từng proxy; `POST /api/proxies/check`: kiểm tra qua
-  worker (`jobcrawler/services/proxies.py`).
+- Danh sách proxy chung: bảng proxy của trang Cài đặt (cài đặt `proxies`, trong DB, mã hoá) và/hoặc
+  `config/proxies.txt` (`PROXIES_FILE`, mẫu `config/proxies.example.txt`). `PROXY_MODE=worker`:
+  gateway gửi danh sách xuống worker trong `WorkerConfig.shared_proxies` (`gateway/server.py`),
+  worker tự xoay; `PROXY_MODE=central`: backend chọn cho từng request. `GET /api/proxies`: trạng
+  thái từng proxy; `POST /api/proxies/check`: kiểm tra qua worker (`jobcrawler/services/proxies.py`).
 - API sau reverse proxy (nginx của giao diện): `jobcrawler api` bật `proxy_headers` của uvicorn;
   IP thật của client (dùng để chặn đoán mật khẩu) chỉ được lấy từ `X-Forwarded-For` khi IP của
   proxy nằm trong `--forwarded-allow-ips` hoặc biến môi trường `FORWARDED_ALLOW_IPS` (uvicorn đọc

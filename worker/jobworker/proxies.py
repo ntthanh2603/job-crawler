@@ -1,11 +1,17 @@
-"""Proxy tại worker (WORKER_PROXIES / WORKER_PROXIES_FILE): pool trong bộ nhớ của một process.
+"""Proxy tại worker: pool trong bộ nhớ của một process, xoay vòng dần.
+
+Danh sách: proxy riêng của máy (WORKER_PROXIES / WORKER_PROXIES_FILE), không có thì danh sách
+proxy chung gateway gửi xuống (`WorkerConfig.shared_proxies`, PROXY_MODE=worker; đổi danh sách thì
+`replace`).
 
 - Mỗi domain gắn một proxy (sticky) `sticky_seconds` giây; cần proxy mới thì chọn lần lượt
-  (round-robin) trong các proxy còn dùng được với domain đó.
+  (round-robin) trong các proxy còn dùng được với domain đó. Mỗi worker bắt đầu vòng ở một vị trí
+  riêng (`start`) để các worker không cùng dồn vào proxy đầu danh sách.
 - 403/407/429 → proxy nghỉ với domain đó `cooldown_seconds`. Lỗi kết nối qua proxy → cũng nghỉ với
   domain đó và tính một lỗi liên tiếp; đủ `max_failures` lỗi liên tiếp thì loại `dead_seconds` giây.
-- id `w:<hash>` để backend phân biệt proxy tại worker với proxy chung. Không log mật khẩu: in/log
-  bằng `Proxy.display` / `mask()`.
+- id: proxy riêng `w:<hash>` (backend phân biệt với proxy chung); proxy chung dùng đúng id của
+  backend (`<hash>`, cùng cách tính) để `source_fetches` khớp bảng proxy ở trang Cài đặt. Không log
+  mật khẩu: in/log bằng `Proxy.display` / `mask()`.
 """
 
 from __future__ import annotations
@@ -106,6 +112,26 @@ def parse_proxy_line(line: str) -> Proxy | None:
     return Proxy(id=proxy_id(url), url=url)
 
 
+def shared_proxies(urls: Iterable[str]) -> list[Proxy]:
+    """Danh sách proxy chung gateway gửi xuống (URL đã chuẩn hoá ở backend), id như backend."""
+    proxies: dict[str, Proxy] = {}
+    for url in urls:
+        try:
+            proxy = parse_proxy_line(url)
+        except ProxyParseError as exc:
+            log.warning("worker.shared_proxy_invalid", error=str(exc))
+            continue
+        if proxy is not None:
+            shared = Proxy(id=hashlib.sha1(proxy.url.encode()).hexdigest()[:10], url=proxy.url)
+            proxies.setdefault(shared.id, shared)
+    return list(proxies.values())
+
+
+def start_offset(worker_id: str) -> int:
+    """Vị trí bắt đầu vòng xoay, cố định theo worker (không phụ thuộc PYTHONHASHSEED)."""
+    return int.from_bytes(hashlib.sha1(worker_id.encode()).digest()[:4], "big")
+
+
 def load_proxies(urls: Iterable[str] = (), path: Path | None = None) -> list[Proxy]:
     """Proxy từ danh sách (WORKER_PROXIES) và file (WORKER_PROXIES_FILE), bỏ trùng.
 
@@ -146,6 +172,7 @@ class LocalProxyPool:
         cooldown_seconds: float = 120,
         max_failures: int = 5,
         dead_seconds: float = 600,
+        start: int = 0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.proxies = list(proxies)
@@ -158,11 +185,22 @@ class LocalProxyPool:
         self._clock = clock
         self._sticky: dict[str, tuple[str, float]] = {}  # host → (proxy id, hết hạn)
         self._cool: dict[tuple[str, str], float] = {}  # (proxy id, host) → hết nghỉ lúc
-        self._next = 0  # vị trí round-robin
+        self._start = start
+        self._next = start % len(self.proxies) if self.proxies else 0  # vị trí round-robin
         self._picks = 0
 
     def __len__(self) -> int:
         return len(self.proxies)
+
+    def replace(self, proxies: Iterable[Proxy]) -> None:
+        """Đổi danh sách (gateway gửi danh sách chung mới): proxy còn trong danh sách giữ sức khoẻ,
+        thời gian nghỉ và domain đang gắn; proxy bị bỏ thì quên hẳn."""
+        self.proxies = list(proxies)
+        self._by_id = {p.id: p for p in self.proxies}
+        self._health = {p.id: self._health.get(p.id) or _Health() for p in self.proxies}
+        self._sticky = {h: s for h, s in self._sticky.items() if s[0] in self._by_id}
+        self._cool = {k: until for k, until in self._cool.items() if k[0] in self._by_id}
+        self._next = self._start % len(self.proxies) if self.proxies else 0
 
     def _dead(self, proxy_id: str, now: float) -> bool:
         health = self._health[proxy_id]

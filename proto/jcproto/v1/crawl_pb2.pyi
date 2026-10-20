@@ -67,7 +67,7 @@ class WorkerInfo(_message.Message):
     def __init__(self, worker_id: _Optional[str] = ..., hostname: _Optional[str] = ..., version: _Optional[str] = ..., pool: _Optional[str] = ..., http_slots: _Optional[int] = ..., render_slots: _Optional[int] = ..., local_proxies: _Optional[int] = ..., labels: _Optional[_Mapping[str, str]] = ..., started_at_ms: _Optional[int] = ...) -> None: ...
 
 class WorkerConfig(_message.Message):
-    __slots__ = ("version", "http_slots", "render_slots", "impersonate", "max_body_bytes", "heartbeat_seconds", "lease_wait_ms", "use_local_proxies")
+    __slots__ = ("version", "http_slots", "render_slots", "impersonate", "max_body_bytes", "heartbeat_seconds", "lease_wait_ms", "use_local_proxies", "shared_proxies", "shared_proxies_hash")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     HTTP_SLOTS_FIELD_NUMBER: _ClassVar[int]
     RENDER_SLOTS_FIELD_NUMBER: _ClassVar[int]
@@ -76,6 +76,8 @@ class WorkerConfig(_message.Message):
     HEARTBEAT_SECONDS_FIELD_NUMBER: _ClassVar[int]
     LEASE_WAIT_MS_FIELD_NUMBER: _ClassVar[int]
     USE_LOCAL_PROXIES_FIELD_NUMBER: _ClassVar[int]
+    SHARED_PROXIES_FIELD_NUMBER: _ClassVar[int]
+    SHARED_PROXIES_HASH_FIELD_NUMBER: _ClassVar[int]
     version: int
     http_slots: int
     render_slots: int
@@ -84,7 +86,9 @@ class WorkerConfig(_message.Message):
     heartbeat_seconds: int
     lease_wait_ms: int
     use_local_proxies: bool
-    def __init__(self, version: _Optional[int] = ..., http_slots: _Optional[int] = ..., render_slots: _Optional[int] = ..., impersonate: _Optional[str] = ..., max_body_bytes: _Optional[int] = ..., heartbeat_seconds: _Optional[int] = ..., lease_wait_ms: _Optional[int] = ..., use_local_proxies: _Optional[bool] = ...) -> None: ...
+    shared_proxies: _containers.RepeatedScalarFieldContainer[str]
+    shared_proxies_hash: str
+    def __init__(self, version: _Optional[int] = ..., http_slots: _Optional[int] = ..., render_slots: _Optional[int] = ..., impersonate: _Optional[str] = ..., max_body_bytes: _Optional[int] = ..., heartbeat_seconds: _Optional[int] = ..., lease_wait_ms: _Optional[int] = ..., use_local_proxies: _Optional[bool] = ..., shared_proxies: _Optional[_Iterable[str]] = ..., shared_proxies_hash: _Optional[str] = ...) -> None: ...
 
 class FetchTask(_message.Message):
     __slots__ = ("task_id", "kind", "method", "url", "headers", "body", "proxy", "proxy_id", "timeout_seconds", "allow_redirects", "wait_until", "capture_json", "deadline_ms", "source", "direct", "priority")

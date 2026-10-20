@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any, cast
 
@@ -477,6 +478,62 @@ async def test_local_proxy_failure_then_direct(gateway: Gateway, web: WebServer)
     retried = gw.result("t2")
     assert retried.status == 200
     assert retried.proxy_id == ""  # proxy đang nghỉ với domain này
+
+
+async def test_shared_proxy_list_from_gateway(
+    gateway: Gateway, web: WebServer, forward_proxy: ForwardProxy
+) -> None:
+    """Worker không có proxy riêng: dùng danh sách chung gateway gửi khi đăng ký; danh sách đổi
+    (phiên bản mới) thì đăng ký lại và thay danh sách."""
+    gw, port = gateway
+    gw.config = crawl_pb2.WorkerConfig(
+        version=5,
+        use_local_proxies=True,
+        shared_proxies=[forward_proxy.url],
+        shared_proxies_hash="h1",
+        lease_wait_ms=150,
+        heartbeat_seconds=1,
+    )
+    gw.add(http_task("t1", web.url("/small")))
+    run = RunningWorker(Worker(make_settings(port), proxies=pool_of()))
+    try:
+        [result] = await gw.wait_results(1)
+        assert result.status == 200
+        assert forward_proxy.requests == [web.url("/small")]
+        # id như backend (không có `w:`): khớp bảng proxy ở trang Cài đặt.
+        assert result.proxy_id == hashlib.sha1(forward_proxy.url.encode()).hexdigest()[:10]
+        # Danh sách bị xoá (vd. đổi sang Backend chọn): worker đi thẳng.
+        gw.config = crawl_pb2.WorkerConfig(
+            version=6, use_local_proxies=True, lease_wait_ms=150, heartbeat_seconds=1
+        )
+        await gw.wait_for(lambda: len(gw.registers) == 2)
+        gw.add(http_task("t2", web.url("/small")))
+        await gw.wait_results(2)
+    finally:
+        await run.stop()
+    assert gw.result("t2").proxy_id == ""
+    assert len(run.worker.proxies) == 0
+
+
+async def test_own_proxies_win_over_shared_list(
+    gateway: Gateway, web: WebServer, forward_proxy: ForwardProxy
+) -> None:
+    gw, port = gateway
+    gw.config = crawl_pb2.WorkerConfig(
+        version=5,
+        use_local_proxies=True,
+        shared_proxies=[f"http://127.0.0.1:{closed_port()}"],
+        shared_proxies_hash="h1",
+    )
+    gw.add(http_task("t1", web.url("/small")))
+    pool = pool_of(forward_proxy.url)
+    run = RunningWorker(Worker(make_settings(port), proxies=pool))
+    try:
+        [result] = await gw.wait_results(1)
+    finally:
+        await run.stop()
+    assert result.status == 200
+    assert result.proxy_id == pool.proxies[0].id  # proxy riêng của máy (`w:…`)
 
 
 async def test_local_proxies_disabled_by_gateway(

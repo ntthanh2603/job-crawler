@@ -652,12 +652,14 @@ GROUPS: tuple[Group, ...] = (
             "Quyết định proxy cho request lấy trang.",
             {
                 "worker": (
-                    "Proxy tại worker",
-                    "Mỗi worker dùng proxy riêng của máy đó (nếu có), không có thì đi thẳng. "
-                    "Backend không chọn proxy.",
+                    "Worker tự xoay",
+                    "Worker tải danh sách proxy chung bên dưới về và tự xoay vòng: mỗi domain giữ "
+                    "một proxy một lúc rồi đổi sang proxy kế tiếp, proxy bị chặn / lỗi thì nghỉ. "
+                    "Máy worker có proxy riêng (WORKER_PROXIES) dùng proxy của nó; danh sách trống "
+                    "và không có proxy riêng thì đi thẳng.",
                 ),
                 "central": (
-                    "Proxy chung",
+                    "Backend chọn",
                     "Backend chọn proxy cho từng request từ danh sách chung bên dưới, gắn theo "
                     "domain và cho nghỉ khi lỗi; worker dùng đúng proxy được chỉ định.",
                 ),
@@ -672,9 +674,10 @@ GROUPS: tuple[Group, ...] = (
             "proxies",
             "list",
             "Danh sách proxy chung",
-            "Proxy cho chế độ Proxy chung (HTTP, HTTPS, SOCKS; có hoặc không tài khoản / mật "
-            "khẩu). Backend xoay vòng: mỗi domain gắn một proxy, đổi proxy khi bị chặn, loại proxy "
-            "lỗi liên tiếp và thử lại sau. Mật khẩu không bao giờ hiện lại sau khi lưu.",
+            "Proxy dùng chung (HTTP, HTTPS, SOCKS; có hoặc không tài khoản / mật khẩu). Chế độ "
+            "“Worker tự xoay”: gateway gửi danh sách xuống worker (đổi danh sách thì worker nhận "
+            "trong khoảng 15 giây); “Backend chọn”: backend xoay vòng cho từng request. Mật khẩu "
+            "không bao giờ hiện lại sau khi lưu.",
             check=_check_proxies,
             placeholder="http://user:pass@1.2.3.4:8080",
             live=False,
@@ -1406,8 +1409,9 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "proxy_max_consecutive_failures",
             "proxy_dead_seconds",
             "proxy_check_url",
-            description="Dùng khi chế độ là “Proxy chung”: backend chọn proxy cho từng request. "
-            "Proxy riêng của worker đặt ở máy worker.",
+            description="“Worker tự xoay”: worker tải danh sách này về. “Backend chọn”: backend "
+            "chọn proxy cho từng request, theo các thời hạn bên dưới. Proxy riêng của một máy "
+            "worker đặt ở máy đó.",
         ),
     ),
     "network": (

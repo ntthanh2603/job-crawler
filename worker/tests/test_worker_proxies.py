@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ from jobworker.proxies import (
     parse_proxy_line,
     playwright_settings,
     proxy_id,
+    shared_proxies,
+    start_offset,
 )
 
 
@@ -203,3 +206,36 @@ def test_browser_skips_socks_with_auth() -> None:
     assert pool.choose("a.vn") == socks
     # Render cho cùng domain không dùng được proxy SOCKS có mật khẩu.
     assert pool.choose("a.vn", browser=True) == http
+
+
+# --- danh sách proxy chung (gateway gửi xuống) ---------------------------------------------------
+
+
+def test_shared_proxies_use_backend_ids() -> None:
+    proxies = shared_proxies(["http://u:p@10.0.0.1:8080", "10.0.0.2:3128", "rác", "10.0.0.2:3128"])
+    assert [p.url for p in proxies] == ["http://u:p@10.0.0.1:8080", "http://10.0.0.2:3128"]
+    # Cùng cách tính với backend (`net/proxy_pool.py`): sha1(url)[:10], không có tiền tố `w:`.
+    assert proxies[1].id == hashlib.sha1(b"http://10.0.0.2:3128").hexdigest()[:10]
+
+
+def test_start_offset_spreads_workers() -> None:
+    proxies = make(4)
+    firsts = {
+        LocalProxyPool(proxies, start=start_offset(f"worker-{i}"), clock=Clock()).choose("a.vn")
+        for i in range(12)
+    }
+    assert len(firsts) > 1  # các worker không cùng bắt đầu ở proxy đầu danh sách
+    assert start_offset("worker-1") == start_offset("worker-1")
+
+
+def test_replace_keeps_health_of_remaining_proxies() -> None:
+    clock = Clock()
+    a, b, c = make(3)
+    pool = LocalProxyPool([a, b], cooldown_seconds=60, max_failures=1, clock=clock)
+    assert pool.choose("x.vn") == a
+    pool.report_failure(b, "y.vn")  # b bị loại
+    pool.replace([b, c])
+    assert pool.alive() == 1  # b vẫn đang bị loại, c mới
+    assert pool.choose("x.vn") == c  # a đã bỏ: domain đang gắn a chọn lại
+    pool.replace([])
+    assert pool.choose("x.vn") is None

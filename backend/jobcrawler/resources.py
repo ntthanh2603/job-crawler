@@ -37,13 +37,8 @@ from jobcrawler.llm import LLMClient
 from jobcrawler.net.direct import DirectTransport
 from jobcrawler.net.http import HttpClient, HttpConfig
 from jobcrawler.net.kv import KeyValueStore, RedisKV
-from jobcrawler.net.proxy_pool import (
-    Proxy,
-    ProxyParseError,
-    ProxyPool,
-    load_proxies,
-    parse_proxy_line,
-)
+from jobcrawler.net.proxy_pool import Proxy, ProxyPool
+from jobcrawler.net.proxy_pool import central_proxies as proxy_list
 from jobcrawler.net.ratelimit import RedisRateLimiter
 from jobcrawler.queues import Queues
 
@@ -92,18 +87,7 @@ def redis_location(url: str) -> str:
 
 def central_proxies(settings: Settings) -> list[Proxy]:
     """Danh sách proxy chung: PROXIES (trang Cài đặt) rồi PROXIES_FILE, bỏ trùng."""
-    found: dict[str, Proxy] = {}
-    for line in settings.proxies:
-        try:
-            proxy = parse_proxy_line(line)
-        except ProxyParseError as exc:
-            log.warning("proxy.invalid_line", source="PROXIES", error=str(exc))
-            continue
-        if proxy is not None:
-            found.setdefault(proxy.id, proxy)
-    for proxy in load_proxies(settings.proxies_file):
-        found.setdefault(proxy.id, proxy)
-    return list(found.values())
+    return proxy_list(settings.proxies, settings.proxies_file)
 
 
 def open_redis(settings: Settings) -> tuple[Redis, Redis]:

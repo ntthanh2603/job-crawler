@@ -44,7 +44,14 @@ from jobworker.credentials import Credentials
 from jobworker.fetch import HttpFetcher
 from jobworker.health import HealthStatus
 from jobworker.logging import get_logger
-from jobworker.proxies import LocalProxyPool, Proxy, browser_compatible, load_proxies
+from jobworker.proxies import (
+    LocalProxyPool,
+    Proxy,
+    browser_compatible,
+    load_proxies,
+    shared_proxies,
+    start_offset,
+)
 from jobworker.results import expired, failure, now_ms, task_timeout
 from jobworker.watchdog import Watchdog
 
@@ -159,6 +166,9 @@ class RuntimeConfig:
     lease_wait_ms: int
     use_local_proxies: bool
     version: int = 0
+    # Danh sách proxy chung gateway gửi xuống (PROXY_MODE=worker) và mã băm của nó.
+    shared_proxies: tuple[str, ...] = ()
+    shared_hash: str = ""
 
     @classmethod
     def local(cls, settings: WorkerSettings) -> RuntimeConfig:
@@ -185,6 +195,8 @@ class RuntimeConfig:
             lease_wait_ms=cfg.lease_wait_ms or self.lease_wait_ms,
             use_local_proxies=cfg.use_local_proxies,
             version=cfg.version,
+            shared_proxies=tuple(cfg.shared_proxies),
+            shared_hash=cfg.shared_proxies_hash,
         )
 
 
@@ -246,8 +258,11 @@ class Worker:
                 load_proxies(settings.worker_proxies, settings.worker_proxies_file),
                 sticky_seconds=settings.worker_proxy_sticky_seconds,
                 cooldown_seconds=settings.worker_proxy_cooldown_seconds,
+                start=start_offset(self.worker_id),
             )
         self.proxies = proxies
+        # Máy có proxy riêng thì dùng proxy của nó; không có thì dùng danh sách chung gateway gửi.
+        self._own_proxies = len(proxies) > 0
         if http is None:
             http = HttpFetcher(
                 worker_id=self.worker_id,
@@ -442,6 +457,9 @@ class Worker:
         old = self.config
         self.config = new
         self.health.heartbeat_seconds = new.heartbeat_seconds
+        if not self._own_proxies and new.shared_hash != old.shared_hash:
+            self.proxies.replace(shared_proxies(new.shared_proxies))
+            log.info("worker.shared_proxies", proxies=len(self.proxies))
         if replace(old, version=new.version) != new:
             log.info(
                 "worker.config",

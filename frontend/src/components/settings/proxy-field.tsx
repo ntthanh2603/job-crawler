@@ -30,9 +30,14 @@ import {
 
 const CHECK_BATCH = 20
 
-const MODE_TEXT: Record<string, string> = {
-  worker: "Chế độ đang là “Proxy tại worker”",
-  off: "Chế độ đang là “Không dùng proxy”",
+/** Danh sách này được dùng thế nào theo chế độ proxy đang lưu. */
+const MODE_TEXT: Record<string, { text: string; warn: boolean }> = {
+  worker: {
+    text: "Chế độ “Worker tự xoay”: mỗi worker tải danh sách này về và tự xoay vòng (máy có proxy riêng dùng proxy của nó). Trạng thái bên dưới cập nhật khi bấm Kiểm tra.",
+    warn: false,
+  },
+  central: { text: "Chế độ “Backend chọn”: backend xoay vòng các proxy này cho từng request.", warn: false },
+  off: { text: "Chế độ “Không dùng proxy”: danh sách này chưa được dùng.", warn: true },
 }
 
 function Tag({ children, className, title }: { children: ReactNode; className?: string; title?: string }) {
@@ -375,10 +380,16 @@ export function ProxyListField({ value, onChange, id }: { value: Exclude<Raw, nu
 
   return (
     <div id={id} className="space-y-3">
-      {mode && mode !== "central" && lines.length > 0 && (
-        <p className="rounded-lg border border-warning/40 bg-warning/8 px-3 py-2 text-meta text-warning-ink dark:bg-warning/10">
-          {MODE_TEXT[mode] ?? "Chế độ khác “Proxy chung”"}: danh sách này chưa được dùng. Chọn “Proxy chung” ở mục Chế độ phía trên
-          để backend xoay vòng các proxy này.
+      {mode && MODE_TEXT[mode] && lines.length > 0 && (
+        <p
+          className={cn(
+            "rounded-lg border px-3 py-2 text-meta",
+            MODE_TEXT[mode].warn
+              ? "border-warning/40 bg-warning/8 text-warning-ink dark:bg-warning/10"
+              : "bg-muted/40 text-muted-foreground",
+          )}
+        >
+          {MODE_TEXT[mode].text}
         </p>
       )}
 

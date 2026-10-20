@@ -206,9 +206,13 @@ Thứ tự chọn proxy cho mỗi việc:
 1. Việc có `proxy` (backend `PROXY_MODE=central`: backend chọn từ danh sách chung, gắn theo domain,
    tự chấm sức khoẻ) → dùng đúng proxy đó, `proxy_id` do backend đặt.
 2. Việc có `direct` (backend `PROXY_MODE=off`) → đi thẳng, bỏ qua proxy tại worker.
-3. Gateway cho dùng proxy tại worker (`PROXY_MODE=worker`) và worker có proxy còn dùng được →
+3. Gateway cho worker tự xoay (`PROXY_MODE=worker`, mặc định) và worker có proxy còn dùng được →
    proxy gắn theo domain (sticky `WORKER_PROXY_STICKY_SECONDS`), chọn lần lượt trong các proxy
-   còn tốt; `proxy_id` dạng `w:<hash>`.
+   còn tốt. Danh sách: proxy riêng của máy (`WORKER_PROXIES` / `WORKER_PROXIES_FILE`, `proxy_id`
+   dạng `w:<hash>`) nếu có; không thì **danh sách proxy chung** gateway gửi khi đăng ký
+   (`WorkerConfig.shared_proxies`, bảng proxy ở trang Cài đặt; `proxy_id` đúng id của backend). Danh
+   sách chung đổi → phiên bản cấu hình đổi → worker đăng ký lại và thay danh sách, giữ sức khoẻ của
+   proxy còn lại. Mỗi worker bắt đầu vòng xoay ở một vị trí riêng (theo `worker_id`).
 4. Không thì đi thẳng.
 
 Proxy tại worker: lỗi kết nối qua proxy, 403, 407, 429 → nghỉ với domain đó

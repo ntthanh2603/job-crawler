@@ -74,6 +74,11 @@ message WorkerConfig {
   int32 heartbeat_seconds = 6;
   int32 lease_wait_ms = 7;
   bool use_local_proxies = 8;      // worker dùng proxy của mình khi việc không chỉ định proxy
+  // Danh sách proxy chung (trang Cài đặt) khi PROXY_MODE=worker: worker không có proxy riêng
+  // (WORKER_PROXIES) thì tự xoay vòng trong danh sách này. Chỉ gửi trong RegisterResponse; mã băm
+  // nằm trong `version` nên đổi danh sách thì worker đăng ký lại để nhận bản mới.
+  repeated string shared_proxies = 9;
+  string shared_proxies_hash = 10;
 }
 
 message FetchTask {

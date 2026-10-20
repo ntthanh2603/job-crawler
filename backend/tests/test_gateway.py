@@ -386,6 +386,22 @@ def test_worker_config_from_settings() -> None:
     assert not worker_config(_settings(proxy_mode="off")).use_local_proxies
 
 
+def test_worker_config_carries_the_shared_proxy_list() -> None:
+    """PROXY_MODE=worker: danh sách proxy chung đi xuống worker; đổi danh sách thì đổi version."""
+    lines = ["http://u:p@10.0.0.1:8080", "10.0.0.2:3128", "10.0.0.2:3128"]
+    a = worker_config(_settings(proxy_mode="worker", proxies=lines))
+    assert list(a.shared_proxies) == ["http://u:p@10.0.0.1:8080", "http://10.0.0.2:3128"]
+    assert len(a.shared_proxies_hash) == 16
+    same = worker_config(_settings(proxy_mode="worker", proxies=list(reversed(lines))))
+    assert same.version == a.version  # thứ tự nhập không đổi phiên bản
+    more = worker_config(_settings(proxy_mode="worker", proxies=[*lines, "10.0.0.3:3128"]))
+    assert more.version != a.version
+    # Backend chọn proxy (central) / không proxy: worker không nhận danh sách.
+    for mode in ("central", "off"):
+        config = worker_config(_settings(proxy_mode=mode, proxies=lines))
+        assert (list(config.shared_proxies), config.shared_proxies_hash) == ([], "")
+
+
 def test_queue_max_wait_must_exceed_grace() -> None:
     assert _settings().fetch_queue_max_wait_seconds == 300
     with pytest.raises(ValueError, match="FETCH_QUEUE_MAX_WAIT_SECONDS"):

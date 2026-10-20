@@ -53,6 +53,7 @@ from jobcrawler.gateway.registry import (
 )
 from jobcrawler.gateway.worker_auth import WorkerAuth, bearer
 from jobcrawler.logging import get_logger
+from jobcrawler.net.proxy_pool import central_proxies
 
 log = get_logger(__name__)
 
@@ -82,7 +83,20 @@ def config_version(fields: dict[str, Any]) -> int:
     return (int.from_bytes(digest[:8], "big") >> 1) or 1
 
 
+def shared_proxies(settings: Settings) -> list[str]:
+    """Proxy chung gửi xuống worker (PROXY_MODE=worker): worker không có proxy riêng thì tự xoay
+    vòng trong danh sách này. Chế độ khác: rỗng (central: backend chọn từng request)."""
+    if settings.proxy_mode != "worker":
+        return []
+    return [p.url for p in central_proxies(settings.proxies, settings.proxies_file)]
+
+
+def proxies_hash(urls: list[str]) -> str:
+    return hashlib.sha256("\n".join(sorted(urls)).encode()).hexdigest()[:16] if urls else ""
+
+
 def worker_config(settings: Settings) -> crawl_pb2.WorkerConfig:
+    shared = shared_proxies(settings)
     fields: dict[str, Any] = {
         "http_slots": settings.gateway_http_slots,
         "render_slots": settings.gateway_render_slots,
@@ -91,8 +105,11 @@ def worker_config(settings: Settings) -> crawl_pb2.WorkerConfig:
         "heartbeat_seconds": settings.gateway_heartbeat_seconds,
         "lease_wait_ms": settings.gateway_lease_wait_ms,
         "use_local_proxies": settings.proxy_mode == "worker",
+        # Mã băm (không phải danh sách, có mật khẩu) nằm trong phiên bản: đổi danh sách → worker
+        # thấy phiên bản mới ở Lease / Heartbeat → đăng ký lại để nhận danh sách.
+        "shared_proxies_hash": proxies_hash(shared),
     }
-    return crawl_pb2.WorkerConfig(version=config_version(fields), **fields)
+    return crawl_pb2.WorkerConfig(version=config_version(fields), shared_proxies=shared, **fields)
 
 
 # --- servicer ------------------------------------------------------------------------------------
