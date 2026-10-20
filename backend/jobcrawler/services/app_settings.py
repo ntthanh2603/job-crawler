@@ -9,9 +9,14 @@ rẻ nhất là so version:
         settings = apply_overrides(base, await load_overrides(sessionmaker))
 
 Mục `live=False` chỉ được đọc lúc dựng đối tượng dùng lâu (client LLM, proxy pool, cron, số job
-song song của runner...): đổi xong phải khởi động lại service mới có hiệu lực. Các field kết nối,
-bí mật hạ tầng, tên queue, gateway, đăng nhập giao diện, log chỉ đặt được bằng biến môi trường
-(`ENV_ONLY`), không bao giờ trả ra API.
+song song của runner...): lưu mà đổi giá trị của chúng thì tăng thêm bộ đếm
+`<REDIS_PREFIX>:settings:restart`; `jobcrawler serve` (container `backend`) thấy bộ đếm tăng thì
+khởi động lại các process con rồi ghi `...:settings:restart_applied` (`restart_state`). Chạy từng
+process riêng thì phải tự khởi động lại. Các field kết nối, bí mật hạ tầng, tên queue, gateway,
+đăng nhập giao diện, log chỉ đặt được bằng biến môi trường (`ENV_ONLY`), không bao giờ trả ra API.
+
+Cài đặt đặt bằng biến môi trường (`.env`) chép được vào bảng (`import_env`) để quản lý hẳn ở trang
+Cài đặt.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from jobcrawler import secretbox, sysres
 from jobcrawler.config import Settings, parse_window
 from jobcrawler.db.models import AppSetting
 from jobcrawler.logging import get_logger
@@ -50,12 +56,14 @@ MASK = "••••••••"
 # Mật khẩu trong proxy hiển thị thành chuỗi này (`http://user:•••@host:port`).
 PROXY_MASK = "•••"
 
-# Chỉ đặt bằng biến môi trường / .env: kết nối, bí mật hạ tầng, tên queue, gateway, đăng nhập
-# giao diện, log. Không sửa ở giao diện, không trả ra API.
+# Chỉ đặt bằng biến môi trường / .env / file bí mật (SECRETS_DIR): kết nối (cả Redis cache), bí
+# mật hạ tầng, tên queue, gateway, đăng nhập giao diện (Basic, header SSO, đăng xuất), token số đo,
+# watchdog (đọc một lần lúc process khởi động), log. Không sửa ở giao diện, không trả ra API.
 ENV_ONLY: frozenset[str] = frozenset(
     {
         "database_url",
         "redis_url",
+        "cache_redis_url",
         "db_pool_size",
         "db_max_overflow",
         "redis_prefix",
@@ -69,6 +77,14 @@ ENV_ONLY: frozenset[str] = frozenset(
         "gateway_tls_key",
         "ui_username",
         "ui_password",
+        "jwt_secret",
+        "encryption_keys",
+        "auth_token_hours",
+        "auth_proxy_user_header",
+        "auth_proxy_email_header",
+        "auth_logout_url",
+        "watchdog_seconds",
+        "demo_companies",
         "log_level",
         "log_format",
         "log_db_level",
@@ -455,7 +471,8 @@ GROUPS: tuple[Group, ...] = (
             "runner_build_concurrency",
             "int",
             "Job build song song",
-            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt build.",
+            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt build. 0 = tự tính theo CPU / "
+            "RAM của máy (2,5 mỗi CPU, không quá 2 mỗi GiB RAM, trong 4–20).",
             unit="job",
             live=False,
         ),
@@ -463,7 +480,8 @@ GROUPS: tuple[Group, ...] = (
             "runner_poll_concurrency",
             "int",
             "Job poll song song",
-            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt poll.",
+            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt poll. 0 = tự tính theo máy "
+            "(12 mỗi CPU, trong 20–100).",
             unit="job",
             live=False,
         ),
@@ -471,7 +489,8 @@ GROUPS: tuple[Group, ...] = (
             "runner_board_concurrency",
             "int",
             "Job index trang tuyển dụng song song",
-            "Mỗi process runner index cùng lúc tối đa chừng này trang tuyển dụng.",
+            "Mỗi process runner index cùng lúc tối đa chừng này trang tuyển dụng. 0 = tự tính theo "
+            "máy (1 mỗi CPU, trong 2–8).",
             unit="job",
             live=False,
         ),
@@ -645,8 +664,9 @@ GROUPS: tuple[Group, ...] = (
             "proxies",
             "list",
             "Danh sách proxy chung",
-            "Mỗi dòng một proxy: scheme://user:pass@host:port, host:port hoặc host:port:user:pass. "
-            "Chỉ dùng ở chế độ Proxy chung; mật khẩu được ẩn khi hiển thị.",
+            "Proxy cho chế độ Proxy chung (HTTP, HTTPS, SOCKS; có hoặc không tài khoản / mật "
+            "khẩu). Backend xoay vòng: mỗi domain gắn một proxy, đổi proxy khi bị chặn, loại proxy "
+            "lỗi liên tiếp và thử lại sau. Mật khẩu không bao giờ hiện lại sau khi lưu.",
             check=_check_proxies,
             placeholder="http://user:pass@1.2.3.4:8080",
             live=False,
@@ -694,9 +714,9 @@ GROUPS: tuple[Group, ...] = (
     ),
     _group(
         "network",
-        "HTTP & lịch sự",
-        "Timeout, thử lại, cache và giới hạn tốc độ theo domain để thu thập lịch sự, không làm "
-        "quá tải website.",
+        "HTTP & tốc độ truy cập",
+        "Timeout, thử lại, cache của request; giới hạn số request mỗi giây theo domain và tuân thủ "
+        "robots.txt để không làm quá tải hay bị website chặn.",
         _s(
             "http_timeout_seconds",
             "float",
@@ -1503,6 +1523,17 @@ GROUPS = tuple(replace(group, sections=_SECTIONS.get(group.key, ())) for group i
 
 SPECS: list[SettingSpec] = [spec for group in GROUPS for spec in group.items]
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SPECS}
+# Cài đặt mà 0 = tự tính theo máy: giá trị tự động trên máy đang chạy API (cùng container với
+# runner khi chạy `jobcrawler serve`), để trang Cài đặt hiện cho người sửa biết.
+AUTO_VALUES: dict[str, Callable[[], int]] = {
+    "runner_build_concurrency": lambda: sysres.auto_concurrency("build"),
+    "runner_poll_concurrency": lambda: sysres.auto_concurrency("poll"),
+    "runner_board_concurrency": lambda: sysres.auto_concurrency("boards"),
+}
+# Lưu trong bảng ở dạng mã hoá (`secretbox`): bí mật và danh sách proxy (có mật khẩu).
+SENSITIVE: frozenset[str] = frozenset(
+    {spec.key for spec in SPECS if spec.kind == "secret"} | {"proxies"}
+)
 
 
 # --- kiểm tra giá trị ----------------------------------------------------------------------------
@@ -1699,11 +1730,86 @@ async def settings_version(redis: Redis, prefix: str) -> int:
     return int(raw or 0)
 
 
+def restart_key(prefix: str) -> str:
+    """Bộ đếm: tăng mỗi lần lưu đổi một cài đặt `live=False`."""
+    return f"{prefix}:settings:restart"
+
+
+def restart_applied_key(prefix: str) -> str:
+    """Giá trị `restart_key` mà `jobcrawler serve` đã áp dụng (khởi động lại process con xong)."""
+    return f"{prefix}:settings:restart_applied"
+
+
+def supervisor_key(prefix: str) -> str:
+    """Có (TTL ngắn, `jobcrawler serve` ghi lại liên tục) = cài đặt `live=False` được tự áp dụng."""
+    return f"{prefix}:serve:alive"
+
+
+@dataclass(frozen=True, slots=True)
+class RestartState:
+    auto: bool  # có `jobcrawler serve` đang chạy: tự khởi động lại để áp dụng
+    pending: bool  # đã lưu cài đặt cần khởi động lại mà chưa áp dụng xong
+
+
+async def restart_state(redis: Redis, prefix: str) -> RestartState:
+    auto = bool(await redis.exists(supervisor_key(prefix)))
+    wanted, applied = await redis.mget(restart_key(prefix), restart_applied_key(prefix))
+    return RestartState(auto=auto, pending=auto and int(wanted or 0) > int(applied or 0))
+
+
+def _sealed(key: str, value: Any) -> Any:
+    """Giá trị ghi vào bảng: trường nhạy cảm (`SENSITIVE`) được mã hoá (`secretbox`)."""
+    if key not in SENSITIVE or value is None:
+        return value
+    return secretbox.current().encrypt(key, value)
+
+
+def _opened(key: str, value: Any) -> tuple[bool, Any]:
+    """(đọc được?, giá trị) của một dòng: giải mã nếu đã mã hoá; hỏng / thiếu khoá thì bỏ dòng."""
+    if not secretbox.is_encrypted(value):
+        return True, value
+    try:
+        return True, secretbox.current().decrypt(key, value)
+    except (secretbox.DecryptError, RuntimeError) as exc:
+        log.error("settings.decrypt_failed", key=key, error=str(exc))
+        return False, None
+
+
 async def load_overrides(sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, Any]:
-    """Các dòng `app_settings` còn trong danh mục (key → giá trị JSON, chưa kiểm)."""
+    """Các dòng `app_settings` còn trong danh mục (key → giá trị JSON đã giải mã, chưa kiểm).
+    Dòng không giải mã được (mất khoá) bị bỏ qua: cài đặt đó về biến môi trường / mặc định."""
     async with sessionmaker() as session:
         rows = (await session.execute(select(AppSetting.key, AppSetting.value))).all()
-    return {key: value for key, value in rows if key in SPEC_BY_KEY}
+    out: dict[str, Any] = {}
+    for key, value in rows:
+        if key in SPEC_BY_KEY:
+            ok, opened = _opened(key, value)
+            if ok:
+                out[key] = opened
+    return out
+
+
+async def seal_stored(sessionmaker: async_sessionmaker[AsyncSession]) -> int:
+    """Mã hoá (lại) các dòng nhạy cảm còn lưu nguyên văn hoặc bằng khoá cũ (sau khi đổi
+    ENCRYPTION_KEYS); giá trị không đổi nên không tăng version. Trả số dòng đã ghi lại."""
+    box = secretbox.current()
+    changed = 0
+    async with sessionmaker.begin() as session:
+        rows = (
+            await session.execute(
+                select(AppSetting).where(AppSetting.key.in_(sorted(SENSITIVE))).with_for_update()
+            )
+        ).scalars()
+        for row in rows:
+            if row.value is None or box.is_current(row.value):
+                continue
+            ok, opened = _opened(row.key, row.value)
+            if ok:
+                row.value = box.encrypt(row.key, opened)
+                changed += 1
+    if changed:
+        log.info("settings.sealed", rows=changed, key_id=box.active)
+    return changed
 
 
 async def load_effective(
@@ -1823,7 +1929,7 @@ async def save(
             changed += result.rowcount or 0  # pyright: ignore[reportAttributeAccessIssue]
         for key, value in upserts.items():
             stmt = pg_insert(AppSetting).values(
-                key=key, value=_jsonable(key, value), updated_by=user
+                key=key, value=_sealed(key, _jsonable(key, value)), updated_by=user
             )
             stmt = stmt.on_conflict_do_update(
                 index_elements=[AppSetting.key],
@@ -1837,6 +1943,9 @@ async def save(
             changed += 1
     if changed:
         version = await redis.incr(version_key(prefix))
+        restart = restart_required(prepared.before, effective, [*upserts, *resets])
+        if restart:
+            await redis.incr(restart_key(prefix))
         await redis.publish(channel(prefix), str(version))
         log.info(
             "settings.saved",
@@ -1844,8 +1953,56 @@ async def save(
             version=version,
             changed=sorted(upserts),
             reset=sorted(resets),
+            restart=restart,
         )
     return effective
+
+
+def env_overrides(base: Settings, overrides: Mapping[str, Any]) -> dict[str, Any]:
+    """Cài đặt sửa được ở giao diện mà biến môi trường / `.env` của process đặt khác mặc định và
+    chưa có dòng trong bảng: key → giá trị dạng JSON (bí mật nguyên văn), như gửi lên `save`."""
+    out: dict[str, Any] = {}
+    for spec in SPECS:
+        key = spec.key
+        if key in overrides or key not in base.model_fields_set:
+            continue
+        value = _jsonable(key, getattr(base, key))
+        default = _jsonable(key, spec.field.get_default(call_default_factory=True))
+        if value != default:
+            out[key] = value
+    return out
+
+
+@dataclass(frozen=True, slots=True)
+class Imported:
+    keys: list[str]  # đã chép vào bảng
+    skipped: dict[str, str]  # không hợp lệ ở giao diện: key → lý do (vẫn lấy từ biến môi trường)
+
+
+async def import_env(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    redis: Redis,
+    prefix: str,
+    base: Settings,
+    *,
+    user: str | None,
+) -> Imported:
+    """Chép `env_overrides` vào bảng (như lưu ở giao diện: kiểm tra, nhật ký, tăng version) để
+    trang Cài đặt là nơi quản lý chúng; giá trị hiệu lực không đổi. Giá trị không qua kiểm tra
+    của giao diện thì bỏ qua (giữ ở biến môi trường), phần còn lại vẫn chép."""
+    values = env_overrides(base, await load_overrides(sessionmaker))
+    skipped: dict[str, str] = {}
+    while values:
+        try:
+            await save(sessionmaker, redis, prefix, base, values, user=user)
+            break
+        except SettingsError as exc:
+            bad = {k: v for k, v in exc.errors.items() if k in values} or dict.fromkeys(values, "")
+            skipped |= bad
+            values = {k: v for k, v in values.items() if k not in bad}
+    if skipped:
+        log.warning("settings.import_env_skipped", keys=sorted(skipped))
+    return Imported(sorted(values), skipped)
 
 
 def _audit_value(spec: SettingSpec, value: Any) -> Any:
@@ -1954,6 +2111,7 @@ def describe(
                     "secret": secret,
                     "is_set": _secret_set(spec, getattr(effective, key)) if secret else None,
                     "env_is_set": _secret_set(spec, getattr(base, key)) if secret else None,
+                    "auto_value": AUTO_VALUES[key]() if key in AUTO_VALUES else None,
                 }
             )
         out.append(

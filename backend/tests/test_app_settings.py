@@ -272,6 +272,27 @@ def test_restart_required_lists_changed_non_live_keys() -> None:
     assert a.restart_required(before, after, keys) == ["llm_model"]
 
 
+def test_env_overrides_lists_env_values_not_in_db() -> None:
+    s = base(
+        llm_model="qwen3",
+        llm_api_key=SecretStr("sk-1"),
+        board_concurrency=7,
+        poll_interval_seconds=Settings.model_fields["poll_interval_seconds"].default,
+        ui_password=SecretStr("pw"),
+    )
+    # Trùng mặc định thì không cần chép; ENV_ONLY (ui_password) không bao giờ vào bảng.
+    assert a.env_overrides(s, {}) == {
+        "llm_model": "qwen3",
+        "llm_api_key": "sk-1",
+        "board_concurrency": 7,
+    }
+    # Đã có dòng trong bảng thì giá trị ở giao diện thắng: không chép đè.
+    assert a.env_overrides(s, {"llm_model": "khac"}) == {
+        "llm_api_key": "sk-1",
+        "board_concurrency": 7,
+    }
+
+
 def test_mask_proxy_formats() -> None:
     assert a.mask_proxy("socks5://u:p@h.vn:1080") == "socks5://u:•••@h.vn:1080"
     assert a.mask_proxy("http://h.vn:3128") == "http://h.vn:3128"

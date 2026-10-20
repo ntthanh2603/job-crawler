@@ -49,7 +49,14 @@ async def test_service_payloads_have_no_untyped_keys(integration_settings: Setti
             api.CrawlStatusOut.model_validate(await actions.crawl_status(res), extra="forbid")
             groups = app_settings.describe(settings, {}, settings)
             settings_api.SettingsPageOut.model_validate(
-                {"version": 0, "groups": groups}, extra="forbid"
+                {
+                    "version": 0,
+                    "groups": groups,
+                    "env_keys": sorted(app_settings.env_overrides(settings, {})),
+                    "auto_restart": False,
+                    "restart_pending": False,
+                },
+                extra="forbid",
             )
     finally:
         for name in settings.queue_names:

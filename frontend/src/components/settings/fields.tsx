@@ -14,6 +14,7 @@ import type { SettingItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { describeCron, humanSeconds, parseWindow, windowLength, type Raw } from "./model"
+import { ProxyListField } from "./proxy-field"
 
 type FieldProps = {
   item: SettingItem
@@ -36,6 +37,7 @@ export function SettingField(props: FieldProps) {
     case "enum":
       return <EnumField {...props} />
     case "list":
+      if (props.item.key === "proxies") return <ProxyListField {...props} />
       return props.item.options.length ? <ChoiceListField {...props} /> : <LinesField {...props} />
     case "dict":
       return <DictField {...props} />
@@ -112,6 +114,13 @@ function NumberField({ item, value, onChange, id, invalid }: FieldProps) {
       </div>
       {/* Giới hạn hiện khi rê chuột và trong thông báo lỗi; dưới ô chỉ đổi đơn vị cho dễ đọc. */}
       {extra && <Hint>= {extra}</Hint>}
+      {/* 0 = tự tính theo máy (như open-asm): cho biết máy này đang tính ra bao nhiêu. */}
+      {item.auto_value !== null && (
+        <Hint>
+          {valid && n === 0 ? "Tự động" : "0 = tự động"} theo CPU / RAM · máy này: {num(item.auto_value)}
+          {item.unit ? ` ${item.unit}` : ""}
+        </Hint>
+      )}
     </div>
   )
 }

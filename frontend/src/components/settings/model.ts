@@ -25,7 +25,10 @@ export function toRaw(item: SettingItem, value: SettingValue): Exclude<Raw, null
     case "bool":
       return Boolean(value)
     case "list":
-      return item.options.length ? [...((value as string[] | null) ?? [])] : ((value as string[] | null) ?? []).join("\n")
+      // Trang tuyển dụng (ô đánh dấu) và proxy (bảng) giữ mảng; danh sách khác là ô nhiều dòng.
+      return item.options.length || item.key === "proxies"
+        ? [...((value as string[] | null) ?? [])]
+        : ((value as string[] | null) ?? []).join("\n")
     case "dict":
       return Object.entries((value as Record<string, string | number> | null) ?? {}).map(([k, v]): [string, string] => [k, String(v)])
     case "secret":

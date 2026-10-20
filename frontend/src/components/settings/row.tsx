@@ -26,10 +26,14 @@ export function Pill({ children, title, className }: { children: ReactNode; titl
 }
 
 /** Biểu tượng "cần khởi động lại" kèm chú thích (đọc được bằng trình đọc màn hình). */
-export function RestartMark() {
+export function RestartMark({ auto }: { auto: boolean }) {
   return (
     <Hint
-      content="Chỉ có hiệu lực sau khi khởi động lại các service dùng cài đặt này"
+      content={
+        auto
+          ? "Lưu xong backend tự khởi động lại các process để áp dụng (vài giây)"
+          : "Chỉ có hiệu lực sau khi backend khởi động lại"
+      }
       className="inline-grid size-5 place-items-center rounded-md text-warning-ink"
     >
       <RotateCw className="size-3.5" aria-label="Cần khởi động lại" />
@@ -42,12 +46,14 @@ export function SettingRow({
   draft,
   error,
   timezone,
+  autoRestart,
   onChange,
 }: {
   item: SettingItem
   draft: Draft
   error: string | undefined
   timezone: string
+  autoRestart: boolean
   onChange: (key: string, raw: Raw | undefined) => void
 }) {
   const id = `setting-${item.key}`
@@ -58,7 +64,7 @@ export function SettingRow({
   const hasEnv = item.env_value !== null || Boolean(item.env_is_set)
   const secretSet = item.secret ? (resetting ? item.env_is_set : item.is_set) : null
   // Lưới chọn nhiều lựa chọn cần cả chiều ngang: ô nhập nằm dưới phần giải thích.
-  const wide = item.kind === "list" && item.options.length > 0
+  const wide = item.kind === "list" && (item.options.length > 0 || item.key === "proxies")
   return (
     <div
       id={`row-${item.key}`}
@@ -74,7 +80,7 @@ export function SettingRow({
           <label htmlFor={id} className="mr-0.5 text-sm font-medium text-foreground">
             {item.label}
           </label>
-          {!item.live && <RestartMark />}
+          {!item.live && <RestartMark auto={autoRestart} />}
           {dirty ? (
             <Pill className="bg-primary text-primary-foreground">{resetting ? "Sẽ khôi phục" : "Chưa lưu"}</Pill>
           ) : item.source === "ui" ? (
@@ -91,7 +97,7 @@ export function SettingRow({
         </div>
         <p className="text-meta text-pretty text-muted-foreground">{item.help}</p>
         <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground/90">
-          <code className="font-mono text-[0.6875rem] text-muted-foreground/80">{envName(item)}</code>
+          {hasEnv && <code className="font-mono text-[0.6875rem] text-muted-foreground/80">{envName(item)}</code>}
           {isCustom(item) &&
             (item.secret ? (
               <span>· Mặc định: {item.key === "llm_api_key" ? "không cần khoá" : "chưa đặt"}</span>

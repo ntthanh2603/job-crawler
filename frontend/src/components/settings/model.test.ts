@@ -38,6 +38,7 @@ function item(over: Partial<SettingItem> = {}): SettingItem {
     secret: false,
     is_set: null,
     env_is_set: null,
+    auto_value: null,
     ...over,
   }
 }

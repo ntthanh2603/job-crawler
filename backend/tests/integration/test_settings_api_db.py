@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import base64
+import contextlib
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import delete, select
 
+from jobcrawler import secretbox
 from jobcrawler.config import Settings
 from jobcrawler.db.models import AppSetting
 from jobcrawler.gateway import registry
@@ -25,7 +26,6 @@ from jobcrawler.web.app import create_app
 
 pytestmark = pytest.mark.integration
 
-AUTH = {"Authorization": "Basic " + base64.b64encode(b"admin:mat-khau").decode()}
 ORIGIN = {"Origin": "http://ui.test"}
 
 
@@ -44,14 +44,28 @@ def by_key(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["key"]: item for g in payload["groups"] for item in g["items"]}
 
 
+async def raw_rows(web: Web) -> dict[str, Any]:
+    """Giá trị đúng như nằm trong bảng (trường nhạy cảm đã mã hoá)."""
+    async with web.res.sessionmaker() as s:
+        result = await s.execute(select(AppSetting.key, AppSetting.value))
+        return dict(result.all())
+
+
 async def rows(web: Web) -> dict[str, Any]:
+    """Dòng của bảng (giá trị đã giải mã, người lưu)."""
     async with web.res.sessionmaker() as s:
         result = await s.execute(select(AppSetting.key, AppSetting.value, AppSetting.updated_by))
-        return {k: (v, by) for k, v, by in result.all() if k in app_settings.SPEC_BY_KEY}
+        out: dict[str, Any] = {}
+        for k, v, by in result.all():
+            if k in app_settings.SPEC_BY_KEY:
+                value = secretbox.current().decrypt(k, v) if secretbox.is_encrypted(v) else v
+                out[k] = (value, by)
+        return out
 
 
-@pytest.fixture
-async def web(integration_settings: Settings) -> AsyncIterator[Web]:
+@contextlib.asynccontextmanager
+async def open_web(integration_settings: Settings, **env: Any) -> AsyncIterator[Web]:
+    """API trên DB / Redis thật; `env`: giá trị như đặt bằng biến môi trường của backend."""
     tag = uuid4().hex[:8]
     settings = integration_settings.model_copy(
         update={
@@ -63,6 +77,7 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
             "serp_api_key": None,
             "ui_password": SecretStr("mat-khau"),
         }
+        | env
     )
     app = create_app(settings)
     try:
@@ -73,7 +88,7 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://ui.test",
-                headers=AUTH | ORIGIN,
+                headers={"Authorization": f"Bearer {app.state.token_auth.issue().token}"} | ORIGIN,
             ) as client:
                 yield Web(client, settings, res)
             async with res.sessionmaker.begin() as s:
@@ -88,6 +103,12 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
             await redis.aclose()
         for name in settings.queue_names:
             await drop_queue(settings.redis_url, name)
+
+
+@pytest.fixture
+async def web(integration_settings: Settings) -> AsyncIterator[Web]:
+    async with open_web(integration_settings) as w:
+        yield w
 
 
 async def test_get_lists_groups_without_secrets(web: Web) -> None:
@@ -130,6 +151,8 @@ async def test_put_saves_bumps_version_and_publishes(web: Web) -> None:
         data = r.json()
         assert data["version"] == 1
         assert data["restart_required"] == ["llm_model", "rate_limits"]
+        # Không có `jobcrawler serve`: không tự áp dụng, không có gì "đang áp dụng".
+        assert (data["auto_restart"], data["restart_pending"]) == (False, False)
         items = by_key(data)
         assert (
             items["poll_interval_seconds"]["value"],
@@ -163,6 +186,64 @@ async def test_put_saves_bumps_version_and_publishes(web: Web) -> None:
     r = await web.client.put("/api/settings", json={"values": {"serp_api_key": app_settings.MASK}})
     assert r.status_code == 200
     assert r.json()["version"] == 1
+
+
+async def test_restart_counter_and_state(web: Web) -> None:
+    redis = web.res.redis
+    restart = app_settings.restart_key(web.prefix)
+    # Mục live=True: không cần khởi động lại.
+    r = await web.client.put("/api/settings", json={"values": {"poll_interval_seconds": 120}})
+    assert r.status_code == 200, r.text
+    assert await redis.get(restart) is None
+    r = await web.client.put("/api/settings", json={"values": {"llm_model": "qwen-x"}})
+    assert r.json()["restart_required"] == ["llm_model"]
+    assert int(await redis.get(restart)) == 1
+
+    # `jobcrawler serve` đang chạy (khoá alive) nhưng chưa khởi động lại xong.
+    await redis.set(app_settings.supervisor_key(web.prefix), 0, ex=30)
+    await redis.set(app_settings.restart_applied_key(web.prefix), 0)
+    data = (await web.client.get("/api/settings")).json()
+    assert (data["auto_restart"], data["restart_pending"]) == (True, True)
+    await redis.set(app_settings.restart_applied_key(web.prefix), 1)
+    data = (await web.client.get("/api/settings")).json()
+    assert (data["auto_restart"], data["restart_pending"]) == (True, False)
+
+
+async def test_import_env_copies_env_values_into_db(integration_settings: Settings) -> None:
+    async with open_web(
+        integration_settings,
+        llm_model="qwen-env",
+        llm_api_key=SecretStr("sk-env"),
+        board_concurrency=7,
+        rate_limits={"topcv.vn": 0.5},
+    ) as web:
+        await web.client.put("/api/settings", json={"values": {"board_concurrency": 9}})
+        page = (await web.client.get("/api/settings")).json()
+        # board_concurrency đã đặt ở giao diện: giá trị giao diện thắng, không chép. (Có thể có
+        # thêm key từ backend/.env của máy chạy test.)
+        wanted = {"llm_api_key", "llm_model", "rate_limits"}
+        assert wanted <= set(page["env_keys"])
+        assert "board_concurrency" not in page["env_keys"]
+        assert by_key(page)["llm_model"]["source"] == "env"
+
+        r = await web.client.post("/api/settings/import-env")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["imported"] == page["env_keys"]
+        assert (data["skipped"], data["env_keys"], data["restart_required"]) == ({}, [], [])
+        items = by_key(data)
+        assert items["llm_model"]["source"] == "ui"
+        assert items["llm_api_key"]["is_set"] is True
+        assert "sk-env" not in r.text
+        stored = await rows(web)
+        assert stored["llm_api_key"] == ("sk-env", "admin")
+        assert stored["llm_model"] == ("qwen-env", "admin")
+        assert stored["board_concurrency"] == (9, "admin")
+        # Giá trị không đổi: không cần khởi động lại.
+        assert await web.res.redis.get(app_settings.restart_key(web.prefix)) is None
+
+        again = (await web.client.post("/api/settings/import-env")).json()
+        assert again["imported"] == []
 
 
 async def test_put_rejects_invalid_values_without_saving(web: Web) -> None:
@@ -300,3 +381,109 @@ async def test_empty_workers(web: Web) -> None:
     assert data["workers"] == []
     assert data["summary"]["alive"] == 0
     assert data["summary"]["pools"] == {}
+
+
+async def test_proxies_status_and_check(web: Web) -> None:
+    lines = ["http://u%40x:p4ss@10.0.0.1:8080", "socks5://10.0.0.2:1080", "10.0.0.3:3128:bob:pw"]
+    r = await web.client.put("/api/settings", json={"values": {"proxies": lines}})
+    assert r.status_code == 200, r.text
+
+    data = (await web.client.get("/api/proxies")).json()
+    assert data["mode"] == web.settings.proxy_mode
+    items = data["items"]
+    assert [i["source"] for i in items][:3] == ["settings"] * 3
+    first, second, third = items[:3]
+    # `line` khớp giá trị cài đặt `proxies` (đã che mật khẩu) để giao diện ghép trạng thái.
+    page = by_key((await web.client.get("/api/settings")).json())
+    assert [first["line"], second["line"], third["line"]] == page["proxies"]["value"]
+    assert (first["scheme"], first["host"], first["port"]) == ("http", "10.0.0.1", 8080)
+    assert (first["username"], first["has_password"]) == ("u@x", True)
+    assert (second["username"], second["has_password"]) == (None, False)
+    assert (third["username"], third["has_password"]) == ("bob", True)
+    assert "p4ss" not in str(data)
+    assert "pw" not in first["line"] + third["line"]
+    assert (first["score"], first["fails"], first["dead"]) == (50, 0, False)
+
+    # Trạng thái pool trên Redis: loại proxy 1, cho nghỉ với hai domain, gắn proxy 2 với một domain.
+    redis, prefix = web.res.redis, web.prefix
+    await redis.set(f"{prefix}:proxy:dead:{first['id']}", "check: timeout", ex=600)
+    await redis.set(f"{prefix}:proxy:fails:{first['id']}", 5)
+    await redis.set(f"{prefix}:proxy:cool:{first['id']}:a.vn", 1, ex=60)
+    await redis.set(f"{prefix}:proxy:cool:{first['id']}:b.vn", 1, ex=60)
+    await redis.set(f"{prefix}:proxy:sticky:c.vn", second["id"], ex=60)
+    data = (await web.client.get("/api/proxies")).json()
+    first, second = data["items"][:2]
+    assert (first["dead"], first["dead_reason"], first["fails"]) == (True, "check: timeout", 5)
+    assert 0 < first["dead_seconds"] <= 600
+    assert (first["cooling_domains"], first["sticky_domains"]) == (2, 0)
+    assert (second["cooling_domains"], second["sticky_domains"]) == (0, 1)
+    assert second["dead_seconds"] is None
+
+    # Kiểm tra: id lạ bỏ qua; danh sách rỗng / quá dài bị từ chối.
+    r = await web.client.post("/api/proxies/check", json={"ids": ["khong-co"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"results": []}
+    assert (await web.client.post("/api/proxies/check", json={"ids": []})).status_code == 422
+    many = {"ids": [f"x{i}" for i in range(21)]}
+    assert (await web.client.post("/api/proxies/check", json=many)).status_code == 422
+
+
+async def test_sensitive_settings_are_encrypted_at_rest(web: Web) -> None:
+    proxies = ["http://u:mat-khau-proxy@10.1.1.1:8080"]
+    r = await web.client.put(
+        "/api/settings", json={"values": {"serp_api_key": "sk-rat-bi-mat", "proxies": proxies}}
+    )
+    assert r.status_code == 200, r.text
+    raw = await raw_rows(web)
+    for key in ("serp_api_key", "proxies"):
+        assert secretbox.is_encrypted(raw[key]), key
+    assert "sk-rat-bi-mat" not in str(raw)
+    assert "mat-khau-proxy" not in str(raw)
+    effective = await app_settings.load_effective(web.res.sessionmaker, web.settings)
+    assert effective.serp_api_key is not None
+    assert effective.serp_api_key.get_secret_value() == "sk-rat-bi-mat"
+    assert effective.proxies == proxies
+
+    # Dòng cũ còn nguyên văn (trước khi có mã hoá): `seal_stored` mã hoá lại, giá trị không đổi.
+    async with web.res.sessionmaker.begin() as s:
+        s.add(AppSetting(key="llm_api_key", value="sk-cu", updated_by="test"))
+    assert await app_settings.seal_stored(web.res.sessionmaker) == 1
+    assert secretbox.is_encrypted((await raw_rows(web))["llm_api_key"])
+    assert (await app_settings.load_overrides(web.res.sessionmaker))["llm_api_key"] == "sk-cu"
+    assert await app_settings.seal_stored(web.res.sessionmaker) == 0
+
+    # Mất khoá (đổi ENCRYPTION_KEYS mà bỏ khoá cũ): dòng không giải mã được thì bỏ qua.
+    saved = secretbox.current()
+    secretbox.configure(secretbox.SecretBox.from_secrets(["khoa-khac"]))
+    try:
+        assert "serp_api_key" not in await app_settings.load_overrides(web.res.sessionmaker)
+    finally:
+        secretbox.configure(saved)
+
+
+async def test_worker_join_keys(integration_settings: Settings) -> None:
+    # Gateway không hỏi khoá: không tạo khoá tham gia (bỏ GATEWAY_TOKEN đọc từ backend/.env).
+    async with open_web(integration_settings, gateway_token=None) as web:
+        page = (await web.client.get("/api/workers")).json()
+        assert page["auth_enabled"] is False
+        assert (await web.client.post("/api/workers/join-keys")).status_code == 409
+
+    async with open_web(integration_settings, gateway_token=SecretStr("s3cret")) as web:
+        page = (await web.client.get("/api/workers")).json()
+        assert page["auth_enabled"] is True
+        r = await web.client.post("/api/workers/join-keys")
+        assert r.status_code == 200, r.text
+        key = r.json()
+        assert key["key"].startswith("jcj_")
+        assert key["ttl_seconds"] == 300
+        status = (await web.client.get(f"/api/workers/join-keys/{key['id']}")).json()
+        assert status == {"id": key["id"], "status": "pending", "worker_id": None}
+        # Redis chỉ giữ băm: khoá không nằm trong tên / giá trị khoá Redis nào.
+        redis = web.res.redis
+        for name in [k async for k in redis.scan_iter(match=f"{web.prefix}:gw:*")]:
+            assert key["key"] not in name.decode()
+            assert key["key"] not in str(await redis.get(name))
+        r = await web.client.delete(f"/api/workers/join-keys/{key['id']}")
+        assert r.json()["status"] == "expired"
+        status = (await web.client.get(f"/api/workers/join-keys/{key['id']}")).json()
+        assert status["status"] == "expired"
