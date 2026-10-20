@@ -1,17 +1,45 @@
-"""Cấu hình ứng dụng, đọc từ biến môi trường và file `.env`."""
+"""Cấu hình ứng dụng, đọc từ biến môi trường, file `.env` và file bí mật (Docker secrets).
+
+Thứ tự ưu tiên (của pydantic-settings, cao → thấp): tham số truyền vào `Settings(...)` → biến môi
+trường → `.env` → file bí mật trong `SECRETS_DIR` → mặc định trong mã. Biến môi trường đặt rỗng
+(`GATEWAY_TOKEN=`) bị bỏ qua (`env_ignore_empty`), nên file bí mật cùng tên vẫn được dùng.
+
+File bí mật: mỗi file một giá trị, tên file = tên field (không phân biệt hoa thường), vd.
+`/run/secrets/gateway_token`, `llm_api_key`, `serp_api_key`, `ui_password`,
+`database_url`; nội dung được bỏ khoảng trắng / xuống dòng ở hai đầu. Thư mục lấy từ biến môi
+trường `SECRETS_DIR` (đặt rỗng = tắt); không đặt thì dùng `/run/secrets` nếu thư mục đó tồn tại
+(chỗ Docker / compose gắn secrets), nên chạy trên máy dev không bị ảnh hưởng.
+"""
 
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
 from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SecretsSettingsSource,
+    SettingsConfigDict,
+)
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+AuthMode = Literal["proxy", "jwt", "none"]
 _WINDOW = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
+# Chỗ Docker / compose gắn secrets (`secrets:` của service).
+DEFAULT_SECRETS_DIR = Path("/run/secrets")
+
+
+def secrets_dir() -> Path | None:
+    """Thư mục file bí mật: `SECRETS_DIR` (rỗng = tắt), không đặt thì `/run/secrets` nếu có."""
+    raw = os.environ.get("SECRETS_DIR")
+    if raw is not None:
+        return Path(raw.strip()) if raw.strip() else None
+    return DEFAULT_SECRETS_DIR if DEFAULT_SECRETS_DIR.is_dir() else None
 
 
 def parse_window(value: str, name: str = "window") -> tuple[int, int]:
@@ -40,7 +68,13 @@ class Settings(BaseSettings):
     # 127.0.0.1 chứ không localhost: compose chỉ mở cổng ở IPv4 loopback, và trên Windows localhost
     # thử ::1 trước (mỗi kết nối mới chờ thêm ~2 s).
     database_url: str = "postgresql+asyncpg://jobcrawler:jobcrawler@127.0.0.1:15432/jobcrawler"
+    # Redis chính: hàng đợi, stream lấy trang, worker, khoá, rate limit, phiên bản cài đặt, số đo
+    # SLA, chặn đoán mật khẩu, heartbeat health — dữ liệu không được mất (noeviction, có lưu đĩa).
     redis_url: str = "redis://127.0.0.1:16379/0"
+    # Redis chỉ cho cache thuần (trang HTTP, robots.txt, tìm nguồn, SERP, câu trả lời LLM, số liệu
+    # trang tổng quan): mất / bị đẩy ra thì chỉ tính lại, nên đặt được maxmemory + allkeys-lru.
+    # Trống = dùng chung REDIS_URL.
+    cache_redis_url: str | None = None
     db_pool_size: int = Field(default=10, ge=1)
     db_max_overflow: int = Field(default=10, ge=0)
 
@@ -51,10 +85,11 @@ class Settings(BaseSettings):
     board_queue_name: str = "jobcrawler-boards"
     # Job của runner không còn báo sống chừng này giây thì runner khác thu hồi và chạy lại.
     queue_reclaim_seconds: float = Field(default=60, ge=5)
-    # Mỗi process runner chạy cùng lúc tối đa chừng này job mỗi loại.
-    runner_build_concurrency: int = Field(default=10, ge=1)
-    runner_poll_concurrency: int = Field(default=50, ge=1)
-    runner_board_concurrency: int = Field(default=4, ge=1)
+    # Mỗi process runner chạy cùng lúc tối đa chừng này job mỗi loại; 0 = tự tính theo CPU / RAM của
+    # máy (`jobcrawler.sysres`, như open-asm).
+    runner_build_concurrency: int = Field(default=0, ge=0)
+    runner_poll_concurrency: int = Field(default=0, ge=0)
+    runner_board_concurrency: int = Field(default=0, ge=0)
 
     # LLM: vLLM self-host (OpenAI-compatible). Để trống thì mọi bước dùng LLM bị tắt.
     llm_base_url: str | None = None
@@ -294,15 +329,58 @@ class Settings(BaseSettings):
     # Số dòng tối đa nén lại bằng từ điển mới mỗi lượt bảo trì.
     compression_recompress_rows: int = Field(default=50_000, ge=0)
 
-    # Đăng nhập HTTP Basic của API (`jobcrawler api`, service api trong compose; giao diện React
-    # gọi API nên dùng chung). Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ mở ở 127.0.0.1.
+    # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `web/auth.py`). Không đặt
+    # UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.
     ui_username: str = "admin"
     ui_password: SecretStr | None = None
+    # Khoá ký JWT đăng nhập (`web/auth.py`); trống = khoá ngẫu nhiên lưu trên Redis chính.
+    jwt_secret: SecretStr | None = None
+    # Khoá mã hoá trường nhạy cảm trong DB (`jobcrawler.secretbox`): các chuỗi bí mật cách nhau dấu
+    # phẩy, chuỗi cuối dùng để mã hoá. Trống = khoá ngẫu nhiên lưu trên Redis chính.
+    encryption_keys: SecretStr | None = None
+    # Hạn của phiên đăng nhập (giờ); hết hạn thì đăng nhập lại.
+    auth_token_hours: float = Field(default=12, gt=0, le=24 * 30)
+    # SSO qua proxy tin cậy (oauth2-proxy đứng trước service giao diện): đặt tên header chứa
+    # người dùng đã đăng nhập (vd. X-Auth-Request-User) thì API lấy người dùng từ header đó, không
+    # dùng HTTP Basic. CHỈ AN TOÀN khi API không ai gọi thẳng được (chỉ qua giao diện + proxy SSO,
+    # proxy xoá / ghi đè header này từ client). Trống = tắt.
+    auth_proxy_user_header: str | None = None
+    # Header email (vd. X-Auth-Request-Email): dùng khi header người dùng trống.
+    auth_proxy_email_header: str | None = None
+    # Đường dẫn đăng xuất cho giao diện (vd. /oauth2/sign_out); trống = không có nút đăng xuất.
+    auth_logout_url: str | None = None
 
-    # Log.
+    # Watchdog trong process api / gateway / scheduler / runner (`jobcrawler.watchdog`): event loop
+    # hoặc vòng lặp chính đứng quá chừng này giây thì process tự thoát (mã 70) để Docker
+    # (`restart: unless-stopped`) dựng lại. Mất Postgres / Redis không tính là đứng. 0 = tắt.
+    watchdog_seconds: float = Field(default=120, ge=0)
+    # `jobcrawler serve`: bảng `companies` trống thì nạp 50 doanh nghiệp mẫu
+    # (data/demo_companies.csv) để thử hệ thống ngay. Production đặt False.
+    demo_companies: bool = True
+
+    # Log. Production nên đặt LOG_DB_LEVEL=WARNING (bảng `logs` chỉ giữ cảnh báo / lỗi).
     log_level: LogLevel = "INFO"
     log_format: Literal["console", "json"] = "console"
     log_db_level: LogLevel = "INFO"
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Thư mục bí mật đọc lúc tạo Settings (không cố định lúc import): `Settings(_secrets_dir=…)`
+        # vẫn thắng; không truyền thì theo SECRETS_DIR / /run/secrets.
+        if (
+            isinstance(file_secret_settings, SecretsSettingsSource)
+            and file_secret_settings.secrets_dir is None
+        ):
+            file_secret_settings.secrets_dir = secrets_dir()
+        # Thứ tự mặc định của pydantic-settings: init > env > .env > file bí mật.
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     @model_validator(mode="after")
     def _check_deadlines(self) -> Self:
@@ -338,6 +416,19 @@ class Settings(BaseSettings):
     @property
     def serp_enabled(self) -> bool:
         return self.serp_api_key is not None
+
+    @property
+    def auth_mode(self) -> AuthMode:
+        """Cách API nhận người dùng: `proxy` (header của proxy SSO), `jwt` (đăng nhập bằng
+        UI_USERNAME / UI_PASSWORD, phiên là JWT), `none` (không hỏi đăng nhập)."""
+        if (self.auth_proxy_user_header or "").strip():
+            return "proxy"
+        return "jwt" if self.ui_password is not None else "none"
+
+    @property
+    def effective_cache_redis_url(self) -> str:
+        """URL Redis của cache: CACHE_REDIS_URL, trống thì REDIS_URL."""
+        return self.cache_redis_url or self.redis_url
 
     @property
     def queue_names(self) -> tuple[str, str, str]:

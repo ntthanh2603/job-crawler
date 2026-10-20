@@ -9,3 +9,5 @@
 tests/
 scripts/
 Taskfile.yml
+buf.yaml
+buf.lock

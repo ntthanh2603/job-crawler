@@ -44,6 +44,7 @@ GROUP = "workers"
 JOB_TTL = 600  # giây giữ job đã xong
 TERMINAL = ("complete", "failed", "aborted")
 BLOCK_MS = 1000  # XREADGROUP chờ tối đa chừng này rồi xem lại cờ dừng
+READ_RETRY_SECONDS = 1.0  # đọc stream lỗi (Redis mất) thì chờ chừng này rồi thử lại
 SCHEDULE_BATCH = 500
 # Consumer không còn entry đang giữ và worker đã thôi báo sống chừng này ms thì xoá khỏi group.
 CONSUMER_GC_MS = 10 * 60 * 1000
@@ -559,6 +560,8 @@ class StreamWorker:
         shutdown_grace_s: float = 2.0,
         handle_signals: bool = True,
         tz: tzinfo = UTC,
+        on_loop: Callable[[], Awaitable[Any]] | None = None,
+        on_iteration: Callable[[], None] | None = None,
     ) -> None:
         self.queue = queue
         self.concurrency = concurrency
@@ -576,6 +579,12 @@ class StreamWorker:
         self.tz = tz
         # Nhiều StreamWorker trong một process (runner): process tự bắt tín hiệu rồi gọi stop().
         self._signals = self.SIGNALS if handle_signals else ()
+        # Gọi mỗi lần vòng lặp nhận việc quay (ít nhất mỗi BLOCK_MS, kể cả khi hết slot): heartbeat
+        # health của process (`jobcrawler.heartbeat`) — vòng lặp kẹt thì thôi gọi.
+        self.on_loop = on_loop
+        # Gọi (đồng bộ) ở đầu MỌI vòng của vòng lặp nhận việc, kể cả khi đọc Redis lỗi: watchdog
+        # trong process (`jobcrawler.watchdog`) — chỉ vòng lặp đứng hẳn mới làm process thoát.
+        self.on_iteration = on_iteration
         self.id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self.context: dict[str, Any] = {"worker": self, "queue": queue}
         self.stats: Counter[str] = Counter(complete=0, failed=0, retried=0, aborted=0)
@@ -625,26 +634,41 @@ class StreamWorker:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), seconds)
 
-    async def _wait_stop_or(self, event: asyncio.Event) -> None:
+    async def _wait_stop_or(self, event: asyncio.Event, timeout: float | None = None) -> None:
         waiters = [asyncio.create_task(event.wait()), asyncio.create_task(self._stop.wait())]
-        _, pending = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        _, pending = await asyncio.wait(
+            waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
         for task in pending:
             task.cancel()
 
+    async def _looped(self) -> None:
+        if self.on_loop is None:
+            return
+        try:
+            await self.on_loop()
+        except Exception:
+            log.exception("queue.on_loop_error", queue=self.queue.name)
+
     async def _fetch(self) -> None:
         while not self._stop.is_set():
+            if self.on_iteration is not None:
+                self.on_iteration()
             free = self.concurrency - len(self._running)
             if free <= 0:
                 self._slot.clear()
-                await self._wait_stop_or(self._slot)
+                # Hết slot: chờ job xong, nhưng quay lại mỗi BLOCK_MS để vẫn báo sống (on_loop).
+                await self._wait_stop_or(self._slot, BLOCK_MS / 1000)
+                await self._looped()
                 continue
             try:
                 entries = await self.queue.read(self.id, free, BLOCK_MS)
-            except Exception:
+            except Exception:  # Redis lỗi: không báo sống, healthcheck thấy heartbeat cũ dần
                 log.exception("queue.read_error", queue=self.queue.name)
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._stop.wait(), 1.0)
+                    await asyncio.wait_for(self._stop.wait(), READ_RETRY_SECONDS)
                 continue
+            await self._looped()
             for entry, key in entries:
                 try:
                     job = await self.queue.start(key, entry, self.id)

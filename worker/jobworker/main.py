@@ -1,4 +1,5 @@
-"""CLI `jobworker`: `run` (vòng lặp chính), `check` (gateway + proxy tại worker), `version`."""
+"""CLI `jobworker`: `run` (vòng lặp chính), `check` (gateway + proxy tại worker), `health`
+(healthcheck của Docker, đọc file trạng thái), `version`."""
 
 from __future__ import annotations
 
@@ -6,11 +7,13 @@ import asyncio
 import sys
 import time
 import warnings
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from jobworker import __version__
+from jobworker.health import GATEWAY_GRACE_SECONDS
 
 if TYPE_CHECKING:
     from jobworker.config import WorkerSettings
@@ -45,7 +48,8 @@ def _settings() -> WorkerSettings:
 
 @app.command()
 def run() -> None:
-    """Kết nối gateway và nhận việc tới khi có SIGTERM / Ctrl-C (hoặc gateway yêu cầu drain)."""
+    """Kết nối gateway và nhận việc tới khi có SIGTERM / Ctrl-C (hoặc gateway yêu cầu drain).
+    Treo quá WORKER_WATCHDOG_SECONDS thì thoát mã 70."""
     from jobworker.client import run_worker
 
     asyncio.run(run_worker(_settings()))
@@ -136,6 +140,41 @@ async def _check(settings: WorkerSettings, timeout: float) -> bool:
     if not proxies:
         typer.echo("Không có proxy tại worker (WORKER_PROXIES / WORKER_PROXIES_FILE).")
     return gateway_ok
+
+
+@app.command()
+def health(
+    max_age: Annotated[
+        float | None,
+        typer.Option(
+            help="Giây; file trạng thái cũ hơn thì coi là treo."
+            " Mặc định max(30, 3 × chu kỳ heartbeat ghi trong file).",
+            min=1,
+        ),
+    ] = None,
+    gateway_grace: Annotated[
+        float,
+        typer.Option(
+            help="Giây không kết nối được gateway liên tục thì coi là không khoẻ; 0 = bỏ qua.",
+            min=0,
+        ),
+    ] = GATEWAY_GRACE_SECONDS,
+    file: Annotated[
+        Path | None, typer.Option(help="File trạng thái; mặc định WORKER_HEALTH_FILE.")
+    ] = None,
+) -> None:
+    """Healthcheck (Docker): mã 0 khi worker còn chạy và không mất gateway quá lâu, 1 khi không."""
+    from jobworker.health import check as check_health
+
+    if file is None:
+        from jobworker.config import WorkerSettings
+
+        file = WorkerSettings().worker_health_file
+    ok, reason = check_health(file, max_age=max_age, gateway_grace=gateway_grace)
+    if not ok:
+        typer.echo(f"unhealthy: {reason}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"healthy: {reason}")
 
 
 @app.command()

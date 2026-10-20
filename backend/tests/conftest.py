@@ -7,9 +7,11 @@ from jobcrawler.config import Settings
 
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Xoá biến môi trường trùng tên field của Settings để test không phụ thuộc máy."""
+    """Xoá biến môi trường trùng tên field của Settings để test không phụ thuộc máy; tắt file bí
+    mật (SECRETS_DIR rỗng: không đọc /run/secrets của máy chạy test)."""
     for name in Settings.model_fields:
         monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.setenv("SECRETS_DIR", "")
 
 
 class FakeClock:

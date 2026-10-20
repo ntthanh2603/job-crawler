@@ -1,0 +1,28 @@
+# buf (https://buf.build) cho hợp đồng gRPC: `buf lint` và `buf breaking` (CI job proto-breaking so
+# với commit trước). Chạy tay trong proto/ (không cần cài buf):
+#   docker run --rm -v "$PWD:/workspace" -w /workspace bufbuild/buf:1.73.0 lint
+#   docker run --rm -v "$PWD/..:/workspace" -w /workspace/proto bufbuild/buf:1.73.0 \
+#     breaking --against '/workspace/.git#branch=main,subdir=proto'
+#
+# Gốc module là proto/ (giống `-I proto` của scripts/gen.py), nên tên file là
+# jcproto/v1/crawl.proto ở cả protoc lẫn buf và import giữa các file .proto sau này trùng nhau.
+version: v2
+modules:
+  - path: .
+    excludes:
+      - .venv
+lint:
+  use:
+    - STANDARD
+  except:
+    # Package `jobcrawler.crawl.v1` nằm ở jcproto/v1/ (thư mục theo tên gói Python `jcproto`).
+    - PACKAGE_DIRECTORY_MATCH
+    # Đổi tên service / giá trị enum đã phát hành là thay đổi phá vỡ (tên đi vào wire của gRPC và
+    # vào JSON): giữ CrawlGateway và ERROR_KIND_NONE = 0 (giá trị 0 có nghĩa "không lỗi").
+    - SERVICE_SUFFIX
+    - ENUM_ZERO_VALUE_SUFFIX
+breaking:
+  use:
+    # Mức FILE (chặt nhất): mã Python sinh theo file (crawl_pb2), chuyển kiểu giữa các file cũng làm
+    # vỡ import của backend / worker.
+    - FILE

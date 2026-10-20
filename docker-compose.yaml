@@ -1,12 +1,15 @@
 name: jobcrawler
 
-# Một máy chạy đủ hệ thống (dev / quy mô nhỏ). Triển khai nhiều máy và quy mô 10.000 doanh
-# nghiệp: docs/DEPLOY.md (worker ở máy khác dùng deploy/worker.compose.yaml).
+# Năm container: postgres, redis, backend, frontend, worker.
 #
-# Mỗi service build từ thư mục của nó và đọc `.env` của nó: backend/ (api, gateway, scheduler,
-# runner, migrate — một image), worker/, frontend/ (image `web`: nginx phục vụ giao diện và chuyển
-# /api tới `api`). proto/ là thư viện hợp đồng gRPC, vào image backend / worker qua build context
-# tên `proto`. `.env` ở gốc chỉ cho biến của compose (cổng, số bản, tài khoản Postgres).
+# Mỗi service build từ thư mục của nó và đọc `.env` của nó: backend/ (`jobcrawler serve`: migration
+# rồi API, gateway gRPC, scheduler, runner trong một container), worker/ (lấy trang), frontend/
+# (nginx phục vụ giao diện, chuyển /api tới `backend`). proto/ là thư viện hợp đồng gRPC, vào image
+# backend / worker qua build context tên `proto`. `.env` ở gốc chỉ cho biến của compose (cổng, số
+# worker, tài khoản Postgres, image).
+#
+# Worker ở máy khác: trên máy đó `docker compose up -d --no-deps worker` với WORKER_GATEWAY_ADDR
+# trong `.env` gốc (docs/DEPLOY.md).
 
 # Log của container xoay vòng (mặc định json-file không giới hạn, đầy đĩa sau vài tuần).
 x-logging: &logging
@@ -14,24 +17,6 @@ x-logging: &logging
   options:
     max-size: 10m
     max-file: "3"
-
-x-backend: &backend
-  image: jobcrawler-backend:latest
-  env_file:
-    - path: backend/.env
-      required: false
-  environment: &backend_env
-    # Ghi đè URL trong backend/.env (vốn trỏ 127.0.0.1 cho CLI trên host) bằng hostname nội bộ.
-    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
-    REDIS_URL: redis://redis:6379/0
-  depends_on: &backend_deps
-    migrate:
-      condition: service_completed_successfully
-    redis:
-      condition: service_healthy
-  init: true
-  restart: unless-stopped
-  logging: *logging
 
 services:
   postgres:
@@ -57,10 +42,18 @@ services:
     restart: unless-stopped
     logging: *logging
 
+  # Hàng đợi (Redis Streams), khoá, rate limit, cài đặt và cache. AOF mỗi giây; đầy bộ nhớ thì lệnh
+  # ghi báo lỗi chứ không xoá việc trong hàng đợi (cache có TTL nên tự dọn).
   redis:
     image: redis:7-alpine
-    # Hàng đợi (Redis Streams) + rate limit + cache: AOF mỗi giây, tự viết lại khi phình.
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
     # Redis không đặt mật khẩu: chỉ mở ở 127.0.0.1.
     ports:
       - "127.0.0.1:${REDIS_PORT:-16379}:6379"
@@ -74,47 +67,69 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # Chạy một lần `jobcrawler db upgrade` để các process không khởi động trên schema cũ.
-  migrate:
-    <<: *backend
+  # `jobcrawler serve`: migration rồi bốn process — API JSON (:8000, chỉ trong mạng compose, trình
+  # duyệt đi qua `frontend`), gateway gRPC cho worker (:50051), scheduler, runner (build / poll /
+  # trang tuyển dụng). Một process thoát hoặc treo (watchdog) thì container thoát và Docker dựng
+  # lại. Cấu hình ở backend/.env; đặt UI_PASSWORD nếu mở giao diện ra ngoài.
+  backend:
+    image: ${REGISTRY:-}jobcrawler-backend:${IMAGE_TAG:-latest}
     build:
       context: backend
       additional_contexts:
         proto: proto
-    command: ["jobcrawler", "db", "upgrade"]
+    command: ["jobcrawler", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      # Ghi đè URL trong backend/.env (vốn trỏ 127.0.0.1 cho CLI trên host) bằng hostname nội bộ.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
+      REDIS_URL: redis://redis:6379/0
+      CACHE_REDIS_URL: ""
+      # Chỉ `frontend` (nginx) gọi tới được API: tin X-Forwarded-For của nó để chặn đoán mật khẩu
+      # theo IP thật của người dùng.
+      FORWARDED_ALLOW_IPS: "*"
+    # Worker ở máy khác nối vào đây; mở ra ngoài thì đặt GATEWAY_TOKEN (và TLS, docs/DEPLOY.md).
+    ports:
+      - "${GATEWAY_PUBLISH:-127.0.0.1:50051}:50051"
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
-
-  # API JSON (/api/...). Không mở ra host: trình duyệt đi qua `web`. Đặt UI_PASSWORD trong
-  # backend/.env nếu mở `web` ra ngoài.
-  api:
-    <<: *backend
-    command: ["jobcrawler", "api", "--host", "0.0.0.0", "--port", "8000"]
-    environment:
-      <<: *backend_env
-      # Chỉ `web` (nginx) gọi tới được api: tin X-Forwarded-For của nó để chặn đoán mật khẩu theo
-      # IP thật của người dùng.
-      FORWARDED_ALLOW_IPS: "*"
+      redis:
+        condition: service_healthy
+    # API trả lời, gateway SERVING, scheduler và runner còn heartbeat mới trên Redis.
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=5)"
+          && jobcrawler gateway-health && jobcrawler health scheduler runner
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      # Migration chạy trước khi các process khởi động.
+      start_period: 120s
+      start_interval: 5s
+    # SIGTERM: các process làm nốt việc đang chạy, tối đa 25 giây.
+    stop_grace_period: 30s
+    init: true
+    restart: unless-stopped
+    logging: *logging
 
-  # Giao diện React (frontend/) trên nginx không root; /api/ chuyển tới `api` (giữ Host cho kiểm
-  # tra chống CSRF). Chỉ mở ở 127.0.0.1.
-  web:
-    image: jobcrawler-web:latest
+  # Giao diện React trên nginx không root; /api/ chuyển tới `backend` (giữ Host cho kiểm tra chống
+  # CSRF). Chỉ mở ở 127.0.0.1.
+  frontend:
+    image: ${REGISTRY:-}jobcrawler-frontend:${IMAGE_TAG:-latest}
     build:
       context: frontend
     environment:
-      API_UPSTREAM: http://api:8000
+      API_UPSTREAM: http://backend:8000
+      # Có load balancer / reverse proxy đứng trước: CIDR của nó (tin X-Forwarded-For từ đó).
+      REAL_IP_FROM: ${REAL_IP_FROM:-}
     ports:
       - "127.0.0.1:${WEB_PORT:-8000}:8080"
     depends_on:
-      api:
+      backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
@@ -124,53 +139,10 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # Gateway gRPC cho worker lấy trang. Worker ở máy khác nối vào GATEWAY_PUBLISH (mặc định chỉ
-  # 127.0.0.1); mở ra ngoài thì đặt GATEWAY_TOKEN (và TLS, xem docs/DEPLOY.md).
-  gateway:
-    <<: *backend
-    command: ["jobcrawler", "gateway"]
-    ports:
-      - "${GATEWAY_PUBLISH:-127.0.0.1:50051}:50051"
-    # grpc.health.v1 qua `jobcrawler gateway-health` (TLS theo GATEWAY_TLS_CERT/KEY); worker chờ
-    # SERVING mới khởi động.
-    healthcheck:
-      test: ["CMD", "jobcrawler", "gateway-health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-      start_interval: 2s
-
-  # Xếp lịch build đêm / poll ngày. Nhiều replica được (một replica giữ khoá làm việc).
-  scheduler:
-    <<: *backend
-    command: ["jobcrawler", "scheduler"]
-
-  # Runner poll: lượt nhẹ theo bộ khung, cần nhanh (mỗi replica RUNNER_POLL_CONCURRENCY lượt).
-  runner-poll:
-    <<: *backend
-    command: ["jobcrawler", "runner", "--role", "poll"]
-    deploy:
-      replicas: ${RUNNER_POLL_REPLICAS:-2}
-
-  # Runner build: lượt đủ (đêm, khi poll lỗi, doanh nghiệp mới) + cron bảo trì / số liệu.
-  runner-build:
-    <<: *backend
-    command: ["jobcrawler", "runner", "--role", "build"]
-    deploy:
-      replicas: ${RUNNER_BUILD_REPLICAS:-2}
-
-  # Runner trang tuyển dụng: index đủ ban đêm, index đuôi mỗi 2 phút ban ngày.
-  runner-boards:
-    <<: *backend
-    command: ["jobcrawler", "runner", "--role", "boards"]
-    deploy:
-      replicas: ${RUNNER_BOARDS_REPLICAS:-1}
-
   # Worker lấy trang (curl_cffi + Chromium). Cấu hình ở worker/.env; proxy riêng của worker:
   # worker/config/worker-proxies.txt hoặc WORKER_PROXIES trong worker/.env.
   worker:
-    image: jobcrawler-worker:latest
+    image: ${REGISTRY:-}jobcrawler-worker:${IMAGE_TAG:-latest}
     build:
       context: worker
       additional_contexts:
@@ -180,15 +152,27 @@ services:
       - path: worker/.env
         required: false
     environment:
-      GATEWAY_ADDR: gateway:50051
+      GATEWAY_ADDR: ${WORKER_GATEWAY_ADDR:-backend:50051}
       WORKER_PROXIES_FILE: /app/config/worker-proxies.txt
     volumes:
       - ./worker/config:/app/config:ro
     depends_on:
-      gateway:
+      backend:
         condition: service_healthy
+    # `jobworker health` đọc file trạng thái worker ghi: treo, hoặc mất gateway quá 5 phút →
+    # unhealthy; vòng lặp kẹt thì watchdog cho process thoát và Docker dựng lại.
+    healthcheck:
+      test: ["CMD", "jobworker", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
     deploy:
-      replicas: ${WORKER_REPLICAS:-2}
+      replicas: ${WORKER_REPLICAS:-1}
+    # SIGTERM: worker thôi nhận việc và làm nốt tối đa WORKER_SHUTDOWN_GRACE_SECONDS (30) giây;
+    # mặc định Docker chỉ chờ 10 giây rồi SIGKILL.
+    stop_grace_period: 40s
     init: true
     shm_size: 1gb
     restart: unless-stopped

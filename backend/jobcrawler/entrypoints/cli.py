@@ -580,6 +580,68 @@ def gateway_health(
 
 
 @app.command()
+def health(
+    components: Annotated[
+        list[str],
+        typer.Argument(
+            help="scheduler, runner (đủ ba vai), runner-build, runner-poll, runner-boards; nhiều"
+            " component thì phải khoẻ cả.",
+            show_default=False,
+        ),
+    ],
+    max_age: Annotated[
+        float | None,
+        typer.Option(
+            "--max-age",
+            min=0.1,
+            help="Heartbeat cũ hơn chừng này giây là hỏng (mặc định 3 nhịp = 15 giây).",
+        ),
+    ] = None,
+) -> None:
+    """Healthcheck Docker của scheduler / runner: exit 0 khi heartbeat của chính container này
+    (theo hostname) trên REDIS_URL còn mới, không thì exit 1 kèm lý do ngắn. Không cần Postgres.
+    Ví dụ compose: `["CMD", "jobcrawler", "health", "scheduler", "runner"]`."""
+    from redis.asyncio import Redis
+
+    from jobcrawler import heartbeat
+
+    known = heartbeat.components()
+    unknown = [c for c in components if c not in known]
+    if unknown:
+        typer.secho(
+            f"Component không hợp lệ: {', '.join(map(repr, unknown))} (có: {', '.join(known)})",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)  # Docker: 1 = unhealthy (2 dành riêng)
+    settings = get_settings()
+    limit = heartbeat.DEFAULT_MAX_AGE if max_age is None else max_age
+
+    async def go() -> list[tuple[bool, str]]:
+        redis = Redis.from_url(settings.redis_url, socket_connect_timeout=3, socket_timeout=3)
+        try:
+            return [
+                await heartbeat.check(redis, settings.redis_prefix, c, max_age=limit)
+                for c in components
+            ]
+        finally:
+            await redis.aclose()
+
+    try:
+        results = asyncio.run(go())
+    except Exception as exc:
+        typer.secho(f"Không đọc được Redis: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    for ok, reason in results:
+        if ok:
+            typer.echo(reason)
+        else:
+            typer.secho(reason, fg=typer.colors.RED, err=True)
+    if not all(ok for ok, _ in results):
+        raise typer.Exit(1)
+
+
+@app.command()
 def api(
     host: Annotated[str, typer.Option(help="Địa chỉ lắng nghe (0.0.0.0 trong container).")] = (
         "127.0.0.1"
@@ -596,7 +658,8 @@ def api(
     ] = None,
 ) -> None:
     """API JSON cho giao diện (service riêng) và script: `/api/...`, tài liệu ở `/api/docs`,
-    `/healthz`. Đăng nhập bằng UI_USERNAME / UI_PASSWORD nếu đặt."""
+    `/healthz`. Đăng nhập bằng UI_USERNAME / UI_PASSWORD nếu đặt,
+    hoặc header của proxy SSO (AUTH_PROXY_USER_HEADER)."""
     import uvicorn
 
     uvicorn.run(
@@ -616,6 +679,23 @@ def api(
 # Tên cũ (trước khi giao diện tách thành service riêng): giữ cho compose / script cũ, ẩn khỏi
 # --help.
 app.command("ui", hidden=True, deprecated=True, help="Tên cũ của `jobcrawler api`.")(api)
+
+
+@app.command()
+def serve(
+    host: Annotated[
+        str, typer.Option(help="Địa chỉ lắng nghe của API (0.0.0.0 trong container).")
+    ] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Cổng của API.")] = 8000,
+    migrate: Annotated[
+        bool, typer.Option(help="Nâng schema (`db upgrade`) trước khi chạy.")
+    ] = True,
+) -> None:
+    """Cả backend trong một lệnh (container `backend`): migration rồi các process `api`, `gateway`,
+    `scheduler`, `runner`. Một process thoát thì dừng hết và thoát (Docker dựng lại container)."""
+    from jobcrawler.entrypoints.serve import run_serve
+
+    raise typer.Exit(run_serve(host, port, migrate=migrate))
 
 
 # --- doanh nghiệp, queue -----------------------------------------------------------------------

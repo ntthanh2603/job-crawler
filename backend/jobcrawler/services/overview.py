@@ -4,8 +4,9 @@ Hai phần, cache khác nhau:
 
 - **Phân bố** trên toàn bộ job đang mở / doanh nghiệp (theo nguồn, tỉnh/thành, cấp bậc, loại hình,
   hình thức, khoảng lương, KYC, doanh nghiệp nhiều việc nhất, job mới theo ngày): quét nhiều dòng
-  nên tính sẵn — cron `overview_cron` làm mới mỗi vài phút, kết quả nằm trong Redis
-  (`CHARTS_KEY`); người xem chỉ đọc. Chưa có (Redis mới) thì tính một lần rồi lưu.
+  nên tính sẵn — cron `overview_cron` làm mới mỗi vài phút, kết quả nằm trong Redis cache
+  (`CHARTS_KEY`, CACHE_REDIS_URL); người xem chỉ đọc. Chưa có (Redis mới, khoá bị đẩy ra) thì
+  tính một lần rồi lưu.
 - **Theo cửa sổ thời gian** (lượt chạy, request theo giờ, thống kê `stats.collect_stats`): chỉ
   đọc các dòng trong cửa sổ qua index `started_at` / BRIN `fetched_at`; cache `VIEW_TTL` giây
   theo cửa sổ để nhiều người xem / tự làm mới không chạy lại truy vấn.
@@ -181,7 +182,7 @@ async def compute_charts(session: AsyncSession, *, now: datetime | None = None) 
 async def refresh_charts(res: Resources) -> dict[str, Any]:
     async with res.sessionmaker() as session:
         charts = await compute_charts(session)
-    await res.redis.set(
+    await res.cache_redis.set(
         CHARTS_KEY.format(ns=res.settings.redis_prefix), _dump(charts), ex=CHARTS_TTL
     )
     log.info("overview.charts_refreshed", active_jobs=charts["totals"]["active_jobs"])
@@ -189,7 +190,7 @@ async def refresh_charts(res: Resources) -> dict[str, Any]:
 
 
 async def get_charts(res: Resources) -> dict[str, Any]:
-    cached = await res.redis.get(CHARTS_KEY.format(ns=res.settings.redis_prefix))
+    cached = await res.cache_redis.get(CHARTS_KEY.format(ns=res.settings.redis_prefix))
     if cached:
         return json.loads(cached)
     return await refresh_charts(res)
@@ -236,7 +237,7 @@ async def runs_per_hour(session: AsyncSession, *, hours: int = 24) -> list[dict[
 async def build_overview(res: Resources, *, hours: float | None, storage: bool) -> dict[str, Any]:
     """Toàn bộ dữ liệu trang tổng quan (cache VIEW_TTL giây theo cửa sổ)."""
     key = VIEW_KEY.format(ns=res.settings.redis_prefix, hours=hours or 0, storage=int(storage))
-    cached = await res.redis.get(key)
+    cached = await res.cache_redis.get(key)
     if cached:
         return json.loads(cached)
     st = await stats.collect_stats(res, hours=hours, storage=storage)
@@ -277,5 +278,5 @@ async def build_overview(res: Resources, *, hours: float | None, storage: bool) 
             for run, name in recent
         ],
     }
-    await res.redis.set(key, _dump(payload), ex=VIEW_TTL)
+    await res.cache_redis.set(key, _dump(payload), ex=VIEW_TTL)
     return json.loads(_dump(payload))

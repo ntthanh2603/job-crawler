@@ -58,3 +58,14 @@ tasks:
       - task: test
       - task: gen-api:check
       - task: build
+
+  # E2E cần một stack đang chạy (compose: giao diện ở http://127.0.0.1:8000) nên không nằm trong check.
+  e2e:install:
+    desc: Tải Chromium cho Playwright (một lần; Linux thiếu thư viện thì thêm `-- --with-deps`)
+    cmds:
+      - npm run e2e:install -- {{.CLI_ARGS}}
+
+  e2e:
+    desc: E2E Playwright chỉ đọc trên stack đang chạy, địa chỉ E2E_BASE_URL (mặc định http://127.0.0.1:8000)
+    cmds:
+      - npm run e2e -- {{.CLI_ARGS}}

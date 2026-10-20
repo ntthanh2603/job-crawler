@@ -25,7 +25,6 @@ from jobcrawler.db.models import (
     SourceProfile,
 )
 from jobcrawler.logging import get_logger
-from jobcrawler.net.kv import RedisKV
 from jobcrawler.net.urls import parse_domain_input
 from jobcrawler.pipeline import dedup, kyc, normalize, store, verify
 from jobcrawler.pipeline.verify import CompanyContext
@@ -156,7 +155,7 @@ async def run_kyc_step(
         )
 
     s = res.settings
-    serp = SerpClient.from_settings(s, res.api_http, RedisKV(res.redis, prefix=s.redis_prefix))
+    serp = SerpClient.from_settings(s, res.api_http, res.cache_kv)
     result = await kyc.run_kyc(
         company_in,
         fetcher=res.http,
@@ -252,7 +251,7 @@ async def process_jobs(
     normalized = normalize.normalize_jobs(raws, now=now, is_board=board_names.__contains__)
     ctx = await company_context(res, company, website)
     sigs = dedup.Signatures()
-    kv = RedisKV(res.redis, prefix=s.redis_prefix)  # cache câu trả lời LLM theo nội dung tin
+    kv = res.cache_kv  # cache câu trả lời LLM theo nội dung tin (Redis cache)
     verdicts = await verify.verify_jobs(
         normalized,
         ctx,

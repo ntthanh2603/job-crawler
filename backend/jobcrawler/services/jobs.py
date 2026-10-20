@@ -15,7 +15,7 @@ from jobcrawler.db.models import JobPosting
 from jobcrawler.llm import LLMClient
 from jobcrawler.logging import get_logger
 from jobcrawler.net.http import Fetcher
-from jobcrawler.net.kv import KeyValueStore, RedisKV
+from jobcrawler.net.kv import KeyValueStore
 from jobcrawler.net.urls import parse_domain_input
 from jobcrawler.pipeline.collect import CollectResult, collect
 from jobcrawler.pipeline.discovery import DiscoveryResult, discover, sources_for
@@ -239,7 +239,7 @@ async def jobs_for_website(
         website,
         fetcher=res.http,
         llm=res.llm,
-        kv=RedisKV(res.redis, prefix=s.redis_prefix),
+        kv=res.cache_kv,  # cache tìm nguồn (Redis cache)
         deadline=deadline or time.monotonic() + s.company_deadline_seconds,
         limits=SourceLimits.from_settings(s),
         refresh=refresh,

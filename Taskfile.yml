@@ -51,7 +51,7 @@ tasks:
   # --- docker compose --------------------------------------------------------------------------
 
   up:
-    desc: Build image (backend, worker, web) và chạy cả stack (docker-compose.yaml)
+    desc: Build image và chạy 5 container (postgres, redis, backend, frontend, worker)
     cmds:
       - docker compose up -d --build
 
@@ -64,6 +64,27 @@ tasks:
     desc: Dừng stack (giữ volume dữ liệu)
     cmds:
       - docker compose down
+
+  # --- phát hành ------------------------------------------------------------------------------
+
+  release:
+    desc: "Phát hành: tạo tag vX.Y.Z (annotated) trên main và đẩy lên origin; CI build + đẩy image lên GHCR. Dùng: task release VERSION=1.2.0"
+    requires:
+      vars: [VERSION]
+    preconditions:
+      - sh: '{{if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+$" .VERSION}}true{{else}}false{{end}}'
+        msg: "VERSION phải có dạng X.Y.Z (vd. 1.2.0), không có tiền tố v"
+      - sh: test -z "$(git status --porcelain)"
+        msg: "Cây làm việc còn thay đổi chưa commit (git status)"
+      - sh: test "$(git rev-parse --abbrev-ref HEAD)" = main
+        msg: "Chỉ phát hành từ nhánh main"
+      - sh: git fetch --quiet --tags origin main && test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+        msg: "main chưa khớp origin/main: pull / push trước"
+      - sh: '! git rev-parse --quiet --verify "refs/tags/v{{.VERSION}}"'
+        msg: "Tag v{{.VERSION}} đã có"
+    cmds:
+      - git tag -a "v{{.VERSION}}" -m "jobcrawler v{{.VERSION}}"
+      - git push origin "v{{.VERSION}}"
 
   # --- chạy trên mọi service ------------------------------------------------------------------
 

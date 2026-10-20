@@ -9,6 +9,7 @@ Khoá Redis (tiền tố `<REDIS_PREFIX>:gw`):
 - `count:<id>`: hash `leased` / `completed` / `dropped` / `lost` (HINCRBY: Lease và Complete chạy
   song song, nhiều gateway), cùng TTL với `worker:<id>`; `load_worker` / `list_workers` ghép vào
   `WorkerStatus`.
+- `totals`: hash cùng các trường, cộng dồn mọi worker, không TTL (chỉ tăng).
 - `inflight:<id>`: hash task_id → deadline_ms của việc worker đang giữ (Lease ghi, Complete xoá;
   worker rời / quá hạn báo sống thì gateway trả `ERROR_KIND_WORKER_LOST` cho từng việc còn lại).
 - `fetch:<pool>:<kind>[:hi]`: stream việc lấy trang (`:hi`: việc ưu tiên, giao trước).
@@ -40,6 +41,8 @@ class Keys:
         self.workers = f"{self.base}:workers"
         self.drain = f"{self.base}:drain"
         self.config = f"{self.base}:config"
+        # Tổng cộng dồn mọi worker (`leased` / `completed` / `dropped` / `lost`), không TTL.
+        self.totals = f"{self.base}:totals"
 
     def worker(self, worker_id: str) -> str:
         return f"{self.base}:worker:{worker_id}"
@@ -153,15 +156,23 @@ async def add_counts(
     dropped: int = 0,
     lost: int = 0,
 ) -> None:
-    """Cộng số việc đã giao / đã nhận kết quả / kết quả bị bỏ / việc mất của worker."""
+    """Cộng số việc đã giao / đã nhận kết quả / kết quả bị bỏ / việc mất của worker (và vào tổng
+    cộng dồn `keys.totals`)."""
     key = keys.counts(worker_id)
     values = {"leased": leased, "completed": completed, "dropped": dropped, "lost": lost}
     async with redis.pipeline(transaction=False) as pipe:
         for name, value in values.items():
             if value:
                 pipe.hincrby(key, name, value)
+                pipe.hincrby(keys.totals, name, value)
         pipe.pexpire(key, int(ttl * 10_000))
         await pipe.execute()
+
+
+async def load_totals(redis: Redis, keys: Keys) -> dict[str, int]:
+    """Tổng cộng dồn mọi worker từ khi Redis có khoá `totals` (chỉ tăng)."""
+    raw = await redis.hmget(keys.totals, list(COUNT_FIELDS))  # pyright: ignore[reportGeneralTypeIssues]
+    return {name: int(v or 0) for name, v in zip(COUNT_FIELDS, raw, strict=True)}
 
 
 def _with_counts(status: WorkerStatus, counts: list[Any]) -> WorkerStatus:

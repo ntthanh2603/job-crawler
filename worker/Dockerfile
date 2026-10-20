@@ -42,4 +42,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 USER pwuser
 # Worker tự xử lý SIGTERM: thôi nhận việc, làm nốt (WORKER_SHUTDOWN_GRACE_SECONDS), Leave.
 STOPSIGNAL SIGTERM
+# `jobworker health` đọc file trạng thái worker ghi (WORKER_HEALTH_FILE, mặc định
+# /tmp/jobworker-health.json): file cũ (treo) hoặc mất gateway quá 5 phút → unhealthy. Compose
+# `healthcheck:` ghi đè được.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["jobworker", "health"]
 CMD ["jobworker", "run"]

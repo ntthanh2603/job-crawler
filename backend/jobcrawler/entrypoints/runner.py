@@ -11,6 +11,14 @@ Một process runner chạy một hoặc nhiều vai (mỗi vai một queue, m�
 
 Mạng không đi thẳng từ đây: mọi request tới website / ATS / trang tuyển dụng được gửi tới worker
 lấy trang (gói jobworker) qua gateway gRPC.
+
+Health: vòng lặp nhận việc của mỗi vai ghi heartbeat của process (`jobcrawler.heartbeat`; component
+`runner-build` / `runner-poll` / `runner-boards`, đủ ba vai là `runner`), kiểm bằng
+`jobcrawler health <component>` trong container.
+
+Watchdog (`jobcrawler.watchdog`, WATCHDOG_SECONDS): event loop, hoặc vòng lặp nhận việc của BẤT KỲ
+vai nào, đứng quá ngưỡng thì process thoát (mã 70) để Docker dựng lại. Mọi vòng đều tính (kể cả khi
+đọc Redis lỗi): mất Redis / Postgres không làm thoát.
 """
 
 from __future__ import annotations
@@ -19,17 +27,21 @@ import asyncio
 import dataclasses
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Literal, Required, TypedDict
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from jobcrawler import sysres
 from jobcrawler.config import Settings
+from jobcrawler.heartbeat import Heartbeat, runner_component
 from jobcrawler.logging import get_logger
 from jobcrawler.queues import make_queue
 from jobcrawler.resources import Resources, open_resources
 from jobcrawler.schemas import RunTrigger
 from jobcrawler.services import boards, crawl, maintenance, overview
 from jobcrawler.streamqueue import CronJob, StreamWorker
+from jobcrawler.watchdog import start_watchdog
 
 log = get_logger(__name__)
 
@@ -198,11 +210,13 @@ def queue_name(settings: Settings, role: Role) -> str:
 
 
 def concurrency(settings: Settings, role: Role) -> int:
-    return {
+    """Số job song song của vai: cài đặt, 0 = tự tính theo máy (`jobcrawler.sysres`)."""
+    value = {
         "build": settings.runner_build_concurrency,
         "poll": settings.runner_poll_concurrency,
         "boards": settings.runner_board_concurrency,
     }[role]
+    return value or sysres.auto_concurrency(role)
 
 
 FUNCTIONS: dict[Role, list[Any]] = {
@@ -230,24 +244,40 @@ def build_worker(settings: Settings, role: Role) -> StreamWorker:
 async def run_runner(settings: Settings, roles: Sequence[Role] = ROLES) -> None:
     """Chạy các vai `roles` trong một process, dùng chung một `Resources`. Dừng bằng SIGTERM /
     Ctrl+C: job đang chạy được làm nốt (hoặc xếp lại) rồi thoát."""
+    roles = list(dict.fromkeys(roles))
     async with open_resources(settings) as res:
+        # Heartbeat health: chỉ ghi khi vòng lặp của mọi vai đều đang quay.
+        beat = Heartbeat(res.redis, res.settings.redis_prefix, runner_component(roles), parts=roles)
         # Số job cùng lúc và lịch cron theo cài đặt hiện hành (kể cả giá trị sửa ở trang Cài đặt).
-        workers = [build_worker(res.settings, role) for role in dict.fromkeys(roles)]
-        for worker in workers:
+        workers = [build_worker(res.settings, role) for role in roles]
+        for role, worker in zip(roles, workers, strict=True):
             worker.context["resources"] = res
+            worker.on_loop = partial(beat.tick, role)
             await worker.queue.connect()
         log.info(
             "runner.start",
-            roles=list(dict.fromkeys(roles)),
+            roles=roles,
+            component=beat.component,
             concurrency={w.queue.name: w.concurrency for w in workers},
         )
+        # Watchdog: mỗi vai một vòng lặp chính, vai nào đứng cũng làm process thoát.
+        dog = start_watchdog(beat.component, max_stall=res.settings.watchdog_seconds, parts=roles)
+
+        def shutdown() -> None:
+            dog.stop()  # dừng có chủ đích: lượt làm nốt job không bị watchdog giết
+            for worker in workers:
+                worker.stop()
+
         loop = asyncio.get_running_loop()
         signals = StreamWorker.SIGNALS
-        for signum in signals:
-            loop.add_signal_handler(signum, lambda: [w.stop() for w in workers])
         try:
+            for role, worker in zip(roles, workers, strict=True):
+                worker.on_iteration = partial(dog.loop_iteration, role)
+            for signum in signals:
+                loop.add_signal_handler(signum, shutdown)
             await asyncio.gather(*(w.start() for w in workers))
         finally:
+            dog.stop()
             for signum in signals:
                 loop.remove_signal_handler(signum)
             for worker in workers:

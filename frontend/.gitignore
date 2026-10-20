@@ -2,3 +2,9 @@ node_modules
 *.tsbuildinfo
 dist
 coverage
+
+# Playwright (npm run e2e)
+test-results
+playwright-report
+blob-report
+e2e/.auth

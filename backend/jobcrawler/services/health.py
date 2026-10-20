@@ -50,7 +50,7 @@ def proxies_to_check(res: Resources) -> ProxyPool:
     PROXY_MODE=central, không thì dựng pool từ danh sách để vẫn kiểm tra được."""
     if res.proxies.enabled:
         return res.proxies
-    kv = RedisKV(res.redis, prefix=res.settings.redis_prefix)
+    kv = RedisKV(res.redis, prefix=res.settings.redis_prefix)  # trạng thái proxy: Redis chính
     return make_proxy_pool(res.settings, kv, central_proxies(res.settings))
 
 

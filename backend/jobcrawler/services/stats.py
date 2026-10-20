@@ -23,7 +23,7 @@ from jobcrawler.queues import JobQueue
 from jobcrawler.resources import Resources
 from jobcrawler.schemas import FetchOutcome, JobStatus, RunStatus
 
-# Mục tiêu mặc định (BUILD_PROMPT mục 13).
+# Mục tiêu mặc định: tin mới thấy trong 3 phút ở P95, tỉ lệ lỗi dưới 2%.
 TARGET_P95_SECONDS = 180.0
 TARGET_FAILED_RATE = 0.02
 TOP = 10
@@ -36,6 +36,9 @@ class QueueStats:
     active: int = 0
     scheduled: int = 0
     workers: int = 0
+    # Tổng số job chạy cùng lúc tối đa của các runner đang nghe queue (RUNNER_*_CONCURRENCY, tự
+    # tính theo máy khi 0): so với `active` để biết runner còn chỗ hay đã đầy.
+    capacity: int = 0
     # Cộng dồn từ các worker đang sống (mỗi worker tự đếm từ lúc khởi động).
     complete: int = 0
     failed: int = 0
@@ -137,6 +140,7 @@ async def queue_stats(queue: JobQueue) -> QueueStats:
     st.queued, st.active, st.scheduled = info["queued"], info["active"], info["scheduled"]
     st.workers = len(info["workers"])
     for worker in info["workers"].values():
+        st.capacity += int(dict(worker.get("metadata") or {}).get("concurrency", 0))
         stats: dict[str, Any] = dict(worker.get("stats") or {})
         st.complete += int(stats.get("complete", 0))
         st.failed += int(stats.get("failed", 0))

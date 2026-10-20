@@ -21,7 +21,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from jobcrawler.config import Settings
 from jobcrawler.db.models import Company, CompanyAlias, JobPosting, SourceProfile
 from jobcrawler.logging import get_logger
-from jobcrawler.net.kv import RedisKV
 from jobcrawler.net.urls import host_of, registrable_domain
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions, IndexStats
@@ -277,7 +276,7 @@ async def lookup_profiles(
     Không có SERP_API_KEY (hoặc BOARD_SERP_LOOKUP=false) thì bỏ qua. SERP gọi thẳng từ backend
     (`api_http`); trang profile tìm được thì đi qua tầng mạng crawl (`http`)."""
     s = res.settings
-    serp = SerpClient.from_settings(s, res.api_http, RedisKV(res.redis, prefix=s.redis_prefix))
+    serp = SerpClient.from_settings(s, res.api_http, res.cache_kv)
     if not s.board_serp_lookup or not serp.enabled:
         return 0
     async with res.sessionmaker() as session:
