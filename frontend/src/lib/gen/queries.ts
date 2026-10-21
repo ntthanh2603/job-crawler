@@ -1292,7 +1292,7 @@ export const ProxiesOutMode = {
 } as const;
 
 /**
- * Một proxy chung và trạng thái xoay vòng của nó (`services.proxies.ProxyStatus`).
+ * Một proxy chung và trạng thái xoay vòng của nó (`proxies_service.ProxyStatus`).
  */
 export type ProxyStatusOut = {
   cooling_domains: number;
@@ -1823,6 +1823,8 @@ fmt?: string;
 export type GetOverviewParams = {
 /**
  * Cửa sổ giờ; 0 = tất cả
+ * @minimum 0
+ * @maximum 87840
  */
 hours?: number;
 storage?: boolean;
@@ -1909,6 +1911,8 @@ export const GetRunLogsSortBy = {
 export type GetStatsParams = {
 /**
  * Cửa sổ giờ; 0 = tất cả
+ * @minimum 0
+ * @maximum 87840
  */
 hours?: number;
 storage?: boolean;
@@ -4756,7 +4760,7 @@ export function useGetMeta<TData = Awaited<ReturnType<typeof getMeta>>, TError =
 
 
 /**
- * Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,
+ * Số liệu + biểu đồ trang tổng quan (`overview_service`: phân bố tính sẵn bằng cron,
  * phần theo cửa sổ cache 60 giây).
  * @summary Get Overview
  */

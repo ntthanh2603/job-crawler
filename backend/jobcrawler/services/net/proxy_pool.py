@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,9 @@ log = get_logger(__name__)
 SCHEMES = frozenset({"http", "https", "socks4", "socks4a", "socks5", "socks5h"})
 INITIAL_SCORE = 50
 MAX_SCORE = 100
+_COMMENT = re.compile(r"(?:^|\s)#.*$")
+# Ký tự giữ nguyên trong phần `user:pass@` (RFC 3986 userinfo, kèm `%` của chuỗi đã mã hoá).
+_USERINFO_SAFE = "%:!$&'()*+,;=-._~"
 
 
 class ProxyParseError(ValueError):
@@ -91,15 +95,28 @@ def _masked(line: str) -> str:
     return ":".join([*parts[:2], "***"]) if len(parts) > 2 else line
 
 
+def strip_comment(line: str) -> str:
+    """Bỏ chú thích: `#` ở đầu dòng hoặc sau khoảng trắng (`1.2.3.4:80  # nhà cung cấp A`).
+    `#` dính liền là một phần của mật khẩu (`1.2.3.4:80:user:pa#ss`)."""
+    return _COMMENT.sub("", line).strip()
+
+
 def parse_proxy_line(line: str) -> Proxy | None:
     """Một dòng của proxies.txt → `Proxy`. Dòng trống hoặc `#` trả None.
 
     Nhận: `scheme://[user:pass@]host:port`, `host:port`, `host:port:user:pass` (mặc định http).
     """
-    line = line.split("#", 1)[0].strip()
+    line = strip_comment(line)
     if not line:
         return None
-    if "://" not in line:
+    if "://" in line:
+        # Mật khẩu có `#`, `?`, `/` chưa mã hoá: mã hoá để `urlsplit` không cắt nhầm (`%` giữ
+        # nguyên nên dòng đã mã hoá không đổi, id proxy cũ giữ nguyên).
+        scheme, _, rest = line.partition("://")
+        credentials, at, host = rest.rpartition("@")
+        if at:
+            line = f"{scheme}://{quote(credentials, safe=_USERINFO_SAFE)}@{host}"
+    else:
         parts = line.split(":")
         if len(parts) == 2:
             line = f"http://{parts[0]}:{parts[1]}"

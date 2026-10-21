@@ -318,8 +318,8 @@ class Job(Base):
             unique=True,
             postgresql_where=text("status = 'active' AND fingerprint IS NOT NULL"),
         ),
-        # Danh sách việc làm: lọc trạng thái + từng cột sắp xếp (jobs/queries.JOB_SORTS), nguồn,
-        # tỉnh, tìm kiếm; BRIN cho biểu đồ theo ngày thấy.
+        # Danh sách việc làm: lọc trạng thái + từng cột sắp xếp (jobs/jobs_service.JOB_SORTS),
+        # nguồn, tỉnh, tìm kiếm; BRIN cho biểu đồ theo ngày thấy.
         Index(
             "ix_jobs_status_first_seen_at", "status", text("first_seen_at DESC"), text("id DESC")
         ),
@@ -591,7 +591,7 @@ class AuditEvent(Base):
     # và User-Agent của trình duyệt / client; trống với thao tác không đến từ request (CLI, cron).
     ip: Mapped[str | None]
     user_agent: Mapped[str | None]
-    # {key: {"before": ..., "after": ...}}; bí mật đã che (`app_settings.MASK`).
+    # {key: {"before": ..., "after": ...}}; bí mật đã che (`app_settings_service.MASK`).
     changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Thông tin nhỏ kèm theo (số đếm, cách kích hoạt, tên...). `metadata` là tên dành riêng của
     # SQLAlchemy nên thuộc tính tên `meta`.

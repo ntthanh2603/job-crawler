@@ -107,3 +107,26 @@ async def test_known_path_with_wrong_method_is_405() -> None:
     async with api_client() as client:
         assert (await client.delete("/api/me")).status_code == 405
         assert (await client.get("/healthz")).text == "ok"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/overview?hours=1e10",  # timedelta tràn → 500
+        "/api/overview?hours=inf",
+        "/api/stats?hours=nan",
+        "/api/stats?hours=-1",
+        "/api/jobs?reviewed=maybe",  # trước đây bị hiểu là "sai"
+    ],
+)
+async def test_out_of_range_query_params_are_422(path: str) -> None:
+    async with api_client() as client:
+        assert (await client.get(path)).status_code == 422
+
+
+@pytest.mark.parametrize("stale_hours", [-1, 1e10])
+async def test_enqueue_stale_hours_is_bounded(stale_hours: float) -> None:
+    """Số âm → mốc ở tương lai → mọi doanh nghiệp bị đưa vào hàng đợi; quá lớn → tràn."""
+    async with api_client() as client:
+        r = await client.post("/api/enqueue", json={"stale_hours": stale_hours})
+        assert r.status_code == 422

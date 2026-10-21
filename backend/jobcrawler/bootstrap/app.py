@@ -6,8 +6,9 @@
 diện chỉ đưa job vào queue.
 
 Middleware, từ ngoài vào: `RequestIdMiddleware` (request id, log truy cập, lỗi chưa xử lý thành 500)
-→ `GuardMiddleware` (đăng nhập: header của proxy SSO hoặc HTTP Basic, chặn đoán mật khẩu, chặn
-CSRF) → FastAPI. Mọi lỗi trả về cùng dạng JSON `{"detail": ...}` như `HTTPException` của FastAPI.
+→ `GuardMiddleware` (đăng nhập: header của proxy SSO hoặc JWT do `POST /api/auth/login` cấp, chặn
+CSRF) → FastAPI. Đoán mật khẩu bị chặn ở chính endpoint đăng nhập (`LoginThrottle`). Mọi lỗi trả về
+cùng dạng JSON `{"detail": ...}` như `HTTPException` của FastAPI.
 """
 
 from __future__ import annotations
@@ -221,12 +222,13 @@ class AuthRedis(Protocol):
 
 
 class LoginThrottle:
-    """Chặn đoán mật khẩu HTTP Basic theo IP, đếm trên Redis (dùng chung mọi process API).
+    """Chặn đoán mật khẩu ở `POST /api/auth/login` theo IP, đếm trên Redis (dùng chung mọi process
+    API).
 
-    Khoá `<redis_prefix>:auth:fail:<ip>`: mỗi lần sai INCR rồi EXPIRE `window` giây; đủ `limit`
-    lần thì mọi request từ IP đó (kể cả mật khẩu đúng) nhận 429 kèm `Retry-After` tới khi khoá hết
-    hạn; đăng nhập đúng thì xoá bộ đếm. Request không gửi thông tin đăng nhập (lần đầu mở trang,
-    trình duyệt chưa hỏi mật khẩu) không bị tính.
+    Khoá `<redis_prefix>:auth:fail:<ip>`: mỗi lần đăng nhập sai INCR rồi EXPIRE `window` giây; đủ
+    `limit` lần thì mọi lần đăng nhập từ IP đó (kể cả mật khẩu đúng) nhận 429 kèm `Retry-After` tới
+    khi khoá hết hạn; đăng nhập đúng thì xoá bộ đếm. Request khác (đã có JWT, hoặc chưa đăng nhập
+    nhận 401) không qua đây, không bị tính.
 
     IP là `request.client.host`. Sau reverse proxy, uvicorn chỉ lấy IP thật từ `X-Forwarded-For`
     khi chạy với `proxy_headers` (`jobcrawler api` bật sẵn) và IP của proxy nằm trong

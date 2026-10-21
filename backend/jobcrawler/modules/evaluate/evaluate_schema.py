@@ -13,7 +13,8 @@ class EvalServerOut(ApiOut):
 
 
 class CompanyEvalOut(ApiOut):
-    # Trường của `evaluate.CompanyEval` + precision / recall (tests/test_openapi.py kiểm khớp).
+    # Trường của `evaluate_service.CompanyEval` + precision / recall (tests/test_openapi.py
+    # kiểm khớp).
     name: str
     company_id: UUID | None
     golden: int
@@ -27,7 +28,8 @@ class CompanyEvalOut(ApiOut):
 
 
 class SourceEvalOut(ApiOut):
-    # Trường của `evaluate.SourceEval` + precision / recall (tests/test_openapi.py kiểm khớp).
+    # Trường của `evaluate_service.SourceEval` + precision / recall (tests/test_openapi.py
+    # kiểm khớp).
     source: str
     predicted: int
     matched: int

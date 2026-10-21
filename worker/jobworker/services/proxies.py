@@ -17,6 +17,7 @@ proxy chung gateway gửi xuống (`WorkerConfig.shared_proxies`, PROXY_MODE=wor
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -29,6 +30,9 @@ log = get_logger(__name__)
 
 SCHEMES = frozenset({"http", "https", "socks4", "socks4a", "socks5", "socks5h"})
 SWEEP_EVERY = 1000  # dọn sticky/cooldown hết hạn sau chừng này lần chọn
+_COMMENT = re.compile(r"(?:^|\s)#.*$")
+# Ký tự giữ nguyên trong phần `user:pass@` (RFC 3986 userinfo, kèm `%` của chuỗi đã mã hoá).
+_USERINFO_SAFE = "%:!$&'()*+,;=-._~"
 
 
 class ProxyParseError(ValueError):
@@ -82,15 +86,28 @@ class Proxy:
         return playwright_settings(self.url)
 
 
+def strip_comment(line: str) -> str:
+    """Bỏ chú thích: `#` ở đầu dòng hoặc sau khoảng trắng (`1.2.3.4:80  # nhà cung cấp A`).
+    `#` dính liền là một phần của mật khẩu (`1.2.3.4:80:user:pa#ss`). Như backend."""
+    return _COMMENT.sub("", line).strip()
+
+
 def parse_proxy_line(line: str) -> Proxy | None:
     """Một dòng proxy → `Proxy`. Dòng trống hoặc `#` trả None.
 
     Nhận: `scheme://[user:pass@]host:port`, `host:port`, `host:port:user:pass` (mặc định http).
     """
-    line = line.split("#", 1)[0].strip()
+    line = strip_comment(line)
     if not line:
         return None
-    if "://" not in line:
+    if "://" in line:
+        # Mật khẩu có `#`, `?`, `/` chưa mã hoá: mã hoá để `urlsplit` không cắt nhầm (`%` giữ
+        # nguyên nên URL đã chuẩn hoá — proxy chung từ backend — không đổi, id khớp backend).
+        scheme, _, rest = line.partition("://")
+        credentials, at, host = rest.rpartition("@")
+        if at:
+            line = f"{scheme}://{quote(credentials, safe=_USERINFO_SAFE)}@{host}"
+    else:
         parts = line.split(":")
         if len(parts) == 2:
             line = f"http://{parts[0]}:{parts[1]}"

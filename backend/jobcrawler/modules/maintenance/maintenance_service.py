@@ -177,9 +177,10 @@ class DedupReport:
 async def dedupe_jobs(
     sessionmaker: async_sessionmaker[AsyncSession], *, limit: int | None = None
 ) -> DedupReport:
-    """Điền dấu vân tay cho job chưa có (lưu trước migration 0006) và gộp job đang mở trùng nội
-    dung: job cũ nhất giữ lại, tin của job trùng chuyển sang nó, job trùng → `removed`. Sau khi
-    chạy, index `ux_jobs_company_fingerprint_active` bảo đảm không còn job trùng."""
+    """Điền dấu vân tay cho job chưa có (dữ liệu cũ, lưu trước khi có dấu vân tay) và gộp job
+    đang mở trùng nội dung: job cũ nhất giữ lại, tin của job trùng chuyển sang nó, job trùng →
+    `removed`. Sau khi chạy, index `ux_jobs_company_fingerprint_active` bảo đảm không còn job
+    trùng."""
     report = DedupReport()
     last_id = NIL
     touched: set[UUID] = set()

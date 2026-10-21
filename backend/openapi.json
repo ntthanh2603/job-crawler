@@ -1378,6 +1378,8 @@
           "stale_hours": {
             "anyOf": [
               {
+                "maximum": 87840.0,
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -3957,7 +3959,7 @@
         "type": "object"
       },
       "ProxyStatusOut": {
-        "description": "Một proxy chung và trạng thái xoay vòng của nó (`services.proxies.ProxyStatus`).",
+        "description": "Một proxy chung và trạng thái xoay vòng của nó (`proxies_service.ProxyStatus`).",
         "properties": {
           "cooling_domains": {
             "title": "Cooling Domains",
@@ -8840,7 +8842,7 @@
     },
     "/api/overview": {
       "get": {
-        "description": "Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,\nphần theo cửa sổ cache 60 giây).",
+        "description": "Số liệu + biểu đồ trang tổng quan (`overview_service`: phân bố tính sẵn bằng cron,\nphần theo cửa sổ cache 60 giây).",
         "operationId": "get_overview",
         "parameters": [
           {
@@ -8851,6 +8853,8 @@
             "schema": {
               "default": 24,
               "description": "Cửa sổ giờ; 0 = tất cả",
+              "maximum": 87840,
+              "minimum": 0,
               "title": "Hours",
               "type": "number"
             }
@@ -9504,6 +9508,8 @@
             "schema": {
               "default": 24,
               "description": "Cửa sổ giờ; 0 = tất cả",
+              "maximum": 87840,
+              "minimum": 0,
               "title": "Hours",
               "type": "number"
             }

@@ -3,7 +3,7 @@
 Tăng theo thời gian nên index B-tree ghi nối đuôi như bigint tự tăng (không phân mảnh như UUIDv4)
 và `ORDER BY id` theo thứ tự tạo; không lộ số lượng dòng, sinh được ở bất kỳ process nào. Trong
 một process id tăng chặt (bộ đếm trong cùng mili-giây, RFC 9562 §6.2 cách 1) — log ghi theo lô vẫn
-giữ đúng thứ tự sự kiện. Phía DB có hàm cùng định dạng `uuid_v7()` (migration 0007) làm mặc định
+giữ đúng thứ tự sự kiện. Phía DB có hàm cùng định dạng `uuid_v7()` (migration 0001) làm mặc định
 cho insert bằng SQL thô.
 """
 

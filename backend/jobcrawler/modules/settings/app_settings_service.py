@@ -45,7 +45,7 @@ from jobcrawler.common.logging import get_logger
 from jobcrawler.database.models import AppSetting
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.services import secretbox
-from jobcrawler.services.net.proxy_pool import ProxyParseError, parse_proxy_line
+from jobcrawler.services.net.proxy_pool import ProxyParseError, parse_proxy_line, strip_comment
 
 log = get_logger(__name__)
 
@@ -271,7 +271,9 @@ def _clean_lines(values: Iterable[str]) -> list[str]:
 def _check_proxies(values: list[str]) -> list[str]:
     out: list[str] = []
     for i, raw in enumerate(values, start=1):
-        line = raw.split("#", 1)[0].strip()
+        # Như proxies.txt: `#` chỉ mở chú thích ở đầu dòng / sau khoảng trắng — mật khẩu có `#`
+        # (`1.2.3.4:8080:user:pa#ss`) giữ nguyên, không bị cắt.
+        line = strip_comment(raw)
         if not line:
             continue
         if PROXY_MASK in line:

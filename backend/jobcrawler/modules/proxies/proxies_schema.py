@@ -11,7 +11,7 @@ from jobcrawler.modules.proxies import proxies_service
 
 
 class ProxyStatusOut(ApiOut):
-    """Một proxy chung và trạng thái xoay vòng của nó (`services.proxies.ProxyStatus`)."""
+    """Một proxy chung và trạng thái xoay vòng của nó (`proxies_service.ProxyStatus`)."""
 
     id: str
     line: str  # đã che mật khẩu, khớp một dòng của cài đặt `proxies`

@@ -11,7 +11,7 @@ from jobcrawler.modules.runs.runs_schema import RunOut
 
 
 class QueueStatsOut(ApiOut):
-    # Trường của `stats.QueueStats` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.QueueStats` (tests/test_openapi.py kiểm khớp).
     name: str
     queued: int
     active: int
@@ -26,7 +26,7 @@ class QueueStatsOut(ApiOut):
 
 
 class RunStatsOut(ApiOut):
-    # Trường của `stats.RunStats` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.RunStats` (tests/test_openapi.py kiểm khớp).
     since: Timestamp | None
     runs: int
     companies: int
@@ -50,7 +50,7 @@ class RunStatsOut(ApiOut):
 
 
 class SourceStatsOut(ApiOut):
-    # Trường của `stats.SourceStats` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.SourceStats` (tests/test_openapi.py kiểm khớp).
     kind: str
     fetches: int
     outcomes: dict[str, int]
@@ -59,7 +59,7 @@ class SourceStatsOut(ApiOut):
 
 
 class BoardStatsOut(ApiOut):
-    # Trường của `stats.BoardStats` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.BoardStats` (tests/test_openapi.py kiểm khớp).
     source: str
     active_postings: int
     postings: int
@@ -86,7 +86,7 @@ class StorageStatsOut(ApiOut):
 
 
 class TargetOut(ApiOut):
-    # Trường của `stats.Target` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.Target` (tests/test_openapi.py kiểm khớp).
     name: str
     value: float | None
     target: str
@@ -95,7 +95,7 @@ class TargetOut(ApiOut):
 
 
 class StatsOut(ApiOut):
-    # Trường của `stats.Stats` (tests/test_openapi.py kiểm khớp).
+    # Trường của `stats_service.Stats` (tests/test_openapi.py kiểm khớp).
     generated_at: Timestamp
     queues: list[QueueStatsOut]
     companies: int

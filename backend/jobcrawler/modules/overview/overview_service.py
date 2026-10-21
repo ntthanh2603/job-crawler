@@ -7,9 +7,10 @@ Hai phần, cache khác nhau:
   nên tính sẵn — cron `overview_cron` làm mới mỗi vài phút, kết quả nằm trong Redis cache
   (`CHARTS_KEY`, CACHE_REDIS_URL); người xem chỉ đọc. Chưa có (Redis mới, khoá bị đẩy ra) thì
   tính một lần rồi lưu.
-- **Theo cửa sổ thời gian** (lượt chạy, request theo giờ, thống kê `stats.collect_stats`): chỉ
-  đọc các dòng trong cửa sổ qua index `started_at` / BRIN `fetched_at`; cache `VIEW_TTL` giây
-  theo cửa sổ để nhiều người xem / tự làm mới không chạy lại truy vấn.
+- **Theo cửa sổ thời gian** (lượt chạy, request theo giờ, thống kê
+  `stats_service.collect_stats`): chỉ đọc các dòng trong cửa sổ qua index `started_at` / BRIN
+  `fetched_at`; cache `VIEW_TTL` giây theo cửa sổ để nhiều người xem / tự làm mới không chạy lại
+  truy vấn.
 """
 
 from __future__ import annotations

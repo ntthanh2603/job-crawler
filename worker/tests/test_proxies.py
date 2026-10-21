@@ -44,6 +44,11 @@ def make(n: int) -> list[Proxy]:
         ("1.2.3.4:8080:user:p@ss", "http://user:p%40ss@1.2.3.4:8080"),
         ("socks5h://u:p@proxy.local:1080  # ghi chú", "socks5h://u:p@proxy.local:1080"),
         ("https://1.2.3.4:8443", "https://1.2.3.4:8443"),
+        # `#` dính liền là một phần của mật khẩu, không phải chú thích.
+        ("1.2.3.4:8080:user:pa#ss", "http://user:pa%23ss@1.2.3.4:8080"),
+        ("http://user:p#ss@1.2.3.4:8080  # nhà cung cấp A", "http://user:p%23ss@1.2.3.4:8080"),
+        # URL đã chuẩn hoá (proxy chung backend gửi xuống) giữ nguyên: id khớp backend.
+        ("http://user:p%23ss@1.2.3.4:8080", "http://user:p%23ss@1.2.3.4:8080"),
     ],
 )
 def test_parse_proxy_line(line: str, url: str) -> None:

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from jobcrawler.common.api import ApiOut
+from jobcrawler.common.api import MAX_HOURS, ApiOut
 from jobcrawler.common.schemas import CompanyEntity
 from jobcrawler.modules.runs.runs_schema import FailedPageItem
 
@@ -58,7 +58,11 @@ class CompanyDetailOut(ApiOut):
 class EnqueueIn(BaseModel):
     company_ids: list[UUID] | None = Field(default=None, description="Các doanh nghiệp cần chạy.")
     stale_hours: float | None = Field(
-        default=None, description="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ."
+        default=None,
+        ge=0,
+        le=MAX_HOURS,
+        allow_inf_nan=False,
+        description="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ.",
     )
     all: bool = Field(default=False, description="Mọi doanh nghiệp (kết hợp stale_hours).")
 
@@ -72,7 +76,7 @@ class CompanyCreateIn(BaseModel):
 
 
 class ImportOutcomeOut(ApiOut):
-    # Trường của `actions.ImportOutcome` (tests/test_openapi.py kiểm khớp).
+    # Trường của `companies_service.ImportOutcome` (tests/test_openapi.py kiểm khớp).
     rows: int
     created: int
     updated: int
@@ -85,7 +89,7 @@ class ImportOutcomeOut(ApiOut):
 
 
 class CompanyCreatedOut(ApiOut):
-    # Trường của `actions.CreateOutcome` (tests/test_openapi.py kiểm khớp).
+    # Trường của `companies_service.CreateOutcome` (tests/test_openapi.py kiểm khớp).
     id: UUID
     created: bool  # False: đã có doanh nghiệp này, chỉ bổ sung trường còn trống
     warnings: list[str]
@@ -93,7 +97,7 @@ class CompanyCreatedOut(ApiOut):
 
 
 class EnqueueResultOut(ApiOut):
-    # Trường của `batch.EnqueueResult` (tests/test_openapi.py kiểm khớp).
+    # Trường của `batch_service.EnqueueResult` (tests/test_openapi.py kiểm khớp).
     selected: int
     enqueued: int
     already_queued: int

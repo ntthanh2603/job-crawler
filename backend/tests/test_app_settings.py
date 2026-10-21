@@ -132,6 +132,15 @@ def test_validate_value_checks_type_bounds_and_format() -> None:
         a.validate_value("boards", ["khong-co"])
     with pytest.raises(ValueError, match="Dòng 2"):
         a.validate_value("proxies", ["1.2.3.4:8080", "rác"])
+    # `#` dính liền là một phần của mật khẩu; chú thích là `#` ở đầu dòng / sau khoảng trắng.
+    assert a.validate_value(
+        "proxies",
+        [
+            "1.2.3.4:8080:user:pa#ss",
+            "http://user:p#ss@5.6.7.8:3128  # nhà cung cấp A",
+            "# tắt tạm: 9.9.9.9:1",
+        ],
+    ) == ["1.2.3.4:8080:user:pa#ss", "http://user:p#ss@5.6.7.8:3128"]
     with pytest.raises(ValueError, match="http"):
         a.validate_value("proxy_check_url", "ftp://x")
     with pytest.raises(ValueError, match="một trong"):

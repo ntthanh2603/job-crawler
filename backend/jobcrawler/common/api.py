@@ -47,6 +47,10 @@ class ApiOut(BaseModel):
     model_config = API_OUTPUT
 
 
+# Trần của tham số số giờ (cửa sổ thống kê, `stale_hours`): 10 năm; lớn hơn thì `now - timedelta`
+# tràn (OverflowError → 500).
+MAX_HOURS = 10 * 366 * 24
+
 # Mốc thời gian: `datetime` (ISO 8601), hoặc chuỗi đã có sẵn trong JSON cache của trang tổng quan
 # (`modules/overview/overview_service.py` ghi bằng `str()`) — giữ nguyên chuỗi đó. Spec chỉ ghi
 # `date-time`.

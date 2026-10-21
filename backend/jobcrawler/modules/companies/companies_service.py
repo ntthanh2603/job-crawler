@@ -313,7 +313,7 @@ class ImportOutcome:
 
 async def import_csv(res: Resources, content: bytes, *, enqueue: bool) -> ImportOutcome:
     """Import `companies.csv` tải lên; `enqueue` thì đưa luôn các doanh nghiệp trong file vào
-    queue. Ném `batch.CsvFormatError` nếu file sai định dạng."""
+    queue. Ném `batch_service.CsvFormatError` nếu file sai định dạng."""
     if len(content) > MAX_UPLOAD_BYTES:
         raise batch_service.CsvFormatError("file quá lớn (tối đa 20 MB)")
     try:

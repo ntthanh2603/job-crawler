@@ -7,20 +7,26 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from jobcrawler.common.api import res_of
+from jobcrawler.common.api import MAX_HOURS, res_of
 from jobcrawler.modules.overview import overview_service, stats_service
 from jobcrawler.modules.overview.overview_schema import OverviewOut, StatsOut
 
 router = APIRouter(prefix="/api", tags=["overview"])
 
+# Cửa sổ thống kê (giờ): số hữu hạn trong [0, MAX_HOURS].
+Hours = Annotated[
+    float,
+    Query(ge=0, le=MAX_HOURS, allow_inf_nan=False, description="Cửa sổ giờ; 0 = tất cả"),
+]
+
 
 @router.get("/overview")
 async def get_overview(
     request: Request,
-    hours: Annotated[float, Query(description="Cửa sổ giờ; 0 = tất cả")] = 24,
+    hours: Hours = 24,
     storage: bool = False,
 ) -> OverviewOut:
-    """Số liệu + biểu đồ trang tổng quan (services/overview.py: phân bố tính sẵn bằng cron,
+    """Số liệu + biểu đồ trang tổng quan (`overview_service`: phân bố tính sẵn bằng cron,
     phần theo cửa sổ cache 60 giây)."""
     payload = await overview_service.build_overview(
         res_of(request), hours=hours or None, storage=storage
@@ -31,7 +37,7 @@ async def get_overview(
 @router.get("/stats")
 async def get_stats(
     request: Request,
-    hours: Annotated[float, Query(description="Cửa sổ giờ; 0 = tất cả")] = 24,
+    hours: Hours = 24,
     storage: bool = False,
 ) -> StatsOut:
     st = await stats_service.collect_stats(res_of(request), hours=hours or None, storage=storage)

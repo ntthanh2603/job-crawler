@@ -48,7 +48,22 @@ def test_parse_host_port_user_pass_quotes_credentials() -> None:
     assert proxy.display == "http://user:***@1.2.3.4:3128"
 
 
-@pytest.mark.parametrize("line", ["", "   ", "# comment"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "1.2.3.4:3128:user:pa#ss",
+        "http://user:pa#ss@1.2.3.4:3128",
+        "http://user:pa%23ss@1.2.3.4:3128  # đã mã hoá sẵn",
+    ],
+)
+def test_hash_inside_password_is_not_a_comment(line: str) -> None:
+    """`#` chỉ là chú thích ở đầu dòng hoặc sau khoảng trắng; dính liền là một phần mật khẩu."""
+    proxy = _p(line)
+    assert proxy.url == "http://user:pa%23ss@1.2.3.4:3128"
+    assert proxy.playwright()["password"] == "pa#ss"
+
+
+@pytest.mark.parametrize("line", ["", "   ", "# comment", "  #1.2.3.4:3128"])
 def test_parse_skips_blank_and_comments(line: str) -> None:
     assert parse_proxy_line(line) is None
 
@@ -68,6 +83,7 @@ def test_parse_rejects_invalid(line: str) -> None:
         ("1.2.3.4:abc:user:mat-khau", "http://user:***@1.2.3.4:abc"),
         ("1.2.3.4:3128:user", "1.2.3.4:3128:***"),
         ("1.2.3.4:3128:user:mat-khau:x", "1.2.3.4:3128:***"),
+        ("http://user:mat#khau@1.2.3.4:abc", "http://user:***@1.2.3.4:abc"),
     ],
 )
 def test_parse_error_masks_credentials(line: str, shown: str) -> None:

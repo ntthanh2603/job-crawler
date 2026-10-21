@@ -15,8 +15,8 @@ class SettingsUpdate(BaseModel):
     values: dict[str, Any]
 
 
-# Giá trị một cài đặt như API trả (`app_settings._display`: JSON của field, bí mật luôn null, proxy
-# đã ẩn mật khẩu). Khi chạy không kiểm lại; spec liệt kê các dạng có thể có.
+# Giá trị một cài đặt như API trả (`app_settings_service._display`: JSON của field, bí mật luôn
+# null, proxy đã ẩn mật khẩu). Khi chạy không kiểm lại; spec liệt kê các dạng có thể có.
 type SettingValue = Annotated[
     Any,
     WithJsonSchema(
