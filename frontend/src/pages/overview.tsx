@@ -502,7 +502,8 @@ const LATENCY_RANGES = [15, 60, 360]
 
 export function OverviewPage() {
   const [params, setParams] = useSearchParams()
-  const hours = params.get("hours") ?? "24"
+  // Chỉ nhận các khoảng có trong ô chọn: giá trị lạ trên URL về 24 giờ (không thành "Toàn bộ").
+  const hours = WINDOWS.find(([v]) => v === params.get("hours"))?.[0] ?? "24"
   // Khoảng đo độ trễ phát hiện (phút), lưu ở `?latency=` để giữ khi tải lại.
   const latency = LATENCY_RANGES.includes(Number(params.get("latency"))) ? Number(params.get("latency")) : 60
   const [tab, setTab] = useTabParam(TABS, "runs")

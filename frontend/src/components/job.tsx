@@ -162,6 +162,7 @@ export function ReviewBox({
         toast.success("Đã xoá đánh giá")
         client.invalidateQueries({ queryKey: getGetJobQueryKey(job.id) })
         client.invalidateQueries({ queryKey: getGetReviewQueryKey() })
+        client.invalidateQueries({ queryKey: getGetJobsQueryKey() })
       },
     },
   })

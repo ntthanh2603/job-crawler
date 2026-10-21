@@ -595,6 +595,12 @@ export function Empty({
 /** Số dòng mỗi trang cho ô chọn dưới bảng (như data-table của open-asm). */
 export const PAGE_SIZES = [10, 20, 50, 100] as const
 
+/** `limit` gửi API từ `?pageSize=` trên URL: giá trị lạ (gõ tay, link cũ) về 50 thay vì lỗi 422. */
+export function pageLimit(pageSize: string): number {
+  const n = Number(pageSize)
+  return (PAGE_SIZES as readonly number[]).includes(n) ? n : 50
+}
+
 /** Các nút số trang: trang đầu, trang cuối và ±2 quanh trang hiện tại; khoảng bỏ qua là "gap". */
 export function pageWindow(page: number, pageCount: number): (number | "gap")[] {
   const out: (number | "gap")[] = []

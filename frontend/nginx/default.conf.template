@@ -16,6 +16,14 @@ map $uri $jc_cache_control {
     ~^/api/     "";
 }
 
+# Scheme người dùng thấy: nginx chỉ nghe HTTP, TLS kết thúc ở load balancer phía trước (DEPLOY.md)
+# và báo qua X-Forwarded-Proto. Backend đặt cookie phiên `Secure` theo giá trị này. Client tự đặt
+# `https` khi đi HTTP thường chỉ làm trình duyệt của chính nó bỏ cookie.
+map $http_x_forwarded_proto $jc_forwarded_proto {
+    default  $scheme;
+    https    https;
+}
+
 # Log truy cập kèm thời gian xử lý và X-Request-Id backend trả về (tra log của backend theo id).
 log_format jc_web '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent '
                   '"$http_referer" "$http_user_agent" rt=$request_time '
@@ -84,12 +92,12 @@ server {
         # Sau load balancer (REAL_IP_FROM), $remote_addr đã là IP client nginx rút ra từ
         # X-Forwarded-For của proxy tin cậy; ngoài ra là IP kết nối tới nginx.
         proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $jc_forwarded_proto;
         # Request id của client (nếu có) đi tiếp; X-Request-Id backend trả về cũng tới client.
         proxy_set_header X-Request-Id $http_x_request_id;
 
-        # Không chặn lỗi của backend (proxy_intercept_errors mặc định off): 401 kèm
-        # WWW-Authenticate (HTTP Basic khi backend đặt UI_PASSWORD) tới thẳng trình duyệt.
+        # Không chặn lỗi của backend (proxy_intercept_errors mặc định off): 401 khi backend đặt
+        # UI_PASSWORD mà chưa đăng nhập tới thẳng giao diện (chuyển về trang đăng nhập).
         proxy_connect_timeout 10s;
         proxy_send_timeout 120s;
         proxy_read_timeout 120s;
@@ -114,7 +122,7 @@ server {
         proxy_set_header Connection "";
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $jc_forwarded_proto;
         proxy_set_header X-Request-Id $http_x_request_id;
 
         proxy_buffering off;

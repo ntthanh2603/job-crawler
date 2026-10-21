@@ -338,7 +338,8 @@ export function ProxyListField({ value, onChange, id }: { value: Exclude<Raw, nu
   const entries: Entry[] = lines.map((line) => ({ line, row: parseProxyLine(line) }))
   const rows = entries.flatMap((e) => (e.row ? [e.row] : []))
   const status = useGetProxies({ query: { refetchInterval: 15_000 } })
-  const check = useCheckProxies()
+  // Lỗi báo một lần ở `runCheck` (toast chung của mutation sẽ báo trùng).
+  const check = useCheckProxies({ mutation: { onError: () => {} } })
   const [results, setResults] = useState<Record<string, ProxyCheck>>({})
   const [checking, setChecking] = useState<Set<string>>(new Set())
   const [editing, setEditing] = useState<{ index: number | null } | null>(null)

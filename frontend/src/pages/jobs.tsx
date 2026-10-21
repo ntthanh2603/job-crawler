@@ -18,6 +18,7 @@ import {
   StatusBadge,
   TextLink,
   nextSort,
+  pageLimit,
   useRowLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
@@ -122,16 +123,15 @@ export function JobsPage() {
     sortBy: filters.sortBy as GetJobsSortBy,
     sortOrder: filters.sortOrder === "ASC" ? "ASC" : "DESC",
   }
-  const { pageSize, sortBy: _sortBy, sortOrder: _sortOrder, ...jobFilters } = filters
+  const { pageSize, sortBy: _sortBy, sortOrder: _sortOrder, ...rest } = filters
+  // Bộ lọc trên URL là chuỗi; `salary_from` trống hoặc không phải số không âm thì không gửi.
+  const minSalary = Number(filters.salary_from)
+  const jobFilters = {
+    ...rest,
+    salary_from: filters.salary_from && Number.isFinite(minSalary) && minSalary >= 0 ? minSalary : undefined,
+  }
   const query = useGetJobs(
-    // Bộ lọc trên URL là chuỗi; `salary_from` trống thì không gửi.
-    {
-      ...jobFilters,
-      ...sort,
-      salary_from: filters.salary_from ? Number(filters.salary_from) : undefined,
-      page,
-      limit: Number(pageSize) || 50,
-    },
+    { ...jobFilters, ...sort, page, limit: pageLimit(pageSize) },
     { query: { placeholderData: (prev) => prev } },
   )
   const onSort = (column: GetJobsSortBy) => update(nextSort(sort, column))

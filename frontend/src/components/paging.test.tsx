@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components
 import { createQueryClient } from "@/lib/query-client"
 import type { ListParams, Page, SortState } from "@/lib/types"
 
-import { nextSort, PagedList, Pager, pageWindow, SortHead } from "./common"
+import { nextSort, PagedList, pageLimit, Pager, pageWindow, SortHead } from "./common"
 
 type Col = "started_at" | "duration_ms"
 
@@ -18,6 +18,14 @@ function page<T>(data: T[], values: Partial<Page<T>> = {}): Page<T> {
 }
 
 describe("phân trang", () => {
+  it("số dòng mỗi trang từ URL: giá trị ngoài danh sách về 50", () => {
+    expect(pageLimit("20")).toBe(20)
+    expect(pageLimit("100")).toBe(100)
+    expect(pageLimit("500")).toBe(50)
+    expect(pageLimit("abc")).toBe(50)
+    expect(pageLimit("")).toBe(50)
+  })
+
   it("nút số trang: trang đầu, trang cuối, ±2 quanh trang hiện tại, khoảng bỏ qua thành gap", () => {
     expect(pageWindow(5, 20)).toEqual([1, "gap", 3, 4, 5, 6, 7, "gap", 20])
     expect(pageWindow(1, 3)).toEqual([1, 2, 3])

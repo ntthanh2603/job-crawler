@@ -22,6 +22,7 @@ import {
   StatusBadge,
   TextLink,
   nextSort,
+  pageLimit,
   useRowLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
@@ -450,7 +451,7 @@ export function CompaniesPage() {
   }
   const { pageSize, ...rest } = filters
   const query = useGetCompanies(
-    { ...rest, ...sort, page, limit: Number(pageSize) || 50 },
+    { ...rest, ...sort, page, limit: pageLimit(pageSize) },
     { query: { placeholderData: (prev) => prev } },
   )
   const onSort = (column: GetCompaniesSortBy) => update(nextSort(sort, column))
@@ -466,7 +467,16 @@ export function CompaniesPage() {
   const items = query.data?.data ?? []
   const allChecked = items.length > 0 && items.every((r) => selected.has(r.company.id))
   const someChecked = !allChecked && items.some((r) => selected.has(r.company.id))
-  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(items.map((r) => r.company.id)))
+  // Chỉ thêm / bỏ các dòng của trang này: dòng đã chọn ở trang khác giữ nguyên.
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      for (const r of items) {
+        if (allChecked) next.delete(r.company.id)
+        else next.add(r.company.id)
+      }
+      return next
+    })
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev)

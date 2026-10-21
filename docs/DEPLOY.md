@@ -49,7 +49,8 @@ frontend`.
   load balancer: mỗi tab giữ một kết nối SSE, HTTP/1.1 chỉ cho 6 kết nối mỗi origin (tab ẩn quá
   60 s tự đóng kết nối). Proxy không giữ được kết nối lâu thì giao diện tự quay về poll định kỳ.
   `jobcrawler api` dừng sau tối đa 5 s (`timeout_graceful_shutdown`) dù còn luồng mở; trình duyệt
-  tự nối lại.
+  tự nối lại. Load balancer kết thúc TLS phải gửi `X-Forwarded-Proto: https`: nginx của `frontend`
+  chuyển tiếp giá trị đó cho backend, backend mới đặt cookie đăng nhập `Secure`.
 - **Image**: CI build và đẩy `jobcrawler-backend`, `-worker`, `-frontend` lên GHCR sau khi mọi kiểm
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
   Máy chạy đặt `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=…` trong `.env` gốc rồi `docker compose pull &&

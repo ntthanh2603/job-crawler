@@ -41,6 +41,8 @@ export function JoinKeyDialog({
   const [pool, setPool] = useState("default")
   const keyRef = useRef<JoinKeyOut | null>(null)
   keyRef.current = key
+  const openRef = useRef(open)
+  openRef.current = open
   const poolId = useId()
   const navigate = useNavigate()
   const location = useLocation()
@@ -48,15 +50,23 @@ export function JoinKeyDialog({
   const create = useCreateJoinKey({
     mutation: {
       onSuccess: (k) => {
+        // Đã đóng hộp thoại trước khi khoá về: huỷ ngay, không để khoá sống 15 phút không ai thấy.
+        if (!openRef.current) {
+          void revokeJoinKey(encodeURIComponent(k.id)).catch(() => undefined)
+          return
+        }
         setKey(k)
         setDeadline(performance.now() + k.ttl_seconds * 1000)
       },
+      onError: () => {}, // hiện trong hộp thoại thay cho toast chung
     },
   })
   const status = useGetJoinKey(encodeURIComponent(key?.id ?? ""), {
     query: { enabled: Boolean(key) && open, refetchInterval: (q) => (q.state.data?.status === "pending" ? 2000 : false) },
   })
   const used = key && status.data?.id === key.id && status.data.status === "used" ? status.data : null
+  const usedRef = useRef(used)
+  usedRef.current = used
   const left = (deadline - now) / 1000
   const expired = Boolean(key) && !used && left <= 0
   // Worker nối gRPC qua chính cổng của giao diện.
@@ -72,13 +82,18 @@ export function JoinKeyDialog({
     : ""
   const local = isLoopback(gatewayUrl)
 
+  // Huỷ khoá đang hiện nếu worker chưa dùng (khoá đã dùng thì không còn gì để huỷ).
+  const revokeUnused = () => {
+    const k = keyRef.current
+    if (k && !usedRef.current) void revokeJoinKey(encodeURIComponent(k.id)).catch(() => undefined)
+  }
+
   // Mở hộp thoại: tạo khoá; đóng: huỷ khoá chưa dùng.
   useEffect(() => {
     if (!open) return
     create.mutate()
     return () => {
-      const k = keyRef.current
-      if (k) void revokeJoinKey(encodeURIComponent(k.id)).catch(() => undefined)
+      revokeUnused()
       setKey(null)
     }
     // Chỉ theo lúc mở / đóng (create / revoke không đổi giữa các lần render).
@@ -95,8 +110,7 @@ export function JoinKeyDialog({
   }, [used])
 
   const renew = () => {
-    const k = keyRef.current
-    if (k) void revokeJoinKey(encodeURIComponent(k.id)).catch(() => undefined)
+    revokeUnused()
     setKey(null)
     create.mutate()
   }
