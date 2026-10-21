@@ -109,7 +109,8 @@ cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì bu
    `careers.` / `tuyendung.` / `jobs.` → đường dẫn phổ biến. Kết quả cache 7 ngày; build đêm tìm lại.
 4. **Thu thập** (`pipeline/collect.py`): mỗi nguồn một task, đọc **đủ** site (≤ 10 trang danh sách,
    ≤ 20 trang API, ≤ 80 trang chi tiết mỗi nguồn); tin đã tải trong `JOB_REUSE_DAYS` dùng lại.
-5. **Chuẩn hoá → xác minh → gộp → lưu** (mục 6). Lượt đọc đủ mọi nguồn mới đóng việc không còn thấy.
+5. **Chuẩn hoá → xác minh → gộp → lưu** (mục 6). Lượt đọc đủ mọi nguồn mới đóng việc không còn thấy
+   (trang lỗi tạm — timeout, 5xx, 429, robots.txt không tải được — làm nguồn chưa đủ).
 6. **Ghi bộ khung** (`crawl_plans`) và lịch (`company_schedules`).
 
 ### Bộ khung (`sources/plan.py`, bảng `crawl_plans`)
@@ -146,10 +147,15 @@ poll đầu tiên lúc 06:00 thấy.
    `POLL_MAX_DETAIL_PAGES` = 10 mỗi nguồn, còn lại lượt sau). **Đã gỡ** = mã cũ vắng mặt, chỉ khi
    nguồn đọc trọn (không bị cắt vì hết trang / deadline, không lỗi).
 4. Không đổi gì → chỉ cập nhật lịch (đa số lượt, không ghi `company_runs`). Có tin mới → chuẩn hoá →
-   xác minh → gộp với việc đã có → lưu; tin đã gỡ → đóng việc nếu không còn bản tin nào khác.
+   xác minh → gộp với việc đã có → lưu (việc đã lưu được gộp lại cùng các tin khác của nó mà lượt
+   poll không đọc, nên không bị ghi đè bằng phần tin lượt poll thấy: [DEDUP.md](DEDUP.md) mục 8);
+   tin đã gỡ → đóng việc nếu không còn bản tin nào khác.
 5. **Bộ khung hỏng → build lại ngay** (`REBUILD_ON_ERROR`): trang chính 404/410, API không còn JSON /
    không còn tin, trang danh sách hết sạch tin, lỗi tạm lặp `POLL_MAX_FAILURES` (3) lượt. Build lại
-   vẫn hỏng → thử lại sau 2 giờ (trạng thái "Bộ khung hỏng").
+   vẫn hỏng → thử lại sau 2 giờ (trạng thái "Bộ khung hỏng"). Tắt `REBUILD_ON_ERROR`: nguồn hỏng chờ
+   lượt build đêm, doanh nghiệp vẫn `ready`, các nguồn khác vẫn được poll. Doanh nghiệp `paused`
+   không bao giờ bị lượt poll đổi trạng thái: lượt theo lịch / `board` bỏ qua, chỉ lượt bấm tay chạy
+   (và không xếp build lại).
 6. **Chốt chặn đóng nhầm**: mất ≥ 30% tin (≥ 3 tin, nguồn ≥ 5 tin) trong một lượt → không đóng, đếm
    như lỗi; lặp 3 lượt → build lại, lượt build đọc đủ mới đóng đúng.
 
@@ -170,7 +176,10 @@ Build và poll của cùng doanh nghiệp không chạy chồng (`crawl_service.
 
 - Khoá Redis `<prefix>:lock:company:<id>` (`locks.RedisLease`, 60 s, tự gia hạn mỗi 20 s). Poll gặp
   khoá thì bỏ lượt; build chờ tối đa `POLL_TIMEOUT_SECONDS` + 15 s, vẫn không giữ được (lượt build
-  khác đang chạy) thì bỏ lượt (`skipped`, scheduler xếp lại khi còn cần) — không chạy chồng.
+  khác đang chạy) thì bỏ lượt (`skipped`, scheduler xếp lại khi còn cần) — không chạy chồng. Thời
+  gian chờ trừ vào hạn của lượt build (`COMPANY_DEADLINE_SECONDS` tính từ lúc job bắt đầu, như
+  timeout cứng `COMPANY_TIMEOUT_SECONDS`): chờ lâu thì lượt build `partial` và chạy tiếp, không bị
+  huỷ giữa lúc lưu.
 - Mất khoá giữa chừng (process đứng quá 60 s, Redis mất) → lượt bị huỷ ở lần gia hạn kế tiếp
   (`LeaseLost`).
 - **Fencing token** (`database/fencing.py`, bảng `company_fences`): mỗi lần giữ khoá, token của doanh
@@ -189,14 +198,19 @@ P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của
 
 - Mỗi doanh nghiệp có pha cố định trong [0, 1): build đêm lúc `đầu BUILD_WINDOW + pha × độ dài`
   (10.000 doanh nghiệp / 6 giờ ≈ 0,46 lượt / giây), poll đầu ngày lúc `đầu POLL_WINDOW + pha × T`.
-- Scheduler mỗi giây: tạo lịch cho doanh nghiệp mới (`new` → build ngay); lấy dòng đến hạn bằng
-  `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp, xếp job. Hàng đợi còn quá
+- Scheduler mỗi giây: tạo lịch cho doanh nghiệp mới (`new` → build ngay; lượt build không xong thì
+  thử lại sau 30 phút); lấy dòng đến hạn bằng `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp, xếp job rồi
+  mới commit (Redis lỗi / process chết giữa chừng → rollback, nhịp sau lấy lại đúng các dòng đó; job
+  có khoá theo doanh nghiệp nên không xếp trùng). Phần build lỗi không làm mất lượt poll của nhịp.
+  Hàng đợi còn quá
   `BUILD_QUEUE_MAX_BACKLOG` / `POLL_QUEUE_MAX_BACKLOG` việc chờ thì không xếp thêm. Cùng nhịp, ghi
   các dòng nhật ký thao tác gateway để lại trên Redis vào `audit_events` (mục 10).
 - Chỉ một scheduler làm việc: lease Redis `<prefix>:lock:scheduler` (`locks.RedisLease`, 30 s, gia
   hạn mỗi nhịp; hai scheduler chồng nhau trong chốc lát vô hại vì job có khoá duy nhất). Bảo trì giữ
-  lease bằng `hold()`: mất lease thì lượt bảo trì bị huỷ. Không dùng khoá advisory theo phiên
-  Postgres (hỏng sau PgBouncer chế độ transaction).
+  lease bằng `hold()`: mất lease thì lượt bảo trì bị huỷ. Index một trang tuyển dụng (đủ hay đuôi)
+  giữ `<prefix>:lock:board-index:<trang>` cũng bằng `hold()` (60 s): lượt khác của cùng trang gặp
+  khoá thì bỏ qua, mất lease thì lượt bị huỷ. Không dùng khoá advisory theo phiên Postgres (hỏng sau
+  PgBouncer chế độ transaction).
 - Trạng thái lịch: `new`, `ready`, `no_sources`, `broken`, `paused`.
 - Cron (theo `CRAWL_TIMEZONE`): bảo trì mỗi giờ, số liệu tổng quan 5 phút, index trang tuyển dụng
   đủ 00:30, đuôi mỗi 2 phút (6h–23h).
@@ -207,8 +221,11 @@ P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của
 
 - **Đủ** (đêm): đọc toàn bộ danh sách, tải tin mới / đổi, tin vắng 2 lượt → gỡ; map profile mới.
 - **Đuôi** (ngày, mỗi 2 phút): 1–4 request tới phần mới nhất, tải tin chưa từng thấy.
-- Doanh nghiệp có profile vừa có tin mới → **poll ngay**. Lượt poll không gọi trang tuyển dụng theo
-  từng doanh nghiệp.
+- Doanh nghiệp có profile vừa có tin mới → **poll ngay** (lượt `board`: đọc thêm tin của doanh nghiệp
+  trong index). Lượt poll không gọi trang tuyển dụng theo từng doanh nghiệp. Job poll có một khoá
+  `poll:<id>` cho mọi lý do, nên xếp lượt `board` luôn đặt cờ Redis `<prefix>:poll:board_pending:<id>`
+  (một ngày): lượt poll đang chờ lấy cờ và đọc index như lượt `board`; cờ đặt trong lúc lượt build /
+  poll đang chạy thì lượt đó xếp thêm một lượt `board` khi xong — tin không phải chờ tới build đêm.
 - Map profile ↔ doanh nghiệp (`pipeline/profiles.py`): cùng MST → website trùng domain → tên khớp
   đúng một doanh nghiệp; còn mơ hồ thì LLM chọn kèm lý do.
 
@@ -218,7 +235,7 @@ hình / hình thức.
 
 **Xác minh** (`pipeline/verify.py`): mỗi tin một quyết định có lý do (`EXPIRED`, `EMPTY_JD`,
 `NOT_A_JOB`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_SIGNALS`, `SPAM_REPOST`). Tin đáng ngờ phải
-được LLM xác nhận (cache 7 ngày); LLM lỗi → hoãn (không nhận, không loại, việc cũ giữ nguyên).
+được LLM xác nhận (cache 7 ngày theo prompt + model: đổi `LLM_MODEL` thì hỏi lại); LLM lỗi → hoãn (không nhận, không loại, việc cũ giữ nguyên).
 
 **Gộp** (`pipeline/dedup.py`): cùng tiêu đề, chung tỉnh/thành, JD giống (MinHash ≥ 0,8) hoặc cùng nơi
 nộp → một việc. Bản chuẩn: ATS / careers > trang tuyển dụng đủ JD > mới nhất. Index duy nhất trong DB

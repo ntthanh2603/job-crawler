@@ -87,6 +87,45 @@ def test_enqueue_needs_a_selection(args: list[str], message: str) -> None:
     assert message in result.output
 
 
+def test_build_passes_refresh_and_runs_as_manual(monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections.abc import AsyncIterator
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from jobcrawler.bootstrap import cli
+    from jobcrawler.common.schemas import RunStatus, RunTrigger
+    from jobcrawler.modules.crawl import crawl_service
+
+    calls: list[dict[str, Any]] = []
+
+    @asynccontextmanager
+    async def resources(**kw: Any) -> AsyncIterator[str]:
+        yield "res"
+
+    async def build_company(res: Any, company_id: Any, **kw: Any) -> Any:
+        calls.append(kw)
+        return SimpleNamespace(
+            company_name="ACME",
+            status=RunStatus.OK,
+            duration_ms=1,
+            jobs_accepted=0,
+            jobs_found=0,
+            run_id=None,
+        )
+
+    monkeypatch.setattr(cli, "open_resources", resources)
+    monkeypatch.setattr(crawl_service, "build_company", build_company)
+    company_id = str(uuid4())
+    for args in (["build", company_id], ["build", company_id, "--no-refresh"]):
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+    # Lượt build tay ghi trigger `manual` (không phải `error`); --refresh / --no-refresh đi tới
+    # build_company.
+    manual = {"trigger": RunTrigger.MANUAL, "continue_partial": False}
+    assert calls == [{**manual, "refresh": True}, {**manual, "refresh": False}]
+
+
 def test_reviewed_sample_gives_precision(tmp_path: Path) -> None:
     path = tmp_path / "sample.csv"
     path.write_text(

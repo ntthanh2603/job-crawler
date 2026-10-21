@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -84,6 +86,13 @@ def _result(status: RunStatus) -> CompanyResult:
     )
 
 
+class NoFlags:
+    """Redis giả: không có cờ tin mới trên trang tuyển dụng chờ poll."""
+
+    async def exists(self, _key: str) -> int:
+        return 0
+
+
 class FakeSession:
     async def __aenter__(self) -> FakeSession:
         return self
@@ -129,6 +138,7 @@ async def test_partial_build_enqueues_a_continuation(
         settings=settings,
         queues=SimpleNamespace(build=queue),
         sessionmaker=FakeSession,
+        redis=NoFlags(),
     )
     ctx: Any = {"settings": settings, "resources": res}
     out = await runner.build_company(
@@ -173,6 +183,33 @@ async def test_build_is_skipped_while_another_run_holds_the_company(
     assert out["status"] == "skipped"
     assert "đang có lượt" in out["error"]
     assert called == []
+
+
+async def test_build_deadline_counts_the_time_spent_waiting_for_the_lock(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """Timeout cứng của job tính từ lúc job bắt đầu: chờ lượt poll nhả khoá thì lượt build còn ít
+    thời gian hơn, không bắt đầu lại đủ COMPANY_DEADLINE_SECONDS (bị huỷ giữa lúc lưu)."""
+    waited = 0.3
+    seen: dict[str, Any] = {}
+
+    async def fake_process(res: Any, company_in: Any, **kwargs: Any) -> CompanyResult:
+        seen.update(kwargs, called=time.monotonic())
+        return _result(RunStatus.OK)
+
+    @asynccontextmanager
+    async def slow_lock(*_args: Any, **_kwargs: Any) -> AsyncIterator[bool]:
+        await asyncio.sleep(waited)  # lượt poll đang chạy
+        yield True
+
+    monkeypatch.setattr(company_service, "process_company", fake_process)
+    monkeypatch.setattr(crawl_service, "company_lock", slow_lock)
+    settings = Settings()
+    res = SimpleNamespace(settings=settings, sessionmaker=FakeSession, redis=NoFlags())
+    ctx: Any = {"settings": settings, "resources": res}
+    await runner.build_company(ctx, company_id=str(UUID(int=2)))
+    left = seen["deadline"] - seen["called"]
+    assert left <= settings.company_deadline_seconds - waited + 0.05
 
 
 @pytest.mark.parametrize(

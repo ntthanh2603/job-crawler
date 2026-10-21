@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
 from jobcrawler.bootstrap.serve import Supervisor, child_commands
 
 
@@ -169,3 +171,47 @@ def test_watch_errors_do_not_stop_serve() -> None:
     assert sup.restarts == 0
     assert watch.marked == [7]
     assert len(started) == 1
+
+
+class SeqWatch(FakeWatch):
+    """Bộ đếm đọc lần lượt `values` (hết thì giữ số cuối)."""
+
+    def __init__(self, *values: int) -> None:
+        super().__init__(values[0])
+        self.values = list(values)
+
+    def wanted(self) -> int:
+        self.value = self.values.pop(0) if len(self.values) > 1 else self.values[0]
+        return super().wanted()
+
+
+@pytest.mark.parametrize(
+    ("values", "restarts"),
+    [
+        ((5, 0, 1), 1),  # Redis mới: đếm lại từ 0, theo số mới; lần lưu sau đó vẫn khởi động lại
+        ((5, 2), 1),  # đếm lại và đã lưu trước khi serve kịp thấy: khởi động lại
+        ((5, 0, 0), 0),  # chỉ đếm lại, chưa lưu gì
+        ((5, 5, 6), 1),
+    ],
+)
+def test_restart_counter_reset(values: tuple[int, ...], restarts: int) -> None:
+    started: list[FakeProc] = []
+    watch = SeqWatch(*values)
+    ticks = iter(range(100))
+    sup = Supervisor(
+        {"api": ["api"]},
+        watch=watch,
+        popen=_popen_factory(started),
+        watch_seconds=0,
+        clock=lambda: float(next(ticks)),
+    )
+
+    def tick(_s: float) -> None:
+        if len(watch.marked) >= len(values):
+            sup.request_stop()
+
+    sup._sleep = tick  # pyright: ignore[reportPrivateUsage]
+    assert sup.run() == 0
+    assert watch.marked == list(values)
+    assert sup.restarts == restarts
+    assert len(started) == 1 + restarts

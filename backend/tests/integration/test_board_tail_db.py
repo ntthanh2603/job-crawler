@@ -20,7 +20,7 @@ from jobcrawler.database.models import (
 )
 from jobcrawler.modules.boards import boards_service
 from jobcrawler.pipeline import kyc
-from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
+from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions, index_lock
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult
@@ -47,7 +47,8 @@ def tail_indexer(
 ) -> BoardIndexer:
     return BoardIndexer(
         adapter or FakeBoard(),
-        engine=res.engine,
+        redis=res.redis,
+        redis_prefix=res.settings.redis_prefix,
         sessionmaker=res.sessionmaker,
         fetcher=fetcher,
         llm=LLMClient(FakeChatClient(["{}"]), model=None),
@@ -58,7 +59,8 @@ def tail_indexer(
 def full_indexer(res: Resources, fetcher: FakeFetcher) -> BoardIndexer:
     return BoardIndexer(
         FakeBoard(),
-        engine=res.engine,
+        redis=res.redis,
+        redis_prefix=res.settings.redis_prefix,
         sessionmaker=res.sessionmaker,
         fetcher=fetcher,
         llm=LLMClient(FakeChatClient(["{}"]), model=None),
@@ -166,13 +168,10 @@ async def test_tail_skipped_while_full_index_holds_lock(integration_settings: Se
     async with open_resources(settings_for(integration_settings), db_logs=False) as res:
         await reset(res)
         site = fake_site(JOBS)
-        async with res.engine.connect() as conn:
-            key = func.hashtext("board-index:fakeboard")
-            await conn.execute(select(func.pg_advisory_lock(key)))
-            try:
-                skipped = await tail_indexer(res, site).run()
-            finally:
-                await conn.execute(select(func.pg_advisory_unlock(key)))
+        other = index_lock(res.redis, res.settings.redis_prefix, FakeBoard.name)
+        async with other.hold() as held:
+            assert held
+            skipped = await tail_indexer(res, site).run()
         assert skipped.skipped
         assert skipped.mode == "tail"
         assert skipped.run_id is None

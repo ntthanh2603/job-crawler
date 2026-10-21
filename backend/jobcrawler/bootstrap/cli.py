@@ -264,9 +264,8 @@ def build(
 
     async def go() -> CompanyResult:
         async with open_resources() as res:
-            trigger = RunTrigger.ERROR if refresh else RunTrigger.MANUAL
             return await crawl_service.build_company(
-                res, cid, trigger=trigger, continue_partial=False
+                res, cid, trigger=RunTrigger.MANUAL, refresh=refresh, continue_partial=False
             )
 
     result = _run(go())

@@ -4,9 +4,10 @@
   `đầu BUILD_WINDOW + pha × độ dài khung`, poll đầu ngày ở `đầu POLL_WINDOW + pha × chu kỳ`.
   10.000 doanh nghiệp trong khung đêm 6 giờ ≈ 0,46 lượt build/giây; poll mỗi 150 giây ≈ 67
   lượt/giây — không dồn vào cùng một giây.
-- Scheduler (một replica giữ khoá Postgres) mỗi nhịp lấy các dòng đến hạn bằng
-  `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp và xếp job; khoá job theo doanh nghiệp nên job còn
-  chờ thì không xếp trùng. Hàng đợi còn nhiều việc chờ thì không xếp thêm (backpressure).
+- Scheduler (một replica giữ lease Redis, `locks.RedisLease`) mỗi nhịp lấy các dòng đến hạn bằng
+  `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp và xếp job ngay trong transaction đó (xếp job lỗi thì
+  mốc không bị dời, nhịp sau xếp lại); khoá job theo doanh nghiệp nên job còn chờ thì không xếp
+  trùng. Hàng đợi còn nhiều việc chờ thì không xếp thêm (backpressure).
 - Mốc poll kế tiếp tính từ lúc xếp (không từ lúc xong) nên chu kỳ giữ đều dù lượt poll dài ngắn.
 """
 
@@ -18,7 +19,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, func, insert, literal, select, update
+from sqlalchemy import DateTime, func, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.config import Settings, parse_window
@@ -117,15 +119,17 @@ def first_poll_at(company_id: UUID, now: datetime, settings: Settings) -> dateti
 
 
 async def ensure_schedules(session: AsyncSession, now: datetime) -> int:
-    """Tạo dòng lịch cho doanh nghiệp chưa có (mới nạp): trạng thái `new` → build ngay."""
+    """Tạo dòng lịch cho doanh nghiệp chưa có (mới nạp): trạng thái `new` → build ngay. Dòng vừa
+    được lượt build ghi song song (`save_build_schedule`) thì bỏ qua, không làm hỏng nhịp."""
     missing = select(
         Company.id, literal(ScheduleState.NEW.value), literal(now, DateTime(timezone=True))
     ).where(
         ~select(CompanySchedule.company_id).where(CompanySchedule.company_id == Company.id).exists()
     )
     result = await session.execute(
-        insert(CompanySchedule)
+        pg_insert(CompanySchedule)
         .from_select(["company_id", "state", "next_build_at"], missing)
+        .on_conflict_do_nothing(index_elements=[CompanySchedule.company_id])
         .returning(CompanySchedule.company_id)
     )
     return len(result.all())
@@ -153,9 +157,18 @@ async def due_builds(
     (lượt build xong sẽ đặt mốc đúng)."""
     out: list[tuple[UUID, RunTrigger]] = []
     S = CompanySchedule
-    # Mới nạp: build ngay (cần bộ khung để poll), bất kể khung giờ.
-    for cid in await _claim(session, [S.state == ScheduleState.NEW.value], S.next_build_at, limit):
-        out.append((cid, RunTrigger.NEW))
+    # Mới nạp: build ngay (cần bộ khung để poll), bất kể khung giờ. Lượt build không xong (job
+    # lỗi / bị bỏ, doanh nghiệp vẫn `new`) thì thử lại sau RETRY_BUILD, không xếp lại mỗi nhịp.
+    new = await _claim(
+        session,
+        [
+            S.state == ScheduleState.NEW.value,
+            or_(S.next_build_at.is_(None), S.next_build_at <= now),
+        ],
+        S.next_build_at,
+        limit,
+    )
+    out += [(cid, RunTrigger.NEW) for cid in new]
     # Bộ khung hỏng, lượt build lại trước chưa thành: thử lại khi tới mốc.
     broken = await _claim(
         session,
@@ -223,25 +236,37 @@ async def queue_room(queue: object, max_backlog: int) -> int:
 
 
 async def tick(res: Resources, now: datetime | None = None) -> dict[str, int]:
-    """Một nhịp scheduler: tạo lịch còn thiếu, xếp build đến hạn, xếp poll đến hạn."""
+    """Một nhịp scheduler: tạo lịch còn thiếu, xếp build đến hạn, xếp poll đến hạn.
+
+    Job được xếp trước khi commit mốc đã dời: Redis lỗi / process chết giữa chừng thì transaction
+    rollback, nhịp sau lấy lại đúng các dòng đó (job đã xếp có khoá theo doanh nghiệp nên xếp lại
+    không trùng). Phần build lỗi không làm mất lượt poll của nhịp: poll vẫn được xếp, lỗi ném ra
+    sau cùng."""
     from jobcrawler.modules.crawl import crawl_service
 
     s = res.settings
     now = now or datetime.now(UTC)
-    async with res.sessionmaker.begin() as session:
-        created = await ensure_schedules(session, now)
-        room = await queue_room(res.queues.build, s.build_queue_max_backlog)
-        builds = await due_builds(session, now, s, min(room, s.scheduler_batch))
+    created = builds = built = 0
+    error: Exception | None = None
+    try:
+        async with res.sessionmaker.begin() as session:
+            created = await ensure_schedules(session, now)
+            room = await queue_room(res.queues.build, s.build_queue_max_backlog)
+            due = await due_builds(session, now, s, min(room, s.scheduler_batch))
+            by_trigger: dict[RunTrigger, list[UUID]] = {}
+            for cid, trigger in due:
+                by_trigger.setdefault(trigger, []).append(cid)
+            for trigger, ids in by_trigger.items():
+                built += await crawl_service.enqueue_builds(res, ids, trigger=trigger)
+            builds = len(due)
+    except Exception as exc:
+        error = exc
     async with res.sessionmaker.begin() as session:
         room = await queue_room(res.queues.poll, s.poll_queue_max_backlog)
         polls = await due_polls(session, now, s, min(room, s.scheduler_batch))
-    by_trigger: dict[RunTrigger, list[UUID]] = {}
-    for cid, trigger in builds:
-        by_trigger.setdefault(trigger, []).append(cid)
-    built = 0
-    for trigger, ids in by_trigger.items():
-        built += await crawl_service.enqueue_builds(res, ids, trigger=trigger)
-    polled = await crawl_service.enqueue_polls(res, polls, trigger=RunTrigger.SCHEDULE)
+        polled = await crawl_service.enqueue_polls(res, polls, trigger=RunTrigger.SCHEDULE)
+    if error is not None:
+        raise error
     if created or builds or polls:
         log.debug("schedule.tick", created=created, builds=built, polls=polled)
     return {"created": created, "builds": built, "polls": polled}

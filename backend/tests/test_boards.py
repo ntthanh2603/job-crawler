@@ -18,6 +18,7 @@ from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.base import SourceError, SourceLimits, SourceSession
 from jobcrawler.sources.boards.base import (
     BoardEntry,
+    BoardJob,
     ListingState,
     parse_sitemap,
     sitemap_body,
@@ -270,6 +271,40 @@ async def test_profile_source_falls_back_to_index_and_skips_foreign_jobs() -> No
     )
     assert len(jobs) == 2
     assert s.truncated == ["detail_pages"]
+
+
+class FlakyBoard(PagedBoard):
+    def parse_job(self, html: str, url: str) -> BoardJob | None:
+        if url.endswith("tin-2.html"):
+            raise ValueError("bố cục lạ")
+        return super().parse_job(html, url)
+
+
+async def test_profile_source_survives_a_page_that_fails_to_parse() -> None:
+    """Một trang chi tiết bóc lỗi chỉ mất tin đó (lưu vào trang lỗi), không hỏng cả nguồn."""
+    s = session(profile_site([1, 2, 3]))
+    source = BoardProfileSource(
+        FlakyBoard(),
+        external_id="7",
+        url=PROFILE,
+        fresh=False,
+        index=MemoryIndex([]),
+        name=ACME_NAME,
+    )
+    assert [j.external_id for j in await collect_profile(source, s)] == ["1", "3"]
+    [failed] = [r for r in s.records if r.failure]
+    assert failed.url == f"{HOME}viec-lam/tin-2.html"
+    assert (failed.failure or "").startswith("parse_error: ValueError")
+
+
+def test_bad_dates_in_sitemap_and_job_page_are_ignored() -> None:
+    """Ngày không có thật ("0000-00-00", "2026-02-30") là không có ngày, không làm hỏng trang."""
+    _, items = parse_sitemap(urlset(("viec-lam/tin-1.html", "0000-00-00")))
+    assert items == [(f"{HOME}viec-lam/tin-1.html", None)]
+    html = job_page("Kế toán", ACME_NAME, "cong-ty/acme-7", valid_through="2026-02-30")
+    parsed = FakeBoard().parse_job(html, f"{HOME}viec-lam/ke-toan-1.html")
+    assert parsed is not None
+    assert (parsed.job.expires_at, parsed.job.expires_raw) == (None, "2026-02-30")
 
 
 def test_parse_job_with_profile() -> None:

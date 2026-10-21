@@ -197,6 +197,27 @@ def test_empty_api_dates_are_ignored() -> None:
     assert job.expires_at is None
 
 
+def test_lookalike_keys_are_not_job_fields() -> None:
+    """`soLuong` (số lượng tuyển) không phải lương, `emailAddress` không phải nơi làm,
+    `detailUrl` không phải mô tả."""
+    item = {
+        "tieuDe": "Nhân viên kho",
+        "soLuong": "2 người",
+        "mucLuong": "8 - 10 triệu",
+        "emailAddress": "hr@a.vn",
+        "address": "Bình Dương",
+        "detailUrl": "/tuyen-dung/nhan-vien-kho-" + "1" * 300,
+        "moTa": "<p>" + "Sắp xếp, kiểm đếm hàng hoá trong kho. " * 5 + "</p>",
+    }
+    job = to_job(
+        item, doc=JsonDoc(url="https://a.vn/api/jobs", data={}), page_url="https://a.vn/", links={}
+    )
+    assert isinstance(job, RawJob)
+    assert job.salary_raw == "8 - 10 triệu"
+    assert job.locations == ["Bình Dương"]
+    assert (job.description or "").startswith("<p>Sắp xếp")
+
+
 def test_jobs_sharing_the_listing_url_have_no_common_apply_key() -> None:
     raw = RawJob(
         source="careers",

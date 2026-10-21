@@ -216,6 +216,9 @@ def test_fingerprint_distinguishes_places_and_matches_stored_row() -> None:
         ("Chuyên viên tuyển dụng", "Trợ lý Chuyên viên tuyển dụng"),
         ("Business Analyst I", "Business Analyst II"),
         ("Sales Manager", "Sales"),
+        ("Phó phòng kinh doanh", "Nhân viên kinh doanh"),
+        ("Phó phòng kinh doanh", "Trưởng phòng kinh doanh"),
+        ("Bếp", "Phó bếp"),
     ],
 )
 def test_titles_differing_by_rank_are_different_jobs(a: str, b: str) -> None:
@@ -229,6 +232,11 @@ def test_titles_differing_by_rank_are_different_jobs(a: str, b: str) -> None:
         ("Nhân viên kinh doanh", "Kinh doanh"),
         ("Kế Toán Tổng Hợp - Hà Nội (Tuyển Gấp)", "Kế toán tổng hợp"),
         ("Senior Java Developer", "Java Developer (Senior)"),
+        # "trường", "phố", "phổ" bỏ dấu trùng "trưởng", "phó".
+        ("Kế toán - Thành phố Thủ Đức", "Kế toán"),
+        ("Giáo viên Tiếng Anh - Trường Quốc tế ABC", "Giáo viên Tiếng Anh"),
+        ("Nhân viên kinh doanh thị trường", "Nhân viên kinh doanh"),
+        ("Lao động phổ thông", "Lao động"),
     ],
 )
 def test_titles_without_rank_difference_still_match(a: str, b: str) -> None:

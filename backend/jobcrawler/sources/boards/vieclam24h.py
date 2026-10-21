@@ -20,9 +20,8 @@ import re
 from typing import Any
 
 from jobcrawler.common.pages import parse
-from jobcrawler.common.urls import normalize_url
 from jobcrawler.pipeline.company_facts import valid_tax_code
-from jobcrawler.sources.boards.base import BoardJob, ListingBoard, ProfileRef
+from jobcrawler.sources.boards.base import BoardJob, ListingBoard, ProfileRef, website_url
 
 
 def next_data(html: str) -> dict[str, Any]:
@@ -67,7 +66,7 @@ class Vieclam24h(ListingBoard):
         if parsed is None or parsed.profile is None:
             return parsed
         employer = _employer(next_data(html))
-        website = normalize_url(employer.get("website") or "") if employer.get("website") else None
+        website = website_url(employer.get("website"))
         tax_code = valid_tax_code(str(employer.get("tax_code") or "")) or None
         profile = parsed.profile.model_copy(
             update={
@@ -89,8 +88,8 @@ class Vieclam24h(ListingBoard):
         updates: dict[str, Any] = {}
         if employer.get("name"):
             updates["name"] = employer["name"]
-        if employer.get("website"):
-            updates["website"] = normalize_url(employer["website"])
+        if website := website_url(employer.get("website")):
+            updates["website"] = website
         if tax := valid_tax_code(str(employer.get("tax_code") or "")):
             updates["tax_code"] = tax
         if employer.get("address"):

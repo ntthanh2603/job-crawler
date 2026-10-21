@@ -110,7 +110,8 @@ async def index_board(res: Resources, adapter: BoardAdapter, options: IndexOptio
     """Một lượt index (đủ hay đuôi theo `options.tail`) một trang, qua tầng mạng crawl."""
     indexer = BoardIndexer(
         adapter,
-        engine=res.engine,
+        redis=res.redis,  # khoá index một trang: Redis chính
+        redis_prefix=res.settings.redis_prefix,
         sessionmaker=res.sessionmaker,
         fetcher=res.http,
         llm=res.llm,
@@ -362,7 +363,7 @@ async def _adopt_profile(
             match_evidence={**decision.evidence, "via": "serp"},
             matched_at=datetime.now(UTC),
         )
-        await db.execute(
+        adopted = await db.scalar(
             stmt.on_conflict_do_update(
                 index_elements=[SourceProfile.source, SourceProfile.external_id],
                 set_={
@@ -373,8 +374,12 @@ async def _adopt_profile(
                     "website": func.coalesce(stmt.excluded.website, SourceProfile.website),
                 },
                 where=SourceProfile.company_id.is_(None),
-            )
+            ).returning(SourceProfile.id)
         )
+    if adopted is None:
+        # Profile đã map vào doanh nghiệp khác: không ghi đè, không tính là tìm được.
+        log.info("boards.serp_profile_taken", source=adapter.name, url=url, company_id=company.id)
+        return False
     log.info("boards.serp_profile", source=adapter.name, url=url, company_id=company.id)
     return True
 

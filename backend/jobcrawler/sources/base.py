@@ -18,7 +18,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from jobcrawler.common.logging import get_logger
@@ -26,7 +26,7 @@ from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.common.text import strip_accents
 from jobcrawler.common.urls import normalize_url
 from jobcrawler.services.llm import LLMClient
-from jobcrawler.services.net.http import Fetcher, FetchResult
+from jobcrawler.services.net.http import ROBOTS_UNREACHABLE, Fetcher, FetchResult
 from jobcrawler.sources.plan import PlanSpec
 
 if TYPE_CHECKING:
@@ -295,10 +295,12 @@ class Source(ABC):
 
 
 def transient_failure(result: FetchResult) -> bool:
-    """Lỗi có thể hết ở lượt sau (timeout, 5xx, 429, mất kết nối) — khác 404/410 (tin đã gỡ) và
-    robots cấm."""
-    if result.ok or result.outcome is FetchOutcome.ROBOTS_DISALLOWED:
+    """Lỗi có thể hết ở lượt sau (timeout, 5xx, 429, mất kết nối, robots.txt không tải được) —
+    khác 404/410 (tin đã gỡ) và robots cấm."""
+    if result.ok:
         return False
+    if result.outcome is FetchOutcome.ROBOTS_DISALLOWED:
+        return result.error == ROBOTS_UNREACHABLE
     return result.status is None or result.status >= 500 or result.status == 429
 
 
@@ -338,8 +340,9 @@ async def gather_all[T](coros: Iterable[Awaitable[T]]) -> list[T]:
 
 def parse_datetime(value: Any, *, end_of_day: bool = False) -> datetime | None:
     """Ngày giờ dạng rõ ràng → UTC: ISO 8601, "2026-10-15 09:31:36 UTC", RFC 822, epoch (giây
-    hoặc ms). Chỉ có ngày → đầu ngày (hoặc cuối ngày nếu `end_of_day`) theo giờ Việt Nam.
-    Dạng tương đối hay mơ hồ → None."""
+    hoặc ms). Không ghi múi giờ (kể cả chỉ có ngày) → giờ Việt Nam. `end_of_day` (hạn nộp): ngày
+    ghi đúng nửa đêm ("2026-11-01", "2026-11-01T00:00:00+0700" của JobsGO) là hết ngày đó.
+    Dạng tương đối, mơ hồ hay ngày không có thật ("2026-02-30", "0000-00-00") → None."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int | float):
@@ -350,21 +353,20 @@ def parse_datetime(value: Any, *, end_of_day: bool = False) -> datetime | None:
             return None
     if not isinstance(value, str) or not (text := value.strip()):
         return None
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        day = date.fromisoformat(text)
-        moment = time(23, 59, 59) if end_of_day else time(0, 0)
-        return datetime.combine(day, moment, VN_TZ).astimezone(UTC)
     iso = re.sub(r"\s*(UTC|GMT)$", "+00:00", text).replace("Z", "+00:00")
     try:
-        parsed = datetime.fromisoformat(iso)
-    except ValueError:
         try:
+            parsed = datetime.fromisoformat(iso)
+        except ValueError:
             parsed = email.utils.parsedate_to_datetime(text)
-        except (TypeError, ValueError, IndexError):
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=VN_TZ)
-    return parsed.astimezone(UTC)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=VN_TZ)
+        if end_of_day and parsed.time() == time(0, 0):
+            parsed = parsed.replace(hour=23, minute=59, second=59)
+        return parsed.astimezone(UTC)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        # Ngày sai ("2026-13-01") hoặc ngoài khoảng của `datetime` ("0001-01-01" đổi sang UTC).
+        return None
 
 
 def mentions_vietnam(text: str | None) -> bool:

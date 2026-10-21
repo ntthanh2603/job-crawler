@@ -4,6 +4,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from jobcrawler.common.schemas import ExtractionMethod
 from jobcrawler.sources import jsonld
 from jobcrawler.sources.base import parse_datetime
@@ -108,6 +110,25 @@ def test_graph_item_list_and_escaped_html() -> None:
     assert first.extra["identifier"] == "KT-01"
 
 
+def test_postings_sharing_the_page_url_keep_their_ids_when_one_is_removed() -> None:
+    """Trang danh sách có nhiều JobPosting không có `url`: mã theo `identifier` (khi riêng từng
+    tin) hoặc tên vị trí, không theo thứ tự trên trang."""
+    page = "https://acme.vn/tuyen-dung"
+    nodes = [
+        {"@type": "JobPosting", "title": "Kế toán", "identifier": "KT-01"},
+        {"@type": "JobPosting", "title": "Thủ kho"},
+        {"@type": "JobPosting", "title": "Bảo vệ"},
+        {"@type": "JobPosting", "title": "Bảo vệ"},
+    ]
+    before = {(j.title, j.external_id) for j in jsonld.raw_jobs(_page(*nodes), page)}
+    assert len({i for _, i in before}) == 4
+    after = {(j.title, j.external_id) for j in jsonld.raw_jobs(_page(*nodes[1:]), page)}
+    assert after < before  # bỏ tin đầu: các tin còn lại giữ mã
+    # `identifier` chung mọi tin (mã công ty): phân biệt bằng tên vị trí.
+    shared = [{**n, "identifier": "ACME"} for n in nodes[:2]]
+    assert len({j.external_id for j in jsonld.raw_jobs(_page(*shared), page)}) == 2
+
+
 def test_broken_json_ld_is_ignored() -> None:
     html = '<script type="application/ld+json">{"@type": "JobPosting", "title": </script>'
     assert jsonld.raw_jobs(html, "https://a.vn/") == []
@@ -135,6 +156,37 @@ def test_parse_datetime_formats() -> None:
     assert parse_datetime(1786469891368) == datetime.fromtimestamp(1786469891.368, UTC)
     for vague in ("Posted 30+ Days Ago", "2 ngày trước", "", None, True):
         assert parse_datetime(vague) is None
+
+
+@pytest.mark.parametrize("value", ["0000-00-00", "2026-02-30", "2026-13-01", "2026-02-30T10:00Z"])
+def test_parse_datetime_impossible_dates_are_none(value: str) -> None:
+    assert parse_datetime(value) is None
+    assert parse_datetime(value, end_of_day=True) is None
+
+
+def test_parse_datetime_out_of_range_is_none() -> None:
+    # Nửa đêm 1/1/0001 giờ Việt Nam đổi sang UTC là trước năm 1: ngoài khoảng của `datetime`.
+    assert parse_datetime("0001-01-01") is None
+    assert parse_datetime("9999-12-31T23:00:00-05:00") is None
+
+
+def test_bad_valid_through_does_not_drop_the_page() -> None:
+    node = {"@type": "JobPosting", "title": "Kế toán", "validThrough": "0000-00-00"}
+    [job] = jsonld.raw_jobs(_page(node), "https://a.vn/tuyen-dung/ke-toan-1")
+    assert (job.expires_at, job.expires_raw) == (None, "0000-00-00")
+
+
+def test_deadline_at_local_midnight_is_end_of_that_day() -> None:
+    """JobsGO "Hạn nộp: 01/11/2026" ghi `validThrough` "2026-11-01T00:00:00+0700": còn nhận hồ sơ
+    hết ngày 1/11. Ngày đăng thì giữ nguyên nửa đêm."""
+    end = datetime(2026, 11, 1, 16, 59, 59, tzinfo=UTC)
+    assert parse_datetime("2026-11-01T00:00:00+0700", end_of_day=True) == end
+    assert parse_datetime("2026-11-01T00:00:00", end_of_day=True) == end
+    assert parse_datetime("2026-11-01T00:00:00+0700") == datetime(2026, 10, 31, 17, 0, tzinfo=UTC)
+    # Có giờ cụ thể: giữ nguyên.
+    assert parse_datetime("2026-11-01T17:30:00+07:00", end_of_day=True) == datetime(
+        2026, 11, 1, 10, 30, tzinfo=UTC
+    )
 
 
 def test_salary_text_values() -> None:

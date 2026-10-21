@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -85,12 +86,26 @@ _RANK_TOKENS = frozenset(
     }
 )  # fmt: skip
 _RANK_PHRASES = ("thuc tap", "tro ly", "giam doc")
+# Bỏ dấu, "trường" (trường học, thị trường, hiện trường...), "phố" / "phổ" (thành phố, phổ thông)
+# cũng là truong / pho: không phải cấp bậc. "Phó" là cấp bậc khi đứng trước chức vụ ("phó phòng").
+_NOT_RANK = re.compile(
+    r"\b(?:thi|moi|hien|quang|chien|nha|tang) truong\b"
+    r"|\btruong(?= (?:hoc|hop|thanh|quoc te|dai hoc|cao dang|trung cap|trung hoc|tieu hoc|"
+    r"mam non|mau giao|thcs|thpt|pho thong|lien cap|song ngu|nghe)\b)"
+    r"|\b(?:thanh|khu|duong) pho\b"
+    r"|\bpho\b(?! (?:phong|giam|tong|ban|truong|quan|chu|chanh|hieu|khoa|bep|nhom|ca|bo|chi|doi|"
+    r"xuong|vien)\b)"
+)
+
+
+def _ranks(folded: str) -> set[str]:
+    return set(_NOT_RANK.sub(" ", folded).split()) & _RANK_TOKENS
 
 
 def rank_conflict(a: str, b: str) -> bool:
     """Hai tiêu đề khác nhau ở từ chỉ cấp bậc."""
     fa, fb = fold(a), fold(b)
-    if (set(fa.split()) ^ set(fb.split())) & _RANK_TOKENS:
+    if _ranks(fa) ^ _ranks(fb):
         return True
     return any((f" {p} " in f" {fa} ") != (f" {p} " in f" {fb} ") for p in _RANK_PHRASES)
 

@@ -18,9 +18,11 @@ mới tin cũ, không tải lại tin đổi `lastmod`, không tải lại tin �
 profile vừa gặp chưa map. Không bao giờ đánh dấu tin vắng mặt / đã gỡ, không đặt `indexed_at`
 (phần đuôi không chứng minh profile đủ tin). Ghi `board_index_runs` với `stats.mode = "tail"`.
 
-Một trang chỉ được index bởi một process tại một thời điểm (pg advisory lock). Lượt (đủ hay đuôi)
-gặp khoá đang bị giữ thì bỏ qua ngay, không chờ: `IndexStats.skipped`, không ghi dòng
-`board_index_runs`.
+Một trang chỉ được index bởi một process tại một thời điểm: lease Redis
+`<prefix>:lock:board-index:<trang>` (`locks.RedisLease`, tự gia hạn; không dùng khoá advisory theo
+phiên Postgres — hỏng sau PgBouncer chế độ transaction). Lượt (đủ hay đuôi) gặp khoá đang bị giữ
+thì bỏ qua ngay, không chờ: `IndexStats.skipped`, không ghi dòng `board_index_runs`. Mất khoá giữa
+chừng thì lượt bị huỷ (`IndexStats.error`).
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from uuid import UUID
 
 from sqlalchemy import case, func, insert, literal_column, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import JobStatus, RunStatus
@@ -52,6 +54,7 @@ from jobcrawler.database.models import (
 from jobcrawler.pipeline.profiles import map_profiles
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import Fetcher, FetchResult
+from jobcrawler.services.redis.locks import LeaseLost, RedisLease
 from jobcrawler.sources.base import (
     FetchRecord,
     SourceError,
@@ -74,6 +77,13 @@ REMOVE_AFTER_MISSED_RUNS = 2
 MAX_DROP = 0.5
 MIN_ACTIVE_FOR_DROP_CHECK = 50
 _CHUNK = 5_000  # số id mỗi câu UPDATE
+# Hạn khoá index một trang (gia hạn mỗi LOCK_SECONDS / 3 trong lúc chạy).
+LOCK_SECONDS = 60.0
+
+
+def index_lock(redis: Any, prefix: str, source: str) -> RedisLease:
+    """Khoá index một trang tuyển dụng (Redis chính)."""
+    return RedisLease(redis, f"{prefix}:lock:board-index:{source}", ttl=LOCK_SECONDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +204,8 @@ class BoardIndexer:
         self,
         adapter: BoardAdapter,
         *,
-        engine: AsyncEngine,
+        redis: Any,
+        redis_prefix: str,
         sessionmaker: async_sessionmaker[AsyncSession],
         fetcher: Fetcher,
         llm: LLMClient,
@@ -203,7 +214,7 @@ class BoardIndexer:
         clock: Any = time.monotonic,
     ) -> None:
         self.adapter = adapter
-        self.engine = engine
+        self.lock = index_lock(redis, redis_prefix, adapter.name)
         self.sessionmaker = sessionmaker
         self.options = options or IndexOptions()
         self.records: list[FetchRecord] = []
@@ -533,34 +544,39 @@ class BoardIndexer:
         st = self.stats
         started = self.clock()
         started_at = datetime.now(UTC)
-        lock_key = f"board-index:{self.adapter.name}"
-        async with self.engine.connect() as lock_conn:
-            got = await lock_conn.scalar(select(func.pg_try_advisory_lock(func.hashtext(lock_key))))
-            if not got:
-                # Không chờ: lượt đuôi trùng lượt đủ ban đêm (hay lượt khác) là chuyện thường.
-                st.skipped = "đang được index ở process khác"
-                st.status = RunStatus.FAILED
-                (log.info if self.options.tail else log.warning)(
-                    "board.index_skipped",
-                    source=self.adapter.source,
-                    mode=st.mode,
-                    reason=st.skipped,
-                )
-                return st
-            try:
-                await self._start_run(started_at)
-                if self.options.tail:
-                    await self._run_tail(started)
-                else:
-                    await self._run(started, started_at)
-            except Exception as exc:
-                st.status, st.error = RunStatus.FAILED, f"{type(exc).__name__}: {exc}"
-                log.exception("board.index_error", source=self.adapter.source)
-            finally:
-                st.duration_ms = int((self.clock() - started) * 1000)
-                if st.run_id is not None:
-                    await asyncio.shield(self._finish_run())
-                await lock_conn.execute(select(func.pg_advisory_unlock(func.hashtext(lock_key))))
+        try:
+            async with self.lock.hold() as held:
+                if not held:
+                    # Không chờ: lượt đuôi trùng lượt đủ ban đêm (hay lượt khác) là chuyện thường.
+                    st.skipped = "đang được index ở process khác"
+                    st.status = RunStatus.FAILED
+                    (log.info if self.options.tail else log.warning)(
+                        "board.index_skipped",
+                        source=self.adapter.source,
+                        mode=st.mode,
+                        reason=st.skipped,
+                    )
+                    return st
+                try:
+                    await self._start_run(started_at)
+                    if self.options.tail:
+                        await self._run_tail(started)
+                    else:
+                        await self._run(started, started_at)
+                except Exception as exc:
+                    st.status, st.error = RunStatus.FAILED, f"{type(exc).__name__}: {exc}"
+                    log.exception("board.index_error", source=self.adapter.source)
+                except asyncio.CancelledError:
+                    # Mất khoá (hoặc bị huỷ từ ngoài): dòng `board_index_runs` ghi FAILED.
+                    st.status, st.error = RunStatus.FAILED, st.error or "bị huỷ giữa chừng"
+                    raise
+                finally:
+                    st.duration_ms = int((self.clock() - started) * 1000)
+                    if st.run_id is not None:
+                        await asyncio.shield(self._finish_run())
+        except LeaseLost as exc:
+            st.status, st.error = RunStatus.FAILED, str(exc)
+            log.warning("board.index_lock_lost", source=self.adapter.source, mode=st.mode)
         log.info(
             "board.index_done",
             source=self.adapter.source,

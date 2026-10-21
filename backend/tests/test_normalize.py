@@ -61,10 +61,48 @@ def test_hanoi_spellings_give_same_value(text: str) -> None:
         ("125 Nguyễn Văn Linh, phường Vĩnh Phúc, Hà Nội", "Hà Nội"),
         ("Remote, France", None),
         ("Toàn quốc", None),
+        ("Thành phố Đà Nẵng", "Đà Nẵng"),
+        ("Tầng 5, Hà Nội", "Hà Nội"),
+        # Tên đường trùng tên tỉnh/thành không phải tỉnh/thành của địa chỉ.
+        ("Tầng 5, 72 Nguyễn Huệ, Quận 1", None),
+        ("Tầng 5, 72 Nguyễn Huệ, Quận 1, TP.HCM", "Hồ Chí Minh"),
+        ("235 Điện Biên Phủ, Phường 15, Bình Thạnh", None),
+        ("Xa lộ Hà Nội, Thủ Đức", None),
+        ("Số 10 Phố Huế, Hai Bà Trưng, Hà Nội", "Hà Nội"),
     ],
 )
 def test_province_of(address: str, province: str | None) -> None:
     assert provinces.province_of(address) == province
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        # Địa điểm chỉ là danh sách tỉnh/thành: mỗi tỉnh/thành một địa điểm (không chỉ tỉnh cuối).
+        ("Hà Nội, Hồ Chí Minh", [("Hà Nội", "Hà Nội"), ("Hồ Chí Minh", "Hồ Chí Minh")]),
+        (
+            "HN, HCM, Đà Nẵng",
+            [("Hà Nội", "Hà Nội"), ("Hồ Chí Minh", "Hồ Chí Minh"), ("Đà Nẵng", "Đà Nẵng")],
+        ),
+        ("Hà Nội / TP.HCM", [("Hà Nội", "Hà Nội"), ("Hồ Chí Minh", "Hồ Chí Minh")]),
+        # Địa chỉ thật, hoặc nhiều cách viết của một tỉnh: giữ nguyên.
+        ("Phường Vĩnh Phúc, Hà Nội", [("Hà Nội", "Phường Vĩnh Phúc, Hà Nội")]),
+        ("Thủ Dầu Một, Bình Dương", [("Hồ Chí Minh", "Thủ Dầu Một, Bình Dương")]),
+    ],
+)
+def test_normalize_locations_splits_province_lists(
+    address: str, expected: list[tuple[str, str]]
+) -> None:
+    locations = normalize.normalize_locations([address], "Kế toán")
+    assert [(loc.province, loc.address_raw) for loc in locations] == expected
+
+
+def test_normalize_jobs_keeps_one_copy_per_posting() -> None:
+    short = raw_job(description="<p>Làm kế toán</p>")
+    full = raw_job()  # cùng (nguồn, mã tin), JD đầy đủ hơn
+    other = raw_job(external_id="acme-2", url="https://careers.acme.vn/jobs/2")
+    jobs = normalize.normalize_jobs([short, other, full], now=NOW, is_board=lambda _: False)
+    assert [(j.external_id, j.raw is full) for j in jobs] == [("acme-1", True), ("acme-2", False)]
 
 
 def test_find_provinces_in_title() -> None:
@@ -88,7 +126,9 @@ def test_find_provinces_in_title() -> None:
         ("Upto 3000$", (None, 3000, "USD", SalaryPeriod.MONTH, False)),
         ("12,500,000 VND", (12.5e6, 12.5e6, "VND", SalaryPeriod.MONTH, False)),
         ("15.000.000đ - 20.000.000đ", (15e6, 20e6, "VND", SalaryPeriod.MONTH, False)),
-        ("1,5 - 2 triệu/tuần", (1.5e6, 2e6, "VND", SalaryPeriod.MONTH, False)),
+        # Theo tuần / ngày: `SalaryPeriod` không có kỳ này, không gọi là lương tháng.
+        ("1,5 - 2 triệu/tuần", (1.5e6, 2e6, "VND", None, False)),
+        ("500k/ngày", (500_000, 500_000, "VND", None, False)),
         ("200 - 300 triệu/năm", (200e6, 300e6, "VND", SalaryPeriod.YEAR, False)),
         ("50.000đ/giờ", (50_000, 50_000, "VND", SalaryPeriod.HOUR, False)),
         ("$120k - $150k", (120_000, 150_000, "USD", SalaryPeriod.YEAR, False)),
@@ -99,6 +139,17 @@ def test_find_provinces_in_title() -> None:
         ("Cạnh tranh", (None, None, None, None, True)),
         ("Negotiable", (None, None, None, None, True)),
         ("Thương lượng", (None, None, None, None, True)),
+        # "tối thiểu" là mức sàn (bỏ dấu "toi" cũng là "tới").
+        ("Tối thiểu 10 triệu", (10e6, None, "VND", SalaryPeriod.MONTH, False)),
+        ("Thu nhập tối thiểu 8 triệu/tháng", (8e6, None, "VND", SalaryPeriod.MONTH, False)),
+        ("15 triệu trở lên", (15e6, None, "VND", SalaryPeriod.MONTH, False)),
+        ("15tr+", (15e6, None, "VND", SalaryPeriod.MONTH, False)),
+        # Số lớn với k / M, không ghi tiền tệ: VND.
+        ("Upto 30M", (None, 30e6, "VND", SalaryPeriod.MONTH, False)),
+        ("300k/giờ", (300_000, 300_000, "VND", SalaryPeriod.HOUR, False)),
+        # Năm không phải số tiền.
+        ("Lương 2025: 15 triệu", (15e6, 15e6, "VND", SalaryPeriod.MONTH, False)),
+        ("2000 USD gross", (2000, 2000, "USD", SalaryPeriod.MONTH, False)),
     ],
 )
 def test_parse_salary_text(raw: str, expected: tuple[object, ...]) -> None:
@@ -122,6 +173,9 @@ def test_parse_salary_prefers_structured_fields() -> None:
     yearly = parse_salary("$257K - $335K", low=257000, high=335000, currency="USD", period="1 YEAR")
     assert yearly is not None
     assert yearly.period is SalaryPeriod.YEAR
+    daily = parse_salary(None, low=500_000, currency="VND", period="DAY")
+    assert daily is not None
+    assert (daily.min, daily.period) == (500_000, None)
 
 
 def test_parse_salary_without_amount_drops_default_currency() -> None:
@@ -141,6 +195,7 @@ def test_parse_salary_without_amount_drops_default_currency() -> None:
         ("Thu nhập: Up to 1.000 USD...", (None, 1000, False)),
         ("Salary range: $1,500 - $2,500", (1500, 2500, False)),
         ("**Mức lương:** Thỏa thuận", (None, None, True)),
+        ("Mức lương: Tối thiểu 10 triệu/tháng", (10e6, None, False)),
         # Không phải mức lương.
         ("- Lương tháng 13, thưởng lễ Tết", None),
         ("- Lương thưởng hấp dẫn", None),
@@ -562,6 +617,14 @@ def test_mask_contacts(text: str, expected: str | None) -> None:
             "giao vien chu nhiem lop ocean edu bac giang 2",
         ),
         ("Data Engineer (Big Data / Lakehouse)", "data engineer big data lakehouse"),
+        # "2D", "3D", "4K" là chữ, không phải lương; "15K", "$2K" vẫn là lương.
+        ("Animator 2D - Game", "animator 2d game"),
+        ("Artist 3D - Game", "artist 3d game"),
+        ("Designer 3D - Senior", "designer 3d senior"),
+        ("Video Editor 4K", "video editor 4k"),
+        ("Kế toán (15K)", "ke toan"),
+        ("Dev ($2K)", "dev"),
+        ("Nhân viên kinh doanh - 15tr+", "nhan vien kinh doanh"),
     ],
 )
 def test_normalize_title(title: str, key: str) -> None:

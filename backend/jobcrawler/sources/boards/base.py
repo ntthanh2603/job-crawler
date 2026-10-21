@@ -35,6 +35,7 @@ from selectolax.lexbor import LexborHTMLParser
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.pages import (
     Link,
+    base_url,
     clean_text,
     extract_links,
     meta_content,
@@ -180,6 +181,16 @@ def _as_list(value: Any) -> list[Any]:
 def is_social_host(host: str) -> bool:
     """Facebook, LinkedIn, YouTube...: không phải website doanh nghiệp."""
     return bool(_SOCIAL.search(host))
+
+
+def website_url(value: Any) -> str | None:
+    """Website nhà tuyển dụng tự nhập trên trang tuyển dụng, hay thiếu scheme ("www.abc.com.vn").
+    None: không phải địa chỉ web ("Đang cập nhật")."""
+    text = text_or_none(value) if isinstance(value, str) else None
+    if not text:
+        return None
+    url = normalize_url(text if "://" in text else f"https://{text}")
+    return url if url and "." in host_of(url) else None
 
 
 def sitemap_body(content: bytes) -> str | None:
@@ -450,8 +461,11 @@ class BoardAdapter(ABC):
         links: list[Link],
         org_name: str | None,
         org_id: str | None = None,
+        *,
+        page_url: str | None = None,
     ) -> str | None:
-        """URL profile nhà tuyển dụng trên trang chi tiết tin.
+        """URL profile nhà tuyển dụng trên trang chi tiết tin (`page_url`: URL trang, để hiểu link
+        tương đối).
 
         Trang tin thường có nhiều link tới profile khác (menu "nhà tuyển dụng hàng đầu", tin
         tương tự), nên: selector riêng của adapter → link có chữ khớp tên nhà tuyển dụng →
@@ -461,7 +475,7 @@ class BoardAdapter(ABC):
             node = tree.css_first(self.profile_selector)
             href = node.attributes.get("href") if node is not None else None
             if href:
-                url = normalize_url(href, links[0].url if links else self.home)
+                url = normalize_url(href, base_url(tree, page_url) if page_url else self.home)
                 if url and self.profile_id(url):
                     return self.canonical(url)
         candidates = [(self.canonical(link.url), link.text) for link in links]
@@ -631,6 +645,8 @@ class SitemapBoard(BoardAdapter):
         links: list[Link],
         orgs: list[dict[str, Any]],
         org_id: str | None = None,
+        *,
+        page_url: str | None = None,
     ) -> ProfileRef | None:
         """Profile từ link trên trang + `hiringOrganization` (tên, website, logo)."""
         org = orgs[0] if orgs else {}
@@ -640,7 +656,7 @@ class SitemapBoard(BoardAdapter):
         url = next(
             (u for u in self._org_urls(org) if same_site(u, self.home) and self.profile_id(u)),
             None,
-        ) or self.find_profile_link(tree, links, org_name, org_id)
+        ) or self.find_profile_link(tree, links, org_name, org_id, page_url=page_url)
         if url is None:
             return None
         label = next((link.text for link in links if self.canonical(link.url) == url), "")
@@ -689,7 +705,7 @@ class SitemapBoard(BoardAdapter):
         job = jobs[0].model_copy(update=updates)
         links = extract_links(tree, url)
         org_id = None if self.identifier_is_job or identifier is None else str(identifier)
-        profile = self.profile_from_page(tree, links, org_nodes(html, url), org_id)
+        profile = self.profile_from_page(tree, links, org_nodes(html, url), org_id, page_url=url)
         if profile is not None and not job.company_name:
             job = job.model_copy(update={"company_name": profile.name})
         return BoardJob(job=job, profile=profile)

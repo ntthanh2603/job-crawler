@@ -18,6 +18,7 @@ import dataclasses
 import json
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +38,6 @@ VIEW_KEY = "{ns}:overview:view:{hours}:{storage}"
 VIEW_TTL = 60
 DAYS = 30
 TOP = 12
-LOCAL_TZ = "Asia/Ho_Chi_Minh"
 
 ACTIVE = Job.status == JobStatus.ACTIVE.value
 SOURCE_KIND = func.split_part(Job.canonical_source, ":", 1)
@@ -61,8 +61,11 @@ async def _pairs(session: AsyncSession, stmt: Any) -> list[tuple[Any, int]]:
     return [(row[0], int(row[1])) for row in rows]
 
 
-async def compute_charts(session: AsyncSession, *, now: datetime | None = None) -> dict[str, Any]:
-    """Phân bố trên job đang mở và doanh nghiệp. Mỗi truy vấn đọc theo index trạng thái / BRIN."""
+async def compute_charts(
+    session: AsyncSession, *, tz: str, now: datetime | None = None
+) -> dict[str, Any]:
+    """Phân bố trên job đang mở (`status_service.open_jobs`) và doanh nghiệp; job mới theo ngày
+    của múi giờ `tz` (CRAWL_TIMEZONE). Mỗi truy vấn đọc theo index trạng thái / BRIN."""
     now = now or datetime.now(UTC)
     by_source = await _pairs(
         session,
@@ -116,7 +119,8 @@ async def compute_charts(session: AsyncSession, *, now: datetime | None = None) 
     salary = dict(await _pairs(session, select(band, func.count()).where(ACTIVE).group_by(band)))
     order = [b[0] for b in SALARY_BANDS] + ["Tiền tệ / kỳ khác", "Thoả thuận", "Không ghi"]
 
-    local_day = func.date(func.timezone(LOCAL_TZ, Job.first_seen_at))
+    # `timezone(tz, t)` = `t AT TIME ZONE tz`: giờ địa phương, rồi lấy ngày.
+    local_day = func.date(func.timezone(tz, Job.first_seen_at))
     own = SOURCE_KIND == "careers"
     since = now - timedelta(days=DAYS)
     days: dict[date, dict[str, int]] = {}
@@ -126,7 +130,7 @@ async def compute_charts(session: AsyncSession, *, now: datetime | None = None) 
         .group_by(local_day, own)
     ):
         days.setdefault(day, {})["careers" if is_own else "boards"] = int(n)
-    today = (now + timedelta(hours=7)).date()
+    today = now.astimezone(ZoneInfo(tz)).date()
     jobs_by_day = [
         {
             "day": (d := today - timedelta(days=DAYS - 1 - i)).isoformat(),
@@ -181,7 +185,7 @@ async def compute_charts(session: AsyncSession, *, now: datetime | None = None) 
 
 async def refresh_charts(res: Resources) -> dict[str, Any]:
     async with res.sessionmaker() as session:
-        charts = await compute_charts(session)
+        charts = await compute_charts(session, tz=res.settings.crawl_timezone)
     await res.cache_redis.set(
         CHARTS_KEY.format(ns=res.settings.redis_prefix), _dump(charts), ex=CHARTS_TTL
     )

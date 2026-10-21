@@ -9,12 +9,14 @@ Poll (`poll_company`) — ban ngày, mỗi POLL_INTERVAL_SECONDS:
    cache, tin đã biết được dùng lại (không mở trang chi tiết), chỉ mở trang của link mới.
 3. So tập mã tin với lượt trước (`crawl_plans.job_keys`). Không đổi → chỉ cập nhật lịch: không
    ghi `company_runs`, không đụng `jobs` (đa số lượt poll đi đường này).
-4. Có tin mới / tin biến mất (nguồn đọc trọn) / trang tuyển dụng báo có tin mới → chỉ tin mới
-   được chuẩn hoá → xác minh → gộp (với việc đã có) → lưu; tin không còn thấy được đánh `removed`
-   và việc của nó đóng nếu không còn tin nào khác. Chi phí một lượt poll theo số tin MỚI, không
-   theo số tin của doanh nghiệp. Ghi `company_runs` (kind=poll).
+4. Có tin mới / tin biến mất (nguồn đọc trọn) / trang tuyển dụng báo có tin mới (lượt `board` hoặc
+   cờ tin mới, xem `mark_board_pending`) → chỉ tin mới được chuẩn hoá → xác minh → gộp (với việc
+   đã có, cùng các tin khác của việc đó: `store.save_company_jobs`) → lưu; tin không còn thấy được
+   đánh `removed` và việc của nó đóng nếu không còn tin nào khác. Chi phí một lượt poll theo số tin
+   MỚI, không theo số tin của doanh nghiệp. Ghi `company_runs` (kind=poll).
 5. Bộ khung không còn đúng (trang chính 404/410, API không còn trả tin, trang danh sách trống, lỗi
-   tạm lặp lại POLL_MAX_FAILURES lần) → nguồn `broken`, doanh nghiệp được build lại ngay.
+   tạm lặp lại POLL_MAX_FAILURES lần) → nguồn `broken`, doanh nghiệp được build lại ngay
+   (REBUILD_ON_ERROR tắt: chờ build đêm). Doanh nghiệp `paused` không bao giờ đổi trạng thái lịch.
 
 Build và poll cùng một doanh nghiệp không chạy chồng nhau (khoá Redis theo doanh nghiệp, tự gia
 hạn); lượt đã mất khoá không ghi được DB nữa (fencing token, `database/fencing.py`).
@@ -125,6 +127,55 @@ def poll_key(company_id: UUID) -> str:
     return f"poll:{company_id}"
 
 
+# --- tin mới trên trang tuyển dụng chờ poll ------------------------------------------------------
+
+# Job poll có một khoá `poll:<id>` cho mọi lý do, nên lượt poll `board` (index trang tuyển dụng vừa
+# thấy tin mới của doanh nghiệp) bị bỏ khi đã có lượt poll đang chờ / chạy. Để tin không phải chờ
+# tới build đêm: xếp poll `board` luôn đặt cờ Redis (trạng thái, `res.redis`); lượt poll giữ khoá
+# doanh nghiệp lấy và xoá cờ trước khi đọc index, có cờ thì đọc tin trang tuyển dụng như lượt
+# `board`. Cờ đặt trong lúc lượt build / poll đang chạy (đã qua bước đọc cờ, hoặc lượt `board` gặp
+# khoá nên bỏ lượt) được thấy lúc lượt đó xong: xếp thêm một lượt poll `board`. Hết hạn sau một
+# ngày (build đêm đọc lại mọi tin).
+BOARD_PENDING_TTL_SECONDS = 24 * 3600
+
+
+def _board_pending_key(res: Resources, company_id: UUID) -> str:
+    return f"{res.settings.redis_prefix}:poll:board_pending:{company_id}"
+
+
+async def mark_board_pending(res: Resources, company_ids: Iterable[UUID]) -> None:
+    """Đánh dấu doanh nghiệp có tin mới trên trang tuyển dụng chờ lượt poll đọc."""
+    keys = [_board_pending_key(res, cid) for cid in company_ids]
+    if not keys:
+        return
+    async with res.redis.pipeline(transaction=False) as pipe:
+        for key in keys:
+            pipe.set(key, 1, ex=BOARD_PENDING_TTL_SECONDS)
+        await pipe.execute()
+
+
+async def take_board_pending(res: Resources, company_id: UUID) -> bool:
+    """Lấy và xoá cờ tin mới trên trang tuyển dụng (lượt poll gọi khi đã giữ khoá doanh nghiệp)."""
+    return await res.redis.getdel(_board_pending_key(res, company_id)) is not None
+
+
+async def follow_up_board_poll(res: Resources, company_id: UUID) -> bool:
+    """Lượt build / poll vừa nhả khoá: còn cờ tin mới trên trang tuyển dụng (đặt trong lúc lượt đó
+    chạy) thì xếp lượt poll `board`. Khoá `poll:<id>` có thể vẫn là job đang chạy này nên thử thêm
+    khoá `poll:<id>:board`. True nếu đã xếp. Lỗi Redis chỉ ghi log: lượt vừa xong đã lưu, cờ còn
+    đó cho lượt poll sau."""
+    try:
+        if not await res.redis.exists(_board_pending_key(res, company_id)):
+            return False
+        for key in (poll_key(company_id), f"{poll_key(company_id)}:board"):
+            if await _enqueue_poll(res, key, company_id, RunTrigger.BOARD):
+                log.info("poll.board_follow_up", company_id=str(company_id), key=key)
+                return True
+    except Exception as exc:
+        log.warning("poll.board_follow_up_error", company_id=str(company_id), error=str(exc))
+    return False
+
+
 # --- khoá theo doanh nghiệp --------------------------------------------------------------------
 
 # Khoá tự gia hạn mỗi ttl/3 khi đang giữ: runner chết thì khoá tự hết hạn sau chừng này giây.
@@ -176,6 +227,8 @@ async def build_company(
     """Lượt build một doanh nghiệp đã có trong `companies`; `partial` thì xếp lượt chạy tiếp
     (trừ khi `continue_partial=False`)."""
     s = res.settings
+    # Timeout cứng của job tính từ lúc job bắt đầu: thời gian chờ khoá trừ vào hạn của lượt build.
+    deadline = time.monotonic() + s.company_deadline_seconds
     async with res.sessionmaker() as session:
         company = await session.get(Company, company_id)
     if company is None:
@@ -208,7 +261,9 @@ async def build_company(
             queued_at=queued_at,
             trigger=trigger,
             refresh_discovery=refresh,
+            deadline=deadline,
         )
+    await follow_up_board_poll(res, company_id)
     if (
         continue_partial
         and result.status is RunStatus.PARTIAL
@@ -407,16 +462,21 @@ async def poll_company(
     outcome = PollOutcome(company_id=company_id, status="skipped")
     async with company_lock(res, company_id) as held:
         if not held:
+            # Lượt đang giữ khoá xếp lượt poll `board` khi xong nếu còn cờ tin mới.
             outcome.error = "doanh nghiệp đang được build"
             return outcome
+        # Đọc cờ trước khi đọc index: tin index thấy sau lúc này đặt cờ mới cho lượt sau.
+        board = await take_board_pending(res, company_id) or trigger is RunTrigger.BOARD
         # Việc lấy trang của lượt poll đi stream ưu tiên: không xếp sau việc build (SLA phát hiện).
         with (
             structlog.contextvars.bound_contextvars(company_id=str(company_id), poll=True),
             priority_fetches(),
         ):
             try:
-                outcome = await _poll(res, company_id, trigger, queued_at, started_at, t0)
+                outcome = await _poll(res, company_id, trigger, board, queued_at, started_at, t0)
             except fencing.FencedOut:
+                if board:  # lượt đang giữ khoá đọc lại
+                    await mark_board_pending(res, [company_id])
                 raise  # lượt khác đã giữ khoá: không ghi gì thêm
             except Exception as exc:
                 log.exception("poll.error")
@@ -433,6 +493,12 @@ async def poll_company(
                             last_error=(outcome.error or "")[:500],
                         )
                     )
+                if board:
+                    # Lượt poll theo lịch kế tiếp đọc lại (không xếp lại ngay: lỗi lặp lại thì
+                    # không thành vòng poll liên tục).
+                    await mark_board_pending(res, [company_id])
+    if outcome.status != "failed":
+        await follow_up_board_poll(res, company_id)
     outcome.duration_ms = int((time.monotonic() - t0) * 1000)
     if outcome.fresh:
         metric = "ok"
@@ -456,10 +522,12 @@ async def _poll(
     res: Resources,
     company_id: UUID,
     trigger: RunTrigger,
+    board: bool,
     queued_at: datetime | None,
     started_at: datetime,
     t0: float,
 ) -> PollOutcome:
+    """`board`: đọc thêm tin của doanh nghiệp trên các trang tuyển dụng (index vừa thấy tin mới)."""
     s = res.settings
     outcome = PollOutcome(company_id=company_id, status="ok")
     async with res.sessionmaker() as session:
@@ -471,9 +539,17 @@ async def _poll(
     if company is None:
         outcome.status, outcome.error = "skipped", "không còn doanh nghiệp"
         return outcome
-    if not plans and trigger is not RunTrigger.BOARD:
+    # Doanh nghiệp đã tắt thu thập: chỉ poll khi người dùng bấm, và không bao giờ đổi trạng thái
+    # lịch (lượt poll `board` / lượt còn trong hàng đợi từ trước khi tắt thì bỏ).
+    paused = schedule is not None and schedule.state == ScheduleState.PAUSED.value
+    if paused and trigger is not RunTrigger.MANUAL:
+        outcome.status, outcome.error = "skipped", "doanh nghiệp đã tắt thu thập"
+        return outcome
+    if not plans and not board:
         outcome.status = "no_plans"
         return outcome
+    if board and trigger is RunTrigger.SCHEDULE:
+        trigger = RunTrigger.BOARD  # lượt theo lịch đọc cờ tin mới trên trang tuyển dụng
 
     sources: list[Source] = []
     specs: dict[str, PlanSpec] = {}
@@ -512,7 +588,7 @@ async def _poll(
     }
     all_ok = all(c.ok for c in checks)
     broken = [c for c in checks if c.broken]
-    changed = bool(outcome.new or outcome.gone) or trigger is RunTrigger.BOARD
+    changed = bool(outcome.new or outcome.gone) or board
     finished_at = datetime.now(UTC)
 
     run_id: UUID | None = None
@@ -528,10 +604,11 @@ async def _poll(
             fresh = [j for j in collected.jobs if (j.source, j.external_id) in new_keys]
             raws, _missing = await _hydrate(res, fresh)
             board_jobs: list[RawJob] = []
-            if trigger is RunTrigger.BOARD:
+            if board:
                 boards = await _board_jobs(res, company, records, deadline)
                 incomplete += boards.incomplete_sources
                 board_jobs = boards.jobs
+            gone = {(c.plan.kind, ext) for c in checks for ext in c.gone}
             processed = await company_service.process_jobs(
                 res,
                 company,
@@ -540,8 +617,8 @@ async def _poll(
                 deadline=t0 + s.poll_timeout_seconds - POLL_SAVE_MARGIN,
                 complete=False,
                 reused=known.used,
+                absent=gone,
             )
-            gone = {(c.plan.kind, ext) for c in checks for ext in c.gone}
             closed = 0
             if gone and not unreadable:
                 present = {(c.plan.kind, ext) for c in checks for ext in c.keys}
@@ -593,7 +670,7 @@ async def _poll(
         )
     if broken:
         outcome.status = "broken"
-        outcome.rebuild = s.rebuild_on_error
+        outcome.rebuild = s.rebuild_on_error and not paused
     elif not all_ok and outcome.status == "ok":
         outcome.status = "partial"
 
@@ -648,8 +725,12 @@ async def _poll(
             }
         if outcome.new or outcome.gone:
             sched["last_change_at"] = finished_at
-        if broken:
+        if broken and outcome.rebuild:
             sched |= {"state": ScheduleState.BROKEN.value, "next_build_at": finished_at}
+        elif broken and not paused:
+            # REBUILD_ON_ERROR tắt: không build lại ban ngày. Nguồn hỏng (`broken`, lượt poll bỏ
+            # qua) chờ lượt build đêm; doanh nghiệp vẫn `ready`, các nguồn khác vẫn được poll.
+            sched["next_build_at"] = schedule_service.next_build_at(company_id, finished_at, s)
         await session.execute(
             update(CompanySchedule).where(CompanySchedule.company_id == company_id).values(**sched)
         )
@@ -704,18 +785,26 @@ async def enqueue_builds(
     return n
 
 
+async def _enqueue_poll(res: Resources, key: str, company_id: UUID, trigger: RunTrigger) -> bool:
+    job = await res.queues.poll.enqueue(
+        "poll_company",
+        key=key,
+        timeout=res.settings.poll_timeout_seconds,
+        company_id=str(company_id),
+        trigger=trigger.value,
+    )
+    return job is not None
+
+
 async def enqueue_polls(res: Resources, company_ids: Iterable[UUID], *, trigger: RunTrigger) -> int:
-    """Mỗi doanh nghiệp một job `poll_company` (khoá `poll:<id>`). Trả số job đã xếp."""
+    """Mỗi doanh nghiệp một job `poll_company` (khoá `poll:<id>`). Trả số job đã xếp. Lý do
+    `board` đặt cờ tin mới trước: job trùng một lượt poll đang chờ / chạy thì lượt đó đọc cờ."""
+    ids = list(company_ids)
+    if trigger is RunTrigger.BOARD:
+        await mark_board_pending(res, ids)
     n = 0
-    for cid in company_ids:
-        job = await res.queues.poll.enqueue(
-            "poll_company",
-            key=poll_key(cid),
-            timeout=res.settings.poll_timeout_seconds,
-            company_id=str(cid),
-            trigger=trigger.value,
-        )
-        n += job is not None
+    for cid in ids:
+        n += await _enqueue_poll(res, poll_key(cid), cid, trigger)
     return n
 
 

@@ -19,6 +19,7 @@ from jobcrawler.sources.careers import (
     Page,
     _stop,  # pyright: ignore[reportPrivateUsage]
     clean_card_text,
+    detail_url,
     hub_page,
     jd_signals,
     job_links,
@@ -367,6 +368,46 @@ async def test_capped_or_failed_pages_mark_source_truncated() -> None:
     s503 = session(flaky)
     assert await run(CareersSource(listing), s503) == []
     assert s503.truncated == ["page_error"]
+
+
+async def test_json_ld_url_of_site_root_does_not_merge_job_pages() -> None:
+    """JSON-LD ghi `url` là trang chủ cho mọi tin: mỗi trang tin vẫn là một tin riêng (mã và URL
+    theo trang)."""
+    listing = "https://acme.vn/tuyen-dung"
+    titles = {"ke-toan-12": "Kế toán tổng hợp", "lap-trinh-34": "Lập trình viên Python"}
+    fetcher = FakeFetcher()
+    fetcher.add(listing, "".join(f'<a href="/tuyen-dung/{p}">{t}</a>' for p, t in titles.items()))
+    for path, title in titles.items():
+        node = {
+            "@type": "JobPosting",
+            "title": title,
+            "url": "https://acme.vn/",
+            "description": "<p>" + "Mô tả công việc chi tiết. " * 20 + "</p>",
+        }
+        fetcher.add(
+            f"{listing}/{path}",
+            f'<script type="application/ld+json">{json.dumps(node, ensure_ascii=False)}</script>',
+        )
+    jobs = await run(CareersSource(listing), session(fetcher))
+    assert sorted(j.url for j in jobs) == [f"{listing}/{p}" for p in titles]
+    assert len({j.external_id for j in jobs}) == 2
+
+
+@pytest.mark.parametrize(
+    ("posting_url", "expected"),
+    [
+        ("https://acme.vn/tuyen-dung/ke-toan-12", "https://acme.vn/tuyen-dung/ke-toan-12"),
+        ("https://acme.vn/", "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x"),
+        ("https://acme.vn/vi/", "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x"),
+        ("https://acme.vn/tuyen-dung", "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x"),
+        ("https://acme.vn/tuyen-dung/ke-toan", "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x"),
+        ("https://jobs.other.com/acme/12", "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x"),
+    ],
+)
+def test_detail_url_keeps_json_ld_url_only_when_it_is_the_job(
+    posting_url: str, expected: str
+) -> None:
+    assert detail_url(posting_url, "https://acme.vn/vi/tuyen-dung/ke-toan-12?ref=x") == expected
 
 
 async def test_known_details_are_reused_without_counting_toward_the_cap() -> None:

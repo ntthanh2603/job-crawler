@@ -3,6 +3,7 @@ rồi ghi bộ khung (`crawl_plans`) và lịch poll / build kế tiếp (`compa
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Collection
 from dataclasses import dataclass, field
@@ -234,12 +235,17 @@ async def process_jobs(
     deadline: float,
     complete: bool,
     reused: Collection[tuple[str, str]] = (),
+    absent: Collection[tuple[str, str]] = (),
 ) -> ProcessedJobs:
     """Chuẩn hoá → xác minh → gộp → lưu các tin đã thu thập; trả job đã nhận.
 
     Bước LLM (chấm tin nghi ngờ, phân loại trường mơ hồ) được chạy tới `deadline` cộng phần
     đệm trước timeout cứng của job (chừa SAVE_MARGIN_SECONDS để lưu). Còn tin hoãn xác minh thì
-    lượt chạy không đủ để đóng job cũ."""
+    lượt chạy không đủ để đóng job cũ.
+
+    Lượt chưa đủ (`complete=False`, vd. poll chỉ có tin mới) gộp cụm của job đã lưu với các tin
+    khác của job đó (`store.save_company_jobs`); `absent`: (nguồn, mã) các tin lượt này biết chắc
+    đã gỡ, không gộp lại."""
     s = res.settings
     now = datetime.now(UTC)
     until = deadline + max(
@@ -267,8 +273,11 @@ async def process_jobs(
     deferred = sum(v.deferred for v in verdicts)
     clusters = dedup.cluster_jobs(accepted, sigs=sigs)
     log.info("dedup.done", accepted=len(accepted), jobs=len(clusters))
+    # LLM chỉ hỏi trường việc đã gộp còn `unknown`: giá trị rule của bất kỳ tin nào trong cụm đứng
+    # trước đoán của LLM. Bản gộp là bản sao (cụm một tin: chính tin đó), tin giữ giá trị rule.
+    merged = [dataclasses.replace(dedup.merge(c)) for c in clusters]
     await normalize.classify_unclear(
-        [c.canonical for c in clusters],
+        merged,
         res.llm,
         until=until,
         max_jobs=s.normalize_llm_max_jobs,
@@ -282,9 +291,12 @@ async def process_jobs(
             jobs=normalized,
             verdicts=verdicts,
             clusters=clusters,
+            merged=merged,
             now=now,
             complete=complete and not deferred,
             reused_postings=reused,
+            is_board=board_names.__contains__,
+            absent=absent,
         )
     return ProcessedJobs(jobs=saved.jobs, deferred=deferred, new=saved.new, removed=saved.removed)
 
@@ -539,17 +551,21 @@ async def process_company(
     queued_at: datetime | None = None,
     trigger: RunTrigger = RunTrigger.MANUAL,
     refresh_discovery: bool = False,
+    deadline: float | None = None,
 ) -> CompanyResult:
     """Lượt build: chạy toàn bộ pipeline cho một doanh nghiệp, ghi `company_runs` (kể cả khi
     lỗi), bộ khung các nguồn và lịch poll / build kế tiếp.
 
     `company_id`: doanh nghiệp đã `import` — dùng đúng bản ghi đó thay vì tra theo tên.
     `queued_at`: lúc job sẵn sàng chạy (để đo thời gian chờ trong hàng đợi). `refresh_discovery`:
-    tìm lại nguồn trên website, không dùng cache tìm nguồn (build đêm)."""
+    tìm lại nguồn trên website, không dùng cache tìm nguồn (build đêm). `deadline`: mốc dừng thu
+    thập theo `time.monotonic()` (job đã chờ khoá thì tính từ lúc job bắt đầu, để timeout cứng của
+    job không cắt ngang lúc lưu); None: COMPANY_DEADLINE_SECONDS từ bây giờ."""
     run_id = uuid7()
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
-    deadline = t0 + res.settings.company_deadline_seconds
+    if deadline is None:
+        deadline = t0 + res.settings.company_deadline_seconds
 
     with structlog.contextvars.bound_contextvars(run_id=str(run_id), company=company_in.name):
         async with res.sessionmaker.begin() as session:

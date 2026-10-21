@@ -39,6 +39,8 @@ WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 TransportErrorKind = Literal["timeout", "proxy", "connect", "other"]
 
 RETRY_STATUSES = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524})
+# `FetchResult.error` khi robots.txt không tải được (tạm coi như cấm; lượt sau thử lại).
+ROBOTS_UNREACHABLE = "robots_unreachable"
 _META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?\s*([a-zA-Z0-9_\-]+)""", re.IGNORECASE)
 _HEADER_CHARSET = re.compile(r"charset=([^\s;]+)", re.IGNORECASE)
 
@@ -112,7 +114,8 @@ class Renderer(Protocol):
 
 
 def decode_body(content: bytes, content_type: str | None) -> str:
-    """Giải mã theo charset trong header, rồi `<meta charset>`, mặc định UTF-8."""
+    """Giải mã theo charset trong header, rồi `<meta charset>`, mặc định UTF-8. Bỏ BOM ở đầu
+    (API trả JSON kèm BOM UTF-8: `json.loads` không nhận)."""
     candidates: list[str] = []
     if content_type and (m := _HEADER_CHARSET.search(content_type)):
         candidates.append(m.group(1).strip("\"'"))
@@ -120,10 +123,10 @@ def decode_body(content: bytes, content_type: str | None) -> str:
         candidates.append(m.group(1).decode("ascii", "ignore"))
     for charset in candidates:
         try:
-            return content.decode(charset)
+            return content.decode(charset).removeprefix("\ufeff")
         except (LookupError, UnicodeDecodeError):
             continue
-    return content.decode("utf-8", errors="replace")
+    return content.decode("utf-8", errors="replace").removeprefix("\ufeff")
 
 
 @dataclass
@@ -383,7 +386,7 @@ class HttpClient:
         if rules.allowed(url):
             return rules, None
         # robots.txt không tải được cũng tạm coi như cấm, nhưng ghi rõ để không lẫn với luật cấm.
-        reason = "robots_unreachable" if rules.unreachable else "robots_disallowed"
+        reason = ROBOTS_UNREACHABLE if rules.unreachable else "robots_disallowed"
         log.info(f"source.{reason}", url=url, source=source)
         denied = FetchResult(
             url=url,

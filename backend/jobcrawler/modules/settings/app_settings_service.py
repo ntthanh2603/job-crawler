@@ -375,9 +375,11 @@ GROUPS: tuple[Group, ...] = (
             "crawl_timezone",
             "str",
             "Múi giờ",
-            "Múi giờ dùng để hiểu khung build và khung poll (tên IANA).",
+            "Múi giờ dùng để hiểu khung build, khung poll và lịch cron (tên IANA).",
             check=_check_timezone,
             placeholder="Asia/Ho_Chi_Minh",
+            # Lịch cron của runner tính theo múi giờ đọc lúc khởi động.
+            live=False,
         ),
         _s(
             "build_window",

@@ -81,6 +81,9 @@ _POSTED = ("postingtime", "postedat", "publishedat", "approvedon", "createdat", 
 _EMPLOYMENT = ("employment", "workingtype", "worktype", "contracttype", "typeofwork", "hinhthuc")
 _ORG = ("department", "team", "jobfield", "jobfamily", "level", "seniority", "capbac", "openings")
 _ATTRIBUTE_GROUPS = (_LOCATION, _SALARY, _DEADLINE, _EMPLOYMENT, _ORG)
+# Khoá chứa từ của một nhóm mà là thứ khác: link (`detailUrl` ≠ mô tả), email (`emailAddress` ≠
+# nơi làm), số lượng tuyển (`soLuong` ≠ lương).
+_NOT_FIELD = re.compile(r"url|link|href|mail|soluong")
 
 # Tham số phân trang của API.
 _PAGE_KEYS = ("page", "pageindex", "pagenumber", "pageno", "currentpage", "p")
@@ -120,10 +123,10 @@ def _text(value: Any) -> str | None:
 
 def _fields(item: Mapping[str, Any], words: Sequence[str]) -> Iterator[tuple[str, Any]]:
     """(khoá chuẩn hoá, giá trị) của các trường có tên chứa một trong `words` (bỏ trường mã số
-    `*_id`, giá trị rỗng)."""
+    `*_id`, trường link / email / số lượng tuyển, giá trị rỗng)."""
     for key, value in item.items():
         norm = _norm(key)
-        if norm.endswith("id") and norm != "id":
+        if (norm.endswith("id") and norm != "id") or _NOT_FIELD.search(norm):
             continue
         if value in (None, "", [], {}):
             continue

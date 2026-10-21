@@ -2,20 +2,21 @@
 gộp thành một dòng `jobs`. Upsert theo khoá duy nhất nên chạy lại không sinh bản ghi trùng.
 
 `jobs.cluster_key` ổn định qua các lượt: cụm có tin đã gắn job từ lượt trước thì dùng lại job đó
-(kể cả khi bản chuẩn đổi, vd. lượt sau tìm thêm trang careers); cụm mới lấy khoá từ tin chuẩn.
+(kể cả khi bản chuẩn đổi, vd. lượt sau tìm thêm trang careers); cụm mới lấy khoá từ tin chuẩn. Lượt
+chưa đủ gộp cụm của job đã lưu với các tin khác của job đó (docs/DEDUP.md mục 8).
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from datasketch import MinHash
-from sqlalchemy import case, func, select, tuple_, update
+from sqlalchemy import case, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from jobcrawler.common.schemas import (
     JobOut,
     JobStatus,
     Location,
+    RawJob,
     Salary,
     SalaryPeriod,
     WorkMode,
@@ -38,6 +40,7 @@ from jobcrawler.pipeline.dedup import (
     TITLE_THRESHOLD,
     Cluster,
     ExistingJob,
+    canonical_rank,
     jd_minhash,
     jd_similarity,
     job_fingerprint,
@@ -45,7 +48,7 @@ from jobcrawler.pipeline.dedup import (
     same_existing,
     title_similarity,
 )
-from jobcrawler.pipeline.normalize import NormalizedJob
+from jobcrawler.pipeline.normalize import NormalizedJob, normalize_job
 from jobcrawler.pipeline.verify import EXPIRED, Verdict
 
 log = get_logger(__name__)
@@ -325,7 +328,8 @@ class _ExistingMatcher:
         self._meta: list[Any] | None = None
         self._loaded: dict[UUID, tuple[ExistingJob, MinHash]] = {}
 
-    async def find(self, job: NormalizedJob, fp: str) -> str | None:
+    async def find(self, job: NormalizedJob, fp: str) -> tuple[UUID, str] | None:
+        """(id, khoá cụm) của job đã lưu khớp `job`, hoặc None."""
         exact = (
             await self.session.execute(
                 select(Job.id, Job.cluster_key).where(
@@ -337,7 +341,7 @@ class _ExistingMatcher:
         ).first()
         if exact is not None and exact.id not in self.claimed:
             self.claimed.add(exact.id)
-            return exact.cluster_key
+            return exact.id, exact.cluster_key
         if self._meta is None:
             self._meta = list(
                 await self.session.execute(
@@ -372,7 +376,7 @@ class _ExistingMatcher:
         if best is None:
             return None
         self.claimed.add(best[1].id)
-        return best[1].cluster_key
+        return best[1].id, best[1].cluster_key
 
     async def _load(self, metas: list[Any]) -> None:
         """Nội dung (giải nén) và MinHash của các job ứng viên — chỉ những job trùng tiêu đề."""
@@ -405,6 +409,99 @@ class _ExistingMatcher:
             self._loaded[m.id] = (existing, jd_minhash(jd))
 
 
+@dataclass(frozen=True, slots=True)
+class _Attached:
+    """Tin đang gắn với một job đã lưu mà lượt chạy (chưa đủ) không thấy."""
+
+    job: NormalizedJob
+    row: _PostingRow
+    confidence: float
+    reasons: list[str]
+
+
+_UNCLEAR = ("level", "employment_type", "work_mode")
+
+
+async def _attached_postings(
+    session: AsyncSession,
+    job_ids: Collection[UUID],
+    *,
+    seen: Collection[UUID],
+    absent: Collection[tuple[str, str]],
+    now: datetime,
+    is_board: Callable[[str], bool],
+) -> tuple[dict[UUID, list[_Attached]], dict[UUID, dict[str, str]]]:
+    """Tin khác của các job `job_ids` mà lượt này không thấy (không trong `seen` / `absent`): đã
+    nhận, đang mở, chưa quá hạn — đúng những tin lượt đủ sẽ gộp lại. `raw` được chuẩn hoá lại như
+    lượt đủ. Kèm cấp bậc / loại hình / hình thức đã lưu của các job có tin như vậy."""
+    if not job_ids:
+        return {}, {}
+    rows = await session.execute(
+        select(
+            JobPosting.id,
+            JobPosting.job_id,
+            JobPosting.source,
+            JobPosting.external_id,
+            JobPosting.raw,
+            JobPosting.first_seen_at,
+            JobPosting.last_seen_at,
+            JobPosting.confidence,
+            JobPosting.verification_reasons,
+        ).where(
+            JobPosting.job_id.in_(list(job_ids)),
+            JobPosting.accepted.is_(True),
+            JobPosting.status == JobStatus.ACTIVE.value,
+            or_(JobPosting.expires_at.is_(None), JobPosting.expires_at >= now),
+        )
+    )
+    attached: dict[UUID, list[_Attached]] = {}
+    for row in rows:
+        if row.id in seen or (row.source, row.external_id) in absent or row.job_id is None:
+            continue
+        try:
+            raw = RawJob.model_validate(row.raw)
+            job = normalize_job(raw, now=now, board=is_board(raw.source))
+        except Exception as exc:  # tin lưu từ phiên bản cũ không đọc lại được: bỏ qua
+            log.warning("jobs.attached_unreadable", posting_id=str(row.id), error=str(exc))
+            continue
+        attached.setdefault(row.job_id, []).append(
+            _Attached(
+                job=job,
+                row=_PostingRow(row.id, row.first_seen_at, row.last_seen_at, row.job_id),
+                confidence=row.confidence or 0.0,
+                reasons=list(row.verification_reasons or []),
+            )
+        )
+    stored: dict[UUID, dict[str, str]] = {}
+    if attached:
+        result = await session.execute(
+            select(Job.id, Job.level, Job.employment_type, Job.work_mode).where(
+                Job.id.in_(list(attached))
+            )
+        )
+        stored = {
+            r.id: {"level": r.level, "employment_type": r.employment_type, "work_mode": r.work_mode}
+            for r in result
+        }
+    return attached, stored
+
+
+def _fill_unclear(job: NormalizedJob, fallbacks: Sequence[Mapping[str, str]]) -> None:
+    """Cấp bậc / loại hình / hình thức còn `unknown` sau khi gộp: lấy giá trị đầu tiên đã biết
+    trong `fallbacks` (giá trị đã lưu của job, rồi bản gộp đã qua LLM của lượt này)."""
+    for name in _UNCLEAR:
+        current = getattr(job, name)
+        if current.value != "unknown":
+            continue
+        value = next((f[name] for f in fallbacks if f.get(name, "unknown") != "unknown"), None)
+        if value is not None:
+            setattr(job, name, type(current)(value))
+
+
+def _unclear_values(job: NormalizedJob) -> dict[str, str]:
+    return {name: getattr(job, name).value for name in _UNCLEAR}
+
+
 async def save_company_jobs(
     session: AsyncSession,
     *,
@@ -416,6 +513,9 @@ async def save_company_jobs(
     now: datetime,
     complete: bool,
     reused_postings: Collection[tuple[str, str]] = (),
+    merged: Sequence[NormalizedJob] | None = None,
+    is_board: Callable[[str], bool] | None = None,
+    absent: Collection[tuple[str, str]] = (),
 ) -> SaveResult:
     """Ghi tin + job của một lượt chạy (trong transaction của `session`).
 
@@ -426,7 +526,15 @@ async def save_company_jobs(
     lượt trước cho tới khi được chấm.
 
     `reused_postings`: (nguồn, mã tin) dùng lại chi tiết đã tải ở lượt trước — giữ nguyên
-    `fetched_at` để hết hạn dùng lại thì lượt sau tải lại."""
+    `fetched_at` để hết hạn dùng lại thì lượt sau tải lại.
+
+    `merged`: bản gộp của từng cụm (đã được LLM điền trường mơ hồ); None thì gộp ở đây.
+
+    Lượt chưa đủ (`complete=False`, có `is_board`) chỉ thấy một phần tin của doanh nghiệp: cụm ghi
+    vào job đã lưu được gộp lại cùng các tin khác còn gắn với job đó (`_attached_postings`, trừ
+    `absent` — tin lượt này biết chắc đã gỡ), như lượt đủ gộp. Không thì job bị ghi đè bằng phần
+    lượt này thấy (bản chuẩn đổi sang tin kém hơn, mất URL / lương / hạn nộp của tin vắng mặt) rồi
+    đổi lại ở lượt đủ."""
     postings: dict[tuple[str, str], _PostingRow] = {}
     verdict_of: dict[tuple[str, str], Verdict] = {}
     for job, verdict in zip(jobs, verdicts, strict=True):
@@ -454,29 +562,32 @@ async def save_company_jobs(
 
     # Bước 1: cụm có tin đã gắn job từ lượt trước giữ khoá của job đó.
     keys: list[str | None] = []
+    owners: list[UUID | None] = []  # job đã lưu mà cụm ghi vào
     used_keys: set[str] = set()
     for cluster in clusters:
         rows = [postings[_key(m)] for m in cluster.members]
         old = sorted({r.job_id for r in rows if r.job_id is not None and r.job_id in previous})
-        key = next((previous[j] for j in old if previous[j] not in used_keys), None)
+        owner = next((j for j in old if previous[j] not in used_keys), None)
+        key = previous[owner] if owner is not None else None
         if key is not None:
             used_keys.add(key)
         keys.append(key)
+        owners.append(owner)
 
     # Bước 2: cụm mới có thể là job đã lưu (doanh nghiệp đăng lại tin với mã / URL khác): cùng dấu
     # vân tay, hoặc khớp mờ với một job đang mở chưa gắn tin nào của lượt này → ghi vào job đó.
-    merged_jobs = [merge(c) for c in clusters]
+    merged_jobs = list(merged) if merged is not None else [merge(c) for c in clusters]
     fingerprints = [job_fingerprint(m) for m in merged_jobs]
     reused = 0
     if any(k is None for k in keys):
         matcher = _ExistingMatcher(session, company_id, claimed=set(previous))
-        for i, merged in enumerate(merged_jobs):
+        for i, merged_job in enumerate(merged_jobs):
             if keys[i] is not None:
                 continue
-            hit = await matcher.find(merged, fingerprints[i])
-            if hit is not None and hit not in used_keys:
-                keys[i] = hit
-                used_keys.add(hit)
+            hit = await matcher.find(merged_job, fingerprints[i])
+            if hit is not None and hit[1] not in used_keys:
+                owners[i], keys[i] = hit
+                used_keys.add(hit[1])
                 reused += 1
     for i, cluster in enumerate(clusters):
         if keys[i] is None:
@@ -486,28 +597,73 @@ async def save_company_jobs(
             keys[i] = key
             used_keys.add(key)
 
+    # Lượt chưa đủ: gộp lại cụm của job đã lưu với các tin khác của job đó mà lượt này không thấy.
+    attached: dict[UUID, list[_Attached]] = {}
+    stored: dict[UUID, dict[str, str]] = {}
+    if not complete and is_board is not None:
+        attached, stored = await _attached_postings(
+            session,
+            {o for o in owners if o is not None},
+            seen={r.id for r in postings.values()},
+            absent=set(absent),
+            now=now,
+            is_board=is_board,
+        )
+    extra_rows: dict[tuple[str, str], _Attached] = {}
+    full_clusters: list[Cluster] = []
+    for i, cluster in enumerate(clusters):
+        owner = owners[i]
+        extra = attached.get(owner) if owner is not None else None
+        if owner is None or not extra:
+            full_clusters.append(cluster)
+            continue
+        extra_rows |= {_key(a.job): a for a in extra}
+        full = Cluster(sorted([*cluster.members, *(a.job for a in extra)], key=canonical_rank))
+        full_clusters.append(full)
+        seen_part = merged_jobs[i]
+        merged_jobs[i] = merge(full)
+        # Trường rule của mọi tin vẫn chưa rõ: giữ giá trị đã lưu (lượt đủ đã hỏi LLM theo bản
+        # chuẩn), không có thì lấy đoán của LLM cho phần lượt này thấy.
+        _fill_unclear(merged_jobs[i], [stored.get(owner, {}), _unclear_values(seen_part)])
+        fingerprints[i] = job_fingerprint(merged_jobs[i])
+
+    def row_of(job: NormalizedJob) -> _PostingRow:
+        return postings[_key(job)] if _key(job) in postings else extra_rows[_key(job)].row
+
+    def confidence_of(job: NormalizedJob) -> float:
+        if _key(job) in verdict_of:
+            return verdict_of[_key(job)].confidence
+        return extra_rows[_key(job)].confidence
+
+    def reasons_of(job: NormalizedJob) -> list[str]:
+        if _key(job) in verdict_of:
+            return list(verdict_of[_key(job)].reasons)
+        return list(extra_rows[_key(job)].reasons)
+
     out: list[JobOut] = []
     touched: set[UUID] = set()
-    for cluster, merged, fp, key in zip(clusters, merged_jobs, fingerprints, keys, strict=True):
+    for cluster, full, merged_job, fp, key in zip(
+        clusters, full_clusters, merged_jobs, fingerprints, keys, strict=True
+    ):
         rows = [postings[_key(m)] for m in cluster.members]
-        member_verdicts = [verdict_of[_key(m)] for m in cluster.members]
-        reasons = list(verdict_of[_key(cluster.canonical)].reasons)
-        if len(cluster.members) > 1:
-            reasons.append(f"DEDUP: gộp {len(cluster.members)} tin")
+        every = [row_of(m) for m in full.members]
+        reasons = reasons_of(full.canonical)
+        if len(full.members) > 1:
+            reasons.append(f"DEDUP: gộp {len(full.members)} tin")
         values = job_values(
-            merged,
+            merged_job,
             company_id=company_id,
             company_name=company_name,
-            source_urls=cluster.source_urls,
-            confidence=max(v.confidence for v in member_verdicts),
+            source_urls=full.source_urls,
+            confidence=max(confidence_of(m) for m in full.members),
             reasons=reasons,
         )
         values |= {
             "cluster_key": key,
             "fingerprint": fp,
-            "canonical_posting_id": postings[_key(cluster.canonical)].id,
-            "first_seen_at": min(r.first_seen_at for r in rows),
-            "last_seen_at": max(r.last_seen_at for r in rows),
+            "canonical_posting_id": row_of(full.canonical).id,
+            "first_seen_at": min(r.first_seen_at for r in every),
+            "last_seen_at": max(r.last_seen_at for r in every),
         }
         job_row = await _upsert_job(session, values)
         touched.add(job_row.id)

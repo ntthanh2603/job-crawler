@@ -4,6 +4,9 @@ xạ tên cũ → tên mới.
 Từ 7/2025 không còn cấp huyện: địa chỉ chỉ chuẩn hoá tới tỉnh/thành; phần còn lại giữ ở
 `address_raw`. So khớp trên chuỗi đã bỏ dấu, viết thường (`text.fold`) nên "Hà Nội", "Ha Noi",
 "HN", "Hanoi" ra cùng một giá trị.
+
+Tên đường trùng tên tỉnh/thành ("72 Nguyễn Huệ", "235 Điện Biên Phủ", "Xa lộ Hà Nội") không tính
+là tỉnh/thành của địa chỉ (`_street_name`).
 """
 
 from __future__ import annotations
@@ -129,6 +132,47 @@ def _pattern() -> re.Pattern[str]:
     return re.compile(r"(?<![0-9a-z])(?:" + "|".join(map(re.escape, aliases)) + r")(?![0-9a-z])")
 
 
+# Phần của địa chỉ: "Tầng 5, 72 Nguyễn Huệ, Quận 1" → "Tầng 5" / "72 Nguyễn Huệ" / "Quận 1".
+_PARTS = re.compile(r"[,;|\n]|\s[-–]\s")
+# Trước tên đường: số nhà đầu phần địa chỉ ("72 Nguyễn Huệ", "Số 12A/3 Điện Biên Phủ"; một chữ xen
+# giữa cho tên người như "Nguyễn Huệ"), chữ "đường" / "phố" / "xa lộ"..., hoặc họ "Nguyễn".
+_STREET_BEFORE = re.compile(
+    r"(?:^(?:so\s+)?\d+[a-z]?(?:\s\d+[a-z]?)*\s(?:[a-z]+\s)?"
+    r"|\b(?:duong|(?<!thanh )pho|ngo|hem|kiet|xa lo|dai lo|quoc lo|tinh lo|nguyen)\s)$"
+)
+
+
+def _street_name(part: str, m: re.Match[str]) -> bool:
+    """Chỗ khớp tên tỉnh/thành trong một phần địa chỉ (đã fold) là tên đường."""
+    return _STREET_BEFORE.search(part[: m.start()]) is not None
+
+
+def _address_matches(address: str) -> list[str]:
+    """Cách viết tỉnh/thành (đã fold) nhắc tới trong địa chỉ, theo thứ tự, bỏ tên đường."""
+    found: list[str] = []
+    for part in _PARTS.split(address):
+        folded = fold(part)
+        found += [m.group(0) for m in _pattern().finditer(folded) if not _street_name(folded, m)]
+    return found
+
+
+# Phần còn lại của địa chỉ chỉ gồm tỉnh/thành: chữ nối, "TP", "tỉnh", tên nước.
+_LIST_FILLER = re.compile(
+    r"\b(?:thanh pho|tp|tinh|khu vuc|chi nhanh|cn|va|and|hoac|or|viet nam|vietnam|vn)\b"
+)
+
+
+def list_units(address: str | None) -> list[str]:
+    """Địa chỉ chỉ là danh sách tỉnh/thành ("Hà Nội, Hồ Chí Minh", "HN/HCM", "Hà Nội và Đà Nẵng")
+    → các đơn vị (giữ tên tỉnh cũ, như `find_units`); địa chỉ thật (có đường, phường...) → []."""
+    if not address:
+        return []
+    folded = fold(address)
+    if _LIST_FILLER.sub(" ", _pattern().sub(" ", folded)).strip():
+        return []
+    return find_units(address)
+
+
 def find_provinces(text: str | None) -> list[str]:
     """Mọi tỉnh/thành (tên mới) nhắc tới trong `text`, theo thứ tự xuất hiện, không lặp."""
     if not text:
@@ -140,11 +184,12 @@ def find_provinces(text: str | None) -> list[str]:
 
 def province_of(address: str | None) -> str | None:
     """Tỉnh/thành của một địa chỉ: tên nhắc tới sau cùng (địa chỉ Việt Nam ghi tỉnh ở cuối,
-    "phường Vĩnh Phúc, Hà Nội" là Hà Nội)."""
+    "phường Vĩnh Phúc, Hà Nội" là Hà Nội), bỏ tên đường ("72 Nguyễn Huệ, Quận 1" không phải
+    Huế)."""
     if not address:
         return None
-    matches = list(_pattern().finditer(fold(address)))
-    return _aliases()[matches[-1].group(0)] if matches else None
+    matches = _address_matches(address)
+    return _aliases()[matches[-1]] if matches else None
 
 
 def find_units(text: str | None) -> list[str]:
@@ -160,8 +205,8 @@ def unit_of(address: str | None) -> str | None:
     """Như `province_of` nhưng giữ tên tỉnh cũ."""
     if not address:
         return None
-    matches = list(_pattern().finditer(fold(address)))
-    return _units()[matches[-1].group(0)] if matches else None
+    matches = _address_matches(address)
+    return _units()[matches[-1]] if matches else None
 
 
 def most_specific(units: set[str]) -> frozenset[str]:

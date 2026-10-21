@@ -23,7 +23,7 @@ from jobcrawler.database.models import (
 from jobcrawler.modules.boards import boards_service
 from jobcrawler.modules.crawl.company_service import process_company
 from jobcrawler.pipeline import kyc
-from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
+from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions, index_lock
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult
@@ -70,7 +70,8 @@ async def reset(res: Resources) -> UUID:
 def indexer(res: Resources, fetcher: FakeFetcher, **options: Any) -> BoardIndexer:
     return BoardIndexer(
         FakeBoard(),
-        engine=res.engine,
+        redis=res.redis,
+        redis_prefix=res.settings.redis_prefix,
         sessionmaker=res.sessionmaker,
         fetcher=fetcher,
         llm=LLMClient(FakeChatClient(["{}"]), model=None),
@@ -298,14 +299,10 @@ async def test_blocked_detail_stops_run_and_lock(integration_settings: Settings)
         assert stats.fetched == 0
 
         # Một process khác đang index cùng trang: lượt này bỏ qua.
-        async with res.engine.connect() as conn:
-            await conn.execute(
-                select(func.pg_advisory_lock(func.hashtext("board-index:fakeboard")))
-            )
+        other = index_lock(res.redis, res.settings.redis_prefix, FakeBoard.name)
+        async with other.hold() as held:
+            assert held
             skipped = await indexer(res, fake_site(JOBS)).run()
-            await conn.execute(
-                select(func.pg_advisory_unlock(func.hashtext("board-index:fakeboard")))
-            )
         assert skipped.skipped
         assert skipped.run_id is None
 
@@ -433,6 +430,64 @@ async def test_serp_lookup_adopts_profile_on_board(
         )
         assert again == 0
         assert len(queries) == 1
+
+
+async def test_serp_lookup_skips_profile_mapped_to_another_company(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Trang profile SERP tìm được đã thuộc doanh nghiệp khác: không ghi đè, không tính là tìm
+    được (`lookup_profiles` trả 0)."""
+    from pydantic import SecretStr
+
+    from jobcrawler.services.serp import SERPER_URL
+
+    monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
+    settings = settings_for(integration_settings).model_copy(
+        update={"serp_api_key": SecretStr("test-key"), "serp_cache_seconds": 0}
+    )
+    async with open_resources(settings, db_logs=False) as res:
+        company_id = await reset(res)
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(Company).where(Company.input_name == f"{ACME} (khác)"))
+            other = Company(input_name=f"{ACME} (khác)")
+            s.add(other)
+            await s.flush()
+            other_id = other.id
+            s.add(
+                SourceProfile(
+                    source=FakeBoard.name,
+                    external_id="7",
+                    url=f"{HOME}cong-ty/acme-7",
+                    name_on_source=ACME,
+                    company_id=other_id,
+                )
+            )
+        site = fake_site(JOBS)
+
+        def serper(kwargs: dict[str, Any]) -> FetchResult:
+            body = {"organic": [{"title": ACME, "link": f"{HOME}cong-ty/acme-7"}]}
+            return fetch_result(SERPER_URL, json.dumps(body), content_type="application/json")
+
+        site.add_route(SERPER_URL, serper)
+        site.add(
+            f"{HOME}cong-ty/acme-7",
+            f'<h1>{ACME}</h1><a href="/viec-lam/ke-toan-11.html">Kế toán</a>',
+        )
+        online = dataclasses.replace(res, http=site, api_http=site)  # pyright: ignore[reportArgumentType]
+        found = await boards_service.lookup_profiles(
+            online, await _company(res, company_id), timeout=10, records=[]
+        )
+        assert found == 0
+        async with res.sessionmaker() as s:
+            profile = await s.scalar(
+                select(SourceProfile).where(
+                    SourceProfile.source == FakeBoard.name, SourceProfile.external_id == "7"
+                )
+            )
+        assert profile is not None
+        assert profile.company_id == other_id
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(Company).where(Company.id == other_id))
 
 
 async def _company(res: Resources, company_id: UUID) -> Company:

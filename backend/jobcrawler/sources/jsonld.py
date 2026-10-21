@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import html as htmllib
+from collections import Counter
 from typing import Any
 
 from extruct.jsonld import JsonLdExtractor
@@ -248,17 +249,16 @@ def _string_list(value: Any) -> list[str]:
 
 def external_id_for_url(url: str, discriminator: str = "") -> str:
     """Định danh ổn định cho tin không có id riêng: hash của URL đã chuẩn hoá (+ phần phân biệt
-    khi nhiều tin chung một URL, vd. thứ tự trên trang hoặc tên vị trí)."""
+    khi nhiều tin chung một URL, vd. mã hoặc tên vị trí)."""
     key = normalize_url(url) or url
     if discriminator:
         key = f"{key}|{discriminator}"
     return hashlib.sha1(key.encode()).hexdigest()[:20]
 
 
-def to_raw_job(
-    node: dict[str, Any], *, page_url: str, source: str = "careers", index: int = 0
-) -> RawJob | None:
-    """Một object JobPosting → RawJob. Thiếu tiêu đề thì bỏ."""
+def to_raw_job(node: dict[str, Any], *, page_url: str, source: str = "careers") -> RawJob | None:
+    """Một object JobPosting → RawJob. Thiếu tiêu đề thì bỏ. Mã theo URL; nhiều tin chung một URL
+    thì `raw_jobs` phân biệt lại."""
     title = _name(node.get("title")) or _name(node.get("name"))
     if not title:
         return None
@@ -268,11 +268,9 @@ def to_raw_job(
     if isinstance(employment, list):
         employment = ", ".join(str(e) for e in employment if e)
     identifier = _identifier(node.get("identifier"))
-    # Nhiều JobPosting trên cùng một trang (trang danh sách) có chung URL: thêm thứ tự.
-    discriminator = str(index) if index and url == page_url else ""
     return RawJob(
         source=source,
-        external_id=external_id_for_url(url, discriminator),
+        external_id=external_id_for_url(url),
         url=url,
         title=title,
         company_name=_name(node.get("hiringOrganization")),
@@ -305,8 +303,36 @@ def to_raw_job(
 
 
 def raw_jobs(html: str, url: str, *, source: str = "careers") -> list[RawJob]:
-    jobs: list[RawJob] = []
-    for i, node in enumerate(job_postings(html, url)):
-        if (job := to_raw_job(node, page_url=url, source=source, index=i)) is not None:
-            jobs.append(job)
+    jobs = [
+        job
+        for node in job_postings(html, url)
+        if (job := to_raw_job(node, page_url=url, source=source)) is not None
+    ]
+    return _distinct_ids(jobs)
+
+
+def _distinct_ids(jobs: list[RawJob]) -> list[RawJob]:
+    """Nhiều JobPosting chung một URL (trang danh sách không có trang riêng từng tin): mã phân
+    biệt bằng `identifier` (khi riêng từng tin), không thì tên vị trí (trùng tên: thêm số lần
+    gặp). Không theo thứ tự trên trang: gỡ một tin không làm tin khác đổi mã."""
+    by_url: dict[str, list[int]] = {}
+    for i, job in enumerate(jobs):
+        by_url.setdefault(job.url, []).append(i)
+    for indexes in by_url.values():
+        if len(indexes) < 2:
+            continue
+        idents = Counter(str(v) for j in indexes if (v := jobs[j].extra.get("identifier")))
+        titles: Counter[str] = Counter()
+        for j in indexes:
+            job = jobs[j]
+            identifier = job.extra.get("identifier")
+            if identifier and idents[str(identifier)] == 1:
+                discriminator = f"id:{identifier}"
+            else:
+                titles[job.title] += 1
+                n = titles[job.title]
+                discriminator = job.title if n == 1 else f"{job.title}#{n}"
+            jobs[j] = job.model_copy(
+                update={"external_id": external_id_for_url(job.url, discriminator)}
+            )
     return jobs

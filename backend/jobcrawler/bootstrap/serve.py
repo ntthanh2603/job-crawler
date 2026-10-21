@@ -9,6 +9,8 @@ con, chờ chúng dừng tối đa STOP_SECONDS rồi giết nốt.
 Cài đặt `live=False` (trang Cài đặt): lưu xong thì bộ đếm `<REDIS_PREFIX>:settings:restart` tăng
 (`modules.settings.app_settings_service`); mỗi WATCH_SECONDS serve đọc bộ đếm, tăng thì khởi động
 lại mọi process con (dừng êm như trên) rồi ghi số đã áp dụng vào `...:settings:restart_applied`.
+Bộ đếm nhỏ đi (Redis mới / bị xoá, đếm lại từ 0) thì serve theo số mới; số đó > 0 (đã có lần lưu
+sau khi đếm lại) thì cũng khởi động lại.
 Serve cũng giữ khoá `<REDIS_PREFIX>:serve:alive` (TTL ALIVE_TTL_SECONDS) để trang Cài đặt biết cài
 đặt được tự áp dụng. Mất Redis không làm serve thoát (chỉ log, thử lại ở nhịp sau)."""
 
@@ -137,14 +139,19 @@ class Supervisor:
         wanted = self._read_watch()
         if wanted is None:
             return
-        if self._applied is not None and wanted > self._applied:
-            log.info("serve.restart_for_settings", wanted=wanted, applied=self._applied)
+        applied = self._applied
+        if applied is not None and wanted < applied:
+            # Bộ đếm trên Redis về lại từ đầu (Redis mới / bị xoá): theo số mới, không thì N lần lưu
+            # tiếp theo không khởi động lại. Số > 0 nghĩa là đã có lần lưu sau đó: khởi động lại.
+            log.warning("serve.restart_counter_reset", wanted=wanted, applied=applied)
+        if applied is not None and wanted != applied and wanted > 0:
+            log.info("serve.restart_for_settings", wanted=wanted, applied=applied)
             self._stop_all()
             if self._stopping:
                 return
             self._start_all()
             self.restarts += 1
-        self._mark_applied(max(wanted, self._applied or 0))
+        self._mark_applied(wanted)
 
     def _read_watch(self) -> int | None:
         if self._watch is None:

@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from jobcrawler.common.schemas import FetchOutcome
-from jobcrawler.services.fakes import FakeRenderer, FakeTransport, response
+from jobcrawler.services.fakes import FakeRenderer, FakeTransport, fetch_result, response
 from jobcrawler.services.net.direct import DirectTransport
 from jobcrawler.services.net.http import (
     CapturedJson,
@@ -24,6 +24,7 @@ from jobcrawler.services.net.http import TransportError as TErr
 from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.services.net.proxy_pool import ProxyPool, parse_proxy_line
 from jobcrawler.services.net.ratelimit import MemoryRateLimiter
+from jobcrawler.sources.base import transient_failure
 
 from .conftest import FakeClock
 
@@ -122,6 +123,7 @@ async def test_robots_disallow_skips_request(clock: FakeClock) -> None:
     result = await rig.client.fetch(f"{SITE}/private/1")
     assert result.outcome is FetchOutcome.ROBOTS_DISALLOWED
     assert result.error == "robots_disallowed"
+    assert not transient_failure(result)  # luật cấm: lượt sau vẫn cấm
     assert rig.transport.urls() == [ROBOTS]
 
 
@@ -139,6 +141,8 @@ async def test_robots_server_error_disallows_all(clock: FakeClock) -> None:
     result = await rig.client.fetch(f"{SITE}/a")
     assert result.outcome is FetchOutcome.ROBOTS_DISALLOWED
     assert result.error == "robots_unreachable"  # không lẫn với luật cấm trong robots.txt
+    # Lỗi tạm: nguồn chưa xong (tin chưa tải được không bị coi là đã gỡ).
+    assert transient_failure(result)
 
 
 async def test_crawl_delay_and_domain_override_set_rate(clock: FakeClock) -> None:
@@ -374,10 +378,20 @@ def test_parse_retry_after() -> None:
             '<meta charset="windows-1252"><p>café</p>',
         ),
         (b"\xff\xfe broken", None, "�� broken"),
+        # BOM UTF-8 ở đầu bị bỏ, kể cả khi header ghi rõ charset.
+        ('\ufeff{"a": 1}'.encode(), "application/json; charset=utf-8", '{"a": 1}'),
+        ('\ufeff{"a": 1}'.encode(), "application/json", '{"a": 1}'),
     ],
 )
 def test_decode_body(content: bytes, content_type: str | None, expected: str) -> None:
     assert decode_body(content, content_type) == expected
+
+
+def test_json_with_utf8_bom() -> None:
+    result = fetch_result(
+        "https://a.vn/api", '\ufeff{"jobs": []}'.encode(), content_type="application/json"
+    )
+    assert result.json() == {"jobs": []}
 
 
 # --- DirectTransport (httpx, API bên ngoài) ---------------------------------------------------

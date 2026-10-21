@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, update
 
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import (
+    JobLevel,
     JobStatus,
     KycStatus,
     PlanStatus,
@@ -25,12 +26,24 @@ from jobcrawler.common.schemas import (
     ScheduleState,
 )
 from jobcrawler.database import fencing
-from jobcrawler.database.models import Company, CompanyRun, CompanySchedule, CrawlPlan, Job
-from jobcrawler.modules.crawl import crawl_service, sla_service
+from jobcrawler.database.models import (
+    Company,
+    CompanyRun,
+    CompanySchedule,
+    CrawlPlan,
+    Job,
+    JobPosting,
+)
+from jobcrawler.modules.crawl import crawl_service, schedule_service, sla_service
+from jobcrawler.pipeline import dedup, store
+from jobcrawler.pipeline.normalize import NormalizedJob
+from jobcrawler.pipeline.verify import Verdict
 from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.services.redis.queues import drop_queue
 from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
+
+from ..jobs_fixtures import NOW, normalized, raw_job
 
 pytestmark = pytest.mark.integration
 
@@ -395,3 +408,163 @@ async def test_truncated_poll_remembers_new_jobs(env: tuple[Resources, Site, UUI
     third = await crawl_service.poll_company(res, company_id)
     assert (third.new, third.saved) == (0, False), third
     assert len(await active_titles(res, company_id)) == 4
+
+
+async def test_rebuild_on_error_off_waits_for_the_nightly_build(
+    env: tuple[Resources, Site, UUID],
+) -> None:
+    """REBUILD_ON_ERROR tắt: bộ khung hỏng không build lại ban ngày, chờ mốc build đêm; doanh
+    nghiệp vẫn `ready` (nguồn khác vẫn được poll)."""
+    res, site, company_id = env
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
+    res.settings = res.settings.model_copy(update={"rebuild_on_error": False})
+    site.break_listing(404)
+    started = datetime.now(UTC)
+    outcome = await crawl_service.poll_company(res, company_id)
+    assert (outcome.status, outcome.rebuild) == ("broken", False)
+    async with res.sessionmaker() as s:
+        schedule = await s.get(CompanySchedule, company_id)
+    assert schedule is not None
+    assert schedule.state == ScheduleState.READY.value
+    assert schedule.next_build_at is not None
+    assert schedule.next_build_at > started
+    assert schedule.next_build_at <= schedule_service.next_build_at(
+        company_id, datetime.now(UTC), res.settings
+    )
+    assert await res.queues.build.job(crawl_service.build_key(company_id)) is None
+
+
+async def test_poll_never_unpauses_a_paused_company(env: tuple[Resources, Site, UUID]) -> None:
+    res, site, company_id = env
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
+    async with res.sessionmaker.begin() as s:
+        await s.execute(
+            update(CompanySchedule)
+            .where(CompanySchedule.company_id == company_id)
+            .values(state=ScheduleState.PAUSED.value)
+        )
+    # Trang tuyển dụng có tin mới của doanh nghiệp đã tắt thu thập: bỏ lượt.
+    board = await crawl_service.poll_company(res, company_id, trigger=RunTrigger.BOARD)
+    assert board.status == "skipped"
+    # Người dùng bấm poll, bộ khung hỏng: không build lại, lịch vẫn `paused`.
+    site.break_listing(404)
+    manual = await crawl_service.poll_company(res, company_id, trigger=RunTrigger.MANUAL)
+    assert (manual.status, manual.rebuild) == ("broken", False)
+    async with res.sessionmaker() as s:
+        schedule = await s.get(CompanySchedule, company_id)
+    assert schedule is not None
+    assert schedule.state == ScheduleState.PAUSED.value
+    assert await res.queues.build.job(crawl_service.build_key(company_id)) is None
+
+
+async def test_board_poll_deduped_by_a_waiting_poll_is_not_lost(
+    env: tuple[Resources, Site, UUID],
+) -> None:
+    """Lượt poll `board` trùng khoá `poll:<id>` của lượt theo lịch đang chờ: lượt đó đọc cờ và đọc
+    tin trang tuyển dụng, tin không phải chờ tới build đêm."""
+    res, _site, company_id = env
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
+    assert await crawl_service.enqueue_polls(res, [company_id], trigger=RunTrigger.SCHEDULE) == 1
+    assert await crawl_service.enqueue_polls(res, [company_id], trigger=RunTrigger.BOARD) == 0
+    outcome = await crawl_service.poll_company(res, company_id, trigger=RunTrigger.SCHEDULE)
+    assert outcome.saved, outcome
+    async with res.sessionmaker() as s:
+        triggers = (
+            await s.scalars(
+                select(CompanyRun.trigger).where(
+                    CompanyRun.company_id == company_id, CompanyRun.kind == RunKind.POLL.value
+                )
+            )
+        ).all()
+    assert list(triggers) == [RunTrigger.BOARD.value]
+    assert not await crawl_service.take_board_pending(res, company_id)
+
+
+async def test_partial_run_merges_with_the_jobs_other_postings(
+    integration_settings: Settings,
+) -> None:
+    """Lượt chưa đủ chỉ thấy tin TopCV của một việc có bản chuẩn là tin careers: việc giữ bản chuẩn
+    careers, mọi URL nguồn, lương / hạn nộp của tin careers (không đổi qua lại giữa ngày và đêm).
+    Tin careers đã gỡ (`absent`) thì không gộp lại; tin đăng lại với mã mới gộp với tin TopCV."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME partial {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+        on_site = normalized(
+            raw_job(external_id=f"c-{suffix}", url=f"https://careers.acme.vn/jobs/c-{suffix}"),
+            board=False,
+        )
+        on_board = normalized(
+            raw_job(
+                source="topcv",
+                external_id=f"t-{suffix}",
+                url=f"https://www.topcv.vn/viec-lam/ke-toan/{suffix}.html",
+                salary_raw=None,
+                expires_at=None,
+                level="Senior",
+            ),
+            board=True,
+        )
+        repost = normalized(
+            raw_job(external_id=f"c2-{suffix}", url=f"https://careers.acme.vn/jobs/c2-{suffix}"),
+            board=False,
+        )
+        assert on_site.salary is not None
+
+        async def save(
+            jobs: list[NormalizedJob],
+            *,
+            complete: bool,
+            absent: set[tuple[str, str]] | None = None,
+        ) -> store.SaveResult:
+            verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
+            async with res.sessionmaker.begin() as s:
+                return await store.save_company_jobs(
+                    s,
+                    company_id=company_id,
+                    company_name="ACME",
+                    jobs=jobs,
+                    verdicts=verdicts,
+                    clusters=dedup.cluster_jobs(jobs),
+                    now=NOW,
+                    complete=complete,
+                    is_board={"topcv"}.__contains__,
+                    absent=absent or set(),
+                )
+
+        [full] = (await save([on_site, on_board], complete=True)).jobs
+        assert full.canonical_source == "careers"
+
+        # Lượt poll `board`: chỉ thấy tin TopCV.
+        [job] = (await save([on_board], complete=False)).jobs
+        assert job.canonical_source == "careers"
+        assert job.source_urls == [on_site.url, on_board.url]
+        assert job.salary is not None
+        assert job.salary.min == on_site.salary.min
+        assert job.expires_at == on_site.expires_at
+        assert job.level is JobLevel.SENIOR  # rule của tin TopCV
+        async with res.sessionmaker() as s:
+            rows = (await s.scalars(select(Job).where(Job.company_id == company_id))).all()
+            canonical = await s.scalar(
+                select(JobPosting.id).where(JobPosting.external_id == on_site.external_id)
+            )
+        assert [r.canonical_posting_id for r in rows] == [canonical]
+        assert "DEDUP: gộp 2 tin" in rows[0].verification_reasons
+
+        # Tin careers đã gỡ khỏi trang (lượt poll đọc trọn nguồn): không gộp lại.
+        gone = {(on_site.source, on_site.external_id)}
+        [alone] = (await save([on_board], complete=False, absent=gone)).jobs
+        assert (alone.canonical_source, alone.source_urls) == ("topcv", [on_board.url])
+
+        # Đăng lại với mã mới (lượt poll thường, tin cũ đã gỡ): gắn vào việc cũ, gộp với tin TopCV.
+        [again] = (await save([repost], complete=False, absent=gone)).jobs
+        assert again.canonical_source == "careers"
+        assert again.source_urls == [repost.url, on_board.url]
+        async with res.sessionmaker() as s:
+            count = await s.scalar(
+                select(func.count()).select_from(Job).where(Job.company_id == company_id)
+            )
+        assert count == 1

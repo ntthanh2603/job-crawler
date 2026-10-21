@@ -557,6 +557,8 @@ def mark_reposts(
         members = sorted((idx[g] for g in group), key=newest, reverse=True)
         keep = jobs[members[0]]
         for i in members[1:]:
+            if jobs[i].external_id == keep.external_id:
+                continue  # chính tin đó, bóc hai lần: không phải đăng lại (gom cụm sẽ gộp)
             verdicts[i].reject(SPAM_REPOST, f"đăng lại của {keep.url}")
             rejected += 1
     return rejected
@@ -664,7 +666,7 @@ async def verify_jobs(
     suspects = [i for i, v in enumerate(verdicts) if v.accepted and v.confidence < min_confidence]
     remaining = list(suspects)
     if suspects and kv is not None:
-        keys = [cache_key(job_verify.PROMPT, _cache_id(jobs[i], ctx)) for i in suspects]
+        keys = [cache_key(job_verify.PROMPT, _cache_id(jobs[i], ctx), llm.model) for i in suspects]
         remaining = []
         for i, raw in zip(suspects, await kv.mget(keys), strict=True):
             try:

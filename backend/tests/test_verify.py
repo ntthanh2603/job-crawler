@@ -267,6 +267,13 @@ async def test_spam_reposts_keep_newest() -> None:
     assert "https://careers.acme.vn/jobs/2" in verdicts[0].reasons[-1]
 
 
+async def test_same_posting_collected_twice_is_not_its_own_repost() -> None:
+    # Hai nguồn cùng loại trả cùng một tin: bản thứ hai bị loại thì tin (cùng khoá) mất việc.
+    first, second = normalized(raw_job()), normalized(raw_job())
+    verdicts = await verify_jobs([first, second], ACME, no_llm(), now=NOW, until=0)
+    assert [v.code for v in verdicts] == [None, None]
+
+
 async def test_suspicious_job_needs_llm() -> None:
     job = normalized(raw_job(method=ExtractionMethod.LLM))
     until = time.monotonic() + 10

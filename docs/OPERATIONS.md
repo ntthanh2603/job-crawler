@@ -26,15 +26,18 @@ task down
 
 ## 2. Lịch thu thập
 
-| Khi nào                               | Việc                                                                            |
-| ------------------------------------- | ------------------------------------------------------------------------------- |
-| Doanh nghiệp mới (thêm tay / nạp CSV) | build ngay, bất kể giờ                                                          |
-| Đêm `BUILD_WINDOW` 00:00–06:00        | build mỗi doanh nghiệp một lần: đọc đủ site, dựng lại bộ khung, đóng việc đã gỡ |
-| Ngày `POLL_WINDOW` 06:00–24:00        | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới                       |
-| Poll lỗi (bộ khung hỏng)              | build lại ngay; vẫn hỏng thì thử lại sau 2 giờ                                  |
-| Trang tuyển dụng có tin mới           | poll ngay doanh nghiệp có profile đó                                            |
+| Khi nào                               | Việc                                                                                                        |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Doanh nghiệp mới (thêm tay / nạp CSV) | build ngay, bất kể giờ                                                                                      |
+| Đêm `BUILD_WINDOW` 00:00–06:00        | build mỗi doanh nghiệp một lần: đọc đủ site, dựng lại bộ khung, đóng việc đã gỡ                             |
+| Ngày `POLL_WINDOW` 06:00–24:00        | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới                                                   |
+| Poll lỗi (bộ khung hỏng)              | build lại ngay; vẫn hỏng thì thử lại sau 2 giờ (`REBUILD_ON_ERROR` tắt: chờ build đêm, nguồn khác vẫn poll) |
+| Trang tuyển dụng có tin mới           | poll ngay doanh nghiệp có profile đó (đang có lượt poll thì lượt đó đọc tin)                                |
 
-Khung giờ theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh). Đổi khung / chu kỳ có hiệu lực trong vài giây.
+Khung giờ theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh). Đổi khung / chu kỳ có hiệu lực trong vài giây;
+đổi múi giờ (↻) thì `jobcrawler serve` khởi động lại các process con, vì lịch cron của runner tính
+theo múi giờ đọc lúc khởi động. Biểu đồ "việc mới theo ngày" ở Tổng quan cũng chia ngày theo múi
+giờ này.
 
 **Bộ khung** (trang Cài đặt → Lịch thu thập): mỗi doanh nghiệp tối đa `PLAN_MAX_PAGES` (10) trang
 mỗi lượt poll, mỗi nguồn ít nhất `PLAN_MIN_PAGES` (3) khi site có đủ. Tab "Bộ khung & lịch" của doanh
@@ -134,7 +137,9 @@ Trang Cài đặt → **Proxy**.
 
 - Trang **Doanh nghiệp**: "Thêm doanh nghiệp" (nhập tay; MST / website sai thì báo lỗi) hoặc "Nạp danh
   sách" (CSV cột `name`, `tax_code`, `website`, `note`; dòng sai bị bỏ). Không tạo trùng: cùng MST,
-  hoặc cùng tên không mâu thuẫn MST / website → chỉ bổ sung trường trống.
+  hoặc cùng tên không mâu thuẫn MST / website → chỉ bổ sung trường trống. Nạp mỗi lô 500 dòng một
+  transaction; lô đụng deadlock với lượt KYC đang chạy được chạy lại (tối đa 3 lần, log
+  `import.deadlock_retry`).
 - DB trống lúc khởi động thì tự nạp 50 doanh nghiệp lớn (`DEMO_COMPANIES=true`, tắt ở production).
   File đó tải được ở "Nạp danh sách" → "Tải CSV mẫu".
 
@@ -153,7 +158,8 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   duyệt.
 - **Log về chia việc** (cảnh báo bất thường, không cần làm gì nếu chỉ thỉnh thoảng):
   `queue.job_revoked` (runner tự huỷ lượt đã bị runner khác thu hồi — runner đó từng đứng / mất
-  Redis), `lock.lost` + `LeaseLost` (lượt mất khoá doanh nghiệp / bảo trì giữa chừng), `FencedOut`
+  Redis), `lock.lost` + `LeaseLost` (lượt mất khoá doanh nghiệp / bảo trì giữa chừng;
+  `board.index_lock_lost`: lượt index trang tuyển dụng mất khoá, bị huỷ), `FencedOut`
   (lượt cũ bị chặn ghi DB vì lượt mới đã giữ khoá), `company.build_skipped` (build gặp lượt khác
   đang chạy), `gateway.worker_lost` với `reason=orphan` (worker không nhận được việc đã giao) và
   `gateway.revoked`. Lặp lại thường xuyên → xem runner / worker đó có bị đứng (CPU, swap, GC) hay mạng

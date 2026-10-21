@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import httpx2
 import openai
@@ -15,11 +16,13 @@ from jobcrawler.services.llm import (
     MAX_RATE_LIMIT_RETRIES,
     TRUNCATION_MARK,
     LLMClient,
+    cached_structured,
     extract_json,
     is_rate_cap,
     retry_after,
     truncate,
 )
+from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.services.net.ratelimit import MemoryRateLimiter
 
 from .conftest import FakeClock
@@ -116,6 +119,48 @@ async def test_client_errors_are_not_retried() -> None:
     assert result.error is not None
     assert result.error.startswith("http_400")
     assert len(fake.calls) == 1
+
+
+class _OddClient:
+    """Phản hồi sai dạng mà endpoint / SDK vẫn có thể trả: `choices` rỗng, `usage` thiếu số."""
+
+    def __init__(self, replies: list[object]) -> None:
+        self._replies = replies
+        self.chat = self
+        self.completions = self
+
+    async def create(self, **kwargs: object) -> object:
+        reply = self._replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+
+async def test_malformed_responses_are_errors_not_exceptions() -> None:
+    """Không ném lỗi ra ngoài (trong `gather_all` một lỗi huỷ cả các lời gọi khác)."""
+    content = '{"is_job": true, "confidence": 1}'
+    ok = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(prompt_tokens=None, completion_tokens=None),
+    )
+    empty = SimpleNamespace(choices=[], usage=None)
+    llm = LLMClient(_OddClient([empty, ok]), model="qwen-test")
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert (result.value, result.attempts, result.prompt_tokens) == (
+        Answer(is_job=True, confidence=1),
+        2,
+        0,
+    )
+
+    request = httpx2.Request("POST", "http://llm/v1/chat/completions")
+    invalid = openai.APIResponseValidationError(
+        response=httpx2.Response(200, request=request), body=None
+    )
+    llm = LLMClient(_OddClient([empty, invalid]), model="qwen-test")
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.unknown
+    assert result.attempts == 2
+    assert (result.error or "").startswith("error: APIResponseValidationError")
 
 
 async def test_call_timeout_is_enforced() -> None:
@@ -231,3 +276,19 @@ def test_retry_after_parsing() -> None:
     assert not is_rate_cap(rate_limited("key_concurrency_limit", 1))
     assert not is_rate_cap(rate_limited("global_concurrency_limit", 1))
     assert retry_after(ValueError()) == 1.0
+
+
+async def test_cache_is_per_model() -> None:
+    """Đổi LLM_MODEL thì hỏi lại: câu trả lời của model cũ không được dùng lại."""
+    kv = MemoryKV()
+    reply = '{"is_job": true, "confidence": 0.9}'
+    old, _ = make([reply])
+    first = await cached_structured(old, kv, "h1", PROMPT, Answer, ttl=60, document="x")
+    again = await cached_structured(old, kv, "h1", PROMPT, Answer, ttl=60, document="x")
+    assert first.value is not None
+    assert not first.cached
+    assert again.cached
+    new = LLMClient(FakeChatClient([reply]), model="qwen-new")  # pyright: ignore[reportArgumentType]
+    other = await cached_structured(new, kv, "h1", PROMPT, Answer, ttl=60, document="x")
+    assert other.value is not None
+    assert not other.cached

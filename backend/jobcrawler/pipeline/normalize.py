@@ -666,8 +666,11 @@ def clean_text_field(text: str | None, fmt: str = "html", base_url: str | None =
 _TITLE_SPLIT = re.compile(r"\s+[-–—|]\s+|\s*\|\s*|\s+[-–—]\s*$|^\s*[-–—]\s+")
 _SALARY_HINT = re.compile(
     r"\b(luong|thu nhap|salary|income|upto|up to|len den|toi da)\b"
-    r"|\d[\d.,]*\s*(k|m|tr|trieu|cu|usd|vnd|d)\b|\$\s*\d|\d\s*\$"
+    # k / m / đ cần số từ hai chữ số: "2D", "3D", "4K" (hoạ sĩ 3D, video 4K) không phải lương.
+    r"|\d[\d.,]*\s*(tr|trieu|cu|usd|vnd)\b|\d[\d.,]*\d\s*(k|m|d)\b"
 )
+# Ký hiệu tiền tệ (xét trên đoạn gốc: `fold` bỏ mất "$"): "$2K", "1.500$".
+_CURRENCY_SIGN = re.compile(r"[$€¥₫]\s*\d|\d\s*[$€¥₫]")
 _URGENT = re.compile(r"^(tuyen gap|can gap|gap|urgent|hot|hot job|tuyen dung gap|new|moi)$")
 _EXPERIENCE_HINT = re.compile(
     r"^(khong (yeu cau|can) kinh nghiem|chua (co|can) kinh nghiem|no experience( required)?|"
@@ -699,6 +702,7 @@ def _noise_segment(segment: str) -> bool:
         return True
     return bool(
         _SALARY_HINT.search(f)
+        or _CURRENCY_SIGN.search(segment)
         or _URGENT.match(f)
         or _EXPERIENCE_HINT.match(f)
         or _CODE.match(f)
@@ -744,10 +748,20 @@ _MULTIPLIER = {
     "ty": 1e9,
 }
 _VND_UNITS = frozenset({"tr", "trieu", "cu", "ty", "nghin", "ngan"})
-_MAX_ONLY = re.compile(r"\b(up ?to|toi|len (den|toi)|den|max|toi da|duoi|under|below)\b|<")
+# "tới" bỏ dấu là "toi", trùng chữ đầu của "tối thiểu".
+_MAX_ONLY = re.compile(
+    r"\b(up ?to|toi(?! thieu)|len (den|toi)|den|max|toi da|duoi|under|below)\b|<"
+)
 _MIN_ONLY = re.compile(
     r"\b(tu|from|tren|over|hon|min|toi thieu|above|starting|at least|it nhat)\b|>"
 )
+# Ngay sau số (chỉ cách đơn vị / kỳ trả): "15 triệu trở lên", "15tr+", "2000 USD or more".
+_MIN_SUFFIX = re.compile(r"\+|\D{0,16}?\b(tro len|or more|or above|and above)\b")
+# Năm trước nhãn hoặc sau chữ "năm" ("Lương 2025: 15 triệu"): không phải số tiền.
+_YEAR = re.compile(r"(?:19|20)\d\d")
+_YEAR_BEFORE = re.compile(r"\b(nam|year)\s*$")
+_YEAR_AFTER = re.compile(r"\s*:")
+_CURRENCY_AFTER = re.compile(r"\s*(?:\$|usd|vnd|eur|d\b|dong)")
 _CURRENCIES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("USD", re.compile(r"\$|\busd\b|us dollar|\bdo la\b")),
     ("EUR", re.compile(r"€|\beur\b")),
@@ -761,6 +775,11 @@ _PERIODS: tuple[tuple[SalaryPeriod, re.Pattern[str]], ...] = (
     (SalaryPeriod.HOUR, re.compile(r"\b(gio|hour|hourly|hr|h)\b")),
     (SalaryPeriod.YEAR, re.compile(r"\b(nam|year|yearly|annual|annually|annum|yr|pa)\b")),
 )
+# Lương theo ngày / tuần / ca: `SalaryPeriod` không có kỳ này, để trống thay vì gọi là lương tháng.
+_OTHER_PERIOD = re.compile(
+    r"(?:/|\b(?:per|moi|mot|a|1)\s+)\s*(?:ngay|day|tuan|week|ca|shift|buoi)\b|\b(?:daily|weekly)\b"
+)
+_OTHER_PERIOD_FIELD = frozenset({"day", "daily", "ngay", "week", "weekly", "tuan", "shift"})
 
 
 def _salary_lower(text: str) -> str:
@@ -792,6 +811,13 @@ def _period(text: str) -> SalaryPeriod | None:
     return None
 
 
+def _other_period(text: str, *, field: bool = False) -> bool:
+    """Lương theo ngày / tuần ("500k/ngày", trường kỳ trả "DAY"): không có trong `SalaryPeriod`."""
+    if field:
+        return fold(text) in _OTHER_PERIOD_FIELD
+    return _period(text) is None and _OTHER_PERIOD.search(_salary_lower(text)) is not None
+
+
 def _currency(text: str) -> str | None:
     for code, pattern in _CURRENCIES:
         if pattern.search(text):
@@ -812,13 +838,27 @@ class _Amounts:
     high: float | None = None
     currency: str | None = None
     period: SalaryPeriod | None = None
+    other_period: bool = False  # theo ngày / tuần: không gán kỳ trả mặc định
+
+
+def _is_year(s: str, m: re.Match[str]) -> bool:
+    """Số là năm ("Lương 2025: 15 triệu", "Thu nhập năm 2024: …"), không phải số tiền."""
+    if m.group(2) is not None or _YEAR.fullmatch(m.group(1)) is None:
+        return False
+    if _CURRENCY_AFTER.match(s, m.end()):
+        return False
+    return bool(_YEAR_AFTER.match(s, m.end()) or _YEAR_BEFORE.search(s[: m.start()]))
 
 
 def _parse_amounts(text: str) -> _Amounts:
     s = _salary_lower(text)
-    found = [(m, parse_number(m.group(1)), m.group(2)) for m in _SAL_NUM.finditer(s)]
+    found = [
+        (m, parse_number(m.group(1)), m.group(2))
+        for m in _SAL_NUM.finditer(s)
+        if not _is_year(s, m)
+    ]
     nums = [(m, v, unit) for m, v, unit in found if v is not None]
-    out = _Amounts(currency=_currency(s), period=_period(text))
+    out = _Amounts(currency=_currency(s), period=_period(text), other_period=_other_period(text))
     if not nums:
         return out
     if len(nums) >= 2 and nums[0][2] is None and nums[1][2] is not None:
@@ -832,7 +872,7 @@ def _parse_amounts(text: str) -> _Amounts:
         out.low, out.high = sorted(values[:2])
     elif _MAX_ONLY.search(prefix):
         out.high = values[0]
-    elif _MIN_ONLY.search(prefix):
+    elif _MIN_ONLY.search(prefix) or _MIN_SUFFIX.match(s, nums[0][0].end()):
         out.low = values[0]
     else:
         out.low = out.high = values[0]
@@ -843,8 +883,8 @@ def _parse_amounts(text: str) -> _Amounts:
         if out.currency == "VND" and top < 1000:
             out.low = out.low * 1e6 if out.low is not None else None
             out.high = out.high * 1e6 if out.high is not None else None
-        elif out.currency is None and top >= 100_000:
-            out.currency = "VND"
+    if out.currency is None and top >= 100_000:
+        out.currency = "VND"  # số lớn không ghi tiền tệ ("300k/giờ", "Upto 30M") là VND
     return out
 
 
@@ -865,6 +905,7 @@ def parse_salary(
         high=high if high is not None else (None if low is not None else parsed.high),
         currency=_norm_currency(currency) or parsed.currency,
         period=(_period(period) if period else None) or parsed.period,
+        other_period=_other_period(period, field=True) if period else parsed.other_period,
     )
     # Nguồn ghi 0 khi không công bố ("0 - 0", "0 - 1.600 USD"): 0 không phải mức lương.
     amounts.low = amounts.low or None
@@ -880,7 +921,7 @@ def parse_salary(
     if amounts.low is not None and amounts.high is not None and amounts.low > amounts.high:
         amounts.low, amounts.high = amounts.high, amounts.low
     top = max(amounts.low or 0, amounts.high or 0)
-    if amounts.period is None:
+    if amounts.period is None and not amounts.other_period:
         yearly = (amounts.currency == "USD" and top >= 30_000) or (
             amounts.currency == "VND" and top >= 500_000_000
         )
@@ -1335,7 +1376,8 @@ def clean_skills(skills: Iterable[str], title: str) -> list[str]:
 
 
 def normalize_locations(raw: Sequence[str], title: str) -> list[Location]:
-    """Mỗi địa điểm thô → (tỉnh/thành mới, địa chỉ gốc). Nguồn không ghi địa điểm thì lấy tỉnh
+    """Mỗi địa điểm thô → (tỉnh/thành mới, địa chỉ gốc). Địa điểm chỉ là danh sách tỉnh/thành
+    ("Hà Nội, Hồ Chí Minh") → mỗi tỉnh/thành một địa điểm. Nguồn không ghi địa điểm thì lấy tỉnh
     nêu trong tiêu đề ("... - Đồng Nai", "HN/HCM")."""
     out: list[Location] = []
     seen: set[tuple[str | None, str | None]] = set()
@@ -1343,10 +1385,12 @@ def normalize_locations(raw: Sequence[str], title: str) -> list[Location]:
         address = _SPACES.sub(" ", ftfy.fix_text(value)).strip(" ,") if value else ""
         if not address:
             continue
-        key = (provinces.province_of(address), address)
-        if key not in seen:
-            seen.add(key)
-            out.append(Location(province=key[0], address_raw=address))
+        units = provinces.list_units(address)
+        for part in units if len(units) > 1 else [address]:
+            key = (provinces.province_of(part), part)
+            if key not in seen:
+                seen.add(key)
+                out.append(Location(province=key[0], address_raw=part))
     if not out:
         out = [Location(province=p) for p in provinces.find_provinces(title)]
     return out
@@ -1411,11 +1455,29 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
     )
 
 
+def _content_size(raw: RawJob) -> int:
+    return sum(len(t or "") for t in (raw.description, raw.requirements, raw.benefits))
+
+
+def unique_raws(raws: Iterable[RawJob]) -> list[RawJob]:
+    """Một bản mỗi tin `(source, external_id)`: hai nguồn cùng loại (hai trang careers của một
+    website, bảng ATS thấy qua website và qua trang tuyển dụng) có thể trả cùng một tin. Giữ bản
+    có nội dung dài hơn (bằng nhau thì bản gặp trước), ở vị trí của bản gặp trước."""
+    best: dict[tuple[str, str], RawJob] = {}
+    for raw in raws:
+        key = (raw.source, raw.external_id)
+        if key not in best or _content_size(raw) > _content_size(best[key]):
+            best[key] = raw
+    return list(best.values())
+
+
 def normalize_jobs(
     raws: Iterable[RawJob], *, now: datetime, is_board: Callable[[str], bool]
 ) -> list[NormalizedJob]:
+    """Chuẩn hoá các tin của một lượt; tin trùng `(source, external_id)` chỉ giữ một bản
+    (`unique_raws`): bản thứ hai bị loại là "đăng lại" của chính nó thì tin mất việc."""
     out: list[NormalizedJob] = []
-    for raw in raws:
+    for raw in unique_raws(raws):
         try:
             out.append(normalize_job(raw, now=now, board=is_board(raw.source)))
         except Exception:  # một tin lạ không được làm hỏng cả doanh nghiệp
@@ -1479,7 +1541,7 @@ async def classify_unclear(
     filled = 0
     ask: list[NormalizedJob] = []
     cached = (
-        await kv.mget([cache_key(prompt, j.content_hash) for j in todo])
+        await kv.mget([cache_key(prompt, j.content_hash, llm.model) for j in todo])
         if kv
         else [None] * len(todo)
     )

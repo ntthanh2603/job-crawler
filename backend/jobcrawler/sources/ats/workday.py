@@ -32,6 +32,9 @@ PAGE_SIZE = 20
 JSON_HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
 _HOST = r"(?P<host>(?P<tenant>[a-z0-9-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com)"
 _RESERVED_SITES = frozenset({"wday", "job", "jobs", "login", "refreshfacet"})
+# Mã yêu cầu: một từ có chữ số (JR0288027, R-12345, 2026-0042).
+_REQ_ID = re.compile(r"[A-Za-z0-9][\w.-]*\d[\w.-]*")
+_PATH_REQ_ID = re.compile(r"_(?P<id>[^_/]*?\d[^_/]*?)(?:-\d{1,2})?$")
 
 PATTERNS = (
     re.compile(_HOST + r"/wday/cxs/[a-z0-9-]+/(?P<site>[A-Za-z0-9_-]+)", re.IGNORECASE),
@@ -91,7 +94,13 @@ def parse_detail(
         for raw in [info.get("location"), *(info.get("additionalLocations") or [])]
         if (loc := text_or_none(raw))
     ]
-    req_id = text_or_none(info.get("jobReqId")) or text_or_none(info.get("id")) or path
+    # Cùng mã với tin chỉ có ở danh sách (`posting_key`): tin không đổi mã giữa các lượt.
+    req_id = (
+        text_or_none(info.get("jobReqId"))
+        or (posting_req_id(listing) if path and listing else None)
+        or text_or_none(info.get("id"))
+        or path
+    )
     country = (info.get("country") or {}).get("descriptor")
     return RawJob(
         source=KIND,
@@ -119,10 +128,20 @@ def posting_url(posting: dict[str, Any], *, ref: AtsRef) -> str:
     return f"https://{host}/{site}{posting['externalPath']}"
 
 
+def posting_req_id(posting: dict[str, Any]) -> str:
+    """Mã yêu cầu tuyển dụng (`jobReqId` của trang chi tiết) của một tin trong danh sách: ô
+    `bulletFields` có dạng mã (ô đầu có thể là nhãn "Spotlight Job"), không thì đuôi
+    `externalPath` (`.../Financial-Analyst_JR0286267`, bỏ hậu tố `-1` của tin đăng lại)."""
+    for bullet in posting.get("bulletFields") or []:
+        if (text := text_or_none(bullet)) and _REQ_ID.fullmatch(text):
+            return text
+    path = posting["externalPath"]
+    m = _PATH_REQ_ID.search(path)
+    return m["id"] if m else path
+
+
 def posting_key(posting: dict[str, Any], *, ref: AtsRef) -> str:
-    bullets = posting.get("bulletFields") or []
-    req_id = text_or_none(bullets[0]) if bullets else posting["externalPath"]
-    return f"{ref.key}:{req_id}"
+    return f"{ref.key}:{posting_req_id(posting)}"
 
 
 def listing_only(posting: dict[str, Any], *, ref: AtsRef) -> RawJob:

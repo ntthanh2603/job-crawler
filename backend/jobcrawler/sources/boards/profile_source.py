@@ -73,7 +73,12 @@ class BoardProfileSource(Source):
             if transient_failure(result):
                 session.truncate("detail_error")
             return None
-        parsed = self.adapter.parse_job(result.text, url)
+        try:
+            parsed = self.adapter.parse_job(result.text, url)
+        except Exception as exc:  # một trang lạ không được làm hỏng cả nguồn
+            log.exception("board.parse_error", url=url, source=self.adapter.source)
+            session.fail_page(result, f"parse_error: {type(exc).__name__}: {exc}")
+            return None
         if parsed is None:
             session.fail_page(result, "no_job: không bóc được tin từ trang chi tiết")
             return None

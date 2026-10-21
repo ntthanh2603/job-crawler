@@ -26,7 +26,15 @@ Mã nguồn: [`pipeline/dedup.py`](../backend/jobcrawler/pipeline/dedup.py) (lu�
 | 5. Index trong DB               | `ux_jobs_company_fingerprint_active`          | hai việc đang mở y hệt nội dung                        |
 
 `external_id` là id của ATS / trang tuyển dụng; tin không có id riêng dùng hash của URL đã chuẩn hoá
-(thêm thứ tự trên trang khi nhiều tin chung một URL, `jsonld.external_id_for_url`).
+(`jsonld.external_id_for_url`). Nhiều tin chung một URL (trang danh sách không có trang riêng từng
+tin) thì thêm `identifier` của tin, không có thì tên vị trí — không theo thứ tự trên trang, để gỡ một
+tin không làm tin khác đổi mã. Trang chi tiết có JSON-LD `url` là trang chủ / trang danh sách / site
+khác thì dùng URL trang.
+
+Hai nguồn cùng loại (hai trang careers của một website, bảng ATS thấy qua website và qua trang tuyển
+dụng) có thể trả cùng một tin trong một lượt: chuẩn hoá chỉ giữ một bản mỗi `(source, external_id)`
+(nội dung dài hơn, `normalize.unique_raws`). Không thì bản thứ hai bị `mark_reposts` loại là "đăng
+lại" của chính nó, và vì cùng khoá tin, dòng `job_postings` bị ghi là bị loại, mất việc.
 
 ## 2. Chuẩn hoá trước khi so
 
@@ -38,6 +46,11 @@ Mã nguồn: [`pipeline/dedup.py`](../backend/jobcrawler/pipeline/dedup.py) (lu�
 | `places`           | nơi làm ở mức **tỉnh cũ** (trước sáp nhập 2025), từ địa chỉ và tiêu đề, giữ đơn vị cụ thể nhất | "[Hải Dương] Kinh doanh" → {Hải Dương}              |
 | `provinces`        | tỉnh/thành hiện tại của các địa điểm                                                           | {Hải Phòng}                                         |
 
+Địa chỉ lấy tỉnh/thành nhắc tới sau cùng, bỏ tên đường trùng tên tỉnh ("72 Nguyễn Huệ, Quận 1"
+không phải Huế, "Xa lộ Hà Nội" không phải Hà Nội: sau số nhà, "đường", "phố", "xa lộ"...). Ô địa điểm
+chỉ là danh sách tỉnh/thành ("Hà Nội, Hồ Chí Minh", "HN/HCM") thành mỗi tỉnh một địa điểm, nên
+`places` / `provinces` có đủ các tỉnh, không chỉ tỉnh cuối.
+
 ## 3. Các phép so
 
 ### 3.1. Tiêu đề — `title_similarity`, ngưỡng 90
@@ -45,7 +58,10 @@ Mã nguồn: [`pipeline/dedup.py`](../backend/jobcrawler/pipeline/dedup.py) (lu�
 1. **Chặn cấp bậc** (`rank_conflict`): hai tiêu đề lệch nhau ở một từ chỉ cấp bậc / vai trò → 0 điểm.
    Từ: senior, sr, junior, jr, lead, leader, principal, head, chief, manager, director, intern,
    internship, fresher, trainee, assistant, deputy, trưởng, phó, I, II, III, IV; cụm: thực tập,
-   trợ lý, giám đốc.
+   trợ lý, giám đốc. Bỏ dấu, "trường" / "phố" / "phổ" cũng là `truong` / `pho`, nên không tính
+   trong "thị trường", "môi trường", "hiện trường", "trường + tên trường" ("Trường Quốc tế ABC",
+   "trường mầm non"...), "thành phố", "phổ thông"; `pho` chỉ là cấp bậc trước chức vụ ("phó phòng",
+   "phó giám đốc", "phó bếp"...).
 2. **`token_set_ratio`** (rapidfuzz) trên `title_normalized`: tách thành tập từ, lấy phần chung, so
    phần chung với "phần chung + từ riêng của mỗi bên" theo tỉ lệ ký tự giống nhau, lấy điểm cao
    nhất (0–100). Tiêu đề này nằm trọn trong tiêu đề kia → 100.
@@ -128,8 +144,9 @@ Trước khi gom cụm, bước xác minh loại các bản đăng lại **cùng
 - không rõ nơi làm → luật đăng lại (mục 5);
 - có nơi làm → tiêu đề ≥ 90 và JD ≥ 0,9.
 
-Giữ bản mới nhất (`posted_at`, bằng nhau thì JD dài hơn), loại các bản còn lại. Tin bị loại không vào
-cụm; việc cũ của nó vẫn được bản giữ lại nhận qua mục 8.
+Giữ bản mới nhất (`posted_at`, bằng nhau thì JD dài hơn), loại các bản còn lại (trừ bản cùng mã tin
+với bản giữ lại: chính tin đó, không phải đăng lại). Tin bị loại không vào cụm; việc cũ của nó vẫn
+được bản giữ lại nhận qua mục 8.
 
 ## 7. Gom cụm và bản chuẩn — `cluster_jobs`, `merge`
 
@@ -159,6 +176,15 @@ Mỗi cụm cần một `cluster_key`:
    4. nhiều ứng viên khớp → chọn việc có JD giống nhất. Mỗi việc cũ chỉ nhận một cụm mỗi lượt.
 3. **Không khớp việc nào** → việc mới, khoá `sha1(source:external_id)` của bản chuẩn.
 
+**Lượt chưa đủ** (poll ban ngày, build `partial`) chỉ thấy một phần tin của doanh nghiệp. Cụm ghi vào
+việc đã lưu (bước 1 hoặc 2) được gộp lại cùng các tin khác còn gắn với việc đó mà lượt này không thấy
+(`_attached_postings`: đã nhận, `active`, chưa quá hạn nộp, trừ tin lượt poll vừa biết chắc đã gỡ):
+đọc `raw` đã lưu, chuẩn hoá lại, `merge` như lượt đủ (mục 7). Vì vậy lượt poll chỉ thấy tin TopCV
+không đổi bản chuẩn careers của việc sang tin TopCV, không làm mất URL / lương / hạn nộp của tin
+careers rồi để lượt đêm đổi lại. Trường cấp bậc / loại hình / hình thức vẫn `unknown` sau khi gộp:
+giữ giá trị đã lưu (lượt đủ đã hỏi LLM theo bản chuẩn), không có thì lấy đoán của LLM cho phần lượt
+này thấy. Lượt đủ không gộp thêm gì: tin không còn thấy thì không thuộc việc nữa.
+
 Upsert việc theo `(company_id, cluster_key)`; `first_seen_at` chỉ lùi về sớm hơn (`least`), không
 bao giờ tiến lên.
 
@@ -179,9 +205,11 @@ fingerprint = sha1( fold(tiêu đề) | places sắp xếp, nối bằng dấu p
 
 ## 10. Ban ngày và ban đêm
 
-- **Poll ban ngày**: so danh sách với các mã đã có, chỉ tin **mã mới** đi qua chuẩn hoá → xác minh →
-  gom cụm. Với tin mới, bước quyết định là gắn vào việc đã lưu (mục 8). Tin đã gỡ được đóng sau đó,
-  nên tin gỡ và tin đăng lại thấy trong cùng một lượt poll vẫn gắn vào việc cũ.
+- **Poll ban ngày**: so danh sách với các mã đã có, chỉ tin **mã mới** (lượt `board`: thêm mọi tin
+  của doanh nghiệp trong index trang tuyển dụng) đi qua chuẩn hoá → xác minh → gom cụm. Với tin mới,
+  bước quyết định là gắn vào việc đã lưu (mục 8), rồi gộp lại với các tin khác của việc đó. Tin đã
+  gỡ được đóng sau đó, nên tin gỡ và tin đăng lại thấy trong cùng một lượt poll vẫn gắn vào việc cũ
+  (tin đã gỡ không được gộp lại vào việc).
 - **Lượt đủ ban đêm**: mọi tin của doanh nghiệp cùng đi qua gom cụm, bản cũ và bản đăng lại thường gộp
   ngay ở mục 7.
 
@@ -228,11 +256,11 @@ fingerprint = sha1( fold(tiêu đề) | places sắp xếp, nối bằng dấu p
 
 Không phải lượt nào cũng tính lại toàn bộ:
 
-| Lượt                      | Đọc DB                                                                                                                                                                 | Tính                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Poll, không có tin mã mới | —                                                                                                                                                                      | không so gì                                                                                     |
-| Poll, có tin mã mới       | tra dấu vân tay qua index (≤ 1 dòng); không trúng thì 6 cột nhẹ của mọi việc đang mở (không có JD), một lần mỗi lượt; JD (giải nén zstd) chỉ của ứng viên tiêu đề ≥ 90 | MinHash tin mới, so tiêu đề cụm mới × việc đang mở, MinHash JD ứng viên                         |
-| Lượt đủ ban đêm           | —                                                                                                                                                                      | MinHash **mọi** tin; `mark_reposts` (cặp cùng nguồn) và `cluster_jobs` so **từng cặp**: n(n−1)/2 |
+| Lượt                      | Đọc DB                                                                                                                                                                                                                  | Tính                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Poll, không có tin mã mới | —                                                                                                                                                                                                                       | không so gì                                                                                                                 |
+| Poll, có tin mã mới       | tra dấu vân tay qua index (≤ 1 dòng); không trúng thì 6 cột nhẹ của mọi việc đang mở (không có JD), một lần mỗi lượt; JD (giải nén zstd) chỉ của ứng viên tiêu đề ≥ 90; `raw` (giải nén) các tin khác của việc được ghi | MinHash tin mới, so tiêu đề cụm mới × việc đang mở, MinHash JD ứng viên; chuẩn hoá lại + `merge` tin khác của việc được ghi |
+| Lượt đủ ban đêm           | —                                                                                                                                                                                                                       | MinHash **mọi** tin; `mark_reposts` (cặp cùng nguồn) và `cluster_jobs` so **từng cặp**: n(n−1)/2                            |
 
 ### 13.1. Số đo
 

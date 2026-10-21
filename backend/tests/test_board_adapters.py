@@ -273,6 +273,52 @@ def test_vieclam24h_reads_employer_website_and_tax_code_from_page_data() -> None
     assert parsed.profile.website == "https://tuyendung.vpbank.com.vn/vi"
 
 
+def _next_data(data: dict[str, Any]) -> str:
+    return f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script>'
+
+
+def test_employer_website_without_scheme() -> None:
+    """Website nhà tuyển dụng tự nhập hay thiếu `https://`; giá trị không phải địa chỉ web thì
+    giữ website lấy từ Organization JSON-LD."""
+    org = {"@type": "Organization", "name": "ACME", "url": "https://acme.vn/"}
+    jsonld = f'<script type="application/ld+json">{json.dumps(org)}</script>'
+
+    def vieclam24h(website: str) -> str | None:
+        employer = {"name": "ACME", "website": website}
+        data = {"props": {"initialState": {"api": {"employerDetail": {"data": employer}}}}}
+        url = "https://vieclam24h.vn/danh-sach-tin-tuyen-dung-acme-ntd123p1.html"
+        profile = REGISTRY["vieclam24h"].parse_profile(jsonld + _next_data(data), url)
+        assert profile is not None
+        return profile.website
+
+    assert vieclam24h("www.abc.com.vn") == "https://www.abc.com.vn/"
+    assert vieclam24h("Đang cập nhật") == "https://acme.vn/"
+
+    company = {"companyName": "ACME", "website": "abc.vn"}
+    data = {"props": {"pageProps": {"companyProfile": company}}}
+    url = "https://www.vietnamworks.com/nha-tuyen-dung/acme-c123"
+    profile = REGISTRY["vietnamworks"].parse_profile(_next_data(data), url)
+    assert profile is not None
+    assert profile.website == "https://abc.vn/"
+
+
+def test_profile_link_is_resolved_against_the_page_url() -> None:
+    """href tương đối của link profile hiểu theo URL trang, không theo link đầu tiên trên trang."""
+    org = {"@type": "Organization", "name": "Công ty TNHH ACME Việt Nam"}
+    node = {"@type": "JobPosting", "title": "Kế toán", "hiringOrganization": org}
+    html = (
+        f'<script type="application/ld+json">{json.dumps(node, ensure_ascii=False)}</script>'
+        '<a href="https://www.facebook.com/careerlink">Facebook</a>'
+        '<a class="text-reset" href="/viec-lam-cua/acme/123">ACME</a>'
+        '<a href="/viec-lam-cua/khac/456">Nhà tuyển dụng hàng đầu</a>'
+    )
+    url = "https://www.careerlink.vn/tim-viec-lam/ke-toan/789"
+    parsed = REGISTRY["careerlink"].parse_job(html, url)
+    assert parsed is not None
+    assert parsed.profile is not None
+    assert parsed.profile.url == "https://www.careerlink.vn/viec-lam-cua/acme/123"
+
+
 def test_vietnamworks_payload_skips_contact_fields() -> None:
     html, url = page("vietnamworks", "job_2_http.html")
     obj = find_object(flight_payload(html), "jobId", 2111825, require="jobTitle")

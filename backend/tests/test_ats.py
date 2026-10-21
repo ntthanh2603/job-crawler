@@ -214,6 +214,25 @@ def test_workday_parse_detail_and_facets() -> None:
     assert job.extra["country"] == "Vietnam"
 
 
+def test_workday_posting_key_is_the_req_id() -> None:
+    """Ô đầu `bulletFields` có thể là nhãn "Spotlight Job" (Intel: cả 20 tin) — mã tin là ô có
+    dạng mã, không thì đuôi `externalPath`; trùng `jobReqId` của trang chi tiết."""
+    ref = ats.match_url("https://intel.wd1.myworkdayjobs.com/External")
+    assert ref is not None
+    postings = workday.parse_listing(load("workday/intel_jobs_page1.json"))
+    keys = [workday.posting_key(p, ref=ref) for p in postings]
+    assert len(set(keys)) == len(postings) == 20
+    assert keys[0] == "intel/external:JR0288027"
+    no_bullets = {"externalPath": "/job/US-Oregon-Hillsboro/Senior-Engineer_JR0282069-1"}
+    assert workday.posting_key(no_bullets, ref=ref) == "intel/external:JR0282069"
+    # Trang chi tiết không ghi `jobReqId`: dùng đúng mã của tin trong danh sách.
+    listing = {"title": "Kỹ sư", "externalPath": "/job/VN/Ky-su_JR0286267", "bulletFields": []}
+    detail = {"jobPostingInfo": {"title": "Kỹ sư", "id": "4dbebf3ac9b2"}}
+    job = workday.parse_detail(detail, ref=ref, listing=listing)
+    assert job is not None
+    assert job.external_id == workday.posting_key(listing, ref=ref) == "intel/external:JR0286267"
+
+
 def test_bamboohr_parse() -> None:
     items = bamboohr.parse_list(load("bamboohr/seek_list.json"))
     assert [i["id"] for i in items] == ["15", "19", "20"]

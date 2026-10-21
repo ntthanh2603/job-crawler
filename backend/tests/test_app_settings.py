@@ -105,6 +105,8 @@ def test_live_flags() -> None:
     assert not live["runner_poll_concurrency"]
     assert not live["compression_level"]
     assert not live["board_tail_cron"]
+    # Lịch cron của runner tính theo múi giờ đọc lúc khởi động: đổi là phải khởi động lại.
+    assert not live["crawl_timezone"]
     assert not live["proxy_mode"]
 
 

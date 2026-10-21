@@ -27,7 +27,6 @@ from typing import Any
 from jobcrawler.common.pages import parse
 from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.common.text import strip_accents
-from jobcrawler.common.urls import normalize_url
 from jobcrawler.sources.base import (
     SourceError,
     SourceSession,
@@ -44,6 +43,7 @@ from jobcrawler.sources.boards.base import (
     ProfileRef,
     SitemapBoard,
     reached_known,
+    website_url,
 )
 
 API = "https://ms.vietnamworks.com/job-search/v1.0/search"
@@ -405,12 +405,11 @@ class VietnamWorks(SitemapBoard):
         )
         profile = None
         if company and company_id:
-            website = text_or_none(info.get("website"))
             profile = ProfileRef(
                 external_id=str(company_id),
                 url=f"{self.home}nha-tuyen-dung/{slugify(company) or 'cong-ty'}-c{company_id}",
                 name=company,
-                website=normalize_url(website) if website else None,
+                website=website_url(info.get("website")),
                 info={"address": info["address"]} if text_or_none(info.get("address")) else {},
             )
         return BoardJob(job=job, profile=profile)
@@ -430,12 +429,11 @@ class VietnamWorks(SitemapBoard):
         name = text_or_none(company.get("companyName"))
         if not name:
             return super().parse_profile(html, url)
-        website = text_or_none(company.get("website"))
         address = text_or_none(company.get("address"))
         return ProfileRef(
             external_id=external_id,
             url=url,
             name=name,
-            website=normalize_url(website) if website else None,
+            website=website_url(company.get("website")),
             info={"address": address} if address else {},
         )

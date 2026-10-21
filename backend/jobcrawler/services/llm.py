@@ -288,14 +288,24 @@ class LLMClient:
                     if exc.status_code >= 500:
                         continue
                     break
+                except Exception as exc:  # phản hồi sai dạng (APIResponseValidationError...)
+                    result.error = f"error: {type(exc).__name__}: {exc}"[:500]
+                    continue
 
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
-                    result.prompt_tokens = (result.prompt_tokens or 0) + usage.prompt_tokens
-                    result.completion_tokens = (
-                        result.completion_tokens or 0
-                    ) + usage.completion_tokens
-                content = resp.choices[0].message.content or ""
+                    result.prompt_tokens = (result.prompt_tokens or 0) + (
+                        getattr(usage, "prompt_tokens", None) or 0
+                    )
+                    result.completion_tokens = (result.completion_tokens or 0) + (
+                        getattr(usage, "completion_tokens", None) or 0
+                    )
+                choices = getattr(resp, "choices", None) or []
+                message = getattr(choices[0], "message", None) if choices else None
+                if message is None:
+                    result.error = "empty_response"
+                    continue
+                content = getattr(message, "content", None) or ""
                 try:
                     result.value = schema.model_validate_json(extract_json(content))
                     result.error = None
@@ -331,8 +341,10 @@ class LLMClient:
         return result
 
 
-def cache_key(prompt: Prompt, key: str) -> str:
-    return f"llm:{prompt.name}:{prompt.version}:{key}"
+def cache_key(prompt: Prompt, key: str, model: str | None) -> str:
+    """Khoá cache câu trả lời: theo prompt (cả version) và model — đổi LLM_MODEL thì hỏi lại, không
+    dùng câu trả lời của model cũ."""
+    return f"llm:{prompt.name}:{prompt.version}:{model or '-'}:{key}"
 
 
 async def cached_structured[T: BaseModel](
@@ -345,9 +357,9 @@ async def cached_structured[T: BaseModel](
     ttl: float,
     **values: str,
 ) -> LLMResult[T]:
-    """`LLMClient.structured` có cache: cùng prompt (cả version) và cùng `key` (vd. hash nội dung
-    tin) thì dùng lại câu trả lời cũ trong `ttl` giây. Chỉ lưu câu trả lời hợp lệ."""
-    full_key = cache_key(prompt, key)
+    """`LLMClient.structured` có cache: cùng prompt (cả version), cùng model và cùng `key` (vd. hash
+    nội dung tin) thì dùng lại câu trả lời cũ trong `ttl` giây. Chỉ lưu câu trả lời hợp lệ."""
+    full_key = cache_key(prompt, key, llm.model)
     if kv is not None and (cached := await kv.get(full_key)) is not None:
         try:
             return LLMResult(

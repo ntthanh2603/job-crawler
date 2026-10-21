@@ -356,6 +356,23 @@ def _is_index(segs: list[str]) -> bool:
     return content[-1] in LISTING_SEGMENTS or (len(content) <= 2 and content[-1] in _INDEX_SEGMENTS)
 
 
+def detail_url(posting_url: str, page_url: str) -> str:
+    """URL của tin ở trang chi tiết: `url` của JobPosting khi đúng là một trang tin, không thì
+    URL trang. Nhiều site ghi `url` là trang chủ, trang danh sách hay site khác cho mọi tin: các
+    tin sẽ chung một mã."""
+    if posting_url == page_url:
+        return page_url
+    segs = _segments(posting_url)
+    if (
+        not same_site(posting_url, page_url)
+        or not _content_segments(segs)
+        or _is_index(segs)
+        or (_has_job_id(page_url) and not _has_job_id(posting_url))
+    ):
+        return page_url
+    return posting_url
+
+
 def _is_id_param(key: str) -> bool:
     """`id`, `jobId`, `request_id`, `postid`... (không tính `pageId` của banner/tracking)."""
     if key.startswith(("page", "from", "utm", "ref", "source")):
@@ -1008,9 +1025,11 @@ class CareersSource(Source):
         self, session: SourceSession, link: JobLink, page: Page
     ) -> tuple[RawJob | None, list[JobLink], bool]:
         if postings := jsonld.raw_jobs(page.html, page.url):
-            job = postings[0]
-            if not same_site(job.url, page.url):
-                job = job.model_copy(update={"url": page.url})
+            # Trang chi tiết là một tin: mã theo URL của tin (như `_parse_detail`).
+            url = detail_url(postings[0].url, page.url)
+            job = postings[0].model_copy(
+                update={"url": url, "external_id": jsonld.external_id_for_url(url)}
+            )
             if len(job.description or "") < _MIN_DESCRIPTION and (
                 again := await self._rendered_detail(session, link, page)
             ):

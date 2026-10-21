@@ -15,6 +15,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.logging import get_logger
@@ -36,6 +37,9 @@ _HEADERS = {
     "note": ("note", "notes", "ghi chu"),
 }
 IMPORT_CHUNK = 500
+# Lần thử lại một lô import bị Postgres huỷ vì deadlock (SQLSTATE 40P01) với lượt chạy doanh nghiệp.
+IMPORT_DEADLOCK_RETRIES = 3
+DEADLOCK = "40P01"
 ENQUEUE_CHUNK = 500
 # Lượt chạy xong (có kết quả) — dùng cho `--stale-hours`; `failed` coi như chưa chạy.
 DONE_STATUSES = (RunStatus.OK.value, RunStatus.PARTIAL.value, RunStatus.AMBIGUOUS.value)
@@ -154,6 +158,10 @@ def read_companies_csv(path: str | Path) -> CsvReport:
 # --- import ---------------------------------------------------------------------------------
 
 
+def is_deadlock(exc: DBAPIError) -> bool:
+    return getattr(exc.orig, "sqlstate", None) == DEADLOCK
+
+
 @dataclass(slots=True)
 class ImportResult:
     created: int = 0
@@ -161,6 +169,13 @@ class ImportResult:
     unchanged: int = 0
     # Id doanh nghiệp theo thứ tự dòng trong file (không trùng).
     company_ids: list[UUID] = field(default_factory=list)
+
+    def add(self, other: ImportResult) -> None:
+        self.created += other.created
+        self.updated += other.updated
+        self.unchanged += other.unchanged
+        seen = set(self.company_ids)
+        self.company_ids += [cid for cid in other.company_ids if cid not in seen]
 
 
 def _pick(candidates: Iterable[Company], company_in: CompanyIn) -> Company | None:
@@ -181,8 +196,10 @@ async def _import_chunk(
 ) -> None:
     norms = {normalize_company_name(r.name) for r in rows}
     taxes = {r.tax_code for r in rows if r.tax_code}
-    # Khoá như `kyc.resolve_company` để worker đang chạy không tạo trùng cùng lúc.
-    for key in sorted(norms | {f"mst:{t}" for t in taxes}):
+    # Khoá như `kyc.resolve_company` để worker đang chạy không tạo trùng cùng lúc, cùng thứ tự với
+    # nó (tên trước, `mst:` sau): xếp lẫn hai loại thì lô giữ `mst:X` chờ tên mà lượt chạy đang
+    # giữ, lượt chạy lại chờ `mst:X` → deadlock.
+    for key in [*sorted(norms), *sorted(f"mst:{t}" for t in taxes)]:
         await kyc._lock(session, key)  # pyright: ignore[reportPrivateUsage]
     by_tax = {
         c.tax_code: c
@@ -241,11 +258,26 @@ async def import_companies(
     sessionmaker: async_sessionmaker[AsyncSession], rows: Sequence[CompanyIn]
 ) -> ImportResult:
     """Tạo/cập nhật `companies` + alias tên đầu vào (chưa KYC). Chạy lại không tạo trùng:
-    khớp theo MST rồi theo tên chuẩn hoá (không mâu thuẫn MST/website)."""
+    khớp theo MST rồi theo tên chuẩn hoá (không mâu thuẫn MST/website).
+
+    Mỗi lô một transaction. `kyc.apply_kyc` khoá dòng doanh nghiệp rồi mới khoá `mst:` (ngược thứ
+    tự lô import: khoá `mst:` rồi cập nhật dòng), nên lô vẫn có thể deadlock với lượt KYC đang chạy;
+    Postgres huỷ một bên — lô bị huỷ thì chạy lại (đã rollback, chưa ghi gì)."""
     result = ImportResult()
     for start in range(0, len(rows), IMPORT_CHUNK):
-        async with sessionmaker.begin() as session:
-            await _import_chunk(session, rows[start : start + IMPORT_CHUNK], result)
+        chunk = rows[start : start + IMPORT_CHUNK]
+        for attempt in range(IMPORT_DEADLOCK_RETRIES + 1):
+            part = ImportResult()
+            try:
+                async with sessionmaker.begin() as session:
+                    await _import_chunk(session, chunk, part)
+            except DBAPIError as exc:
+                if attempt == IMPORT_DEADLOCK_RETRIES or not is_deadlock(exc):
+                    raise
+                log.warning("import.deadlock_retry", attempt=attempt + 1, rows=len(chunk))
+                continue
+            result.add(part)
+            break
     log.info(
         "import.done",
         created=result.created,
