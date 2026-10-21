@@ -20,10 +20,13 @@ x-production:
   jwt-secret: &jwt-secret "jobcrawler-jwt-secret" # CHANGE_ME: chuỗi ngẫu nhiên dài
   encryption-key: &encryption-key "jobcrawler-encryption-key" # CHANGE_ME: chuỗi ngẫu nhiên dài, phải sao lưu
 
-  # An toàn mặc định cho reverse proxy chạy cùng máy. Đổi thành 0.0.0.0:8000:8080 nếu thật sự
-  # muốn mở HTTP trực tiếp; production nên kết thúc TLS ở reverse proxy.
+  # Dùng domain: trỏ DNS domain về IP server, rồi cho Caddy/nginx HTTPS chuyển domain tới
+  # http://127.0.0.1:8000; domain KHÔNG điền vào compose. Reverse proxy phải giữ Host, gửi
+  # X-Forwarded-Proto=https và bật HTTP/2/gRPC để worker ngoài máy kết nối được.
+  # Reverse proxy cùng máy: giữ 127.0.0.1. Proxy ở máy/container khác: đổi thành 0.0.0.0 và chỉ mở
+  # cổng 8000 cho IP proxy bằng firewall.
   web-listen: &web-listen "127.0.0.1:8000:8080" # CHANGE_ME: 0.0.0.0 nếu không có reverse proxy cùng máy
-  # IP/CIDR của reverse proxy tin cậy; để trống nếu không có reverse proxy.
+  # Khi có reverse proxy, điền IP/CIDR của proxy để lấy đúng IP người dùng từ X-Forwarded-For.
   real-ip-from: &real-ip-from "" # CHANGE_ME: IP/CIDR reverse proxy nếu có
   worker-replicas: &worker-replicas 1 # CHANGE_ME: số worker trên máy
   # JSON list hoặc danh sách proxy phân cách bằng dấu phẩy; trống = dùng cấu hình từ backend.
