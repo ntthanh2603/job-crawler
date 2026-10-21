@@ -43,9 +43,9 @@ tasks:
       - task: env
 
   env:
-    desc: Tạo .env (compose), backend/.env, worker/.env từ file .env.example tương ứng (giữ nguyên file đã có)
+    desc: Tạo backend/.env và worker/.env từ file .env.example tương ứng (giữ nguyên file đã có)
     cmds:
-      - for: [".", "backend", "worker"]
+      - for: ["backend", "worker"]
         cmd: uv run --no-project python -c "import pathlib, shutil; d = pathlib.Path('{{.ITEM}}'); p = d / '.env'; p.exists() or shutil.copyfile(d / '.env.example', p)"
 
   # --- docker compose --------------------------------------------------------------------------

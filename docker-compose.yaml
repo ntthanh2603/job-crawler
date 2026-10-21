@@ -6,10 +6,10 @@ name: jobcrawler
 # Mỗi service build từ thư mục của nó và đọc `.env` của nó: backend/ (`jobcrawler serve`: migration
 # rồi API, gateway gRPC, scheduler, runner trong một container), worker/ (lấy trang), frontend/
 # (nginx phục vụ giao diện, chuyển /api tới `backend`). proto/ là thư viện hợp đồng gRPC, vào image
-# backend / worker qua build context tên `proto`. `.env` ở gốc chỉ cho biến của compose (cổng, số
-# worker, tài khoản Postgres, image).
+# backend / worker qua build context tên `proto`. Compose dev dùng giá trị cố định bên dưới, không
+# đọc `.env` ở gốc.
 #
-# Chỉ `frontend` mở cổng ra ngoài (WEB_BIND:WEB_PORT): giao diện, /api và gRPC của worker ở máy
+# Chỉ `frontend` mở cổng ở 127.0.0.1:8000: giao diện, /api và gRPC của worker ở máy
 # khác (nginx chuyển tới gateway). Postgres / Redis chỉ mở ở 127.0.0.1 cho CLI / test trên máy host.
 
 # Log của container xoay vòng (mặc định json-file không giới hạn, đầy đĩa sau vài tuần).
@@ -23,12 +23,12 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-jobcrawler}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobcrawler}
-      POSTGRES_DB: ${POSTGRES_DB:-jobcrawler}
+      POSTGRES_USER: jobcrawler
+      POSTGRES_PASSWORD: jobcrawler
+      POSTGRES_DB: jobcrawler
     # Chỉ mở ở 127.0.0.1 (IPv4) cho CLI / test trên máy host; không mở ra mạng.
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+      - "127.0.0.1:15432:5432"
     # /dev/shm mặc định của Docker (64 MB) không đủ cho truy vấn / VACUUM song song khi bảng lớn.
     shm_size: 512mb
     volumes:
@@ -59,7 +59,7 @@ services:
       - noeviction
     # Redis không đặt mật khẩu: chỉ mở ở 127.0.0.1.
     ports:
-      - "127.0.0.1:${REDIS_PORT:-16379}:6379"
+      - "127.0.0.1:16379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -75,7 +75,7 @@ services:
   # trang tuyển dụng). Một process thoát hoặc treo (watchdog) thì container thoát và Docker dựng
   # lại. Cấu hình ở backend/.env; đặt UI_PASSWORD nếu mở giao diện ra ngoài.
   backend:
-    image: ${REGISTRY:-}jobcrawler-backend:${IMAGE_TAG:-latest}
+    image: jobcrawler-backend:latest
     build:
       context: backend
       additional_contexts:
@@ -86,7 +86,7 @@ services:
         required: false
     environment:
       # Ghi đè URL trong backend/.env (vốn trỏ 127.0.0.1 cho CLI trên host) bằng hostname nội bộ.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobcrawler}:${POSTGRES_PASSWORD:-jobcrawler}@postgres:5432/${POSTGRES_DB:-jobcrawler}
+      DATABASE_URL: postgresql+asyncpg://jobcrawler:jobcrawler@postgres:5432/jobcrawler
       REDIS_URL: redis://redis:6379/0
       CACHE_REDIS_URL: ""
       # Chỉ `frontend` (nginx) gọi tới được API: tin X-Forwarded-For của nó để chặn đoán mật khẩu
@@ -119,16 +119,16 @@ services:
   # Giao diện React trên nginx không root; /api/ chuyển tới `backend` (giữ Host cho kiểm tra chống
   # CSRF), gRPC của worker tới gateway. Cổng duy nhất mở ra ngoài; mặc định chỉ ở 127.0.0.1.
   frontend:
-    image: ${REGISTRY:-}jobcrawler-frontend:${IMAGE_TAG:-latest}
+    image: jobcrawler-frontend:latest
     build:
       context: frontend
     environment:
       API_UPSTREAM: http://backend:8000
       GATEWAY_UPSTREAM: grpc://backend:50051
       # Có load balancer / reverse proxy đứng trước: CIDR của nó (tin X-Forwarded-For từ đó).
-      REAL_IP_FROM: ${REAL_IP_FROM:-}
+      REAL_IP_FROM: ""
     ports:
-      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8080"
+      - "127.0.0.1:8000:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -143,7 +143,7 @@ services:
   # Worker lấy trang (curl_cffi + Chromium). Cấu hình ở worker/.env; proxy riêng của worker:
   # worker/config/worker-proxies.txt hoặc WORKER_PROXIES trong worker/.env.
   worker:
-    image: ${REGISTRY:-}jobcrawler-worker:${IMAGE_TAG:-latest}
+    image: jobcrawler-worker:latest
     build:
       context: worker
       additional_contexts:
@@ -153,7 +153,7 @@ services:
       - path: worker/.env
         required: false
     environment:
-      GATEWAY_ADDR: ${WORKER_GATEWAY_ADDR:-backend:50051}
+      GATEWAY_ADDR: backend:50051
       WORKER_PROXIES_FILE: /app/config/worker-proxies.txt
     volumes:
       - ./worker/config:/app/config:ro
@@ -170,7 +170,7 @@ services:
       start_period: 60s
       start_interval: 5s
     deploy:
-      replicas: ${WORKER_REPLICAS:-1}
+      replicas: 1
     # SIGTERM: worker thôi nhận việc và làm nốt tối đa WORKER_SHUTDOWN_GRACE_SECONDS (30) giây;
     # mặc định Docker chỉ chờ 10 giây rồi SIGKILL.
     stop_grace_period: 40s

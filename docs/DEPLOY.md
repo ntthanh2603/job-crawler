@@ -44,7 +44,7 @@ flowchart LR
 - **Một máy production**: dùng `docker-compose.prod.yaml` như hướng dẫn trên. Nếu dùng Postgres /
   Redis quản lý, sửa trực tiếp `DATABASE_URL` / `REDIS_URL` trong file và chỉ chạy `backend frontend
   worker`.
-- **Một cổng**: chỉ `frontend` mở cổng (`WEB_BIND:WEB_PORT`); nginx chuyển gRPC của worker
+- **Một cổng**: chỉ `frontend` mở cổng (mặc định `8000`); nginx chuyển gRPC của worker
   (`/jobcrawler.crawl.v1.CrawlGateway/`, HTTP/2) tới gateway. Load balancer trước `frontend` phải
   chuyển HTTP/2 cho đường đó (nginx `grpc_pass`, Caddy `h2c://`, ALB target group gRPC). Backend
   có `GATEWAY_TLS_CERT` thì đặt `GATEWAY_UPSTREAM=grpcs://backend:50051` cho `frontend`.

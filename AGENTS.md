@@ -58,15 +58,15 @@ Mỗi service có trong thư mục của nó: mã, `pyproject.toml` + `uv.lock` 
 `jobcrawler-proto = { path = "../proto", editable = true }`; Dockerfile của chúng nhận `proto/` là build
 context tên `proto` (`docker build --build-context proto=proto backend`).
 
-Ở gốc repo chỉ còn phần điều phối: `docker-compose.yaml`, `Taskfile.yml` (include Taskfile từng
-service), `.env.example` (biến của compose: cổng, số bản, tài khoản Postgres), `.github/`,
+Ở gốc repo chỉ còn phần điều phối: `docker-compose.yaml`, `docker-compose.prod.yaml`, `Taskfile.yml`
+(include Taskfile từng service), `.github/`,
 `.pre-commit-config.yaml`, README / AGENTS / CLAUDE. Không có `pyproject.toml` / `uv.lock` /
 `package.json` ở gốc.
 
 ## Lệnh chính (`task`, từ gốc repo)
 
 ```bash
-task setup                    # dependency mọi service + .env, backend/.env, worker/.env từ .env.example
+task setup                    # dependency mọi service + backend/.env, worker/.env từ .env.example
 task infra                    # chỉ postgres + redis (chờ healthy)
 task up / task down           # 5 container: postgres, redis, backend, frontend, worker (up build 3 image)
 task check                    # mọi thứ CI chạy (proto, backend, worker, frontend)

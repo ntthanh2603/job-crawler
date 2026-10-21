@@ -7,14 +7,14 @@ lưu ý vận hành nằm ở đây. Kiến trúc: [ARCHITECTURE.md](ARCHITECTUR
 ## 1. Chạy
 
 ```bash
-task setup   # dependency + .env, backend/.env, worker/.env từ .env.example
+task setup   # dependency + backend/.env, worker/.env từ .env.example của từng service
 task up      # 5 container: postgres, redis, backend, frontend, worker (giao diện 127.0.0.1:8000)
 task down
 ```
 
-- `.env` gốc: biến của compose (cổng, `WORKER_REPLICAS`, tài khoản Postgres). `backend/.env`: kết
-  nối DB / Redis, gateway, đăng nhập, khoá mã hoá, log. `worker/.env`: địa chỉ gateway, khoá tham
-  gia, proxy riêng của máy.
+- Compose dev dùng cổng, tài khoản Postgres và một worker cố định trong `docker-compose.yaml`.
+  `backend/.env`: kết nối DB / Redis, gateway, đăng nhập, khoá mã hoá, log. `worker/.env`: địa chỉ
+  gateway, khoá tham gia, proxy riêng của máy.
 - Mọi cài đặt khác sửa ở trang **Cài đặt** (lưu trong DB, thắng biến môi trường, mọi process nạp
   lại ≤ 5 s). Mục có ↻ chỉ đọc lúc khởi động: lưu xong `jobcrawler serve` tự khởi động lại các process
   con trong vài giây (job đang chạy được xếp lại). Giá trị còn đặt bằng biến môi trường thì nút **Lưu
