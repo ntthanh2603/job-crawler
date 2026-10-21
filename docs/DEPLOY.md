@@ -8,6 +8,20 @@ trang mỗi doanh nghiệp, build lại mọi doanh nghiệp trong 6 giờ đêm
 
 ## 1. Triển khai
 
+### Một máy bằng Docker Compose
+
+Chỉ cần chép `docker-compose.prod.yaml` lên máy chủ:
+
+1. Mở file, tìm `CHANGE_ME`, sửa ba image/tag, mật khẩu Postgres (ở hai chỗ), token gateway,
+   mật khẩu UI và hai khoá bí mật.
+2. Chạy `docker compose -f docker-compose.prod.yaml pull`.
+3. Chạy `docker compose -f docker-compose.prod.yaml up -d`.
+4. Kiểm tra bằng `docker compose -f docker-compose.prod.yaml ps` và mở cổng `8000`.
+
+File này không dùng `build`, `env_file`, `.env` hay file trong repo. Chỉ `frontend` mở cổng; Postgres,
+Redis, backend và worker chỉ ở mạng nội bộ của Compose. Nên đặt cổng `8000` sau reverse proxy HTTPS.
+`docker-compose.yaml` chỉ dành cho dev: build từ mã nguồn và nạp `backend/.env`, `worker/.env`.
+
 ```mermaid
 flowchart LR
   subgraph data["Postgres + Redis (máy riêng hoặc dịch vụ quản lý)"]
@@ -27,20 +41,18 @@ flowchart LR
   app --> data
 ```
 
-- **Một máy**: `docker-compose.yaml` ở gốc repo (5 container). Postgres / Redis quản lý: trỏ
-  `DATABASE_URL` / `REDIS_URL` trong `backend/.env` tới đó, chỉ chạy `docker compose up -d backend
-frontend`.
+- **Một máy production**: dùng `docker-compose.prod.yaml` như hướng dẫn trên. Nếu dùng Postgres /
+  Redis quản lý, sửa trực tiếp `DATABASE_URL` / `REDIS_URL` trong file và chỉ chạy `backend frontend
+  worker`.
 - **Một cổng**: chỉ `frontend` mở cổng (`WEB_BIND:WEB_PORT`); nginx chuyển gRPC của worker
   (`/jobcrawler.crawl.v1.CrawlGateway/`, HTTP/2) tới gateway. Load balancer trước `frontend` phải
   chuyển HTTP/2 cho đường đó (nginx `grpc_pass`, Caddy `h2c://`, ALB target group gRPC). Backend
   có `GATEWAY_TLS_CERT` thì đặt `GATEWAY_UPSTREAM=grpcs://backend:50051` cho `frontend`.
-- **Máy worker** (chỉ cần ra Internet và tới cổng giao diện, không cần DB / Redis): lệnh của nút
-  "Thêm worker" (trang Workers), hoặc compose: `.env` gốc đặt
-  `WORKER_GATEWAY_ADDR=<máy backend>:<cổng giao diện>`, `WORKER_REPLICAS`; `worker/.env` đặt khoá tham
-  gia (`WORKER_JOIN_KEY` một lần, hoặc `GATEWAY_TOKEN`), `GATEWAY_TLS`; rồi `docker compose up -d
---no-deps worker`. Máy backend: `WEB_BIND=0.0.0.0` (hoặc load balancer có TLS) + `GATEWAY_TOKEN`.
-- **Runner thêm**: cùng image, cùng `backend/.env`, lệnh `jobcrawler runner --role poll` (hoặc `build`,
-  `boards`). Mỗi process Python dùng tối đa một core: giữ CPU mỗi process ≤ ~70%.
+- **Máy worker** (chỉ cần ra Internet và tới cổng giao diện, không cần DB / Redis): dùng lệnh của nút
+  "Thêm worker" trên trang Workers. Nếu tự viết compose riêng, lấy cấu hình service `worker` làm mẫu,
+  đổi `GATEWAY_ADDR`, bật TLS và dùng `WORKER_JOIN_KEY` một lần hoặc `GATEWAY_TOKEN`.
+- **Runner thêm**: cùng image và môi trường với `backend`, lệnh `jobcrawler runner --role poll` (hoặc
+  `build`, `boards`). Mỗi process Python dùng tối đa một core: giữ CPU mỗi process ≤ ~70%.
 - **Gateway thêm**: `jobcrawler gateway` sau load balancer L4 (HTTP/2); không giữ trạng thái.
 - **Proxy / load balancer trước giao diện** (cập nhật trực tiếp `GET /api/events`, Server-Sent
   Events): không đệm và không nén `text/event-stream` (nginx của `frontend` đã tắt cho đường này;
@@ -53,8 +65,8 @@ frontend`.
   chuyển tiếp giá trị đó cho backend, backend mới đặt cookie đăng nhập `Secure`.
 - **Image**: CI build và đẩy `jobcrawler-backend`, `-worker`, `-frontend` lên GHCR sau khi mọi kiểm
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
-  Máy chạy đặt `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=…` trong `.env` gốc rồi `docker compose pull &&
-docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. Phát hành: `task release VERSION=X.Y.Z`.
+  Production sửa trực tiếp ba dòng `image:` trong compose và nên ghim cùng một tag; quay lại bản
+  trước bằng cách đổi tag rồi pull/up lại. Phát hành: `task release VERSION=X.Y.Z`.
   Cả backend và worker dựng trên `python:3.12-slim-bookworm` (chung lớp base), hai giai đoạn: image
   chạy chỉ có venv `/opt/venv`, không có uv / mã nguồn. Worker chỉ cài Chromium headless shell
   (`playwright install --with-deps --only-shell chromium`, worker luôn mở headless): ~1,4 GB thay vì
@@ -174,7 +186,8 @@ tải'`) sau khi đo.
   LLM / SERP.
 - Giao diện: `UI_PASSWORD` + `JWT_SECRET` (một người vận hành) hoặc SSO qua proxy (nhiều người);
   `REAL_IP_FROM` khi sau load balancer. Postgres / Redis không mở ra Internet.
-- Bí mật hạ tầng trong `backend/.env` / `worker/.env` (không commit) hoặc `/run/secrets`. Khoá LLM /
-  SERP và proxy chung lưu mã hoá bằng `ENCRYPTION_KEYS` — đặt và sao lưu khoá riêng, không cùng bản dump.
+- File compose production chứa bí mật: chỉ cho quản trị viên đọc, không commit hoặc gửi công khai.
+  Khoá LLM / SERP và proxy chung lưu mã hoá bằng `ENCRYPTION_KEYS` — đặt và sao lưu khoá riêng, không
+  cùng bản dump.
 - `DEMO_COMPANIES=false` ở production. Sao lưu: Postgres quản lý (snapshot + PITR) hoặc WAL liên tục
   (pgBackRest / WAL-G); thử khôi phục định kỳ. Báo lỗ hổng: [SECURITY.md](../.github/SECURITY.md).

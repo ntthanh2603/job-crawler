@@ -1,0 +1,152 @@
+name: jobcrawler
+
+# Production một máy, tự chứa toàn bộ cấu hình. Tìm CHANGE_ME và sửa trước khi chạy.
+# Không cần clone repo, .env, .env.example hay file cấu hình nào khác.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: jobcrawler
+      # CHANGE_ME: dùng chuỗi chữ/số để chèn nguyên vào DATABASE_URL bên dưới.
+      POSTGRES_PASSWORD: CHANGE_ME_DATABASE_PASSWORD
+      POSTGRES_DB: jobcrawler
+    shm_size: 512mb
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  backend:
+    # CHANGE_ME nếu dùng owner/tag khác; nên ghim tag phiên bản hoặc sha-* thay cho main.
+    image: ghcr.io/ntthanh2603/jobcrawler-backend:main
+    command: ["jobcrawler", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      # CHANGE_ME_DATABASE_PASSWORD phải giống POSTGRES_PASSWORD ở trên.
+      DATABASE_URL: postgresql+asyncpg://jobcrawler:CHANGE_ME_DATABASE_PASSWORD@postgres:5432/jobcrawler
+      REDIS_URL: redis://redis:6379/0
+      CACHE_REDIS_URL: ""
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: "50051"
+      GATEWAY_TOKEN: &gateway-token CHANGE_ME_GATEWAY_TOKEN
+      UI_USERNAME: admin
+      UI_PASSWORD: CHANGE_ME_UI_PASSWORD
+      JWT_SECRET: CHANGE_ME_LONG_RANDOM_JWT_SECRET
+      ENCRYPTION_KEYS: CHANGE_ME_LONG_RANDOM_ENCRYPTION_KEY
+      FORWARDED_ALLOW_IPS: "*"
+      DEMO_COMPANIES: "false"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+      LOG_DB_LEVEL: WARNING
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/healthz', timeout=5)"
+          && jobcrawler gateway-health && jobcrawler health scheduler runner
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 120s
+      start_interval: 5s
+    stop_grace_period: 30s
+    init: true
+    restart: unless-stopped
+    logging: *logging
+
+  frontend:
+    # CHANGE_ME nếu dùng owner/tag khác; giữ cùng tag với backend và worker.
+    image: ghcr.io/ntthanh2603/jobcrawler-frontend:main
+    environment:
+      API_UPSTREAM: http://backend:8000
+      GATEWAY_UPSTREAM: grpc://backend:50051
+      # CHANGE_ME nếu có reverse proxy/load balancer: điền IP hoặc CIDR của nó.
+      REAL_IP_FROM: ""
+    ports:
+      # CHANGE_ME địa chỉ/cổng công khai nếu cần. Production nên đặt sau HTTPS reverse proxy.
+      - "0.0.0.0:8000:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    logging: *logging
+
+  worker:
+    # CHANGE_ME nếu dùng owner/tag khác; giữ cùng tag với backend và frontend.
+    image: ghcr.io/ntthanh2603/jobcrawler-worker:main
+    command: ["jobworker", "run"]
+    environment:
+      GATEWAY_ADDR: backend:50051
+      GATEWAY_TOKEN: *gateway-token
+      GATEWAY_TLS: "false"
+      WORKER_POOL: default
+      # Để trống để worker tự tính theo CPU/RAM của container.
+      WORKER_HTTP_SLOTS: ""
+      WORKER_RENDER_SLOTS: ""
+      # CHANGE_ME nếu dùng proxy riêng: JSON list hoặc danh sách phân cách bằng dấu phẩy.
+      WORKER_PROXIES: ""
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "jobworker", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      start_interval: 5s
+    deploy:
+      # CHANGE_ME nếu cần nhiều worker trên cùng máy.
+      replicas: 1
+    stop_grace_period: 40s
+    init: true
+    shm_size: 1gb
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:

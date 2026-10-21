@@ -1,6 +1,7 @@
 name: jobcrawler
 
-# Năm container: postgres, redis, backend, frontend, worker.
+# CHỈ DÙNG CHO DEV. Production dùng docker-compose.prod.yaml tự chứa cấu hình, không cần clone repo
+# hay tạo file .env. Năm container dev: postgres, redis, backend, frontend, worker.
 #
 # Mỗi service build từ thư mục của nó và đọc `.env` của nó: backend/ (`jobcrawler serve`: migration
 # rồi API, gateway gRPC, scheduler, runner trong một container), worker/ (lấy trang), frontend/
