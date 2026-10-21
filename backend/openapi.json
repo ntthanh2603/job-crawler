@@ -1325,6 +1325,20 @@
         "title": "DrainOut",
         "type": "object"
       },
+      "EducationLevel": {
+        "description": "Học vấn tối thiểu tin yêu cầu.",
+        "enum": [
+          "none",
+          "high_school",
+          "vocational",
+          "college",
+          "bachelor",
+          "postgraduate",
+          "unknown"
+        ],
+        "title": "EducationLevel",
+        "type": "string"
+      },
       "EmploymentType": {
         "enum": [
           "full_time",
@@ -1980,6 +1994,13 @@
             "title": "Canonical Source",
             "type": "string"
           },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
           "company_id": {
             "format": "uuid",
             "title": "Company Id",
@@ -1998,6 +2019,10 @@
           "description_md": {
             "title": "Description Md",
             "type": "string"
+          },
+          "education": {
+            "$ref": "#/components/schemas/EducationLevel",
+            "default": "unknown"
           },
           "employment_type": {
             "$ref": "#/components/schemas/EmploymentType",
@@ -2050,6 +2075,17 @@
             },
             "title": "Locations",
             "type": "array"
+          },
+          "openings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openings"
           },
           "posted_at": {
             "anyOf": [
@@ -2141,6 +2177,9 @@
           "level",
           "employment_type",
           "work_mode",
+          "categories",
+          "education",
+          "openings",
           "locations",
           "salary",
           "experience_years",
@@ -2530,6 +2569,20 @@
             "title": "Boards",
             "type": "array"
           },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "educations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Educations",
+            "type": "array"
+          },
           "employment_types": {
             "items": {
               "type": "string"
@@ -2582,7 +2635,9 @@
         },
         "required": [
           "provinces",
+          "categories",
           "levels",
+          "educations",
           "employment_types",
           "work_modes",
           "sources",
@@ -7399,13 +7454,13 @@
             }
           },
           {
-            "description": "active | inactive",
+            "description": "active (đang mở, chưa quá hạn nộp) | inactive (hết hạn, đã gỡ)",
             "in": "query",
             "name": "status",
             "required": false,
             "schema": {
               "default": "active",
-              "description": "active | inactive",
+              "description": "active (đang mở, chưa quá hạn nộp) | inactive (hết hạn, đã gỡ)",
               "title": "Status",
               "type": "string"
             }
@@ -8163,12 +8218,48 @@
             }
           },
           {
+            "description": "Ngành nghề (một giá trị của meta.categories)",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Ngành nghề (một giá trị của meta.categories)",
+              "title": "Category",
+              "type": "string"
+            }
+          },
+          {
             "in": "query",
             "name": "level",
             "required": false,
             "schema": {
               "default": "",
               "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Học vấn tối thiểu (meta.educations)",
+            "in": "query",
+            "name": "education",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Học vấn tối thiểu (meta.educations)",
+              "title": "Education",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)",
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)",
+              "title": "Experience",
               "type": "string"
             }
           },
@@ -8203,19 +8294,19 @@
             }
           },
           {
-            "description": "active | expired | removed | all",
+            "description": "active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all",
             "in": "query",
             "name": "status",
             "required": false,
             "schema": {
               "default": "active",
-              "description": "active | expired | removed | all",
+              "description": "active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all",
               "title": "Status",
               "type": "string"
             }
           },
           {
-            "description": "triệu VND / tháng",
+            "description": "triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)",
             "in": "query",
             "name": "salary_from",
             "required": false,
@@ -8228,7 +8319,7 @@
                   "type": "null"
                 }
               ],
-              "description": "triệu VND / tháng",
+              "description": "triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)",
               "title": "Salary From"
             }
           },
@@ -8374,12 +8465,48 @@
             }
           },
           {
+            "description": "Ngành nghề (một giá trị của meta.categories)",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Ngành nghề (một giá trị của meta.categories)",
+              "title": "Category",
+              "type": "string"
+            }
+          },
+          {
             "in": "query",
             "name": "level",
             "required": false,
             "schema": {
               "default": "",
               "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Học vấn tối thiểu (meta.educations)",
+            "in": "query",
+            "name": "education",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Học vấn tối thiểu (meta.educations)",
+              "title": "Education",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)",
+            "in": "query",
+            "name": "experience",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)",
+              "title": "Experience",
               "type": "string"
             }
           },
@@ -8414,19 +8541,19 @@
             }
           },
           {
-            "description": "active | expired | removed | all",
+            "description": "active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all",
             "in": "query",
             "name": "status",
             "required": false,
             "schema": {
               "default": "active",
-              "description": "active | expired | removed | all",
+              "description": "active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all",
               "title": "Status",
               "type": "string"
             }
           },
           {
-            "description": "triệu VND / tháng",
+            "description": "triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)",
             "in": "query",
             "name": "salary_from",
             "required": false,
@@ -8439,7 +8566,7 @@
                   "type": "null"
                 }
               ],
-              "description": "triệu VND / tháng",
+              "description": "triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)",
               "title": "Salary From"
             }
           },

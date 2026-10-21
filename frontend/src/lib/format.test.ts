@@ -10,6 +10,7 @@ import {
   dec,
   displayName,
   dt,
+  education,
   duration,
   failReason,
   hour,
@@ -136,6 +137,13 @@ describe("chữ", () => {
     expect(label("full_time")).toBe("Toàn thời gian")
     expect(label("something")).toBe("Something")
     expect(label(null)).toBe("–")
+  })
+
+  it("education: học vấn riêng, không lẫn nhãn KYC của none", () => {
+    expect(education("bachelor")).toBe("Đại học")
+    expect(education("none")).toBe("Không yêu cầu")
+    expect(education("unknown")).toBe("–")
+    expect(education(null)).toBe("–")
   })
 
   it("failReason bỏ mã trước dấu hai chấm", () => {

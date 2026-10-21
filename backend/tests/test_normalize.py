@@ -6,7 +6,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from jobcrawler.common.schemas import EmploymentType, JobLevel, SalaryPeriod, WorkMode
+from jobcrawler.common.schemas import (
+    EducationLevel,
+    EmploymentType,
+    JobLevel,
+    SalaryPeriod,
+    WorkMode,
+)
 from jobcrawler.pipeline import normalize, provinces
 from jobcrawler.pipeline.normalize import (
     CONTACT_MASK,
@@ -17,7 +23,9 @@ from jobcrawler.pipeline.normalize import (
     mask_contacts,
     normalize_title,
     parse_date,
+    parse_education,
     parse_experience,
+    parse_openings,
     parse_salary,
     split_sections,
     to_markdown,
@@ -286,6 +294,131 @@ def test_parse_date_rejects_garbage() -> None:
     # Tên tỉnh "Hà Nam" bỏ dấu là "ha nam": không phải "a năm" (một năm).
     assert parse_date("Hà Nam", now=NOW, end_of_day=True) is None
     assert parse_date("Làm việc tại Hà Nam, Ninh Bình", now=NOW) is None
+
+
+# --- học vấn, số lượng tuyển, ngành nghề ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "level"),
+    [
+        ("Đại Học trở lên", EducationLevel.BACHELOR),
+        ("Đại học/Cử nhân", EducationLevel.BACHELOR),
+        ("bachelor degree", EducationLevel.BACHELOR),
+        ("associate degree", EducationLevel.COLLEGE),
+        ("Cao Đẳng trở lên", EducationLevel.COLLEGE),
+        # Nhiều mức: lấy mức thấp nhất.
+        ("Trung cấp/Cao đẳng/Đại học", EducationLevel.VOCATIONAL),
+        ("THPT trở lên", EducationLevel.HIGH_SCHOOL),
+        ("Trên đại học", EducationLevel.POSTGRADUATE),
+        ("Thạc sĩ", EducationLevel.POSTGRADUATE),
+        ("Không yêu cầu", EducationLevel.NONE),
+        ("no requirements", EducationLevel.NONE),
+        # Viết tắt: CĐ, TC, PTTH.
+        ("Tốt nghiệp CĐ/ĐH", EducationLevel.COLLEGE),
+        ("Trình độ: CĐ trở lên", EducationLevel.COLLEGE),
+        ("TC/CĐ/ĐH", EducationLevel.VOCATIONAL),
+        ("PTTH trở lên", EducationLevel.HIGH_SCHOOL),
+        ("2 năm kinh nghiệm", EducationLevel.UNKNOWN),
+        (None, EducationLevel.UNKNOWN),
+    ],
+)
+def test_parse_education(raw: str | None, level: EducationLevel) -> None:
+    assert parse_education(raw) is level
+
+
+def test_parse_education_from_jd_needs_context() -> None:
+    jd = "- Tốt nghiệp Cao đẳng trở lên chuyên ngành kế toán\n- Ưu tiên có bằng thạc sĩ"
+    assert parse_education(jd, require_context=True) is EducationLevel.COLLEGE
+    assert parse_education("Ưu tiên ứng viên có bằng thạc sĩ", require_context=True) is (
+        EducationLevel.UNKNOWN
+    )
+    # Tên trường, "không yêu cầu kinh nghiệm" không phải học vấn.
+    assert parse_education("Làm việc tại Đại học Bách khoa", require_context=True) is (
+        EducationLevel.UNKNOWN
+    )
+    assert parse_education("Không yêu cầu kinh nghiệm", require_context=True) is (
+        EducationLevel.UNKNOWN
+    )
+
+
+@pytest.mark.parametrize(
+    ("jd", "level"),
+    [
+        # Mức ưu tiên ghi sau ("là lợi thế", "is a plus", "preferred"), không lan sang câu sau.
+        ("Có bằng thạc sĩ là lợi thế. Tốt nghiệp đại học", EducationLevel.BACHELOR),
+        ("- Có bằng thạc sĩ là lợi thế\n- Tốt nghiệp đại học", EducationLevel.BACHELOR),
+        ("Degree in IT or related field; master is a plus", EducationLevel.UNKNOWN),
+        ("MBA preferred; graduated from university", EducationLevel.BACHELOR),
+        ("Thạc sĩ được ưu tiên", EducationLevel.UNKNOWN),
+        # Ngữ cảnh đứng sau mức: "X degree", "X trở lên".
+        ("Bachelor's degree in Computer Science", EducationLevel.BACHELOR),
+        ("Master's degree is a plus. Bachelor's degree in Finance", EducationLevel.BACHELOR),
+        ("- Đại học trở lên (ưu tiên chuyên ngành Kế toán)", EducationLevel.BACHELOR),
+        ("**Học vấn:**\n- Đại học", EducationLevel.BACHELOR),
+        # Viết tắt: lấy mức thấp nhất.
+        ("Tốt nghiệp CĐ/ĐH chuyên ngành Kế toán", EducationLevel.COLLEGE),
+        ("Trình độ: CĐ trở lên", EducationLevel.COLLEGE),
+        ("Tốt nghiệp TC/CĐ/ĐH", EducationLevel.VOCATIONAL),
+        ("Tốt nghiệp PTTH trở lên", EducationLevel.HIGH_SCHOOL),
+    ],
+)
+def test_parse_education_from_jd(jd: str, level: EducationLevel) -> None:
+    assert parse_education(jd, require_context=True) is level
+
+
+def test_short_requirements_need_context_for_ambiguous_words() -> None:
+    # "Master" của "Scrum Master" không phải thạc sĩ; trường học vấn của nguồn thì vẫn nhận.
+    job = normalize.normalize_job(
+        raw_job(description="<p>Quản lý dự án</p>", requirements="Scrum Master 2 năm"), now=NOW
+    )
+    assert job.education is EducationLevel.UNKNOWN
+    assert parse_education("Master") is EducationLevel.POSTGRADUATE
+    assert parse_education("CĐ/ĐH", strict=True) is EducationLevel.COLLEGE
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (2, 2),
+        ("1", 1),
+        ("2 người", 2),
+        ("Tuyển 05 nhân viên", 5),
+        (0, None),
+        (True, None),
+        ("", None),
+    ],
+)
+def test_parse_openings(value: object, expected: int | None) -> None:
+    assert parse_openings(value) == expected
+
+
+def test_normalize_job_categories_education_openings() -> None:
+    job = normalize.normalize_job(
+        raw_job(
+            title="Chuyên viên QS",
+            requirements="Đại học",
+            extra={
+                "industry": "Xây dựng, Bất động sản",
+                "education": "Cao Đẳng trở lên",
+                "openings": 2,
+            },
+        ),
+        now=NOW,
+    )
+    assert job.categories == ["Xây dựng", "Bất động sản"]
+    assert job.education is EducationLevel.COLLEGE  # trường học vấn của nguồn đi trước
+    assert job.openings == 2
+    # Không có trường riêng: "Tốt nghiệp đại học…" trong phần yêu cầu của JD.
+    plain = normalize.normalize_job(raw_job(), now=NOW)
+    assert plain.categories == ["Kế toán / Kiểm toán / Thuế"]
+    assert plain.education is EducationLevel.BACHELOR
+    assert plain.openings is None
+    # "Không yêu cầu" ở ô yêu cầu ngắn thường là kinh nghiệm: không suy ra học vấn.
+    vague = normalize.normalize_job(
+        raw_job(description="<p>Làm kế toán</p>", requirements="Không yêu cầu"), now=NOW
+    )
+    assert vague.education is EducationLevel.UNKNOWN
 
 
 # --- cấp bậc, loại hình, hình thức ----------------------------------------------------------------

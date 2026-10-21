@@ -66,6 +66,14 @@ describe("đối tượng", () => {
 })
 
 describe("giá trị", () => {
+  it("bộ lọc xuất việc làm: nhãn và giá trị của ngành nghề, học vấn, nguồn", () => {
+    expect(fieldLabel("category")).toBe("Ngành nghề")
+    expect(fieldLabel("experience")).toBe("Kinh nghiệm")
+    expect(formatAuditValue({ education: "bachelor" })).toBe("Học vấn: Đại học")
+    expect(formatAuditValue("topcv", "source")).toBe("TopCV")
+    expect(formatAuditValue("bachelor")).toBe("bachelor") // khoá khác: giữ nguyên
+  })
+
   it("giá trị đã che hiện là Ẩn", () => {
     expect(isMasked("***")).toBe(true)
     expect(isMasked("••••••••")).toBe(true)

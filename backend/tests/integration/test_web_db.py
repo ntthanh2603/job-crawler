@@ -152,6 +152,10 @@ async def seed(app_state: object, tag: str) -> tuple[UUID, str, UUID, UUID, UUID
             salary_currency="VND",
             salary_period="month",
             level="senior",
+            categories=["Công nghệ thông tin"],
+            education="bachelor",
+            openings=2,
+            experience_years_min=3,
             description_md="## Mô tả\n- Viết API\n\n<script>alert('x')</script>",
             requirements_md="- 3 năm Python",
             source_urls=[f"https://web{tag}.vn/jobs/1"],
@@ -368,6 +372,13 @@ async def test_jobs_filters_detail_export(web: Seed) -> None:
         ({"salary_from": 18}, 1),
         ({"salary_from": 25}, 0),
         ({"level": "senior"}, 1),
+        ({"category": "Công nghệ thông tin"}, 1),
+        ({"category": "Xây dựng"}, 0),
+        ({"education": "bachelor"}, 1),
+        ({"education": "college"}, 0),
+        ({"experience": "3"}, 1),
+        ({"experience": "2"}, 0),
+        ({"experience": "5"}, 0),
         ({"source": "careers"}, 1),
         ({"search": "python"}, 1),
         ({"reviewed": "yes"}, 0),
@@ -377,6 +388,11 @@ async def test_jobs_filters_detail_export(web: Seed) -> None:
 
     d = (await web.client.get(f"/api/jobs/{web.job_id}")).json()
     assert d["job"]["salary"]["min"] == 15_000_000
+    assert (d["job"]["categories"], d["job"]["education"], d["job"]["openings"]) == (
+        ["Công nghệ thông tin"],
+        "bachelor",
+        2,
+    )
     assert "<h2>Mô tả</h2>" in d["html"]["description"]
     assert "<script>" not in d["html"]["description"]
     assert "<li>3 năm Python</li>" in d["html"]["requirements"]
@@ -388,6 +404,11 @@ async def test_jobs_filters_detail_export(web: Seed) -> None:
     rows_csv = list(csvlib.DictReader(io.StringIO(csv.text.lstrip("﻿"))))
     assert [r["title"] for r in rows_csv] == [f"Kỹ sư Python {web.tag}"]
     assert rows_csv[0]["provinces"] == "Hà Nội"
+    assert (rows_csv[0]["categories"], rows_csv[0]["education"], rows_csv[0]["openings"]) == (
+        "Công nghệ thông tin",
+        "bachelor",
+        "2",
+    )
     jsonl = await web.client.get(
         "/api/jobs/export", params={**params, "fmt": "jsonl", "status": "all"}
     )

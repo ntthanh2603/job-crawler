@@ -231,6 +231,29 @@ def _experience(value: Any) -> str | None:
     return _html_text(value)
 
 
+def _labels(value: Any) -> str | None:
+    """Nhãn ngành: chuỗi giữ nguyên ("Xây dựng, Bất động sản"), danh sách nối bằng dấu phẩy."""
+    if isinstance(value, list):
+        return ", ".join(dict.fromkeys(t for v in value if (t := _name(v)))) or None
+    return _name(value)
+
+
+def _education(value: Any) -> str | None:
+    """`educationRequirements`: tên trình độ (EducationalOccupationalCredential: `alternateName`
+    tiếng Việt trước `credentialCategory`) hoặc chuỗi."""
+    if isinstance(value, list):
+        return ", ".join(dict.fromkeys(t for v in value if (t := _education(v)))) or None
+    if isinstance(value, dict):
+        return _name(value.get("alternateName")) or _name(value.get("credentialCategory"))
+    text = text_or_none(value)
+    return text if text and len(text) <= 120 else None
+
+
+def _openings(value: Any) -> int | None:
+    number = _number(value)
+    return int(number) if number is not None and 0 < number <= 10_000 else None
+
+
 def _identifier(value: Any) -> str | None:
     if isinstance(value, dict):
         return text_or_none(value.get("value") or value.get("@id"))
@@ -294,7 +317,9 @@ def to_raw_job(node: dict[str, Any], *, page_url: str, source: str = "careers") 
             for k, v in {
                 "identifier": identifier,
                 "occupational_category": _name(node.get("occupationalCategory")),
-                "industry": _name(node.get("industry")),
+                "industry": _labels(node.get("industry")),
+                "education": _education(node.get("educationRequirements")),
+                "openings": _openings(node.get("totalJobOpenings")),
             }.items()
             if v
         },

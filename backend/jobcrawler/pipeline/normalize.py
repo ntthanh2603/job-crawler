@@ -7,6 +7,7 @@
 - Địa điểm: 34 tỉnh/thành sau sáp nhập 2025 (`pipeline.provinces`).
 - Cấp bậc, loại hình, hình thức làm việc: rule; còn `unknown` thì `classify_unclear` hỏi LLM
   (chỉ cho job đã nhận và đã gộp, để không tốn LLM cho tin bị loại).
+- Ngành nghề (`pipeline.categories`: danh mục nguồn + tiêu đề), học vấn tối thiểu, số lượng tuyển.
 - Ngày: về UTC; hiểu "2 ngày trước", "Hạn nộp: 30/11/2025", "Còn 15 ngày".
 
 Mọi hàm ở đây là thuần (không I/O) trừ `classify_unclear`.
@@ -31,6 +32,7 @@ from markdown_it import MarkdownIt
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.pages import html_to_markdown
 from jobcrawler.common.schemas import (
+    EducationLevel,
     EmploymentType,
     ExperienceYears,
     JobLevel,
@@ -41,7 +43,7 @@ from jobcrawler.common.schemas import (
     WorkMode,
 )
 from jobcrawler.common.text import fold, strip_accents
-from jobcrawler.pipeline import provinces
+from jobcrawler.pipeline import categories, provinces
 from jobcrawler.prompts import job_fields
 from jobcrawler.services.llm import LLMClient, cache_key, cached_structured
 from jobcrawler.services.net.kv import KeyValueStore
@@ -64,6 +66,9 @@ class NormalizedJob:
     level: JobLevel = JobLevel.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
     work_mode: WorkMode = WorkMode.UNKNOWN
+    categories: list[str] = field(default_factory=list)
+    education: EducationLevel = EducationLevel.UNKNOWN
+    openings: int | None = None
     locations: list[Location] = field(default_factory=list)
     salary: Salary | None = None
     experience_years: ExperienceYears | None = None
@@ -1033,6 +1038,251 @@ def parse_experience(raw: str | None, *, require_context: bool = False) -> Exper
     return None
 
 
+# --- học vấn, số lượng tuyển, ngành nghề ----------------------------------------------------------
+
+# Trình độ → cụm từ (đã fold). "Trên đại học" / "sau đại học" là sau đại học, không phải đại học.
+_EDUCATION_RULES: tuple[tuple[EducationLevel, tuple[str, ...]], ...] = (
+    (
+        EducationLevel.POSTGRADUATE,
+        (
+            "sau dai hoc",
+            "tren dai hoc",
+            "thac si",
+            "tien si",
+            "cao hoc",
+            "master",
+            "masters",
+            "mba",
+            "phd",
+            "doctorate",
+            "postgraduate",
+            "post graduate",
+        ),
+    ),
+    (
+        EducationLevel.BACHELOR,
+        ("dai hoc", "cu nhan", "bachelor", "bachelors", "university", "dh", "undergraduate"),
+    ),
+    (EducationLevel.COLLEGE, ("cao dang", "cd", "associate", "associates")),
+    (
+        EducationLevel.VOCATIONAL,
+        (
+            "trung cap",
+            "tc",
+            "so cap",
+            "hoc nghe",
+            "truong nghe",
+            "trung cap nghe",
+            "vocational",
+            "professional certificate",
+            "chung chi nghe",
+        ),
+    ),
+    (
+        EducationLevel.HIGH_SCHOOL,
+        (
+            "thpt",
+            "ptth",
+            "thcs",
+            "pho thong",
+            "trung hoc pho thong",
+            "trung hoc co so",
+            "high school",
+            "lop 12",
+            "lop 9",
+            "cap 3",
+            "cap 2",
+            "12 12",
+            "9 12",
+        ),
+    ),
+    (
+        EducationLevel.NONE,
+        (
+            "khong yeu cau",
+            "khong can bang cap",
+            "khong can bang",
+            "no requirements",
+            "no requirement",
+            "not required",
+            "none",
+        ),
+    ),
+)
+# Thứ tự thấp → cao để lấy mức tối thiểu khi nguồn ghi nhiều mức ("Trung cấp/Cao đẳng/Đại học").
+_EDUCATION_ORDER = (
+    EducationLevel.NONE,
+    EducationLevel.HIGH_SCHOOL,
+    EducationLevel.VOCATIONAL,
+    EducationLevel.COLLEGE,
+    EducationLevel.BACHELOR,
+    EducationLevel.POSTGRADUATE,
+)
+_EDUCATION_PATTERNS = tuple(
+    (
+        level,
+        re.compile(
+            rf"(?<![0-9a-z])(?:{'|'.join(re.escape(p) for p in sorted(ps, key=len, reverse=True))})"
+            r"(?![0-9a-z])"
+        ),
+    )
+    for level, ps in _EDUCATION_RULES
+)
+# Trong JD: chỉ nhận trình độ đứng sau chữ "tốt nghiệp", "trình độ", "bằng"... hoặc trước
+# "degree", "trở lên"... (không phải tên trường, "môi trường đại học"); bỏ mức chỉ là ưu tiên
+# ("ưu tiên thạc sĩ", "thạc sĩ là lợi thế", "MBA preferred").
+_EDUCATION_CONTEXT = re.compile(
+    r"(?:tot nghiep|trinh do|hoc van|bang cap|van bang|co bang|bang tot nghiep|degree in|degree|"
+    r"graduated?|education)\W*(?:\w+\W+){0,4}$"
+)
+_EDUCATION_AFTER = re.compile(
+    r"^\W*(?:s\W+)?(?:degree|diploma|tro len|or above|or higher|chinh quy|chuyen nganh)\b"
+)
+_EDUCATION_PREFERRED = re.compile(
+    r"(?:uu tien|loi the|preferred|is a plus|a plus)\W*(?:\w+\W+){0,6}$"
+)
+_EDUCATION_PREFERRED_AFTER = re.compile(
+    r"^\W*(?:\w+\W+){0,6}?(?:uu tien\W*$|loi the\b|a plus\b|preferred\b|advantage\b|nice to have\b)"
+)
+# Chữ dễ nhầm ("Scrum Master", "Sales Associate", "TC", "CD"): ngoài trường học vấn của nguồn chỉ
+# nhận khi có ngữ cảnh học vấn hoặc đứng cạnh trình độ khác ("TC/CĐ/ĐH").
+_AMBIGUOUS_LEVELS = frozenset({"master", "masters", "associate", "associates", "tc", "cd"})
+# Câu (ưu tiên ở câu trước không áp cho câu sau) và vế câu (", ưu tiên chuyên ngành…").
+_SENTENCES = re.compile(r"[.;!?\n]")
+_CLAUSES = re.compile(r"[,()\[\]]|\s[-–]\s")
+_SHORT_VALUE = 80  # "yêu cầu" ngắn hơn thì thường chỉ là trình độ ("Đại học", "Trình độ: Cao đẳng")
+
+
+def _education_runs(text: str) -> list[tuple[int, int, list[tuple[EducationLevel, str]]]]:
+    """Các trình độ nêu trong `text` đã fold, gom các trình độ liền nhau ("tc cd dh"): (đầu, cuối,
+    [(mức, chữ)])."""
+    found: list[tuple[int, int, EducationLevel, str]] = []
+    for level, pattern in _EDUCATION_PATTERNS:  # sau đại học trước: che "đại học" bên trong
+        for m in pattern.finditer(text):
+            if any(a < m.end() and m.start() < b for a, b, _, _ in found):
+                continue
+            found.append((m.start(), m.end(), level, m.group()))
+    runs: list[tuple[int, int, list[tuple[EducationLevel, str]]]] = []
+    for start, end, level, word in sorted(found, key=lambda f: f[0]):
+        if runs and start == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], end, [*runs[-1][2], (level, word)])
+        else:
+            runs.append((start, end, [(level, word)]))
+    return runs
+
+
+def parse_education(
+    raw: str | None, *, require_context: bool = False, strict: bool = False
+) -> EducationLevel:
+    """ "Đại Học trở lên", "Cao đẳng/Đại học", "bachelor degree", "Không yêu cầu" → học vấn tối
+    thiểu. `require_context`: đọc từ JD — chỉ nhận mức có ngữ cảnh học vấn ("tốt nghiệp đại học",
+    "bachelor's degree") và không phải mức ưu tiên. `strict`: chữ dễ nhầm ("Scrum Master") cũng
+    cần ngữ cảnh."""
+    if not raw:
+        return EducationLevel.UNKNOWN
+    levels = []
+    seen = ""  # phần đã đọc (đã fold): "tốt nghiệp" có thể ở dòng nhãn phía trên
+    for sentence in _SENTENCES.split(raw):
+        said = ""  # phần đã đọc của câu hiện tại
+        for clause in _CLAUSES.split(sentence):
+            text = fold(clause)
+            if not text:
+                continue
+            for start, end, run in _education_runs(text):
+                after = text[end:]
+                context = bool(
+                    _EDUCATION_CONTEXT.search(f"{seen} {said} {text[:start]}"[-60:])
+                    or _EDUCATION_AFTER.match(after)
+                )
+                if require_context and (
+                    not context
+                    or _EDUCATION_PREFERRED.search(f"{said} {text[:start]}"[-60:])
+                    or _EDUCATION_PREFERRED_AFTER.match(after)
+                ):
+                    continue
+                for level, word in run:
+                    if require_context and level is EducationLevel.NONE:
+                        continue
+                    if strict and word in _AMBIGUOUS_LEVELS and len(run) == 1 and not context:
+                        continue
+                    levels.append(level)
+            said = f"{said} {text}"
+        seen = f"{seen} {said}"[-60:]
+    if not levels:
+        return EducationLevel.UNKNOWN
+    return min(levels, key=_EDUCATION_ORDER.index)
+
+
+def classify_education(raw: RawJob, requirements: str | None, description: str) -> EducationLevel:
+    """Học vấn: trường học vấn của nguồn, "yêu cầu" ngắn (chỉ ghi trình độ), rồi câu "tốt nghiệp
+    …" trong phần yêu cầu / mô tả."""
+    level = education_of_fields(raw)
+    if level is not EducationLevel.UNKNOWN:
+        return level
+    for text in (requirements, description):
+        level = parse_education(text, require_context=True)
+        if level is not EducationLevel.UNKNOWN:
+            return level
+    return EducationLevel.UNKNOWN
+
+
+def education_of_fields(raw: RawJob) -> EducationLevel:
+    """Học vấn từ trường nguồn ghi riêng (không đọc JD)."""
+    for value in _extra_strings(raw.extra.get("education")):
+        level = parse_education(value)
+        if level is not EducationLevel.UNKNOWN:
+            return level
+    # "Không yêu cầu" trong ô yêu cầu thường là kinh nghiệm, không phải học vấn.
+    if raw.requirements and len(raw.requirements) <= _SHORT_VALUE:
+        level = parse_education(raw.requirements, strict=True)
+        if level not in (EducationLevel.UNKNOWN, EducationLevel.NONE):
+            return level
+    return EducationLevel.UNKNOWN
+
+
+_OPENINGS = re.compile(r"\d+")
+_MAX_OPENINGS = 10_000
+
+
+def parse_openings(value: object) -> int | None:
+    """Số lượng tuyển: 2, "2", "2 người", "Tuyển 05 nhân viên" → 2 / 5. Không hợp lệ → None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        n = int(value)
+    elif isinstance(value, str) and (m := _OPENINGS.search(value)):
+        n = int(m.group())
+    else:
+        return None
+    return n if 0 < n <= _MAX_OPENINGS else None
+
+
+def _extra_strings(value: object) -> list[str]:
+    return categories.strings(value)
+
+
+def source_labels(raw: RawJob) -> list[str]:
+    """Nhãn ngành phẳng nguồn ghi: JSON-LD `industry` / `occupationalCategory`, phòng ban, nhóm
+    nghề của ATS."""
+    labels = [
+        *_extra_strings(raw.extra.get("industry")),
+        *_extra_strings(raw.extra.get("function")),
+        *_extra_strings(raw.extra.get("category")),
+        *_extra_strings(raw.extra.get("occupational_category")),
+    ]
+    if raw.department:
+        labels.append(raw.department)
+    return labels
+
+
+def classify_job_categories(raw: RawJob, title: str) -> list[str]:
+    return categories.classify_categories(
+        title,
+        path=_extra_strings(raw.extra.get("category_path")),
+        labels=source_labels(raw),
+    )
+
+
 # --- cấp bậc, loại hình, hình thức ----------------------------------------------------------------
 
 
@@ -1441,6 +1691,9 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
         level=level,
         employment_type=employment,
         work_mode=classify_work_mode(raw.work_mode, title, location_texts),
+        categories=classify_job_categories(raw, title),
+        education=classify_education(raw, requirements, description),
+        openings=parse_openings(raw.extra.get("openings")),
         locations=locations,
         salary=salary,
         experience_years=experience,

@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { qs } from "@/lib/api"
-import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
+import { cap, date, displayName, education, num, provinces, salary, sourceLabel } from "@/lib/format"
 import { useGetJobs, useGetMeta, type GetJobsSortBy } from "@/lib/gen/queries"
 import type { SortOrder, SortState } from "@/lib/types"
 import { useUrlFilters } from "@/lib/url-filters"
@@ -33,8 +33,11 @@ import { cn } from "@/lib/utils"
 /** Bộ lọc trên URL và giá trị mặc định (không ghi lên URL). */
 const FILTERS = {
   search: "",
+  category: "",
   province: "",
+  experience: "",
   level: "",
+  education: "",
   employment_type: "",
   work_mode: "",
   source: "",
@@ -54,6 +57,15 @@ const STATUSES = [
   ["all", "Mọi trạng thái"],
 ] as const
 
+/** Kinh nghiệm tối thiểu tin yêu cầu (`experience` của API: số năm, 3 = 3–4 năm). */
+const EXPERIENCES = [
+  ["0", "Dưới 1 năm"],
+  ["1", "1 năm"],
+  ["2", "2 năm"],
+  ["3", "3–4 năm"],
+  ["5", "Từ 5 năm"],
+] as const
+
 const SORTS: readonly (readonly [GetJobsSortBy, SortOrder, string])[] = [
   ["first_seen_at", "DESC", "Mới thấy nhất"],
   ["first_seen_at", "ASC", "Thấy lâu nhất"],
@@ -64,6 +76,17 @@ const SORTS: readonly (readonly [GetJobsSortBy, SortOrder, string])[] = [
   ["expires_at", "ASC", "Sắp hết hạn"],
   ["expires_at", "DESC", "Hạn xa nhất"],
 ]
+
+/** Ngành chính, các ngành khác gom thành "+N" (rê chuột xem đủ). */
+function Categories({ values }: { values: string[] }) {
+  if (!values.length) return <Muted value="–" />
+  return (
+    <span title={values.length > 1 ? values.join(" · ") : undefined}>
+      {values[0]}
+      {values.length > 1 && <span className="text-muted-foreground"> +{values.length - 1}</span>}
+    </span>
+  )
+}
 
 /** Giá trị trống: gạch mờ thay vì "–" đậm lặp lại cả cột. */
 function Muted({ value }: { value: string }) {
@@ -166,6 +189,12 @@ export function JobsPage() {
         >
           <FilterSelect label="Trạng thái" value={filters.status} onChange={(v) => update({ status: v })} options={STATUSES} all={null} />
           <FilterSelect
+            label="Ngành nghề"
+            value={filters.category}
+            onChange={(v) => update({ category: v })}
+            options={meta.data?.categories ?? []}
+          />
+          <FilterSelect
             label="Tỉnh/thành"
             value={filters.province}
             onChange={(v) => update({ province: v })}
@@ -179,7 +208,15 @@ export function JobsPage() {
             onCommit={() => salaryFrom !== filters.salary_from && update({ salary_from: salaryFrom })}
             placeholder="–"
           />
+          <FilterSelect label="Kinh nghiệm" value={filters.experience} onChange={(v) => update({ experience: v })} options={EXPERIENCES} />
           <FilterSelect label="Cấp bậc" value={filters.level} onChange={(v) => update({ level: v })} options={meta.data?.levels ?? []} />
+          <FilterSelect
+            label="Học vấn"
+            value={filters.education}
+            onChange={(v) => update({ education: v })}
+            options={meta.data?.educations ?? []}
+            labels={education}
+          />
           <FilterSelect
             label="Loại hình"
             value={filters.employment_type}
@@ -248,6 +285,7 @@ export function JobsPage() {
                     </div>
                     <div className="text-meta text-muted-foreground">{displayName(j.company_name)}</div>
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-meta">
+                      {j.categories.length > 0 && <Categories values={j.categories} />}
                       {provinces(j) !== "–" && <span>{provinces(j)}</span>}
                       {salary(j.salary) !== "–" && <span className="font-medium">{salary(j.salary)}</span>}
                       <span className="text-muted-foreground">{sourceLabel(j.canonical_source)}</span>
@@ -267,6 +305,7 @@ export function JobsPage() {
                     <SortHead column="first_seen_at" sort={sort} onSort={onSort}>
                       Vị trí
                     </SortHead>
+                    <TableHead>Ngành nghề</TableHead>
                     <TableHead>Nơi làm</TableHead>
                     <SortHead column="salary" sort={sort} onSort={onSort}>
                       Lương
@@ -296,6 +335,9 @@ export function JobsPage() {
                             <JobTags job={j} />
                           </div>
                         )}
+                      </TableCell>
+                      <TableCell className="max-w-48 min-w-32 text-meta whitespace-normal">
+                        <Categories values={j.categories} />
                       </TableCell>
                       <TableCell className="max-w-44 min-w-28 text-meta whitespace-normal">
                         <Muted value={provinces(j)} />

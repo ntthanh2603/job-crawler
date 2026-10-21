@@ -37,6 +37,7 @@ from jobcrawler.common.text import fold, normalize_company_name, strip_accents
 from jobcrawler.common.urls import normalize_url
 from jobcrawler.database.models import Company, CompanyAlias, CompanyRun, Job, JobPosting, JobReview
 from jobcrawler.modules.companies import batch_service
+from jobcrawler.modules.jobs.status_service import open_jobs
 from jobcrawler.pipeline.kyc import MATCH_ALIAS
 from jobcrawler.services.resources import Resources
 
@@ -406,7 +407,7 @@ async def sample_jobs(
     session: AsyncSession, *, n: int = DEFAULT_SAMPLE, seed: int | None = None
 ) -> list[SampleJob]:
     """N job đang mở chọn ngẫu nhiên (cố định được bằng `seed`)."""
-    ids = list(await session.scalars(select(Job.id).where(Job.status == JobStatus.ACTIVE.value)))
+    ids = list(await session.scalars(select(Job.id).where(open_jobs(datetime.now(UTC)))))
     picked = random.Random(seed).sample(ids, min(n, len(ids)))
     if not picked:
         return []
@@ -664,7 +665,7 @@ async def review_summary(session: AsyncSession) -> ReviewSummary:
         select(func.count())
         .select_from(Job)
         .outerjoin(JobReview, JobReview.job_id == Job.id)
-        .where(Job.status == JobStatus.ACTIVE.value, JobReview.id.is_(None))
+        .where(open_jobs(datetime.now(UTC)), JobReview.id.is_(None))
     )
     return ReviewSummary(
         reviewed=sum(s.reviewed for s in by_source),
@@ -679,7 +680,7 @@ async def next_unreviewed(session: AsyncSession, *, exclude: UUID | None = None)
     stmt = (
         select(Job.id)
         .outerjoin(JobReview, JobReview.job_id == Job.id)
-        .where(Job.status == JobStatus.ACTIVE.value, JobReview.id.is_(None))
+        .where(open_jobs(datetime.now(UTC)), JobReview.id.is_(None))
         .order_by(func.random())
         .limit(1)
     )

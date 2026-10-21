@@ -20,6 +20,7 @@ from jobcrawler.database.models import (
     SourceFetch,
     SourceProfile,
 )
+from jobcrawler.modules.jobs.status_service import open_jobs, shown_status
 from jobcrawler.services.redis.queues import JobQueue
 from jobcrawler.services.resources import Resources
 
@@ -370,11 +371,11 @@ async def collect_stats(res: Resources, *, hours: float | None = 24, storage: bo
                 select(Company.kyc_status, func.count()).group_by(Company.kyc_status)
             )
         }
+        # Trạng thái như danh sách việc làm hiện (job đang mở đã quá hạn nộp là `expired`).
+        shown = shown_status(now)
         jobs_by_status = {
             status: n
-            for status, n in await session.execute(
-                select(Job.status, func.count()).group_by(Job.status)
-            )
+            for status, n in await session.execute(select(shown, func.count()).group_by(shown))
         }
         # Cùng một biểu thức (cùng tham số bind) ở SELECT và GROUP BY.
         kind = func.split_part(Job.canonical_source, ":", 1)
@@ -382,7 +383,7 @@ async def collect_stats(res: Resources, *, hours: float | None = 24, storage: bo
             (source, n)
             for source, n in await session.execute(
                 select(kind, func.count())
-                .where(Job.status == JobStatus.ACTIVE.value)
+                .where(open_jobs(now))
                 .group_by(kind)
                 .order_by(func.count().desc())
             )

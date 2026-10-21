@@ -83,7 +83,7 @@ async def get_company(request: Request, company_id: UUID) -> CompanyDetailOut:
             )
             for p in d.profiles
         ],
-        active_jobs=c.active_jobs,
+        active_jobs=d.active_jobs,
         inactive_jobs=d.inactive_jobs,
         runs_total=d.runs,
         rejected_total=d.rejected,

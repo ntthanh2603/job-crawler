@@ -15,7 +15,7 @@ import {
 } from "@/components/common"
 import { JobBody, JobFacts, PostingsTable, ReviewSection } from "@/components/job"
 import { Button } from "@/components/ui/button"
-import { cap, date, displayName, dt, num, pct, sourceLabel } from "@/lib/format"
+import { cap, date, displayName, dt, education, num, pct, sourceLabel } from "@/lib/format"
 import { useGetJob } from "@/lib/gen/queries"
 
 export function JobPage() {
@@ -76,6 +76,22 @@ export function JobPage() {
             <Section title="Chi tiết">
               <Meta
                 items={[
+                  [
+                    "Ngành nghề",
+                    j.categories.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {j.categories.map((c) => (
+                          <TextLink key={c} to={`/jobs?category=${encodeURIComponent(c)}`} className="hover:no-underline">
+                            <Tag className="hover:bg-secondary/70">{c}</Tag>
+                          </TextLink>
+                        ))}
+                      </div>
+                    ) : (
+                      "Chưa rõ"
+                    ),
+                  ],
+                  ["Học vấn", j.education === "unknown" ? "Không ghi" : education(j.education)],
+                  ["Số lượng tuyển", j.openings ? `${num(j.openings)} người` : "Không ghi"],
                   [
                     "Kỹ năng",
                     j.skills.length ? (

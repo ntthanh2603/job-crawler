@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from jobcrawler.common.schemas import ExtractionMethod
+from jobcrawler.pipeline.normalize import normalize_job
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult
@@ -76,6 +78,13 @@ JOBS: list[tuple[str, str, dict[str, Any]]] = [
             "external_id": "2333688",
             "title": "Chuyên Viên Tài Chính Nguồn Vốn (Tín Dụng DN)",
             "salary": (20_000_000, 22_000_000, "VND"),
+            # Khối "Thông tin chung" + "Danh mục Nghề liên quan" (ngoài JSON-LD).
+            "work_mode": "Làm việc tại văn phòng / Onsite",
+            "extra": {
+                "education": "Đại Học trở lên",
+                "openings": 1,
+                "category_path": ["Tài chính/Ngân hàng/Bảo hiểm", "Tài chính", "Huy động vốn"],
+            },
             "profile": (
                 "225567",
                 "https://www.topcv.vn/cong-ty/cong-ty-co-phan-cloud-property/225567.html",
@@ -93,6 +102,8 @@ JOBS: list[tuple[str, str, dict[str, Any]]] = [
         {
             "external_id": "1752022",
             "profile": ("219468", "https://www.topcv.vn/brand/ipa?id=219468"),
+            # Tin trả phí: bố cục `general-information-data`, không có danh mục nghề.
+            "extra": {"education": "Đại Học trở lên", "category_path": None},
         },
     ),
     (
@@ -233,6 +244,10 @@ def test_parse_job(board: str, name: str, want: dict[str, Any]) -> None:
         assert job.salary_raw == want["salary_raw"]
     if "employment_type" in want:
         assert job.employment_type == want["employment_type"]
+    if "work_mode" in want:
+        assert job.work_mode == want["work_mode"]
+    for key, value in want.get("extra", {}).items():
+        assert job.extra.get(key) == value, key
     if "profile" in want:
         assert parsed.profile is not None
         external_id, profile_url = want["profile"]
@@ -244,6 +259,36 @@ def test_parse_job(board: str, name: str, want: dict[str, Any]) -> None:
     if "website" in want:
         assert parsed.profile is not None
         assert parsed.profile.website == want["website"]
+
+
+@pytest.mark.parametrize(
+    ("board", "name", "categories", "education", "openings"),
+    [
+        ("topcv", "job_1.html", ["Tài chính / Ngân hàng / Bảo hiểm"], "bachelor", 1),
+        ("topcv", "job_2.html", ["Công nghệ thông tin"], "bachelor", 1),
+        ("topcv", "job_3.html", ["Xây dựng", "Bất động sản"], "bachelor", 1),
+        ("careerviet", "job_1.html", ["Tài chính / Ngân hàng / Bảo hiểm"], "bachelor", None),
+        (
+            "vieclam24h",
+            "job_2.html",
+            ["Kinh doanh / Bán hàng", "Marketing / PR / Quảng cáo", "Sản xuất / Cơ khí"],
+            "college",
+            8,
+        ),
+        ("jobsgo", "job_2.html", ["Marketing / PR / Quảng cáo"], "college", None),
+        ("glints", "job_1.html", ["Công nghệ thông tin"], "bachelor", None),
+        ("vietnamworks", "job_2.html", ["Biên phiên dịch", "Sản xuất / Cơ khí"], "unknown", None),
+    ],
+)
+def test_board_job_category_education_openings(
+    board: str, name: str, categories: list[str], education: str, openings: int | None
+) -> None:
+    """Ngành nghề / học vấn / số lượng tuyển chuẩn hoá từ tin thật của từng trang."""
+    html, url = page(board, name)
+    parsed = REGISTRY[board].parse_job(html, url)
+    assert parsed is not None
+    job = normalize_job(parsed.job, now=datetime(2026, 10, 21, tzinfo=UTC), board=True)
+    assert (job.categories, job.education.value, job.openings) == (categories, education, openings)
 
 
 def test_vieclam24h_reads_employer_website_and_tax_code_from_page_data() -> None:

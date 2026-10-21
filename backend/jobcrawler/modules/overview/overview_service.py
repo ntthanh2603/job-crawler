@@ -24,8 +24,9 @@ from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.logging import get_logger
-from jobcrawler.common.schemas import FetchOutcome, JobStatus
+from jobcrawler.common.schemas import FetchOutcome
 from jobcrawler.database.models import Company, CompanyRun, Job, SourceFetch
+from jobcrawler.modules.jobs.status_service import open_jobs
 from jobcrawler.modules.overview import stats_service
 from jobcrawler.services.resources import Resources
 
@@ -39,7 +40,6 @@ VIEW_TTL = 60
 DAYS = 30
 TOP = 12
 
-ACTIVE = Job.status == JobStatus.ACTIVE.value
 SOURCE_KIND = func.split_part(Job.canonical_source, ":", 1)
 # Khoảng lương (triệu VND / tháng, theo mức cao nhất ghi trong tin).
 SALARY_BANDS = [
@@ -67,10 +67,11 @@ async def compute_charts(
     """Phân bố trên job đang mở (`status_service.open_jobs`) và doanh nghiệp; job mới theo ngày
     của múi giờ `tz` (CRAWL_TIMEZONE). Mỗi truy vấn đọc theo index trạng thái / BRIN."""
     now = now or datetime.now(UTC)
+    active = open_jobs(now)
     by_source = await _pairs(
         session,
         select(SOURCE_KIND, func.count())
-        .where(ACTIVE)
+        .where(active)
         .group_by(SOURCE_KIND)
         .order_by(func.count().desc()),
     )
@@ -81,14 +82,14 @@ async def compute_charts(
             SELECT p, count(*) FROM (
                 SELECT DISTINCT j.id, loc->>'province' AS p
                 FROM jobs j, jsonb_array_elements(j.locations) AS loc
-                WHERE j.status = 'active') t
+                WHERE j.status = 'active' AND (j.expires_at IS NULL OR j.expires_at >= :now)) t
             WHERE p IS NOT NULL GROUP BY p ORDER BY count(*) DESC LIMIT :top
             """
-        ).bindparams(top=TOP),
+        ).bindparams(top=TOP, now=now),
     )
     no_place = int(
         await session.scalar(
-            select(func.count()).where(ACTIVE, func.jsonb_array_length(Job.locations) == 0)
+            select(func.count()).where(active, func.jsonb_array_length(Job.locations) == 0)
         )
         or 0
     )
@@ -97,7 +98,7 @@ async def compute_charts(
         return await _pairs(
             session,
             select(column, func.count())
-            .where(ACTIVE)
+            .where(active)
             .group_by(column)
             .order_by(func.count().desc()),
         )
@@ -116,7 +117,7 @@ async def compute_charts(
         (Job.salary_negotiable, "Thoả thuận"),
         else_="Không ghi",
     )
-    salary = dict(await _pairs(session, select(band, func.count()).where(ACTIVE).group_by(band)))
+    salary = dict(await _pairs(session, select(band, func.count()).where(active).group_by(band)))
     order = [b[0] for b in SALARY_BANDS] + ["Tiền tệ / kỳ khác", "Thoả thuận", "Không ghi"]
 
     # `timezone(tz, t)` = `t AT TIME ZONE tz`: giờ địa phương, rồi lấy ngày.
@@ -160,11 +161,11 @@ async def compute_charts(
     ]
     companies = int(await session.scalar(select(func.count()).select_from(Company)) or 0)
     with_jobs = int(await session.scalar(select(func.count()).where(Company.active_jobs > 0)) or 0)
-    active = sum(n for _, n in by_source)
+    active_jobs = sum(n for _, n in by_source)
     return {
         "generated_at": now,
         "totals": {
-            "active_jobs": active,
+            "active_jobs": active_jobs,
             "companies": companies,
             "companies_with_jobs": with_jobs,
             "new_jobs_7d": sum(d["careers"] + d["boards"] for d in jobs_by_day[-7:]),

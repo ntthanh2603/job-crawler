@@ -230,8 +230,24 @@ P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của
   đúng một doanh nghiệp; còn mơ hồ thì LLM chọn kèm lý do.
 
 **Chuẩn hoá** (`pipeline/normalize.py`, rule trước, LLM sau): HTML → markdown sạch (ẩn SĐT / email cá
-nhân); lương → min / max / tiền tệ / kỳ; địa điểm → 34 tỉnh/thành sau sáp nhập 2025; cấp bậc / loại
-hình / hình thức.
+nhân); lương → min / max / tiền tệ / kỳ ("tối thiểu", "trở lên", "15tr+" là mức sàn; lương theo
+ngày / tuần để trống kỳ vì `SalaryPeriod` chỉ có tháng / năm / giờ); địa điểm → 34 tỉnh/thành sau
+sáp nhập 2025 (ô chỉ ghi danh sách tỉnh "Hà Nội, Hồ Chí Minh" → mỗi tỉnh một địa điểm; tên đường trùng
+tên tỉnh như "72 Nguyễn Huệ", "Xa lộ Hà Nội" không tính); cấp bậc / loại hình / hình thức (LLM chỉ hỏi
+trường việc **đã gộp** còn `unknown`, sau bước gộp); học vấn tối thiểu (trường nguồn ghi, không có
+thì câu "tốt nghiệp …" / "… degree" trong JD, bỏ mức chỉ là ưu tiên: "thạc sĩ là lợi thế", "MBA
+preferred"); số lượng tuyển. Hai nguồn trả cùng một tin `(source, external_id)` trong một lượt thì chỉ
+giữ một bản (nội dung dài hơn, `normalize.unique_raws`).
+
+**Ngành nghề** (`pipeline/categories.py`): một danh mục chung ~25 nhóm bám nhóm gốc của TopCV, mỗi
+việc ≤ 3 nhóm (nhóm chính trước). Thứ tự tin cậy: đường danh mục của nguồn (TopCV "Danh mục Nghề
+liên quan" gốc → nhánh → lá: nhóm của gốc, thu hẹp theo cấp dưới), rồi tiêu đề (cụm từ khớp sớm
+nhất), rồi nhãn ngành phẳng (JSON-LD `industry` / `occupationalCategory`, phòng ban của ATS — có
+khi là ngành của doanh nghiệp nên đứng sau tiêu đề). Không đọc JD. Từ viết tắt trùng chữ tiếng Việt
+khi bỏ dấu chỉ nhận đúng cách viết ("ít" / IT, "sắp" / SAP, "ủi" / UI, "ai" / AI, "thuê" / thuế).
+Trang tuyển dụng ghi phần này
+ngoài JSON-LD thì adapter đọc thêm ở `BoardAdapter.enrich_job` (TopCV: học vấn, số lượng tuyển, hình
+thức làm việc, danh mục nghề).
 
 **Xác minh** (`pipeline/verify.py`): mỗi tin một quyết định có lý do (`EXPIRED`, `EMPTY_JD`,
 `NOT_A_JOB`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_SIGNALS`, `SPAM_REPOST`). Tin đáng ngờ phải
@@ -344,7 +360,7 @@ trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 | `company_schedules`                                      | trạng thái lịch, mốc build / poll, lượt poll đủ gần nhất; fillfactor 70 (ghi mỗi lượt poll) |
 | `crawl_plans`                                            | bộ khung từng nguồn, `active` / `broken` / `retired`, mã tin, lỗi                           |
 | `source_profiles`, `job_postings`                        | profile trên trang tuyển dụng; mỗi tin của mỗi nguồn (nội dung thô nén zstd)                |
-| `jobs`, `job_reviews`                                    | việc đã gộp (`active` / `expired` / `removed`); kiểm tay                                    |
+| `jobs`, `job_reviews`                                    | việc đã gộp (`active` / `expired` / `removed`, ngành nghề GIN); kiểm tay                    |
 | `company_runs`, `source_fetches`, `failed_pages`, `logs` | lượt build / poll có thay đổi, từng request, trang parse lỗi, log                           |
 | `company_fences`                                         | fencing token của khoá theo doanh nghiệp (tăng mỗi lượt build / poll giữ khoá)              |
 | `board_index_runs`                                       | lịch sử index trang tuyển dụng                                                              |
@@ -352,6 +368,16 @@ trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 
 Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sách luôn phân trang ở server,
 đếm có giới hạn; index theo đúng truy vấn (trigram cho tên, BRIN theo thời gian).
+
+**Việc đang mở khi đọc** (`modules/jobs/status_service.py`): việc `active` đã quá hạn nộp
+(`expires_at` < bây giờ; hạn nộp chỉ có ngày hoặc ghi đúng nửa đêm tính hết ngày đó) được hiện,
+lọc (`status=active` / `expired`), đếm (Tổng quan, Kiểm tay, tab việc của doanh nghiệp) và export
+(giao diện lẫn `jobcrawler export`) là `expired`; cột `status` chỉ đổi khi tin được chạy lại. Riêng
+`companies.active_jobs` (cột ghi sẵn cho danh sách doanh nghiệp) vẫn đếm theo cột `status`. Lọc
+"lương từ" và sắp theo lương dùng lương tháng VND (`models.JOB_SALARY_MONTH_SQL`: lương năm chia
+12; lương theo giờ / ngày / tuần / ca và ngoại tệ không khớp bộ lọc, xếp cuối), index
+`ix_jobs_status_salary` theo đúng biểu thức đó (revision 0006). Export CSV thêm `'`
+trước ô bắt đầu bằng `=` `+` `-` `@` (Excel không hiểu thành công thức); JSONL giữ nguyên.
 
 **Phân trang như open-asm** (`common/pagination.py`): mọi endpoint danh sách nhận `GetManyQuery`
 (`search`, `page` từ 1, `limit` 1–100 mặc định 10, `sortOrder` `ASC` / `DESC`) cộng `sortBy` là

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from jobcrawler.common.schemas import JobOut, JobStatus
 from jobcrawler.database.models import Job
-from jobcrawler.modules.jobs.export_service import CSV_COLUMNS, JobWriter, output_path
+from jobcrawler.modules.jobs.export_service import CSV_COLUMNS, JobWriter, csv_row, output_path
 from jobcrawler.pipeline.store import job_to_out, job_values
 
 from .jobs_fixtures import NOW, normalized, raw_job
@@ -86,3 +86,22 @@ def test_output_path() -> None:
     assert output_path("out/", "jsonl") == Path("out/jobs.jsonl")
     assert output_path("out", "csv") == Path("out/jobs.csv")
     assert output_path("exports/acme.jsonl", "jsonl") == Path("exports/acme.jsonl")
+
+
+def test_csv_text_cells_never_become_formulas() -> None:
+    """Tiêu đề / JD crawl được bắt đầu bằng `=` `+` `-` `@` (tab, CR): Excel không chạy thành công
+    thức; JSONL giữ nguyên."""
+    title = '=HYPERLINK("https://evil.test","Bấm")'
+    job = job_to_out(job_row(title=title, description_md="- Lập trình\n- Kiểm thử"))
+    row = csv_row(job)
+    assert row["title"] == "'" + title
+    assert row["description_md"] == "'- Lập trình\n- Kiểm thử"
+    assert row["company_name"] == "Công ty Cổ phần ACME"  # ô thường không đổi
+    assert row["salary_min"] == "15000000"
+    for value in ("+84 912", "@SUM(A1)", "\tx", "\rx"):
+        assert csv_row(job.model_copy(update={"company_name": value}))["company_name"] == (
+            "'" + value
+        )
+    buf = io.StringIO()
+    JobWriter(buf, "jsonl").write(job)
+    assert json.loads(buf.getvalue())["title"] == title

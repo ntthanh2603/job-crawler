@@ -485,6 +485,22 @@ export type DrainOut = {
   worker_id: string;
 };
 
+/**
+ * Học vấn tối thiểu tin yêu cầu.
+ */
+export type EducationLevel = typeof EducationLevel[keyof typeof EducationLevel];
+
+
+export const EducationLevel = {
+  none: 'none',
+  high_school: 'high_school',
+  vocational: 'vocational',
+  college: 'college',
+  bachelor: 'bachelor',
+  postgraduate: 'postgraduate',
+  unknown: 'unknown',
+} as const;
+
 export type EmploymentType = typeof EmploymentType[keyof typeof EmploymentType];
 
 
@@ -672,6 +688,7 @@ export type JobItem = {
   apply_url: string | null;
   benefits_md: string | null;
   canonical_source: string;
+  categories: string[];
   company_id: string;
   company_name: string;
   /**
@@ -680,6 +697,7 @@ export type JobItem = {
      */
   confidence: number;
   description_md: string;
+  education: EducationLevel;
   employment_type: EmploymentType;
   experience_years: ExperienceYears | null;
   expires_at: string | null;
@@ -688,6 +706,7 @@ export type JobItem = {
   last_seen_at: string;
   level: JobLevel;
   locations: Location[];
+  openings: number | null;
   posted_at: string | null;
   requirements_md: string | null;
   reviewed: boolean | null;
@@ -1004,6 +1023,8 @@ export type MeOut = {
 
 export type MetaOut = {
   boards: string[];
+  categories: string[];
+  educations: string[];
   employment_types: string[];
   kyc_statuses: string[];
   levels: string[];
@@ -1606,7 +1627,7 @@ limit?: number;
  */
 sortOrder?: SortOrder;
 /**
- * active | inactive
+ * active (đang mở, chưa quá hạn nộp) | inactive (hết hạn, đã gỡ)
  */
 status?: string;
 sortBy?: GetCompanyJobsSortBy;
@@ -1698,16 +1719,28 @@ export type GetJobsParams = {
  */
 search?: string;
 province?: string;
+/**
+ * Ngành nghề (một giá trị của meta.categories)
+ */
+category?: string;
 level?: string;
+/**
+ * Học vấn tối thiểu (meta.educations)
+ */
+education?: string;
+/**
+ * Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)
+ */
+experience?: string;
 employment_type?: string;
 work_mode?: string;
 source?: string;
 /**
- * active | expired | removed | all
+ * active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all
  */
 status?: string;
 /**
- * triệu VND / tháng
+ * triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)
  */
 salary_from?: number | null;
 company_id?: string | null;
@@ -1752,16 +1785,28 @@ export type GetJobsExportParams = {
  */
 search?: string;
 province?: string;
+/**
+ * Ngành nghề (một giá trị của meta.categories)
+ */
+category?: string;
 level?: string;
+/**
+ * Học vấn tối thiểu (meta.educations)
+ */
+education?: string;
+/**
+ * Kinh nghiệm tối thiểu tin yêu cầu: 0 (dưới 1 năm) | 1 | 2 | 3 (3–4 năm) | 5 (từ 5 năm)
+ */
+experience?: string;
 employment_type?: string;
 work_mode?: string;
 source?: string;
 /**
- * active | expired | removed | all
+ * active (đang mở, chưa quá hạn nộp) | expired (kể cả job đang mở đã quá hạn nộp) | removed | all
  */
 status?: string;
 /**
- * triệu VND / tháng
+ * triệu VND / tháng (lương năm tính theo tháng; lương theo giờ, ngoại tệ không khớp)
  */
 salary_from?: number | null;
 company_id?: string | null;

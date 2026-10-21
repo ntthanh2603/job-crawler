@@ -5,11 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from jobcrawler.common.api import res_of
-from jobcrawler.common.schemas import EmploymentType, JobLevel, KycStatus, WorkMode
+from jobcrawler.common.schemas import EducationLevel, EmploymentType, JobLevel, KycStatus, WorkMode
 from jobcrawler.modules.boards import boards_service
 from jobcrawler.modules.jobs import jobs_service
 from jobcrawler.modules.meta.meta_schema import MetaOut
 from jobcrawler.modules.runs import runs_service
+from jobcrawler.pipeline.categories import CATEGORY_NAMES
 
 router = APIRouter(prefix="/api", tags=["meta"])
 
@@ -21,7 +22,9 @@ async def get_meta(request: Request) -> MetaOut:
         sources = await jobs_service.job_sources(session)
     return MetaOut(
         provinces=jobs_service.PROVINCE_NAMES,
+        categories=CATEGORY_NAMES,
         levels=jobs_service.enum_values(JobLevel),
+        educations=jobs_service.enum_values(EducationLevel),
         employment_types=jobs_service.enum_values(EmploymentType),
         work_modes=jobs_service.enum_values(WorkMode),
         sources=sources,

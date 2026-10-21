@@ -14,11 +14,11 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field, ValidationError
-from sqlalchemy import Select, func, or_, select, union
+from sqlalchemy import Select, func, not_, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.pagination import GetManyQuery, Page, capped_count, ordering, paginate
-from jobcrawler.common.schemas import CompanyIn, JobStatus
+from jobcrawler.common.schemas import CompanyIn
 from jobcrawler.common.text import normalize_company_name
 from jobcrawler.database.models import (
     Company,
@@ -31,6 +31,7 @@ from jobcrawler.database.models import (
 )
 from jobcrawler.modules.companies import batch_service
 from jobcrawler.modules.jobs.jobs_service import JobItem, JobSort, job_item, job_ordering
+from jobcrawler.modules.jobs.status_service import open_jobs
 from jobcrawler.services.resources import Resources
 
 # --- truy vấn cho giao diện -----------------------------------------------------------------------
@@ -68,7 +69,10 @@ class CompanyListQuery(GetManyQuery):
 class CompanyJobsQuery(GetManyQuery):
     """`GET /api/companies/{id}/jobs`: `search` trong tiêu đề."""
 
-    status: str = Field(default="active", description="active | inactive")
+    status: str = Field(
+        default="active",
+        description="active (đang mở, chưa quá hạn nộp) | inactive (hết hạn, đã gỡ)",
+    )
     sortBy: JobSort = "first_seen_at"
 
 
@@ -126,6 +130,8 @@ class CompanyDetail:
     company: Company
     aliases: list[CompanyAlias]
     profiles: list[SourceProfile]
+    # Số việc đang mở / không còn mở (đếm có giới hạn) theo cùng định nghĩa với `company_jobs`.
+    active_jobs: int
     inactive_jobs: int
     runs: int  # số lượt chạy (đếm có giới hạn)
     rejected: int  # số tin bị loại (đếm có giới hạn)
@@ -172,10 +178,10 @@ async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDeta
             .limit(100)
         )
     )
-    inactive, _ = await capped_count(
-        session,
-        select(Job.id).where(Job.company_id == company_id, Job.status != JobStatus.ACTIVE.value),
-    )
+    now = datetime.now(UTC)
+    jobs = select(Job.id).where(Job.company_id == company_id)
+    active, _ = await capped_count(session, jobs.where(open_jobs(now)))
+    inactive, _ = await capped_count(session, jobs.where(not_(open_jobs(now))))
     runs, _ = await capped_count(
         session, select(CompanyRun.run_id).where(CompanyRun.company_id == company_id)
     )
@@ -193,6 +199,7 @@ async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDeta
         company=company,
         aliases=aliases,
         profiles=profiles,
+        active_jobs=active,
         inactive_jobs=inactive,
         runs=runs,
         rejected=rejected,
@@ -203,17 +210,14 @@ async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDeta
 async def company_jobs(
     session: AsyncSession, company_id: UUID, f: CompanyJobsQuery | None = None
 ) -> Page[JobItem]:
-    """Việc làm của một doanh nghiệp (index company_id, status, first_seen_at)."""
+    """Việc làm của một doanh nghiệp (index company_id, status, first_seen_at). Đang mở như
+    `status=active` của danh sách việc làm (`status_service.open_jobs`)."""
     f = f or CompanyJobsQuery()
-    status = (
-        Job.status != JobStatus.ACTIVE.value
-        if f.status == "inactive"
-        else Job.status == JobStatus.ACTIVE.value
-    )
+    now = datetime.now(UTC)
+    status = not_(open_jobs(now)) if f.status == "inactive" else open_jobs(now)
     stmt = select(Job).where(Job.company_id == company_id, status)
     if search := f.search.strip():
         stmt = stmt.where(Job.title.ilike(f"%{search}%"))
-    now = datetime.now(UTC)
     return await paginate(
         session,
         stmt,

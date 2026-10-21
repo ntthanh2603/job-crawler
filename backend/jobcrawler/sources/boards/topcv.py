@@ -13,6 +13,10 @@
 - Trang profile: Organization JSON-LD (website ở `sameAs`, địa chỉ); tin đang mở ở trang riêng
   `/cong-ty/<slug>-cid<id>/tuyen-dung.html` (thương hiệu: `/brand/<slug>/tuyen-dung?id=<id>`),
   chia trang bằng JavaScript ("1/2 trang", `data-page-url`): trang sau đọc bằng `?page=N`.
+- Trang chi tiết ghi ngoài JSON-LD: khối "Thông tin chung" (cấp bậc, học vấn, số lượng tuyển,
+  hình thức làm việc; tin trả phí dùng bố cục `general-information-data`) và "Danh mục Nghề liên
+  quan" — đường danh mục gốc → nhánh → lá, link `/tim-viec-lam-<slug>-cr<gốc>cb<nhánh>cl<lá>`.
+  JSON-LD `industry` là bộ nhãn ngành cũ do nhà tuyển dụng tự chọn (nhiều nhãn thừa).
 Mẫu: tests/fixtures/boards/topcv/.
 """
 
@@ -21,13 +25,58 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from jobcrawler.common.pages import parse
+from selectolax.lexbor import LexborHTMLParser
+
+from jobcrawler.common.pages import node_text, parse
+from jobcrawler.common.schemas import RawJob
+from jobcrawler.common.text import fold
 from jobcrawler.sources.boards.base import ProfilePage, SitemapBoard
 
 _BRAND = re.compile(r"^https://www\.topcv\.vn/brand/(?P<slug>[^/?]+)$")
 # "<span class="hight-light">1</span>/2 trang" trong #job-listing-paginate-text.
 _PAGES = re.compile(r"(\d+)\s*/\s*(\d+)\s*trang")
 _COMPANY = re.compile(r"^https://www\.topcv\.vn/cong-ty/(?P<slug>[^/]+)/(?P<id>\d+)\.html$")
+# Khối "Thông tin chung": (ô, nhãn, giá trị) của bố cục thường và bố cục tin trả phí.
+_INFO = (
+    (
+        ".box-job-information-general-info-list__item--content",
+        ".box-job-information-general-info-list__item--content-title",
+        ".box-job-information-general-info-list__item--content-desc",
+    ),
+    (
+        ".general-information-data",
+        ".general-information-data__label",
+        ".general-information-data__value",
+    ),
+)
+# Link danh mục nghề: gốc `-cr<id>`, nhánh `cb<id>`, lá `cl<id>` (link tỉnh / từ khoá không có).
+_CATEGORY_LINK = re.compile(r"/tim-viec-lam-[^/?#]+-cr\d+(?:cb\d+)?(?:cl\d+)?/?$")
+_COUNT = re.compile(r"\d+")
+
+
+def general_info(tree: LexborHTMLParser) -> dict[str, str]:
+    """Khối "Thông tin chung": nhãn (đã fold, vd. `hoc van`) → giá trị."""
+    info: dict[str, str] = {}
+    for box, label_selector, value_selector in _INFO:
+        for node in tree.css(box):
+            key = fold(node_text(node.css_first(label_selector)))
+            value = node_text(node.css_first(value_selector))
+            if key and value:
+                info.setdefault(key, value)
+    return info
+
+
+def category_path(tree: LexborHTMLParser) -> list[str]:
+    """Đường danh mục nghề của tin (gốc → nhánh → lá) trong "Danh mục Nghề liên quan"."""
+    for box in tree.css(".box-category"):
+        path: dict[str, None] = {}
+        for link in box.css("a.box-category-tag"):
+            href = (link.attributes.get("href") or "").split("?")[0]
+            if _CATEGORY_LINK.search(href) and (text := node_text(link)):
+                path.setdefault(text, None)
+        if path:
+            return list(path)
+    return []
 
 
 class TopCV(SitemapBoard):
@@ -54,6 +103,31 @@ class TopCV(SitemapBoard):
             if ids and ids[0].isdigit():
                 return f"{base}?id={ids[0]}"
         return base
+
+    def enrich_job(self, job: RawJob, tree: LexborHTMLParser) -> RawJob:
+        info = general_info(tree)
+        extra = dict(job.extra)
+        updates: dict[str, object] = {}
+        if education := info.get("hoc van"):
+            extra["education"] = education
+        if "openings" not in extra and (m := _COUNT.search(info.get("so luong tuyen", ""))):
+            extra["openings"] = int(m.group())
+        if path := category_path(tree):
+            extra["category_path"] = path
+        # JSON-LD của TopCV không có `jobLocationType`: "Làm việc tại văn phòng / Onsite".
+        if job.work_mode is None and (mode := info.get("hinh thuc lam viec")):
+            updates["work_mode"] = mode
+        if job.employment_type is None and (kind := info.get("loai hinh lam viec")):
+            updates["employment_type"] = kind
+        if (
+            not job.level
+            and not extra.get("occupational_category")
+            and (lvl := info.get("cap bac"))
+        ):
+            updates["level"] = lvl
+        if extra != job.extra:
+            updates["extra"] = extra
+        return job.model_copy(update=updates) if updates else job
 
     def profile_id(self, url: str) -> str | None:
         m = self.profile_url.search(self.canonical(url))

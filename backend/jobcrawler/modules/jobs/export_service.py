@@ -16,9 +16,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.logging import get_logger
-from jobcrawler.common.schemas import JobOut, JobStatus
+from jobcrawler.common.schemas import JobOut
 from jobcrawler.common.text import normalize_company_name
 from jobcrawler.database.models import Company, CompanyAlias, Job
+from jobcrawler.modules.jobs.status_service import open_jobs
 from jobcrawler.pipeline.store import job_to_out
 from jobcrawler.services.resources import Resources
 
@@ -35,6 +36,9 @@ CSV_COLUMNS = (
     "level",
     "employment_type",
     "work_mode",
+    "categories",
+    "education",
+    "openings",
     "provinces",
     "addresses",
     "salary_min",
@@ -61,6 +65,10 @@ CSV_COLUMNS = (
     "benefits_md",
 )
 LIST_SEP = " | "
+# Ô CSV bắt đầu bằng các ký tự này bị Excel / LibreOffice hiểu là công thức (tiêu đề crawl được
+# `=HYPERLINK(...)` thành link chạy được, gạch đầu dòng "- ..." thành #NAME?): thêm `'` phía trước
+# để luôn là chữ. JSONL giữ nguyên.
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 class UnknownCompanyError(ValueError):
@@ -92,9 +100,13 @@ def _num(value: float | None) -> str:
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
+def _text_cell(value: str) -> str:
+    return "'" + value if value.startswith(FORMULA_PREFIXES) else value
+
+
 def csv_row(job: JobOut) -> dict[str, str]:
     salary, exp = job.salary, job.experience_years
-    return {
+    row = {
         "company_id": str(job.company_id),
         "company_name": job.company_name,
         "title": job.title,
@@ -102,6 +114,9 @@ def csv_row(job: JobOut) -> dict[str, str]:
         "level": job.level.value,
         "employment_type": job.employment_type.value,
         "work_mode": job.work_mode.value,
+        "categories": LIST_SEP.join(job.categories),
+        "education": job.education.value,
+        "openings": str(job.openings) if job.openings is not None else "",
         "provinces": LIST_SEP.join(
             dict.fromkeys(loc.province for loc in job.locations if loc.province)
         ),
@@ -129,6 +144,7 @@ def csv_row(job: JobOut) -> dict[str, str]:
         "requirements_md": job.requirements_md or "",
         "benefits_md": job.benefits_md or "",
     }
+    return {key: _text_cell(value) for key, value in row.items()}
 
 
 class JobWriter:
@@ -204,7 +220,8 @@ async def export_jobs(
     include_inactive: bool = False,
     now: datetime | None = None,
 ) -> ExportResult:
-    """Ghi job ra file (ghi file tạm rồi đổi tên, không để file dở). Mặc định chỉ job đang mở."""
+    """Ghi job ra file (ghi file tạm rồi đổi tên, không để file dở). Mặc định chỉ job đang mở
+    (như `status=active` của `GET /api/jobs/export`: `status_service.open_jobs`)."""
     now = now or datetime.now(UTC)
     path = output_path(out, fmt)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,10 +231,7 @@ async def export_jobs(
         if companies:
             stmt = stmt.where(Job.company_id.in_(await resolve_companies(session, companies)))
         if not include_inactive:
-            stmt = stmt.where(
-                Job.status == JobStatus.ACTIVE.value,
-                or_(Job.expires_at.is_(None), Job.expires_at >= now),
-            )
+            stmt = stmt.where(open_jobs(now))
         result = await session.stream_scalars(stmt.execution_options(yield_per=500))
         # utf-8-sig cho CSV: Excel mới nhận đúng tiếng Việt.
         encoding = "utf-8-sig" if fmt == "csv" else "utf-8"

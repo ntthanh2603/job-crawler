@@ -105,6 +105,18 @@ class WorkMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class EducationLevel(StrEnum):
+    """Học vấn tối thiểu tin yêu cầu."""
+
+    NONE = "none"  # không yêu cầu
+    HIGH_SCHOOL = "high_school"  # phổ thông (THCS / THPT)
+    VOCATIONAL = "vocational"  # trung cấp, sơ cấp, học nghề, chứng chỉ
+    COLLEGE = "college"  # cao đẳng
+    BACHELOR = "bachelor"  # đại học
+    POSTGRADUATE = "postgraduate"  # thạc sĩ, tiến sĩ
+    UNKNOWN = "unknown"
+
+
 class JobStatus(StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"
@@ -287,6 +299,10 @@ class JobOut(BaseModel):
     level: JobLevel = JobLevel.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
     work_mode: WorkMode = WorkMode.UNKNOWN
+    # Ngành nghề (tên trong `pipeline/categories.CATEGORIES`), ngành chính trước.
+    categories: list[str] = Field(default_factory=list)
+    education: EducationLevel = EducationLevel.UNKNOWN
+    openings: int | None = None  # số người cần tuyển
     locations: list[Location] = Field(default_factory=list)
     salary: Salary | None = None
     experience_years: ExperienceYears | None = None

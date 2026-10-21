@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import (
+    EducationLevel,
     EmploymentType,
     ExperienceYears,
     JobLevel,
@@ -143,6 +144,9 @@ def job_values(
         "level": merged.level.value,
         "employment_type": merged.employment_type.value,
         "work_mode": merged.work_mode.value,
+        "categories": merged.categories,
+        "education": merged.education.value,
+        "openings": merged.openings,
         "locations": [loc.model_dump(mode="json") for loc in merged.locations],
         "salary_min": salary.min if salary else None,
         "salary_max": salary.max if salary else None,
@@ -198,6 +202,9 @@ def job_to_out(row: Job, *, now: datetime | None = None) -> JobOut:
         level=JobLevel(row.level),
         employment_type=EmploymentType(row.employment_type),
         work_mode=WorkMode(row.work_mode),
+        categories=list(row.categories or []),
+        education=EducationLevel(row.education),
+        openings=row.openings,
         locations=[Location.model_validate(loc) for loc in row.locations or []],
         salary=salary,
         experience_years=experience,

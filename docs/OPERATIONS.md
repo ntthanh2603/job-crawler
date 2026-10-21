@@ -172,8 +172,14 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   tới Redis / gateway chập chờn.
 - **Bảo trì tự động** mỗi giờ: lượt chạy treo → `failed`, gộp việc trùng còn sót, xoá dữ liệu cũ
   (`failed_pages` 7 ngày, `source_fetches` / `logs` 30 ngày), nén lại dần. Tay:
-  `jobcrawler db maintain`, `db reclean` (sau khi đổi luật làm sạch), `db dedup`,
-  `index-boards --rematch` (sau khi đổi luật so tên profile).
+  `jobcrawler db maintain`, `db reclean` (sau khi đổi luật làm sạch), `db reclassify` (sau khi đổi
+  luật ngành nghề / học vấn; `--dry-run` chỉ đếm), `db dedup`, `index-boards --rematch` (sau khi đổi
+  luật so tên profile).
+- **Ngành nghề, học vấn, số lượng tuyển** (revision 0005): việc lưu trước đó để trống tới lượt chạy
+  sau của doanh nghiệp; muốn có ngay thì chạy một lần `jobcrawler db reclassify` (đọc nội dung thô
+  của tin đã lưu, không tải lại trang). Học vấn / số lượng tuyển / danh mục nghề TopCV đọc từ HTML
+  chỉ có ở tin được tải lại sau khi nâng cấp (tin mới, tin đổi, tin quá hạn làm mới); trước đó ngành
+  lấy từ `industry` của JSON-LD đã lưu.
 
 ## 9. Redis và Postgres
 

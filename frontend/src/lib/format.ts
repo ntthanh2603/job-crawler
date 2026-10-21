@@ -289,6 +289,22 @@ export const LABELS: Record<string, string> = {
   remote: "Từ xa",
 }
 
+/** Học vấn tối thiểu (`EducationLevel`); "none" ở LABELS là trạng thái KYC nên tách riêng. */
+const EDUCATION: Record<string, string> = {
+  none: "Không yêu cầu",
+  high_school: "Phổ thông",
+  vocational: "Trung cấp / nghề",
+  college: "Cao đẳng",
+  bachelor: "Đại học",
+  postgraduate: "Sau đại học",
+}
+
+/** "bachelor" → "Đại học"; chưa rõ → "–". */
+export function education(value: string | null | undefined): string {
+  if (!value || value === "unknown") return "–"
+  return EDUCATION[value] ?? cap(value)
+}
+
 /** Nhãn tiếng Việt (viết hoa đầu) cho giá trị mã hoá; giá trị lạ thì chỉ viết hoa chữ đầu. */
 export function label(value: string | null | undefined): string {
   if (!value) return "–"

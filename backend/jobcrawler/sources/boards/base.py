@@ -352,6 +352,11 @@ class BoardAdapter(ABC):
     def parse_job(self, html: str, url: str) -> BoardJob | None:
         """Trang chi tiết → tin + profile. None: không bóc được."""
 
+    def enrich_job(self, job: RawJob, tree: LexborHTMLParser) -> RawJob:
+        """Trường trang chi tiết chỉ ghi trong HTML, không có trong JSON-LD (học vấn, danh mục
+        nghề...). Mặc định không thêm gì."""
+        return job
+
     def parse_profile(self, html: str, url: str) -> ProfileRef | None:
         """Trang profile → thông tin nhà tuyển dụng: Organization JSON-LD (tên, website, địa
         chỉ) nếu có, không thì tên từ <h1>."""
@@ -702,7 +707,7 @@ class SitemapBoard(BoardAdapter):
         identifier = jobs[0].extra.get("identifier")
         if not self.identifier_is_job and identifier is not None:
             updates["extra"] = {k: v for k, v in jobs[0].extra.items() if k != "identifier"}
-        job = jobs[0].model_copy(update=updates)
+        job = self.enrich_job(jobs[0].model_copy(update=updates), tree)
         links = extract_links(tree, url)
         org_id = None if self.identifier_is_job or identifier is None else str(identifier)
         profile = self.profile_from_page(tree, links, org_nodes(html, url), org_id, page_url=url)

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,8 +17,9 @@ from typer.testing import CliRunner
 from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.common.schemas import CompanyIn, JobOut, JobStatus
 from jobcrawler.database.models import Company, Job, JobPosting
+from jobcrawler.modules.companies import companies_service
 from jobcrawler.modules.crawl.company_service import process_company
-from jobcrawler.modules.jobs import export_service
+from jobcrawler.modules.jobs import export_service, jobs_service
 from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.pipeline import dedup, store
 from jobcrawler.pipeline.verify import Verdict
@@ -141,6 +143,46 @@ async def test_reclean_jobs_applies_new_cleaning_rules(
         assert cleaned == "- **Tuổi:** Từ 18\n\n- Tên / Chức danh: [liên hệ đã ẩn] - HRBP"
         # Chạy lại: nội dung đã sạch không đổi.
         assert (await maintenance_service.reclean_jobs(res.sessionmaker)).changed == 0
+
+
+async def test_reclassify_jobs_fills_categories_education_openings(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Job lưu trước khi có ngành nghề / học vấn / số lượng tuyển: `db reclassify` tính lại từ
+    nội dung thô của tin, không cần chạy lại doanh nghiệp."""
+    monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        company_id = await reset(res)
+        async with res.sessionmaker.begin() as s:
+            await s.execute(delete(Job).where(Job.company_id == company_id))
+        await indexer(res, fake_site(JOBS)).run()
+        offline = dataclasses.replace(res, http=FakeFetcher())  # pyright: ignore[reportArgumentType]
+        await process_company(offline, CompanyIn(name=ACME))
+        rows = {r.title: r for r in await company_jobs(res, company_id)}
+        accountant = rows["Kế toán"]
+        assert accountant.categories == ["Kế toán / Kiểm toán / Thuế"]
+        async with res.sessionmaker.begin() as s:
+            posting = await s.scalar(
+                select(JobPosting).where(JobPosting.job_id == accountant.id).limit(1)
+            )
+            assert posting is not None
+            # Tin có thêm trường học vấn / số lượng tuyển (vd. lượt index sau đọc trang mới).
+            posting.raw = {**posting.raw, "extra": {"education": "Cao Đẳng trở lên", "openings": 3}}
+            await s.execute(
+                update(Job)
+                .where(Job.company_id == company_id)
+                .values(categories=[], education="unknown", openings=None)
+            )
+
+        dry = await maintenance_service.reclassify_jobs(res.sessionmaker, dry_run=True)
+        assert dry.changed >= 2
+        done = await maintenance_service.reclassify_jobs(res.sessionmaker)
+        assert done.changed == dry.changed
+        after = {r.title: r for r in await company_jobs(res, company_id)}
+        assert after["Kế toán"].categories == ["Kế toán / Kiểm toán / Thuế"]
+        assert (after["Kế toán"].education, after["Kế toán"].openings) == ("college", 3)
+        assert after["Lập trình viên"].categories == ["Công nghệ thông tin"]
+        assert (await maintenance_service.reclassify_jobs(res.sessionmaker)).changed == 0
 
 
 async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: Settings) -> None:
@@ -426,3 +468,119 @@ def test_cli_export(
     assert missing.exit_code == 2
     assert "không tìm thấy doanh nghiệp" in missing.output
     assert bad.exit_code == 2
+
+
+async def test_deadline_and_monthly_salary_in_lists_counts_and_exports(
+    integration_settings: Settings, tmp_path: Path
+) -> None:
+    """Việc `active` đã quá hạn nộp được hiện, lọc, đếm và export là `expired` (API lẫn CLI). Lọc /
+    sắp theo lương dùng lương tháng VND: lương năm chia 12; lương giờ / ngoại tệ xếp cuối."""
+    now = datetime.now(UTC)
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"Hạn nộp {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+            common: dict[str, Any] = {
+                "company_id": company_id,
+                "company_name": company.input_name,
+                "title_normalized": "x",
+                "description_md": "JD",
+                "canonical_source": "careers:x.vn",
+                "confidence": 0.9,
+            }
+            vnd = {"salary_currency": "VND"}
+            s.add_all(
+                [
+                    Job(
+                        cluster_key="month",
+                        title="Tháng",
+                        salary_min=15e6,
+                        salary_max=20e6,
+                        salary_period="month",
+                        expires_at=now + timedelta(days=7),
+                        **vnd,
+                        **common,
+                    ),
+                    Job(
+                        cluster_key="year",
+                        title="Năm",
+                        salary_min=600e6,
+                        salary_max=600e6,
+                        salary_period="year",
+                        **vnd,
+                        **common,
+                    ),
+                    Job(
+                        cluster_key="hour",
+                        title="Giờ",
+                        salary_min=30e3,
+                        salary_max=40e3,
+                        salary_period="hour",
+                        **vnd,
+                        **common,
+                    ),
+                    Job(
+                        cluster_key="usd",
+                        title="USD",
+                        salary_min=3000,
+                        salary_max=4000,
+                        salary_currency="USD",
+                        salary_period="month",
+                        **common,
+                    ),
+                    Job(
+                        cluster_key="late",
+                        title="Quá hạn",
+                        expires_at=now - timedelta(days=1),
+                        **common,
+                    ),
+                    Job(cluster_key="closed", title="Đóng", status="expired", **common),
+                ]
+            )
+        try:
+
+            async def listed(**filters: Any) -> list[jobs_service.JobItem]:
+                query = jobs_service.JobListQuery(company_id=company_id, limit=100, **filters)
+                async with res.sessionmaker() as s:
+                    return (await jobs_service.list_jobs(s, query)).items
+
+            active = await listed()
+            assert sorted(j.title for j in active) == ["Giờ", "Năm", "Tháng", "USD"]
+            assert {j.status for j in active} == {JobStatus.ACTIVE}
+            expired = await listed(status="expired")
+            assert sorted(j.title for j in expired) == ["Quá hạn", "Đóng"]
+            assert {j.status for j in expired} == {JobStatus.EXPIRED}
+            # 600 triệu / năm = 50 triệu / tháng.
+            assert [j.title for j in await listed(salary_from=40)] == ["Năm"]
+            assert await listed(salary_from=60) == []
+            by_salary = [j.title for j in await listed(sortBy="salary")]
+            assert by_salary[:2] == ["Năm", "Tháng"]
+            assert set(by_salary[2:]) == {"Giờ", "USD"}
+
+            # Export của giao diện và `jobcrawler export` cùng một tập job đang mở.
+            filters = jobs_service.JobFilterQuery(company_id=company_id)
+            api = "".join(
+                [part async for part in jobs_service.export_stream(res, filters, "jsonl")]
+            )
+            cli = await export_service.export_jobs(
+                res, fmt="jsonl", out=tmp_path, companies=[str(company_id)]
+            )
+            cli_text = cli.path.read_text(encoding="utf-8")
+            assert sorted(json.loads(line)["title"] for line in api.splitlines()) == sorted(
+                json.loads(line)["title"] for line in cli_text.splitlines()
+            )
+            assert cli.count == len(active)
+
+            async with res.sessionmaker() as s:
+                detail = await companies_service.company_detail(s, company_id)
+                inactive = await companies_service.company_jobs(
+                    s, company_id, companies_service.CompanyJobsQuery(status="inactive")
+                )
+            assert detail is not None
+            assert (detail.active_jobs, detail.inactive_jobs) == (4, 2)
+            assert sorted(j.title for j in inactive.items) == ["Quá hạn", "Đóng"]
+        finally:
+            async with res.sessionmaker.begin() as s:
+                await s.execute(delete(Company).where(Company.id == company_id))

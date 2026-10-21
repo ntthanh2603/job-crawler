@@ -7,7 +7,9 @@ from jobcrawler.common.api import ApiOut
 
 class MetaOut(ApiOut):
     provinces: list[str]
+    categories: list[str]
     levels: list[str]
+    educations: list[str]
     employment_types: list[str]
     work_modes: list[str]
     sources: list[str]

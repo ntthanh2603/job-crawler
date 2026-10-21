@@ -146,6 +146,23 @@ def db_reclean(
     typer.echo(f"đã quét {report.scanned} job · {verb} {report.changed}")
 
 
+@db_app.command("reclassify")
+def db_reclassify(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Chỉ đếm, không ghi.")] = False,
+) -> None:
+    """Tính lại ngành nghề, học vấn, số lượng tuyển của job đã lưu từ nội dung thô của các tin,
+    không cần chạy lại doanh nghiệp."""
+    from jobcrawler.modules.maintenance import maintenance_service
+
+    async def go() -> maintenance_service.RecleanReport:
+        async with open_resources(db_logs=False) as res:
+            return await maintenance_service.reclassify_jobs(res.sessionmaker, dry_run=dry_run)
+
+    report = _run(go())
+    verb = "cần sửa" if dry_run else "đã sửa"
+    typer.echo(f"đã quét {report.scanned} job · {verb} {report.changed}")
+
+
 @db_app.command("dedup")
 def db_dedup() -> None:
     """Điền dấu vân tay cho job cũ và gộp các job đang mở trùng nội dung (job cũ nhất giữ lại)."""

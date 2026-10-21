@@ -7,6 +7,8 @@
   job trùng còn sót (`dedupe_jobs`, cũng chạy tay bằng `jobcrawler db dedup`).
 
 `reclean_jobs` (`jobcrawler db reclean`, chạy tay): áp lại bộ làm sạch nội dung lên job đã lưu.
+`reclassify_jobs` (`jobcrawler db reclassify`, chạy tay): tính lại ngành nghề / học vấn / số lượng
+tuyển của job đã lưu từ nội dung thô của các tin.
 
 Thao tác bảo trì cho API: xếp cron bảo trì vào queue."""
 
@@ -24,13 +26,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
-from jobcrawler.common.schemas import JobStatus, RunStatus
+from jobcrawler.common.schemas import EducationLevel, JobStatus, RawJob, RunStatus
 from jobcrawler.database import compress
 from jobcrawler.database.ids import NIL
 from jobcrawler.database.models import BoardIndexRun, CompanyRun, Job, JobPosting
 from jobcrawler.pipeline import store
-from jobcrawler.pipeline.dedup import stored_fingerprint
-from jobcrawler.pipeline.normalize import clean_text_field
+from jobcrawler.pipeline.categories import title_category
+from jobcrawler.pipeline.dedup import Cluster, merge, stored_fingerprint
+from jobcrawler.pipeline.normalize import (
+    NormalizedJob,
+    clean_text_field,
+    normalize_job,
+    parse_education,
+)
 from jobcrawler.services.redis.locks import RedisLease
 from jobcrawler.services.resources import Resources
 
@@ -300,6 +308,111 @@ async def reclean_jobs(
                             .where(Job.id == row.id)
                             .values(**values, updated_at=func.now())
                         )
+            last_id = rows[-1].id
+
+
+RECLASSIFY_BATCH = 500
+
+
+def reclassified(
+    title: str,
+    requirements: str | None,
+    description: str,
+    raws: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Ngành nghề / học vấn / số lượng tuyển của một job từ nội dung thô các tin đã gộp vào nó
+    (tin chuẩn trước): mỗi tin qua `normalize_job` rồi gộp bằng `dedup.merge`, đúng như lúc chạy
+    doanh nghiệp — học vấn lấy của tin chuẩn (trường nguồn, rồi JD của chính nó), tin khác chỉ
+    điền khi tin chuẩn chưa rõ. Không như vậy thì lượt chạy sau đổi lại giá trị vừa tính."""
+    now = now or datetime.now(UTC)
+    members: list[NormalizedJob] = []
+    for raw in raws:
+        try:
+            job = RawJob.model_validate(raw)
+        except ValueError:  # tin rất cũ thiếu trường bắt buộc: bỏ qua
+            continue
+        try:
+            members.append(normalize_job(job, now=now))
+        except Exception:  # như `normalize_jobs`: tin lạ không vào cụm
+            log.exception("reclassify.normalize_error", url=job.url)
+    by_title = [c for c in [title_category(title)] if c]
+    if not members:
+        # Không còn tin nào (đã xoá): chỉ còn tiêu đề và nội dung đã lưu.
+        education = next(
+            (
+                level
+                for text in (requirements, description)
+                if (level := parse_education(text, require_context=True))
+                is not EducationLevel.UNKNOWN
+            ),
+            EducationLevel.UNKNOWN,
+        )
+        return {"categories": by_title, "education": education.value, "openings": None}
+    merged = merge(Cluster(members))
+    return {
+        "categories": merged.categories or by_title,
+        "education": merged.education.value,
+        "openings": merged.openings,
+    }
+
+
+async def reclassify_jobs(
+    sessionmaker: async_sessionmaker[AsyncSession], *, dry_run: bool = False
+) -> RecleanReport:
+    """Tính lại ngành nghề, học vấn, số lượng tuyển của job đã lưu từ `job_postings.raw` của các
+    tin đã gắn — khi thêm / đổi luật phân loại mà không muốn chạy lại doanh nghiệp."""
+    report = RecleanReport()
+    last_id = NIL
+    while True:
+        async with sessionmaker.begin() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        Job.id,
+                        Job.title,
+                        Job.canonical_posting_id,
+                        Job.requirements_md,
+                        Job.description_md,
+                        Job.categories,
+                        Job.education,
+                        Job.openings,
+                    )
+                    .where(Job.id > last_id)
+                    .order_by(Job.id)
+                    .limit(RECLASSIFY_BATCH)
+                )
+            ).all()
+            if not rows:
+                return report
+            raws: dict[UUID, list[tuple[bool, UUID, dict[str, Any]]]] = {}
+            canonical = {row.id: row.canonical_posting_id for row in rows}
+            postings = await session.execute(
+                select(JobPosting.id, JobPosting.job_id, JobPosting.raw).where(
+                    JobPosting.job_id.in_(list(canonical))
+                )
+            )
+            for posting_id, job_id, raw in postings:
+                if job_id is not None and isinstance(raw, dict):
+                    first = posting_id == canonical.get(job_id)
+                    raws.setdefault(job_id, []).append((not first, posting_id, raw))
+            for row in rows:
+                report.scanned += 1
+                members = [raw for *_, raw in sorted(raws.get(row.id, []), key=lambda t: t[:2])]
+                values = reclassified(row.title, row.requirements_md, row.description_md, members)
+                before = {
+                    "categories": list(row.categories or []),
+                    "education": row.education,
+                    "openings": row.openings,
+                }
+                if values == before:
+                    continue
+                report.changed += 1
+                if not dry_run:
+                    await session.execute(
+                        update(Job).where(Job.id == row.id).values(**values, updated_at=func.now())
+                    )
             last_id = rows[-1].id
 
 

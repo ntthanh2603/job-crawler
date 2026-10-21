@@ -277,3 +277,28 @@ def test_education_requirements_object() -> None:
     html = (boards / "careerviet" / "job_1.html").read_text(encoding="utf-8")
     [job] = jsonld.raw_jobs(html, "https://careerviet.vn/")
     assert job.requirements == "Trình độ: Đại học/Cử nhân"
+
+
+def test_industry_education_openings_go_to_extra() -> None:
+    """`industry` dạng danh sách (JobsGO) nối lại, không chỉ lấy phần tử đầu; học vấn và số lượng
+    tuyển giữ ở `extra` để chuẩn hoá (`pipeline/normalize.py`)."""
+    node = {
+        "@type": "JobPosting",
+        "title": "Nhân viên kinh doanh",
+        "industry": ["Bán Hàng Doanh Nghiệp - B2B", "Telesales - Bán Hàng Online"],
+        "educationRequirements": {
+            "@type": "EducationalOccupationalCredential",
+            "credentialCategory": "associate degree",
+        },
+        "totalJobOpenings": "8",
+    }
+    job = jsonld.to_raw_job(node, page_url="https://a.vn/jobs/1")
+    assert job is not None
+    assert job.extra == {
+        "industry": "Bán Hàng Doanh Nghiệp - B2B, Telesales - Bán Hàng Online",
+        "education": "associate degree",
+        "openings": 8,
+    }
+    bad = jsonld.to_raw_job({**node, "totalJobOpenings": 0}, page_url="https://a.vn/jobs/1")
+    assert bad is not None
+    assert "openings" not in bad.extra

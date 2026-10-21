@@ -34,10 +34,18 @@ from uuid import UUID
 from datasketch import MinHash
 from rapidfuzz import fuzz
 
-from jobcrawler.common.schemas import EmploymentType, ExtractionMethod, JobLevel, Location, WorkMode
+from jobcrawler.common.schemas import (
+    EducationLevel,
+    EmploymentType,
+    ExtractionMethod,
+    JobLevel,
+    Location,
+    WorkMode,
+)
 from jobcrawler.common.text import fold
 from jobcrawler.common.urls import normalize_url
 from jobcrawler.pipeline import provinces as province_names
+from jobcrawler.pipeline.categories import merge_categories
 from jobcrawler.pipeline.normalize import NormalizedJob
 
 TITLE_THRESHOLD = 90.0
@@ -368,6 +376,12 @@ def merge(cluster: Cluster) -> NormalizedJob:
         if best.work_mode is not WorkMode.UNKNOWN
         else first([m.work_mode for m in others if m.work_mode is not WorkMode.UNKNOWN])
         or best.work_mode,
+        categories=merge_categories(m.categories for m in cluster.members),
+        education=best.education
+        if best.education is not EducationLevel.UNKNOWN
+        else first([m.education for m in others if m.education is not EducationLevel.UNKNOWN])
+        or best.education,
+        openings=best.openings or first([m.openings for m in others]),
         locations=locations,
         salary=salary,
         experience_years=best.experience_years or first([m.experience_years for m in others]),

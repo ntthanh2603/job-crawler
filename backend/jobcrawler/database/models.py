@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from jobcrawler.common.schemas import (
+    EducationLevel,
     EmploymentType,
     FetchOutcome,
     JobLevel,
@@ -284,6 +285,18 @@ class BoardIndexRun(Base):
     stats: Mapped[dict[str, Any]] = mapped_column(server_default=EMPTY_OBJECT)
 
 
+# Lương tháng (VND) của job theo mức cao nhất ghi trong tin: lương năm chia 12; lương theo giờ,
+# theo ngày / tuần / ca (kỳ trả trống) và ngoại tệ không quy đổi (NULL). Lọc / sắp theo lương
+# (`jobs_service.SALARY_MONTH`) dùng đúng chuỗi này để khớp index `ix_jobs_status_salary`
+# (migration 0006).
+JOB_SALARY_MONTH_SQL = (
+    "(CASE WHEN salary_currency = 'VND' AND salary_period = 'year' "
+    "THEN coalesce(salary_max, salary_min) / 12 "
+    "WHEN salary_currency = 'VND' AND salary_period = 'month' "
+    "THEN coalesce(salary_max, salary_min) END)"
+)
+
+
 class Job(Base):
     """Job sau khi gộp trùng; các cột tương ứng `schemas.JobOut`."""
 
@@ -295,6 +308,7 @@ class Job(Base):
         one_of("work_mode", WorkMode),
         one_of("status", JobStatus),
         one_of("salary_period", SalaryPeriod),
+        one_of("education", EducationLevel),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         # Hai job y hệt (cùng dấu vân tay) không thể cùng đang mở ở một doanh nghiệp.
         Index(
@@ -316,11 +330,13 @@ class Job(Base):
         Index(
             "ix_jobs_status_salary",
             "status",
-            text("coalesce(salary_max, salary_min) DESC NULLS LAST"),
+            text(f"{JOB_SALARY_MONTH_SQL} DESC NULLS LAST"),
             text("id DESC"),
         ),
         Index("ix_jobs_status_source_kind", "status", text("split_part(canonical_source, ':', 1)")),
         Index("ix_jobs_company_id_status", "company_id", "status", text("first_seen_at DESC")),
+        # Lọc theo ngành nghề (`categories @> ARRAY[...]`).
+        Index("ix_jobs_categories", "categories", postgresql_using="gin"),
         Index(
             "ix_jobs_locations",
             "locations",
@@ -356,6 +372,10 @@ class Job(Base):
     level: Mapped[str] = mapped_column(server_default=JobLevel.UNKNOWN.value)
     employment_type: Mapped[str] = mapped_column(server_default=EmploymentType.UNKNOWN.value)
     work_mode: Mapped[str] = mapped_column(server_default=WorkMode.UNKNOWN.value)
+    # Ngành nghề (tên trong `pipeline/categories.CATEGORIES`), ngành chính trước.
+    categories: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
+    education: Mapped[str] = mapped_column(server_default=EducationLevel.UNKNOWN.value)
+    openings: Mapped[int | None]  # số người cần tuyển
     # [{province, address_raw}]
     locations: Mapped[Any] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     salary_min: Mapped[float | None]

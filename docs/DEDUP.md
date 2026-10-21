@@ -157,8 +157,12 @@ với bản giữ lại: chính tin đó, không phải đăng lại). Tin bị 
 - **Bản chuẩn** (`canonical_rank`): website / ATS của doanh nghiệp trước trang tuyển dụng → cách bóc
   tin cậy hơn (ATS API > JSON-LD > parser > LLM > heuristic) → JD dài hơn → đăng mới hơn.
 - `merge` bổ sung từ các tin khác những trường bản chuẩn còn thiếu (cấp bậc, loại hình, hình thức,
-  lương, kinh nghiệm, yêu cầu, phúc lợi, hạn nộp, nơi nộp); gộp địa điểm và kỹ năng (≤ 30);
-  `posted_at` lấy ngày sớm nhất. Việc giữ mọi URL nguồn (`source_urls`).
+  học vấn, số lượng tuyển, lương, kinh nghiệm, yêu cầu, phúc lợi, hạn nộp, nơi nộp); gộp địa điểm,
+  kỹ năng (≤ 30) và ngành nghề (≤ 3, của bản chuẩn trước); `posted_at` lấy ngày sớm nhất. Việc giữ
+  mọi URL nguồn (`source_urls`).
+- Cấp bậc / loại hình / hình thức còn `unknown` **sau khi gộp** mới hỏi LLM
+  (`normalize.classify_unclear` trên bản gộp, không trên tin): giá trị rule của bất kỳ tin nào trong
+  cụm đứng trước đoán của LLM, và việc đã đủ trường thì không tốn lượt LLM.
 
 ## 8. Gắn vào việc đã lưu — `save_company_jobs`
 

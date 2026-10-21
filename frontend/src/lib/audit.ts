@@ -1,5 +1,5 @@
 // Nhật ký thao tác: nhãn tiếng Việt cho tên thao tác / loại đối tượng / trường, và cách hiện giá trị.
-import { cap, dec, dt, num, sourceLabel } from "@/lib/format"
+import { cap, dec, dt, education, num, sourceLabel } from "@/lib/format"
 import type { AuditEvent } from "@/lib/types"
 
 const ACTIONS: Record<string, string> = {
@@ -142,8 +142,12 @@ const FIELDS: Record<string, string> = {
   filters: "Bộ lọc",
   search: "Tìm kiếm",
   status: "Trạng thái",
+  category: "Ngành nghề",
   province: "Tỉnh/thành",
+  experience: "Kinh nghiệm",
   level: "Cấp bậc",
+  education: "Học vấn",
+  source: "Nguồn",
   employment_type: "Loại hình",
   work_mode: "Hình thức làm việc",
   salary_from: "Lương từ (triệu)",
@@ -194,6 +198,8 @@ export function formatAuditValue(value: unknown, key?: string): string {
   if (typeof value === "string") {
     if (key === "expires_at" && !Number.isNaN(Date.parse(value))) return dt(value)
     if (key === "company_id") return shortId(value)
+    if (key === "education") return education(value)
+    if (key === "source") return sourceLabel(value)
     return WORDS[value] ?? value
   }
   if (Array.isArray(value)) return value.length ? value.map((v) => formatAuditValue(v)).join(", ") : "Trống"
