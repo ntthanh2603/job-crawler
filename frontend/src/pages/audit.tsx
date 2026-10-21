@@ -21,6 +21,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   actionLabel,
   actorLabel,
+  auditHref,
+  browserLabel,
   fieldLabel,
   formatAuditValue,
   hasDetails,
@@ -31,6 +33,7 @@ import {
   resourceName,
   resourceTypeLabel,
   shortId,
+  summary,
 } from "@/lib/audit"
 import { ago, cap, dt, num } from "@/lib/format"
 import { getAudit, getGetAuditQueryKey, useGetAuditActions, useGetSettings } from "@/lib/gen/queries"
@@ -56,17 +59,18 @@ function Resource({ event }: { event: AuditEvent }) {
   const href = resourceHref(event)
   const name = resourceName(event)
   const id = event.resource_id ?? undefined
-  const mono = event.resource_type !== "board" && name !== id
+  // Id rút gọn (không có tên hiện) viết bằng font mono cho dễ đối chiếu.
+  const mono = !event.resource_label && event.resource_type !== "board" && Boolean(id)
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
-      <span className="text-muted-foreground">{resourceTypeLabel(event.resource_type)}</span>
+    <span className="inline-flex min-w-0 flex-col">
+      <span className="text-meta text-muted-foreground">{resourceTypeLabel(event.resource_type)}</span>
       {name &&
         (href ? (
-          <TextLink to={href} className={cn("text-meta font-medium", mono && "font-mono")}>
+          <TextLink to={href} className={cn("text-sm font-medium break-words", mono && "font-mono text-meta")}>
             <span title={id}>{name}</span>
           </TextLink>
         ) : (
-          <span title={id} className={cn("text-meta", mono && "font-mono")}>
+          <span title={id} className={cn("text-sm break-words", mono && "font-mono text-meta")}>
             {name}
           </span>
         ))}
@@ -129,9 +133,27 @@ function Details({ event }: { event: AuditEvent }) {
       ]
     if (key === "reset" && Array.isArray(value))
       return [fieldLabel(key), <span>{value.map((k) => settings.get(String(k))?.label ?? String(k)).join(", ")}</span>]
+    // Worker vào bằng khoá tham gia: link tới nhật ký của khoá (ai tạo, lúc nào).
+    if (key === "join_id" && typeof value === "string" && value)
+      return [
+        fieldLabel(key),
+        <TextLink to={auditHref("join_key", value)} className="font-mono text-meta">
+          {value}
+        </TextLink>,
+      ]
     return [fieldLabel(key), <span className="[overflow-wrap:anywhere]">{formatAuditValue(value, key)}</span>]
   })
-  if (event.request_id) meta.push(["Mã request", <code className="font-mono text-meta break-all">{event.request_id}</code>])
+  const source: [string, ReactNode][] = []
+  if (event.ip) source.push(["IP", <code className="font-mono text-meta">{event.ip}</code>])
+  if (event.user_agent)
+    source.push([
+      "Trình duyệt",
+      <span className="space-y-0.5">
+        <span className="block">{browserLabel(event.user_agent)}</span>
+        <code className="block font-mono text-caption break-all text-muted-foreground">{event.user_agent}</code>
+      </span>,
+    ])
+  if (event.request_id) source.push(["Mã request", <code className="font-mono text-meta break-all">{event.request_id}</code>])
   return (
     <div className="space-y-4">
       {changes && (
@@ -146,12 +168,25 @@ function Details({ event }: { event: AuditEvent }) {
           <Meta items={meta} />
         </div>
       )}
+      {source.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-meta font-medium text-muted-foreground">Nguồn request</div>
+          <Meta items={source} />
+        </div>
+      )}
     </div>
   )
 }
 
+/** "127.0.0.1 · Chrome 141 · Windows" của dòng nhật ký (trống khi thao tác không đến từ request). */
+function sourceText(event: AuditEvent): string {
+  return [event.ip, browserLabel(event.user_agent)].filter(Boolean).join(" · ")
+}
+
 function EventRow({ event, open, onToggle }: { event: AuditEvent; open: boolean; onToggle: () => void }) {
   const details = hasDetails(event)
+  const brief = summary(event)
+  const from = sourceText(event)
   const toggleRow = (e: MouseEvent) => {
     if (!details || (e.target as HTMLElement).closest("a,button")) return
     if (window.getSelection()?.toString()) return
@@ -174,21 +209,39 @@ function EventRow({ event, open, onToggle }: { event: AuditEvent; open: boolean;
           )}
         </TableCell>
         <TableCell className="align-top whitespace-nowrap tabular-nums">
-          <Hint content={dt(event.occurred_at)}>{cap(ago(event.occurred_at))}</Hint>
+          <div className="text-sm">{dt(event.occurred_at)}</div>
+          <div className="text-meta text-muted-foreground">{cap(ago(event.occurred_at))}</div>
         </TableCell>
-        <TableCell className="align-top whitespace-normal md:min-w-56">
+        <TableCell className="align-top whitespace-normal md:min-w-64">
           <div className="font-medium">{actionLabel(event.action)}</div>
+          {brief && <div className="text-meta text-foreground/80">{brief}</div>}
           <code className="font-mono text-caption text-muted-foreground">{event.action}</code>
-          {/* Màn hình hẹp: người thực hiện và đối tượng nằm dưới tên thao tác. */}
-          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-meta md:hidden">
-            <span title={event.actor}>{actorLabel(event.actor)}</span>
+          {/* Màn hình hẹp: người thực hiện, nguồn và đối tượng nằm dưới tên thao tác. */}
+          <div className="mt-1.5 space-y-1 text-meta md:hidden">
+            <div>
+              <span title={event.actor} className="font-medium">
+                {actorLabel(event.actor)}
+              </span>
+              {from && <span className="text-muted-foreground"> · {from}</span>}
+            </div>
             <Resource event={event} />
           </div>
         </TableCell>
-        <TableCell className="align-top max-md:hidden">
-          <span title={event.actor} className={cn(event.actor === "system" || event.actor === "anonymous" ? "text-muted-foreground" : "")}>
+        <TableCell className="align-top whitespace-normal max-md:hidden">
+          <div
+            title={event.actor}
+            className={cn(
+              "font-medium",
+              event.actor === "system" || event.actor === "anonymous" || event.actor === "worker" ? "text-muted-foreground" : "",
+            )}
+          >
             {actorLabel(event.actor)}
-          </span>
+          </div>
+          {from && (
+            <Hint content={event.user_agent || event.ip || ""} className="block text-meta text-muted-foreground">
+              {from}
+            </Hint>
+          )}
         </TableCell>
         <TableCell className="align-top whitespace-normal max-md:hidden">
           <Resource event={event} />
@@ -241,7 +294,7 @@ export function AuditPage() {
     <>
       <PageHeader
         title="Nhật ký thao tác"
-        description="Ai đã làm gì qua giao diện và API: lưu cài đặt, đưa việc vào hàng đợi, nạp danh sách, kiểm tay… Mới nhất trước."
+        description="Ai đã làm gì, lúc nào, từ đâu (IP, trình duyệt) qua giao diện và API: đăng nhập, lưu cài đặt, đưa việc vào hàng đợi, nạp danh sách, xuất dữ liệu, kiểm tay… Mới nhất trước."
         actions={
           <Button variant="outline" onClick={() => query.refetch()} disabled={query.isFetching}>
             <RotateCw className={cn(query.isRefetching && !query.isFetchingNextPage && "animate-spin")} /> Làm mới
@@ -305,7 +358,7 @@ export function AuditPage() {
                   </TableHead>
                   <TableHead>Thời điểm</TableHead>
                   <TableHead>Thao tác</TableHead>
-                  <TableHead className="max-md:hidden">Người thực hiện</TableHead>
+                  <TableHead className="max-md:hidden">Người thực hiện · nguồn</TableHead>
                   <TableHead className="max-md:hidden">Đối tượng</TableHead>
                 </TableRow>
               </TableHeader>

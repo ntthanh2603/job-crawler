@@ -383,8 +383,8 @@ def _company(
 
 def test_profile_policy_by_kyc_status() -> None:
     from jobcrawler.common.schemas import KycStatus
-    from jobcrawler.modules.boards import boards as board_service
-    from jobcrawler.modules.crawl.companies import profile_policy
+    from jobcrawler.modules.boards import boards_service
+    from jobcrawler.modules.crawl.company_service import profile_policy
 
     assert profile_policy(KycStatus.VERIFIED, name_profiles=True) == "all"
     assert profile_policy(KycStatus.NOT_FOUND, name_profiles=True) == "exact_name"
@@ -397,7 +397,7 @@ def test_profile_policy_by_kyc_status() -> None:
         profile.match_evidence = {"signal": signal, "rule": signal != "llm"}
         return profile
 
-    usable = board_service._usable  # pyright: ignore[reportPrivateUsage]
+    usable = boards_service._usable  # pyright: ignore[reportPrivateUsage]
     names = ["KiotViet", "Công ty TNHH Thương mại Dịch vụ Kiotviet"]
     assert usable(mapped("KIOTVIET", "name"), "exact_name", names)
     assert not usable(mapped("KIOTVIET", "name"), "strong", names)

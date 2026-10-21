@@ -4,41 +4,38 @@
 # tới proto/ (hợp đồng gRPC, dependency dạng đường dẫn ../proto):
 #   docker build --build-context proto=../proto -t jobcrawler-worker .     (chạy trong worker/)
 # Compose: `build: {context: ./worker, additional_contexts: {proto: ./proto}}`.
-# Tag image phải khớp `playwright==1.63.0` trong pyproject.toml (Chromium có sẵn ở /ms-playwright).
 # Chạy kèm `--init` (compose: `init: true`) để dọn process con của Chromium.
-FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
+#
+# Cùng base image với backend/Dockerfile (python slim) thay cho image Playwright chính thức: image
+# đó mang cả Chromium đầy đủ, Firefox, WebKit và thư viện hệ thống của cả ba (~4 GB). Worker chỉ
+# mở `chromium.launch(headless=True)` nên chỉ cần Chromium headless shell, cài bằng chính
+# `playwright` trong venv (bản Chromium luôn khớp `playwright` của uv.lock).
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
-# Image Playwright ra bản chậm hơn bản vá của Ubuntu: vá gói hệ điều hành (openssl…). Nó còn cài
-# pip + virtualenv toàn cục (kèm urllib3 / msgpack / setuptools cũ, Trivy chặn ở CI); worker chạy
-# từ /opt/venv do uv tạo nên gỡ cả hai.
-RUN apt-get update \
-    && apt-get upgrade -y --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /usr/local/lib/python3.12/dist-packages/pip /usr/local/lib/python3.12/dist-packages/pip-* \
-        /usr/local/lib/python3.12/dist-packages/virtualenv /usr/local/lib/python3.12/dist-packages/virtualenv-* \
-        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12 /usr/local/bin/virtualenv \
-        /root/.cache/virtualenv /root/.cache/pip
+# --- Dependency (chưa có jobworker) -------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS deps
 
-COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /usr/local/bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
     UV_PYTHON=python3.12 \
-    UV_PROJECT_ENVIRONMENT=/opt/venv \
-    PATH="/opt/venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 
 # Bố cục giống repo (/src/worker cạnh /src/proto) vì uv.lock ghi proto là `../proto`.
 WORKDIR /src/worker
 
-# Dependency trước để layer được cache khi chỉ sửa code. Bỏ qua chính jobworker và gói cục bộ
-# (proto) ở bước này: chỉ cần pyproject.toml + uv.lock, proto mount vào để uv đọc metadata.
+# Chỉ cần pyproject.toml + uv.lock (proto mount vào để uv đọc metadata): layer được cache khi chỉ
+# sửa code.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,from=proto,target=/src/proto \
     uv sync --frozen --no-dev --no-install-project --no-install-local
+
+# --- Build: venv đủ (jobworker + proto) -----------------------------------------------------------
+FROM deps AS build
 
 COPY --from=proto pyproject.toml /src/proto/
 COPY --from=proto jcproto /src/proto/jcproto
@@ -50,7 +47,28 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable \
         --reinstall-package jobworker --reinstall-package jobcrawler-proto
 
+# --- Runtime -------------------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE}
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# Chromium headless shell + thư viện hệ thống của riêng nó (`--with-deps`, apt), chạy bằng
+# `playwright` của venv dependency mount tạm (không nằm trong image): layer này chỉ build lại khi
+# dependency đổi, không phải mỗi lần sửa code. Vá gói hệ điều hành trong cùng layer (Trivy ở CI chặn
+# lỗ hổng đã có bản vá).
+RUN --mount=type=bind,from=deps,source=/opt/venv,target=/opt/venv \
+    playwright install --with-deps --only-shell chromium \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/* /root/.cache
+
+# Cùng uid với user `pwuser` của image Playwright trước đây (file mount từ máy không đổi quyền).
+RUN groupadd --gid 1001 pwuser && useradd --create-home --uid 1001 --gid 1001 pwuser
+COPY --from=build /opt/venv /opt/venv
+
 USER pwuser
+WORKDIR /home/pwuser
 # Worker tự xử lý SIGTERM: thôi nhận việc, làm nốt (WORKER_SHUTDOWN_GRACE_SECONDS), Leave.
 STOPSIGNAL SIGTERM
 # `jobworker health` đọc file trạng thái worker ghi (WORKER_HEALTH_FILE, mặc định

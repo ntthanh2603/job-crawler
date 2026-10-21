@@ -1,8 +1,8 @@
 """Fencing token cho việc ghi DB theo doanh nghiệp: chặn lượt build / poll đã mất khoá ghi đè.
 
-Khoá Redis theo doanh nghiệp (`modules/crawl/crawl.company_lock`) chỉ loại trừ được khi mọi process
-chạy đúng hạn: process đứng lâu hơn TTL khoá (GC, máy ngủ, event loop kẹt) rồi chạy tiếp vẫn tưởng
-mình giữ khoá trong khi lượt khác đã lấy. Fencing token chặn ở chỗ ghi:
+Khoá Redis theo doanh nghiệp (`modules/crawl/crawl_service.company_lock`) chỉ loại trừ được khi mọi
+process chạy đúng hạn: process đứng lâu hơn TTL khoá (GC, máy ngủ, event loop kẹt) rồi chạy tiếp vẫn
+tưởng mình giữ khoá trong khi lượt khác đã lấy. Fencing token chặn ở chỗ ghi:
 
 - Mỗi lần giữ khoá, `next_token()` tăng `company_fences.fence` của doanh nghiệp (transaction riêng)
   và trả số mới. Nguồn token là chính Postgres nên Redis mất dữ liệu không làm token lùi.

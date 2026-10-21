@@ -1,6 +1,19 @@
 // Thành phần dùng chung giữa các trang.
 import { useQuery, type UseQueryOptions } from "@tanstack/react-query"
-import { AlertCircle, ChevronLeft, ChevronRight, FileUp, Inbox, Info, RotateCw, Search, X } from "lucide-react"
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  FileUp,
+  Inbox,
+  Info,
+  RotateCw,
+  Search,
+  X,
+} from "lucide-react"
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
 
@@ -19,11 +32,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TableHead } from "@/components/ui/table"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ApiError, errorMessage } from "@/lib/api"
 import { cap, label, num, reason, sourceProblem } from "@/lib/format"
-import type { Job, Page } from "@/lib/types"
+import type { Job, ListParams, Page, SortOrder, SortState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // --- trạng thái -----------------------------------------------------------------------------------
@@ -64,7 +78,7 @@ const BADGE_CLASS: Record<Tone, string> = {
   muted: "bg-muted text-muted-foreground ring-1 ring-border/70 ring-inset",
 }
 
-const DOT_CLASS: Record<Tone, string> = {
+export const DOT_CLASS: Record<Tone, string> = {
   good: "bg-success",
   warn: "bg-warning",
   bad: "bg-destructive",
@@ -578,30 +592,50 @@ export function Empty({
 
 // --- phân trang, chọn, xác nhận ---------------------------------------------------------------------
 
+/** Số dòng mỗi trang cho ô chọn dưới bảng (như data-table của open-asm). */
+export const PAGE_SIZES = [10, 20, 50, 100] as const
+
+/** Các nút số trang: trang đầu, trang cuối và ±2 quanh trang hiện tại; khoảng bỏ qua là "gap". */
+export function pageWindow(page: number, pageCount: number): (number | "gap")[] {
+  const out: (number | "gap")[] = []
+  let prev = 0
+  for (let p = 1; p <= pageCount; p++) {
+    if (p !== 1 && p !== pageCount && Math.abs(p - page) > 2) continue
+    if (prev && p - prev > 1) out.push("gap")
+    out.push(p)
+    prev = p
+  }
+  return out
+}
+
 /**
- * Phân trang dưới bảng. Nhận thẳng một `Page` từ API (`page`, `pages`, `total`, `size`, `exact`);
- * `exact = false` nghĩa là server chỉ đếm tới `total` (10.000) — hiện "10.000+".
+ * Phân trang dưới bảng (như data-table của open-asm): "1–50 trong 1.234", ô số dòng mỗi trang,
+ * nút trước / sau và các nút số trang. Nhận thẳng một `Page` từ API (`page`, `pageCount`, `total`,
+ * `limit`, `exact`); `exact = false` nghĩa là server chỉ đếm tới `total` (10.000) — hiện "10.000+".
  */
 export function Pager({
   page,
-  pages,
+  pageCount,
   total,
-  size = 50,
+  limit,
   exact = true,
   onPage,
+  onLimit,
   className,
 }: {
   page: number
-  pages: number
+  pageCount: number
   total: number
-  size?: number
+  limit: number
   exact?: boolean
   onPage: (page: number) => void
+  /** Có thì hiện ô chọn số dòng mỗi trang. */
+  onLimit?: (limit: number) => void
   className?: string
 }) {
   if (!total) return null
-  const first = (page - 1) * size + 1
-  const last = Math.min(total, page * size)
+  const first = (page - 1) * limit + 1
+  const last = Math.min(total, page * limit)
   return (
     <div
       className={cn(
@@ -609,66 +643,223 @@ export function Pager({
         className,
       )}
     >
-      <span className="tabular-nums">
-        <span className="font-medium text-foreground">
-          {num(first)}–{num(last)}
-        </span>{" "}
-        trong {num(total)}
-        {!exact && "+"}
-        {!exact && page >= pages && " · lọc hẹp hơn để xem tiếp"}
-      </span>
-      {pages > 1 && (
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="tabular-nums">
+          <span className="font-medium text-foreground">
+            {num(first)}–{num(last)}
+          </span>{" "}
+          trong {num(total)}
+          {!exact && "+"}
+          {!exact && page >= pageCount && " · lọc hẹp hơn để xem tiếp"}
+        </span>
+        {onLimit && (
+          <span className="inline-flex items-center gap-2">
+            Số dòng
+            <Select value={String(limit)} onValueChange={(v) => onLimit(Number(v))}>
+              <SelectTrigger size="sm" className="w-[4.75rem] bg-card tabular-nums" aria-label="Số dòng mỗi trang">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="start">
+                {PAGE_SIZES.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </span>
+        )}
+      </div>
+      {pageCount > 1 && (
+        <nav aria-label="Phân trang" className="flex items-center gap-1">
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Trang trước">
             <ChevronLeft /> <span className="max-sm:sr-only">Trước</span>
           </Button>
-          <span className="px-1.5 tabular-nums">
-            Trang <span className="font-medium text-foreground">{page}</span> / {num(pages)}
+          <span className="px-1.5 tabular-nums sm:hidden">
+            <span className="font-medium text-foreground">{page}</span> / {num(pageCount)}
           </span>
-          <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPage(page + 1)} aria-label="Trang sau">
+          {pageWindow(page, pageCount).map((p, i) =>
+            p === "gap" ? (
+              <span key={`gap-${i}`} className="px-1 max-sm:hidden" aria-hidden>
+                …
+              </span>
+            ) : (
+              <Button
+                key={p}
+                variant={p === page ? "default" : "ghost"}
+                size="sm"
+                className="min-w-8 px-2 tabular-nums max-sm:hidden"
+                aria-label={`Trang ${p}`}
+                aria-current={p === page ? "page" : undefined}
+                onClick={() => onPage(p)}
+              >
+                {num(p)}
+              </Button>
+            ),
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= pageCount}
+            onClick={() => onPage(page + 1)}
+            aria-label="Trang sau"
+          >
             <span className="max-sm:sr-only">Sau</span> <ChevronRight />
           </Button>
-        </div>
+        </nav>
       )}
     </div>
   )
 }
 
+/** Bấm tiêu đề cột: cột khác → tăng dần; cùng cột → đảo chiều (như data-table của open-asm). */
+export function nextSort<C extends string>(sort: SortState<C>, column: C): SortState<C> {
+  return { sortBy: column, sortOrder: sort.sortBy === column && sort.sortOrder === "ASC" ? "DESC" : "ASC" }
+}
+
+/** Tiêu đề cột sắp xếp được (`sortBy` = `column`): mũi tên chiều hiện tại, bấm để đổi. */
+export function SortHead<C extends string>({
+  column,
+  sort,
+  onSort,
+  children,
+  className,
+}: {
+  column: C
+  sort: SortState<C>
+  onSort: (column: C) => void
+  children: ReactNode
+  className?: string
+}) {
+  const active = sort.sortBy === column
+  const Icon = !active ? ChevronsUpDown : sort.sortOrder === "ASC" ? ArrowUp : ArrowDown
+  return (
+    <TableHead
+      className={className}
+      aria-sort={active ? (sort.sortOrder === "ASC" ? "ascending" : "descending") : undefined}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={cn(
+          "-mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+          active && "text-foreground",
+        )}
+      >
+        {children}
+        <Icon className={cn("size-3.5 shrink-0", !active && "opacity-40")} aria-hidden />
+      </button>
+    </TableHead>
+  )
+}
+
+/** Ô "Sắp xếp" chọn sẵn cột + chiều (dùng cả khi bảng thành thẻ trên màn hình hẹp, không có tiêu
+ * đề cột để bấm). `options`: [cột, chiều, nhãn]. */
+export function SortSelect<C extends string>({
+  sort,
+  onChange,
+  options,
+}: {
+  sort: SortState<C>
+  onChange: (sort: SortState<C>) => void
+  options: readonly (readonly [C, SortOrder, string])[]
+}) {
+  return (
+    <FilterSelect
+      label="Sắp xếp"
+      value={`${sort.sortBy}:${sort.sortOrder}`}
+      onChange={(v) => {
+        const [sortBy, sortOrder] = v.split(":")
+        onChange({ sortBy: sortBy as C, sortOrder: sortOrder === "ASC" ? "ASC" : "DESC" })
+      }}
+      options={options.map(([c, o, text]) => [`${c}:${o}`, text] as const)}
+      all={null}
+    />
+  )
+}
+
 /**
- * Danh sách con lấy theo trang từ API: `options(page)` trả query options do orval sinh
- * (`(page) => getGetRunLogsQueryOptions(runId, { page })`); tự lo trạng thái tải / lỗi / rỗng và
- * phân trang; `children` vẽ các dòng của trang hiện tại.
+ * Danh sách con lấy theo trang từ API (như `useServerDataTable` của open-asm, giữ trạng thái trong
+ * component): `options(params)` trả query options do orval sinh
+ * (`(p) => getGetRunLogsQueryOptions(runId, p)`) với `page`, `limit`, `sortBy`, `sortOrder`,
+ * `search`; tự lo trạng thái tải / lỗi / rỗng, ô tìm (khi có `searchPlaceholder`) và phân trang.
+ * `children(items, table)` vẽ các dòng; `table.sort` / `table.onSort` cho `SortHead`.
  */
-export function PagedList<T>({
+export function PagedList<T, C extends string>({
   options,
   empty,
+  defaultSort,
+  defaultLimit = 20,
+  searchPlaceholder,
   children,
 }: {
   // Kiểu lỗi / khoá khác nhau theo endpoint.
-  options: (page: number) => UseQueryOptions<Page<T>, any, Page<T>, any>
+  options: (params: ListParams<C>) => UseQueryOptions<Page<T>, any, Page<T>, any>
   empty: ReactNode
-  children: (items: T[]) => ReactNode
+  defaultSort: SortState<C>
+  defaultLimit?: number
+  searchPlaceholder?: string
+  children: (items: T[], table: { sort: SortState<C>; onSort: (column: C) => void }) => ReactNode
 }) {
   const [page, setPage] = useState(1)
-  const query = useQuery({ ...options(page), placeholderData: (prev) => prev })
+  const [limit, setLimit] = useState(defaultLimit)
+  const [sort, setSort] = useState(defaultSort)
+  const [search, setSearch] = useState("")
+  const [draft, setDraft] = useState("")
+  const query = useQuery({ ...options({ ...sort, page, limit, search }), placeholderData: (prev) => prev })
+  const onSort = (column: C) => {
+    setSort((s) => nextSort(s, column))
+    setPage(1)
+  }
+  const bar = searchPlaceholder && (
+    <FilterBar
+      search={
+        <SearchBox
+          value={draft}
+          onChange={setDraft}
+          placeholder={searchPlaceholder}
+          onSubmit={(v) => {
+            setSearch((v ?? draft).trim())
+            setPage(1)
+          }}
+        />
+      }
+    />
+  )
   if (query.isError)
     return (
-      <div className="p-5">
-        <ErrorState error={query.error} onRetry={() => query.refetch()} />
-      </div>
+      <>
+        {bar}
+        <div className="p-5">
+          <ErrorState error={query.error} onRetry={() => query.refetch()} />
+        </div>
+      </>
     )
   if (!query.data)
     return (
-      <div className="p-5">
-        <Loading rows={5} />
-      </div>
+      <>
+        {bar}
+        <div className="p-5">
+          <Loading rows={5} />
+        </div>
+      </>
     )
   const d = query.data
   return (
-    <div className={cn("transition-opacity", query.isFetching && query.isPlaceholderData && "opacity-60")}>
-      {d.items.length ? children(d.items) : <Empty>{empty}</Empty>}
-      {d.pages > 1 && <Pager {...d} onPage={setPage} />}
-    </div>
+    <>
+      {bar}
+      <div className={cn("transition-opacity", query.isFetching && query.isPlaceholderData && "opacity-60")}>
+        {d.data.length ? children(d.data, { sort, onSort }) : <Empty>{search ? "Không có dòng nào khớp." : empty}</Empty>}
+        <Pager
+          {...d}
+          onPage={setPage}
+          onLimit={(n) => {
+            setLimit(n)
+            setPage(1)
+          }}
+        />
+      </div>
+    </>
   )
 }
 

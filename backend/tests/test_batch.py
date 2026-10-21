@@ -4,8 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from jobcrawler.modules.companies import batch
-from jobcrawler.modules.companies.batch import CsvFormatError, clean_tax_code, parse_companies_csv
+from jobcrawler.modules.companies import batch_service
+from jobcrawler.modules.companies.batch_service import (
+    CsvFormatError,
+    clean_tax_code,
+    parse_companies_csv,
+)
 
 
 def test_parse_spec_columns() -> None:
@@ -88,8 +92,8 @@ def test_header_and_encoding_errors(tmp_path: Path) -> None:
     path = tmp_path / "ansi.csv"
     path.write_bytes("name\nCông ty Hà\n".encode("cp1252"))
     with pytest.raises(CsvFormatError, match="UTF-8"):
-        batch.read_companies_csv(path)
+        batch_service.read_companies_csv(path)
     bom = tmp_path / "bom.csv"
     bom.write_bytes("name,website\nCông ty Hà Nội,hanoi.vn\n".encode("utf-8-sig"))
-    [row] = batch.read_companies_csv(bom).rows
+    [row] = batch_service.read_companies_csv(bom).rows
     assert row.company.name == "Công ty Hà Nội"

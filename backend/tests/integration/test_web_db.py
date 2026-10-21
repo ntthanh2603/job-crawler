@@ -27,7 +27,7 @@ from jobcrawler.database.models import (
     SourceFetch,
     SourceProfile,
 )
-from jobcrawler.modules.maintenance import maintenance
+from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.services.redis.queues import drop_queue, make_queue
 
 pytestmark = pytest.mark.integration
@@ -196,7 +196,7 @@ async def seed(app_state: object, tag: str) -> tuple[UUID, str, UUID, UUID, UUID
         )
         await s.flush()
         # Chèn thẳng vào bảng (không qua pipeline): tính các cột tóm tắt như lượt bảo trì.
-        await maintenance.refresh_company_summaries(s)
+        await maintenance_service.refresh_company_summaries(s)
         return company.id, str(run_id), job.id, expired.id, page.id
 
 
@@ -281,14 +281,21 @@ async def test_overview_and_stats(web: Seed) -> None:
 
 
 async def test_companies_list_detail_and_run(web: Seed) -> None:
-    page = (await web.client.get("/api/companies", params={"q": f"Web {web.tag}"})).json()
+    page = (await web.client.get("/api/companies", params={"search": f"Web {web.tag}"})).json()
     assert page["total"] == 1
-    [item] = page["items"]
+    [item] = page["data"]
     assert item["company"]["id"] == web.company_id
     assert (item["last_status"], item["active_jobs"]) == ("partial", 1)
     assert item["last_incomplete"] == ["careers:web.vn"]
-    filtered = await web.client.get("/api/companies", params={"q": web.tag, "run": "ok"})
+    filtered = await web.client.get("/api/companies", params={"search": web.tag, "run": "ok"})
     assert filtered.json()["total"] == 0
+    by_name = await web.client.get(
+        "/api/companies", params={"search": web.tag, "sortBy": "name", "sortOrder": "ASC"}
+    )
+    assert [c["company"]["id"] for c in by_name.json()["data"]] == [web.company_id]
+    # Tham số danh sách như open-asm: cột sắp xếp ngoài danh sách / limit quá 100 bị từ chối.
+    for bad in ({"sortBy": "input_name; drop"}, {"sortOrder": "up"}, {"limit": 101}, {"page": 0}):
+        assert (await web.client.get("/api/companies", params=bad)).status_code == 422, bad
 
     d = (await web.client.get(f"/api/companies/{web.company_id}")).json()
     assert d["kyc_evidence"]["reason"] == "website ghi đúng MST"
@@ -308,14 +315,18 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
     # Danh sách con lấy theo trang.
     base = f"/api/companies/{web.company_id}"
     jobs = (await web.client.get(f"{base}/jobs")).json()
-    assert [j["id"] for j in jobs["items"]] == [web.job_id]
-    assert (jobs["total"], jobs["page"], jobs["pages"], jobs["exact"]) == (1, 1, 1, True)
+    assert [j["id"] for j in jobs["data"]] == [web.job_id]
+    assert (jobs["total"], jobs["page"], jobs["limit"], jobs["pageCount"]) == (1, 1, 10, 1)
+    assert (jobs["hasNextPage"], jobs["exact"]) == (False, True)
     inactive = (await web.client.get(f"{base}/jobs", params={"status": "inactive"})).json()
-    assert [j["id"] for j in inactive["items"]] == [web.expired_job_id]
-    runs = (await web.client.get(f"{base}/runs")).json()
-    assert [r["run_id"] for r in runs["items"]] == [web.run_id]
+    assert [j["id"] for j in inactive["data"]] == [web.expired_job_id]
+    none = (await web.client.get(f"{base}/jobs", params={"search": "không có tin này"})).json()
+    assert none["total"] == 0
+    runs = (await web.client.get(f"{base}/runs", params={"sortBy": "duration_ms"})).json()
+    assert [r["run_id"] for r in runs["data"]] == [web.run_id]
+    assert (await web.client.get(f"{base}/runs", params={"search": "ok"})).json()["total"] == 0
     rejected = (await web.client.get(f"{base}/rejected", params={"page": 9})).json()
-    assert [p["title"] for p in rejected["items"]] == ["Tin cũ"]
+    assert [p["title"] for p in rejected["data"]] == ["Tin cũ"]
     assert rejected["page"] == 1  # trang vượt quá → trang cuối
 
     run = (await web.client.get(f"/api/runs/{web.run_id}")).json()
@@ -325,9 +336,13 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
     ]
     assert (run["fetches_total"], run["logs_total"]) == (2, 1)
     logs = (await web.client.get(f"/api/runs/{web.run_id}/logs")).json()
-    assert [log["event"] for log in logs["items"]] == ["company.start"]
+    assert [log["event"] for log in logs["data"]] == ["company.start"]
+    errors = await web.client.get(f"/api/runs/{web.run_id}/logs", params={"level": "error"})
+    assert errors.json()["total"] == 0
     fetches = (await web.client.get(f"/api/runs/{web.run_id}/fetches")).json()
     assert fetches["total"] == 2
+    one = await web.client.get(f"/api/runs/{web.run_id}/fetches", params={"limit": 1})
+    assert (one.json()["pageCount"], one.json()["hasNextPage"]) == (2, True)
 
     page_ = (await web.client.get(f"/api/failed-pages/{web.failed_page_id}")).json()
     assert page_["html"].startswith("<html><script>")
@@ -339,9 +354,14 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
 async def test_jobs_filters_detail_export(web: Seed) -> None:
     params = {"company_id": web.company_id}
     active = (await web.client.get("/api/jobs", params=params)).json()
-    assert [j["id"] for j in active["items"]] == [web.job_id]
+    assert [j["id"] for j in active["data"]] == [web.job_id]
     every = (await web.client.get("/api/jobs", params={**params, "status": "all"})).json()
-    assert {j["id"] for j in every["items"]} == {web.job_id, web.expired_job_id}
+    assert {j["id"] for j in every["data"]} == {web.job_id, web.expired_job_id}
+    newest = [j["id"] for j in every["data"]]
+    oldest = await web.client.get(
+        "/api/jobs", params={**params, "status": "all", "sortOrder": "ASC"}
+    )
+    assert [j["id"] for j in oldest.json()["data"]] == newest[::-1]
     for extra, expected in [
         ({"province": "Hà Nội"}, 1),
         ({"province": "Đà Nẵng"}, 0),
@@ -349,7 +369,7 @@ async def test_jobs_filters_detail_export(web: Seed) -> None:
         ({"salary_from": 25}, 0),
         ({"level": "senior"}, 1),
         ({"source": "careers"}, 1),
-        ({"q": "python"}, 1),
+        ({"search": "python"}, 1),
         ({"reviewed": "yes"}, 0),
     ]:
         r = (await web.client.get("/api/jobs", params={**params, **extra})).json()
@@ -401,7 +421,7 @@ async def test_review_flow(web: Seed) -> None:
             "/api/jobs", params={"company_id": web.company_id, "reviewed": "correct"}
         )
     ).json()
-    assert [j["reviewed"] for j in reviewed["items"]] == [True]
+    assert [j["reviewed"] for j in reviewed["data"]] == [True]
     assert (await web.client.delete(f"/api/jobs/{web.job_id}/review")).json() == {"ok": True}
     assert (await web.client.get(f"/api/jobs/{web.job_id}")).json()["review"] is None
     missing = await web.client.post(f"/api/jobs/{uuid4()}/review", json={"correct": True})
@@ -452,6 +472,11 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     crawl = (await web.client.get(f"/api/companies/{web.company_id}/crawl")).json()
     assert crawl["plans"] == []
     assert crawl["poll_interval_seconds"] == web.settings.poll_interval_seconds
+    assert crawl["limits"]["max_failures"] == web.settings.poll_max_failures
+    missing = await web.client.get(f"/api/crawl/plans/{uuid4()}")
+    assert missing.status_code == 404
+    assert crawl["windows"]["build"] == web.settings.build_window
+    assert crawl["windows"]["timezone"] == web.settings.crawl_timezone
     status = (await web.client.get("/api/crawl/status")).json()
     assert status["target_seconds"] == 180
     assert {"polls", "freshness", "windows"} <= set(status)
@@ -459,7 +484,7 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     boards = (await web.client.get("/api/boards")).json()
     assert "topcv" in {b["source"] for b in boards["boards"]}
     runs = (await web.client.get("/api/boards/runs")).json()
-    assert {"items", "total", "page", "pages", "exact"} <= set(runs)
+    assert {"data", "total", "page", "limit", "pageCount", "hasNextPage", "exact"} <= set(runs)
     assert boards["queue"]["name"] == web.settings.board_queue_name
     indexed = (await web.client.post("/api/boards/topcv/index")).json()
     assert indexed == {"queued": True, "workers": 0}
@@ -547,7 +572,7 @@ async def test_create_company_by_hand(web: Seed) -> None:
 
 
 async def test_import_sample_csv(web: Seed) -> None:
-    from jobcrawler.modules.companies import batch
+    from jobcrawler.modules.companies import batch_service
 
     r = await web.client.get("/api/companies/import/sample.csv")
     assert r.status_code == 200
@@ -555,6 +580,6 @@ async def test_import_sample_csv(web: Seed) -> None:
     assert "doanh-nghiep-mau.csv" in r.headers["content-disposition"]
     assert r.content.startswith(b"\xef\xbb\xbf")  # BOM: Excel đọc đúng UTF-8
     # Chính là định dạng nạp danh sách: đọc lại đủ 50 doanh nghiệp, không lỗi / cảnh báo.
-    report = batch.parse_companies_csv(r.content.decode("utf-8-sig"))
+    report = batch_service.parse_companies_csv(r.content.decode("utf-8-sig"))
     assert len(report.rows) == 50
     assert (report.errors, report.warnings, report.duplicates) == ([], [], 0)

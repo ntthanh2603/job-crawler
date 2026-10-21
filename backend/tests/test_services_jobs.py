@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from jobcrawler.common.schemas import ExtractionMethod, RawJob
-from jobcrawler.modules.crawl.website import website_jobs
+from jobcrawler.modules.crawl.website_service import website_jobs
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult

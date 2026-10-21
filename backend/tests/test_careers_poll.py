@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from jobcrawler.common.schemas import RawJob
-from jobcrawler.modules.crawl.crawl import suspicious_drop
+from jobcrawler.modules.crawl.crawl_service import suspicious_drop
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import CapturedJson

@@ -17,8 +17,8 @@ from redis.asyncio import Redis
 from jobcrawler.bootstrap import runner, scheduler
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import FetchOutcome
-from jobcrawler.modules.crawl import crawl, schedule, sla
-from jobcrawler.modules.overview import overview
+from jobcrawler.modules.crawl import crawl_service, schedule_service, sla_service
+from jobcrawler.modules.overview import overview_service
 from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.redis import heartbeat
 from jobcrawler.services.redis.queues import drop_queue
@@ -75,7 +75,7 @@ def no_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     async def tick(res: Any, now: Any = None) -> dict[str, int]:
         return {}
 
-    monkeypatch.setattr(schedule, "tick", tick)
+    monkeypatch.setattr(schedule_service, "tick", tick)
 
 
 # --- heartbeat health --------------------------------------------------------------------------
@@ -159,10 +159,10 @@ async def test_cache_keys_go_to_cache_redis(integration_settings: Settings) -> N
             await res.http._cache.set(page)  # pyright: ignore[reportPrivateUsage]
             assert await res.api_http._cache.get(page.url) is not None  # pyright: ignore[reportPrivateUsage]
             await res.cache_kv.set("discovery:acme.vn", "{}", ttl=60)
-            await overview.refresh_charts(res)
+            await overview_service.refresh_charts(res)
             await res.queues.poll.enqueue("poll_company", key="split", company_id="x")
-            await sla.record_poll(res.redis, prefix, status="ok", duration_s=1, window_s=60)
-            async with crawl.company_lock(res, uuid4(), ttl=30) as held:
+            await sla_service.record_poll(res.redis, prefix, status="ok", duration_s=1, window_s=60)
+            async with crawl_service.company_lock(res, uuid4(), ttl=30) as held:
                 assert held
                 main = await keys_of(res.redis, f"{prefix}:*")
             cache = await keys_of(res.cache_redis, f"{prefix}:*")
@@ -272,7 +272,7 @@ async def test_only_one_scheduler_leads(
         ticks.append(asyncio.current_task().get_name())  # pyright: ignore[reportOptionalMemberAccess]
         return {}
 
-    monkeypatch.setattr(schedule, "tick", tick)
+    monkeypatch.setattr(schedule_service, "tick", tick)
     monkeypatch.setattr(scheduler, "STANDBY_SECONDS", 0.2)
     settings = tagged(integration_settings, scheduler_tick_seconds=0.1)
     try:

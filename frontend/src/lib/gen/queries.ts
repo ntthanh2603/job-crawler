@@ -39,11 +39,14 @@ export type AuditEventOut = {
   actor: string;
   changes: AuditEventOutChanges;
   id: string;
+  ip: string | null;
   metadata: AuditEventOutMetadata;
   occurred_at: string;
   request_id: string | null;
   resource_id: string | null;
+  resource_label: string | null;
   resource_type: string | null;
+  user_agent: string | null;
 };
 
 export type AuditPageOut = {
@@ -197,6 +200,58 @@ export type ChartsOut = {
 };
 
 /**
+ * Giới hạn của lượt poll (cài đặt `POLL_MAX_FAILURES`, `POLL_MAX_DETAIL_PAGES`,
+ * `PLAN_MAX_PAGES`).
+ */
+export type PollLimitsOut = {
+  max_detail_pages: number;
+  max_failures: number;
+  max_pages: number;
+};
+
+/**
+ * Một API danh sách tin (`PlanSpec.apis`): poll gọi thẳng bằng HTTP.
+ */
+export type PlanApiOut = {
+  by_offset: boolean;
+  embedded: boolean;
+  listing: string | null;
+  method: string;
+  page_param: string;
+  paged: boolean;
+  pages: number;
+  size: number;
+  total: number | null;
+  url: string;
+};
+
+/**
+ * Lượt poll gần nhất của một nguồn đi đường nào (suy từ cột của `crawl_plans`: lượt poll
+ * không đổi gì không ghi `company_runs`).
+ */
+export type PlanPollResult = typeof PlanPollResult[keyof typeof PlanPollResult];
+
+
+export const PlanPollResult = {
+  never: 'never',
+  unchanged: 'unchanged',
+  changed: 'changed',
+  retrying: 'retrying',
+  broken: 'broken',
+  retired: 'retired',
+} as const;
+
+/**
+ * Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs`).
+ */
+export type PlanPageOut = {
+  api_only: boolean;
+  hub: boolean;
+  rendered: boolean;
+  url: string;
+};
+
+/**
  * Trạng thái bộ khung một nguồn (`crawl_plans`).
  */
 export type PlanStatus = typeof PlanStatus[keyof typeof PlanStatus];
@@ -209,22 +264,26 @@ export const PlanStatus = {
 } as const;
 
 export type PlanOut = {
-  apis: string[];
+  apis: PlanApiOut[];
+  apis_total: number;
+  ats: string | null;
   built_at: string;
   changed_at: string | null;
   failures: number;
-  hubs: number;
   id: string;
   ignored: number;
+  indirect: number;
   jobs: number;
   kind: string;
   last_error: string | null;
-  listings: string[];
+  last_poll: PlanPollResult;
+  listings: PlanPageOut[];
+  listings_total: number;
   llm_listing: boolean;
   pages: number;
   pages_needed: number;
   polled_at: string | null;
-  rendered: number;
+  readable: boolean;
   source: string;
   status: PlanStatus;
   url: string;
@@ -260,10 +319,22 @@ export type ScheduleOut = {
   state: ScheduleState;
 };
 
+export type CrawlWindowsOut = {
+  build: string;
+  in_build: boolean;
+  in_poll: boolean;
+  next_build_start: string;
+  next_poll_start: string;
+  poll: string;
+  timezone: string;
+};
+
 export type CompanyCrawlOut = {
+  limits: PollLimitsOut;
   plans: PlanOut[];
   poll_interval_seconds: number;
   schedule: ScheduleOut | null;
+  windows: CrawlWindowsOut;
 };
 
 export type CompanyCreateIn = {
@@ -399,16 +470,6 @@ export type PollStatsOut = {
   window_p50: number | null;
   window_p95: number | null;
   within_target: number | null;
-};
-
-export type CrawlWindowsOut = {
-  build: string;
-  in_build: boolean;
-  in_poll: boolean;
-  next_build_start: string;
-  next_poll_start: string;
-  poll: string;
-  timezone: string;
 };
 
 export type CrawlStatusOut = {
@@ -1090,66 +1151,114 @@ export type OverviewOut = {
 };
 
 export type PageOutBoardRunOut = {
+  data: BoardRunOut[];
   exact: boolean;
-  items: BoardRunOut[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutCompanyItem = {
+  data: CompanyItem[];
   exact: boolean;
-  items: CompanyItem[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutFetchOut = {
+  data: FetchOut[];
   exact: boolean;
-  items: FetchOut[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutJobItem = {
+  data: JobItem[];
   exact: boolean;
-  items: JobItem[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutLogOut = {
+  data: LogOut[];
   exact: boolean;
-  items: LogOut[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutPostingOut = {
+  data: PostingOut[];
   exact: boolean;
-  items: PostingOut[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
 };
 
 export type PageOutRunOut = {
+  data: RunOut[];
   exact: boolean;
-  items: RunOut[];
+  hasNextPage: boolean;
+  limit: number;
   page: number;
-  pages: number;
-  size: number;
+  pageCount: number;
   total: number;
+};
+
+export type PlanDetailOutSpec = { [key: string]: unknown };
+
+/**
+ * Một mã tin trong bộ khung (`crawl_plans.job_keys`) và tin đã lưu của nó (nếu có).
+ */
+export type PlanJobOut = {
+  accepted: boolean | null;
+  indirect: boolean;
+  job_id: string | null;
+  key: string;
+  status: JobStatus | null;
+  title: string | null;
+  url: string | null;
+};
+
+/**
+ * Một mục danh mục mã → tên tải kèm trang (`PlanSpec.names`), vd. tỉnh `33` → "Hà Nội".
+ */
+export type PlanNameOut = {
+  id: string;
+  kind: string;
+  name: string;
+};
+
+/**
+ * Toàn bộ một bộ khung: trang / API (như `PlanOut`), các mã tin, link bỏ qua, danh mục
+ * mã → tên và JSON gốc.
+ */
+export type PlanDetailOut = {
+  company_id: string;
+  company_name: string;
+  ignored_links: string[];
+  jobs: PlanJobOut[];
+  jobs_total: number;
+  limits: PollLimitsOut;
+  names: PlanNameOut[];
+  names_total: number;
+  plan: PlanOut;
+  spec: PlanDetailOutSpec;
 };
 
 export type ProxiesOutMode = typeof ProxiesOutMode[keyof typeof ProxiesOutMode];
@@ -1370,6 +1479,14 @@ export type SettingsUpdate = {
   values: SettingsUpdateValues;
 };
 
+export type SortOrder = typeof SortOrder[keyof typeof SortOrder];
+
+
+export const SortOrder = {
+  ASC: 'ASC',
+  DESC: 'DESC',
+} as const;
+
 export type GetAuditParams = {
 /**
  * @minimum 1
@@ -1387,43 +1504,199 @@ actor?: string | null;
 };
 
 export type GetBoardRunsParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
 /**
  * full | tail
  */
 mode?: string | null;
+sortBy?: GetBoardRunsSortBy;
 };
+
+export type GetBoardRunsSortBy = typeof GetBoardRunsSortBy[keyof typeof GetBoardRunsSortBy];
+
+
+export const GetBoardRunsSortBy = {
+  started_at: 'started_at',
+  new: 'new',
+  fetched: 'fetched',
+  failed: 'failed',
+} as const;
 
 export type GetCompaniesParams = {
-q?: string;
-kyc?: string;
-run?: string;
-jobs?: string;
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+/**
+ * verified | ambiguous | not_found | none
+ */
+kyc?: string;
+/**
+ * trạng thái lượt mới nhất | never
+ */
+run?: string;
+/**
+ * with | without (việc đang mở)
+ */
+jobs?: string;
+sortBy?: GetCompaniesSortBy;
 };
 
+export type GetCompaniesSortBy = typeof GetCompaniesSortBy[keyof typeof GetCompaniesSortBy];
+
+
+export const GetCompaniesSortBy = {
+  created_at: 'created_at',
+  name: 'name',
+  active_jobs: 'active_jobs',
+  last_run_at: 'last_run_at',
+} as const;
+
 export type GetCompanyJobsParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
+page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
 /**
  * active | inactive
  */
 status?: string;
-page?: number;
+sortBy?: GetCompanyJobsSortBy;
 };
+
+export type GetCompanyJobsSortBy = typeof GetCompanyJobsSortBy[keyof typeof GetCompanyJobsSortBy];
+
+
+export const GetCompanyJobsSortBy = {
+  first_seen_at: 'first_seen_at',
+  posted_at: 'posted_at',
+  salary: 'salary',
+  expires_at: 'expires_at',
+} as const;
 
 export type GetCompanyRejectedParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+sortBy?: GetCompanyRejectedSortBy;
 };
 
+export type GetCompanyRejectedSortBy = typeof GetCompanyRejectedSortBy[keyof typeof GetCompanyRejectedSortBy];
+
+
+export const GetCompanyRejectedSortBy = {
+  verified_at: 'verified_at',
+  last_seen_at: 'last_seen_at',
+  confidence: 'confidence',
+} as const;
+
 export type GetCompanyRunsParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+sortBy?: GetCompanyRunsSortBy;
 };
+
+export type GetCompanyRunsSortBy = typeof GetCompanyRunsSortBy[keyof typeof GetCompanyRunsSortBy];
+
+
+export const GetCompanyRunsSortBy = {
+  started_at: 'started_at',
+  duration_ms: 'duration_ms',
+  jobs_found: 'jobs_found',
+  jobs_new: 'jobs_new',
+  jobs_closed: 'jobs_closed',
+} as const;
 
 export type GetCrawlStatusParams = {
 minutes?: number;
 };
 
 export type GetJobsParams = {
-q?: string;
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
 province?: string;
 level?: string;
 employment_type?: string;
@@ -1434,7 +1707,7 @@ source?: string;
  */
 status?: string;
 /**
- * triệu VND
+ * triệu VND / tháng
  */
 salary_from?: number | null;
 company_id?: string | null;
@@ -1443,27 +1716,63 @@ company_id?: string | null;
  */
 reviewed?: string;
 /**
- * new | posted | salary | expires
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
  */
-sort?: string;
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+/**
+ * Cột sắp xếp
+ */
+sortBy?: GetJobsSortBy;
 };
+
+export type GetJobsSortBy = typeof GetJobsSortBy[keyof typeof GetJobsSortBy];
+
+
+export const GetJobsSortBy = {
+  first_seen_at: 'first_seen_at',
+  posted_at: 'posted_at',
+  salary: 'salary',
+  expires_at: 'expires_at',
+} as const;
 
 export type GetJobsExportParams = {
 /**
- * @pattern ^(csv|jsonl)$
+ * Tìm trong tiêu đề / tên doanh nghiệp
  */
-fmt?: string;
-q?: string;
+search?: string;
 province?: string;
 level?: string;
 employment_type?: string;
 work_mode?: string;
 source?: string;
+/**
+ * active | expired | removed | all
+ */
 status?: string;
+/**
+ * triệu VND / tháng
+ */
 salary_from?: number | null;
 company_id?: string | null;
+/**
+ * no | yes | correct | wrong
+ */
 reviewed?: string;
+/**
+ * @pattern ^(csv|jsonl)$
+ */
+fmt?: string;
 };
 
 export type GetOverviewParams = {
@@ -1485,12 +1794,72 @@ skip?: string | null;
 };
 
 export type GetRunFetchesParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+sortBy?: GetRunFetchesSortBy;
 };
 
+export type GetRunFetchesSortBy = typeof GetRunFetchesSortBy[keyof typeof GetRunFetchesSortBy];
+
+
+export const GetRunFetchesSortBy = {
+  created_at: 'created_at',
+  duration_ms: 'duration_ms',
+  http_status: 'http_status',
+  items: 'items',
+} as const;
+
 export type GetRunLogsParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
 page?: number;
+/**
+ * Số dòng mỗi trang (1–100)
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+/**
+ * debug | info | warning | error | critical
+ */
+level?: string;
+sortBy?: GetRunLogsSortBy;
 };
+
+export type GetRunLogsSortBy = typeof GetRunLogsSortBy[keyof typeof GetRunLogsSortBy];
+
+
+export const GetRunLogsSortBy = {
+  ts: 'ts',
+  level: 'level',
+} as const;
 
 export type GetStatsParams = {
 /**
@@ -2096,6 +2465,7 @@ export const usePostBoardIndex = <TError = HTTPValidationError,
     }
 
 /**
+ * Doanh nghiệp theo bộ lọc, một trang.
  * @summary Get Companies
  */
 export const getCompanies = (
@@ -3051,6 +3421,101 @@ export function useGetCompanyRuns<TData = Awaited<ReturnType<typeof getCompanyRu
 
 
 /**
+ * Toàn bộ một bộ khung: trang / API lượt poll đọc lại, mã tin (kèm tin đã lưu), link bỏ qua,
+ * danh mục mã → tên, JSON gốc.
+ * @summary Get Crawl Plan
+ */
+export const getCrawlPlan = (
+    planId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<PlanDetailOut>(
+      {url: `/api/crawl/plans/${planId}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getGetCrawlPlanQueryKey = (planId: string,) => {
+    return [
+    `/api/crawl/plans/${planId}`
+    ] as const;
+    }
+
+
+export const getGetCrawlPlanQueryOptions = <TData = Awaited<ReturnType<typeof getCrawlPlan>>, TError = HTTPValidationError>(planId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCrawlPlanQueryKey(planId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCrawlPlan>>> = ({ signal }) => getCrawlPlan(planId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: planId !== null && planId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCrawlPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getCrawlPlan>>>
+export type GetCrawlPlanQueryError = HTTPValidationError
+
+
+export function useGetCrawlPlan<TData = Awaited<ReturnType<typeof getCrawlPlan>>, TError = HTTPValidationError>(
+ planId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCrawlPlan>>,
+          TError,
+          Awaited<ReturnType<typeof getCrawlPlan>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCrawlPlan<TData = Awaited<ReturnType<typeof getCrawlPlan>>, TError = HTTPValidationError>(
+ planId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCrawlPlan>>,
+          TError,
+          Awaited<ReturnType<typeof getCrawlPlan>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCrawlPlan<TData = Awaited<ReturnType<typeof getCrawlPlan>>, TError = HTTPValidationError>(
+ planId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Crawl Plan
+ */
+
+export function useGetCrawlPlan<TData = Awaited<ReturnType<typeof getCrawlPlan>>, TError = HTTPValidationError>(
+ planId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCrawlPlan>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCrawlPlanQueryOptions(planId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
  * Độ trễ phát hiện tin mới (P50/P95 cửa sổ phát hiện của các lượt poll trong `minutes` phút
  * gần nhất), độ tươi hiện tại, khung giờ build / poll.
  * @summary Get Crawl Status
@@ -3575,6 +4040,7 @@ export function useGetFailedPageRaw<TData = Awaited<ReturnType<typeof getFailedP
 
 
 /**
+ * Việc làm theo bộ lọc, một trang (`search` trong tiêu đề / tên doanh nghiệp).
  * @summary Get Jobs
  */
 export const getJobs = (
@@ -3669,6 +4135,7 @@ export function useGetJobs<TData = Awaited<ReturnType<typeof getJobs>>, TError =
 
 
 /**
+ * Mọi việc làm theo bộ lọc (không phân trang), CSV hoặc JSONL.
  * @summary Get Jobs Export
  */
 export const getJobsExport = (

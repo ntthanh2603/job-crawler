@@ -12,8 +12,8 @@ import zstandard
 
 from jcproto.v1 import crawl_pb2
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.gateway import remote
-from jobcrawler.modules.gateway.dispatch import (
+from jobcrawler.modules.gateway import remote_service
+from jobcrawler.modules.gateway.dispatch_service import (
     NoWorkerError,
     choose_pool,
     fetch_priority,
@@ -22,16 +22,21 @@ from jobcrawler.modules.gateway.dispatch import (
     parse_task_id,
     priority_fetches,
 )
-from jobcrawler.modules.gateway.registry import Keys
-from jobcrawler.modules.gateway.remote import (
+from jobcrawler.modules.gateway.registry_service import Keys
+from jobcrawler.modules.gateway.remote_service import (
     RemoteRenderer,
     RemoteTransport,
     encode_body,
     proxy_id_of,
     to_raw_response,
 )
-from jobcrawler.modules.gateway.server import config_version, worker_config
-from jobcrawler.modules.gateway.worker_auth import bearer
+from jobcrawler.modules.gateway.server_service import (
+    client_ip,
+    config_version,
+    peer_ip,
+    worker_config,
+)
+from jobcrawler.modules.gateway.worker_auth_service import bearer
 from jobcrawler.services.net.http import CapturedJson, TransportError
 from jobcrawler.services.net.proxy_pool import parse_proxy_line
 
@@ -253,7 +258,7 @@ LOST = crawl_pb2.FetchResult(
 
 
 async def test_remote_resubmits_once_when_worker_is_lost(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(remote, "LOST_RESUBMIT_DELAY_SECONDS", 0)
+    monkeypatch.setattr(remote_service, "LOST_RESUBMIT_DELAY_SECONDS", 0)
     client = FakeClient(LOST, crawl_pb2.FetchResult(status=200, body=b"<div/>"))
     raw = await RemoteRenderer(cast(Any, client)).render(
         URL, proxy=None, timeout=30, wait_until="load"
@@ -440,6 +445,38 @@ def test_bearer_reads_authorization_metadata() -> None:
     assert bearer([("authorization", "Bearer ")]) is None
     assert bearer([("x-token", "Bearer s3cret")]) is None
     assert bearer(None) is None
+
+
+@pytest.mark.parametrize(
+    ("peer", "ip"),
+    [
+        ("ipv4:10.0.0.5:51234", "10.0.0.5"),
+        ("ipv6:[::1]:51234", "::1"),
+        ("ipv6:%5B2001:db8::7%5D:443", "2001:db8::7"),
+        ("unix:/tmp/gw.sock", None),
+        ("ipv4:khong-phai-ip:1", None),
+        (None, None),
+    ],
+)
+def test_peer_ip(peer: str | None, ip: str | None) -> None:
+    assert peer_ip(peer) == ip
+
+
+def test_client_ip_trusts_forwarded_for_only_from_allowed_proxies() -> None:
+    meta = [("authorization", "Bearer k"), ("x-forwarded-for", "198.51.100.9, 203.0.113.7")]
+    nginx = "ipv4:172.18.0.4:40000"
+    # Proxy tin cậy: địa chỉ cuối (proxy gần nhất ghi vào), giá trị client tự đặt phía trước bỏ.
+    assert client_ip(nginx, meta, forwarded_allow_ips="172.18.0.0/16") == "203.0.113.7"
+    assert client_ip(nginx, meta, forwarded_allow_ips="*") == "203.0.113.7"
+    assert client_ip(nginx, [("X-Forwarded-For", b"203.0.113.8")], forwarded_allow_ips="*") == (
+        "203.0.113.8"
+    )
+    # Không tin cậy / header hỏng / không có header: địa chỉ kết nối.
+    assert client_ip(nginx, meta, forwarded_allow_ips="127.0.0.1,::1") == "172.18.0.4"
+    assert client_ip(nginx, meta, forwarded_allow_ips="x, 10.0.0.0/8") == "172.18.0.4"
+    assert client_ip(nginx, [("x-forwarded-for", "rác")], forwarded_allow_ips="*") == "172.18.0.4"
+    assert client_ip(nginx, None, forwarded_allow_ips="*") == "172.18.0.4"
+    assert client_ip("unix:/tmp/gw.sock", meta, forwarded_allow_ips="*") is None
 
 
 def test_task_json_round_trip_keeps_unicode() -> None:

@@ -38,8 +38,11 @@ Khung giờ theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh). Đổi khung / chu kỳ c�
 
 **Bộ khung** (trang Cài đặt → Lịch thu thập): mỗi doanh nghiệp tối đa `PLAN_MAX_PAGES` (10) trang
 mỗi lượt poll, mỗi nguồn ít nhất `PLAN_MIN_PAGES` (3) khi site có đủ. Tab "Bộ khung & lịch" của doanh
-nghiệp ghi "Poll đọc trọn N trang" hoặc "Poll đọc 10/14 trang" (site dài hơn bộ khung: poll chỉ thấy
-tin mới ở các trang đầu, không đóng việc; build đêm đọc đủ và đóng).
+nghiệp vẽ đường một lượt poll của từng nguồn (đọc danh sách → so mã tin → mở chi tiết tin mới → kết
+quả lượt gần nhất) và ghi "Đọc trọn N trang/lượt" hoặc "Đọc 10/14 trang/lượt" (site dài hơn bộ khung:
+poll chỉ thấy tin mới ở các trang đầu, không đóng việc; build đêm đọc đủ và đóng). Nút "Bản đồ bộ
+khung" mở toàn bộ một bộ khung: cây trang → API, các mã tin kèm tin đã lưu, link bỏ qua, danh mục
+mã → tên, JSON gốc.
 
 **Khi nào poll đóng việc**: chỉ khi nguồn được đọc trọn (mọi trang, không lỗi, không bị cắt) và tin
 vắng mặt không phải tin "gián tiếp". Mất ≥ 30% tin trong một lượt thì không đóng mà đếm như lỗi; lặp
@@ -144,8 +147,10 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
 - Log: `docker compose logs <service>` (xoay 10 MB × 3); `LOG_FORMAT=json` cho máy đọc. Bảng `logs` giữ
   log của lượt chạy; production đặt `LOG_DB_LEVEL=WARNING`. Mỗi request API có `X-Request-Id`, lỗi 500
   trả `request_id` để tra log.
-- **Nhật ký thao tác**: ai lưu cài đặt / bấm build / thêm doanh nghiệp…, giá trị trước → sau (bí mật
-  bị che). Chỉ ghi thêm, bảo trì không dọn.
+- **Nhật ký thao tác**: ai lưu cài đặt / bấm build / thêm doanh nghiệp / xuất dữ liệu / đăng nhập
+  (kể cả đăng nhập sai)…, lúc nào, từ IP và trình duyệt nào, giá trị trước → sau (bí mật bị che).
+  Chỉ ghi thêm, bảo trì không dọn. Dòng ghi trước 21/10/2026 (revision 0004) không có IP / trình
+  duyệt.
 - **Log về chia việc** (cảnh báo bất thường, không cần làm gì nếu chỉ thỉnh thoảng):
   `queue.job_revoked` (runner tự huỷ lượt đã bị runner khác thu hồi — runner đó từng đứng / mất
   Redis), `lock.lost` + `LeaseLost` (lượt mất khoá doanh nghiệp / bảo trì giữa chừng), `FencedOut`

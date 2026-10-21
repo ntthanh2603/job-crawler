@@ -1,8 +1,8 @@
 """Mở/đóng mọi tài nguyên dùng chung của một process backend (CLI, runner, scheduler, API).
 
 Crawl không đi thẳng từ backend: `Resources.http` gửi từng request tới worker lấy trang qua Redis
-Streams (`modules.gateway.dispatch.FetchClient`); chỉ API bên ngoài (SERP) gọi thẳng (`api_http`,
-httpx).
+Streams (`modules.gateway.dispatch_service.FetchClient`); chỉ API bên ngoài (SERP) gọi thẳng
+(`api_http`, httpx).
 
 Hai vai Redis:
 
@@ -31,8 +31,8 @@ from jobcrawler.common import logging as jlog
 from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.database import compress
 from jobcrawler.database.session import create_engine, create_sessionmaker
-from jobcrawler.modules.gateway.dispatch import FetchClient
-from jobcrawler.modules.gateway.remote import RemoteRenderer, RemoteTransport
+from jobcrawler.modules.gateway.dispatch_service import FetchClient
+from jobcrawler.modules.gateway.remote_service import RemoteRenderer, RemoteTransport
 from jobcrawler.services import secretbox
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.direct import DirectTransport
@@ -178,7 +178,7 @@ async def open_resources(
     `db_logs`: gắn sink ghi log vào bảng `logs`. `live_settings`: áp giá trị sửa ở trang Cài đặt
     và nạp lại khi chúng đổi (`res.settings` được thay).
     """
-    from jobcrawler.modules.settings.live_settings import LiveSettings
+    from jobcrawler.modules.settings.live_settings_service import LiveSettings
 
     settings = settings or get_settings()
     async with AsyncExitStack() as stack:

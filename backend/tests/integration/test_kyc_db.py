@@ -20,7 +20,7 @@ from jobcrawler.common.logging import configure_logging
 from jobcrawler.common.schemas import CompanyIn, KycEvidence, KycStatus, RunStatus
 from jobcrawler.database.models import Company, CompanyAlias, CompanyRun, SourceFetch
 from jobcrawler.database.session import create_engine, create_sessionmaker
-from jobcrawler.modules.crawl.companies import process_company
+from jobcrawler.modules.crawl.company_service import process_company
 from jobcrawler.pipeline import kyc
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.services.llm import LLMClient

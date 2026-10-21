@@ -99,11 +99,11 @@ def db_maintain(
 ) -> None:
     """Bảo trì (như cron mỗi giờ): lượt chạy treo → failed, xoá dữ liệu cũ, huấn luyện từ điển
     nén và nén lại dữ liệu."""
-    from jobcrawler.modules.maintenance import maintenance
+    from jobcrawler.modules.maintenance import maintenance_service
 
-    async def go() -> maintenance.MaintenanceReport:
+    async def go() -> maintenance_service.MaintenanceReport:
         async with open_resources(db_logs=False) as res:
-            return await maintenance.run_maintenance(
+            return await maintenance_service.run_maintenance(
                 res, prune=not no_prune, compression=not no_compress
             )
 
@@ -135,11 +135,11 @@ def db_reclean(
 ) -> None:
     """Áp lại bộ làm sạch nội dung (che liên hệ, sửa định dạng) lên job đã lưu, không cần chạy
     lại doanh nghiệp."""
-    from jobcrawler.modules.maintenance import maintenance
+    from jobcrawler.modules.maintenance import maintenance_service
 
-    async def go() -> maintenance.RecleanReport:
+    async def go() -> maintenance_service.RecleanReport:
         async with open_resources(db_logs=False) as res:
-            return await maintenance.reclean_jobs(res.sessionmaker, dry_run=dry_run)
+            return await maintenance_service.reclean_jobs(res.sessionmaker, dry_run=dry_run)
 
     report = _run(go())
     verb = "cần sửa" if dry_run else "đã sửa"
@@ -149,11 +149,11 @@ def db_reclean(
 @db_app.command("dedup")
 def db_dedup() -> None:
     """Điền dấu vân tay cho job cũ và gộp các job đang mở trùng nội dung (job cũ nhất giữ lại)."""
-    from jobcrawler.modules.maintenance import maintenance
+    from jobcrawler.modules.maintenance import maintenance_service
 
-    async def go() -> maintenance.DedupReport:
+    async def go() -> maintenance_service.DedupReport:
         async with open_resources(db_logs=False) as res:
-            return await maintenance.dedupe_jobs(res.sessionmaker)
+            return await maintenance_service.dedupe_jobs(res.sessionmaker)
 
     r = _run(go())
     typer.echo(
@@ -176,10 +176,10 @@ def db_revision(
 
 
 async def _run_company(company_in: CompanyIn) -> CompanyResult:
-    from jobcrawler.modules.crawl import companies
+    from jobcrawler.modules.crawl import company_service
 
     async with open_resources() as res:
-        return await companies.process_company(res, company_in)
+        return await company_service.process_company(res, company_in)
 
 
 def _salary_text(job: JobOut) -> str:
@@ -258,14 +258,16 @@ def build(
     ] = True,
 ) -> None:
     """Build một doanh nghiệp đã nạp ngay trong process này: lượt đủ, ghi bộ khung và lịch."""
-    from jobcrawler.modules.crawl import crawl
+    from jobcrawler.modules.crawl import crawl_service
 
     cid = _company_id(company_id)
 
     async def go() -> CompanyResult:
         async with open_resources() as res:
             trigger = RunTrigger.ERROR if refresh else RunTrigger.MANUAL
-            return await crawl.build_company(res, cid, trigger=trigger, continue_partial=False)
+            return await crawl_service.build_company(
+                res, cid, trigger=trigger, continue_partial=False
+            )
 
     result = _run(go())
     typer.echo(
@@ -282,13 +284,13 @@ def poll(
     json_out: Annotated[bool, typer.Option("--json", help="In kết quả dạng JSON.")] = False,
 ) -> None:
     """Poll một doanh nghiệp theo bộ khung ngay trong process này (không qua queue)."""
-    from jobcrawler.modules.crawl import crawl
+    from jobcrawler.modules.crawl import crawl_service
 
     cid = _company_id(company_id)
 
     async def go() -> Any:
         async with open_resources() as res:
-            return await crawl.poll_company(res, cid, trigger=RunTrigger.MANUAL)
+            return await crawl_service.poll_company(res, cid, trigger=RunTrigger.MANUAL)
 
     outcome = _run(go())
     if json_out:
@@ -315,11 +317,11 @@ def kyc(
     json_out: Annotated[bool, typer.Option("--json", help="In kết quả dạng JSON.")] = False,
 ) -> None:
     """Chỉ chạy KYC: xác định pháp nhân, website, MST, alias (có cache, lưu vào DB)."""
-    from jobcrawler.modules.crawl import companies
+    from jobcrawler.modules.crawl import company_service
 
-    async def go() -> companies.KycReport:
+    async def go() -> company_service.KycReport:
         async with open_resources() as res:
-            return await companies.kyc_company(
+            return await company_service.kyc_company(
                 res, CompanyIn(name=name, tax_code=tax_code, website=website), refresh=refresh
             )
 
@@ -413,13 +415,13 @@ def site(
     steps: Annotated[bool, typer.Option(help="In các bước tìm nguồn.")] = False,
 ) -> None:
     """Tìm trang careers/ATS của một website và liệt kê job (chưa chuẩn hoá/xác minh)."""
-    from jobcrawler.modules.crawl import website as website_jobs
+    from jobcrawler.modules.crawl import website_service
     from jobcrawler.sources import ats
 
-    async def go() -> website_jobs.WebsiteJobs:
+    async def go() -> website_service.WebsiteJobs:
         async with open_resources() as res:
             limit = deadline or res.settings.company_deadline_seconds
-            return await website_jobs.jobs_for_website(
+            return await website_service.jobs_for_website(
                 res,
                 website,
                 deadline=time.monotonic() + limit,
@@ -709,11 +711,11 @@ def serve(
 
 
 def _read_csv(path: str) -> Any:
-    from jobcrawler.modules.companies import batch
+    from jobcrawler.modules.companies import batch_service
 
     try:
-        report = batch.read_companies_csv(path)
-    except (OSError, batch.CsvFormatError) as exc:
+        report = batch_service.read_companies_csv(path)
+    except (OSError, batch_service.CsvFormatError) as exc:
         typer.secho(f"Không đọc được {path}: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
     for message in report.errors[:20]:
@@ -730,13 +732,15 @@ def _read_csv(path: str) -> Any:
 def import_companies(path: Annotated[str, typer.Argument(help="File companies.csv.")]) -> None:
     """Nạp danh sách doanh nghiệp từ CSV (cột name, tax_code, website, note) vào `companies`
     (chưa chạy KYC). Chạy lại không tạo trùng."""
-    from jobcrawler.modules.companies import batch
+    from jobcrawler.modules.companies import batch_service
 
     report = _read_csv(path)
 
-    async def go() -> batch.ImportResult:
+    async def go() -> batch_service.ImportResult:
         async with open_resources(db_logs=False) as res:
-            return await batch.import_companies(res.sessionmaker, [r.company for r in report.rows])
+            return await batch_service.import_companies(
+                res.sessionmaker, [r.company for r in report.rows]
+            )
 
     result = _run(go())
     typer.echo(
@@ -765,7 +769,7 @@ def enqueue(
 ) -> None:
     """Đưa doanh nghiệp vào queue build (mỗi doanh nghiệp một job `build_company`, timeout
     COMPANY_TIMEOUT_SECONDS; job cùng doanh nghiệp đang chờ/chạy thì bỏ qua)."""
-    from jobcrawler.modules.companies import batch
+    from jobcrawler.modules.companies import batch_service
 
     if all_ and file:
         typer.secho("Chọn --all hoặc --file, không dùng cả hai.", fg=typer.colors.RED, err=True)
@@ -775,19 +779,19 @@ def enqueue(
         raise typer.Exit(2)
     report = _read_csv(file) if file else None
 
-    async def go() -> tuple[int, batch.EnqueueResult | None, dict[str, int]]:
+    async def go() -> tuple[int, batch_service.EnqueueResult | None, dict[str, int]]:
         async with open_resources(db_logs=False) as res:
             ids = None
             if report is not None:
-                imported = await batch.import_companies(
+                imported = await batch_service.import_companies(
                     res.sessionmaker, [r.company for r in report.rows]
                 )
                 ids = imported.company_ids
             async with res.sessionmaker() as session:
-                companies = await batch.select_companies(
+                companies = await batch_service.select_companies(
                     session, company_ids=ids, stale_hours=stale_hours, limit=limit
                 )
-            result = None if dry_run else await batch.enqueue_companies(res, companies)
+            result = None if dry_run else await batch_service.enqueue_companies(res, companies)
             info = await res.queues.build.info()
             return len(companies), result, {"queued": info["queued"], "active": info["active"]}
 
@@ -837,7 +841,7 @@ def index_boards(
 ) -> None:
     """Index tăng dần các trang tuyển dụng vào job_postings + source_profiles, rồi map profile
     (`--tail`: lượt đuôi, chỉ tin mới nhất)."""
-    from jobcrawler.modules.boards import boards as board_service
+    from jobcrawler.modules.boards import boards_service
     from jobcrawler.sources import boards
 
     if list_boards:
@@ -846,16 +850,16 @@ def index_boards(
             typer.echo(f"{adapter.name:<14} {state:<4} {adapter.home} {adapter.note}")
         return
     try:
-        board_service.selected_boards(get_settings(), source)
-    except board_service.UnknownBoardError as exc:
+        boards_service.selected_boards(get_settings(), source)
+    except boards_service.UnknownBoardError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
 
     if rematch:
 
-        async def go_rematch() -> board_service.RematchReport:
+        async def go_rematch() -> boards_service.RematchReport:
             async with open_resources() as res:
-                return await board_service.rematch_profiles(res, source)
+                return await boards_service.rematch_profiles(res, source)
 
         again = _run(go_rematch())
         typer.echo(
@@ -867,9 +871,9 @@ def index_boards(
 
     if map_only:
 
-        async def go_map() -> board_service.MapReport:
+        async def go_map() -> boards_service.MapReport:
             async with open_resources() as res:
-                return await board_service.map_all_profiles(res, source)
+                return await boards_service.map_all_profiles(res, source)
 
         report = _run(go_map())
         typer.echo(
@@ -880,7 +884,7 @@ def index_boards(
 
     async def go() -> list[Any]:
         async with open_resources() as res:
-            return await board_service.index_boards(
+            return await boards_service.index_boards(
                 res,
                 source,
                 max_jobs=max_jobs,
@@ -930,7 +934,7 @@ def export(
     ] = False,
 ) -> None:
     """Export job đã chuẩn hoá ra JSONL (mỗi dòng một JobOut) hoặc CSV."""
-    from jobcrawler.modules.jobs import export as export_service
+    from jobcrawler.modules.jobs import export_service
 
     if format_ not in export_service.FORMATS:
         typer.secho(f"--format phải là {' | '.join(export_service.FORMATS)}", fg="red", err=True)
@@ -963,7 +967,7 @@ def stats(
 ) -> None:
     """Thống kê: queue, lượt chạy (p50/p95, tỉ lệ failed), nguồn, index trang tuyển dụng, dung
     lượng DB và tỉ lệ nén."""
-    from jobcrawler.modules.overview import stats as stats_service
+    from jobcrawler.modules.overview import stats_service
 
     async def go() -> stats_service.Stats:
         async with open_resources(db_logs=False) as res:
@@ -1098,13 +1102,15 @@ def eval_(
     jobs.csv). Chưa có golden set: in và ghi N job ngẫu nhiên để kiểm tay."""
     from pathlib import Path
 
-    from jobcrawler.modules.evaluate import evaluate
+    from jobcrawler.modules.evaluate import evaluate_service
 
     if reviewed:
-        review = evaluate.read_review(reviewed)
+        review = evaluate_service.read_review(reviewed)
+        pct = evaluate_service.pct(review.precision)
+        target = evaluate_service.TARGET_PRECISION
         typer.echo(
             f"đã kiểm {review.reviewed} job · đúng {review.correct} · precision"
-            f" {evaluate.pct(review.precision)} (mục tiêu ≥ {evaluate.TARGET_PRECISION:.0%})"
+            f" {pct} (mục tiêu ≥ {target:.0%})"
             + (f" · {review.unknown} dòng chưa điền" if review.unknown else "")
         )
         return
@@ -1112,24 +1118,26 @@ def eval_(
     out_dir = Path(out)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     try:
-        golden_set = evaluate.load_golden(golden)
-    except evaluate.GoldenError as exc:
+        golden_set = evaluate_service.load_golden(golden)
+    except evaluate_service.GoldenError as exc:
         golden_set = None
         typer.secho(f"Chưa có golden set ({exc}): lấy {sample} job ngẫu nhiên.", err=True)
 
     if golden_set is None:
 
-        async def go_sample() -> list[evaluate.SampleJob]:
+        async def go_sample() -> list[evaluate_service.SampleJob]:
             async with open_resources(db_logs=False) as res, res.sessionmaker() as session:
-                return await evaluate.sample_jobs(session, n=sample, seed=seed)
+                return await evaluate_service.sample_jobs(session, n=sample, seed=seed)
 
         jobs = _run(go_sample())
         csv_path = out_dir / f"sample-{stamp}.csv"
         md_path = out_dir / f"sample-{stamp}.md"
-        evaluate.write_sample_csv(csv_path, jobs)
+        evaluate_service.write_sample_csv(csv_path, jobs)
         from datetime import UTC, datetime
 
-        text = evaluate.sample_markdown(jobs, generated_at=datetime.now(UTC), csv_path=csv_path)
+        text = evaluate_service.sample_markdown(
+            jobs, generated_at=datetime.now(UTC), csv_path=csv_path
+        )
         md_path.write_text(text, encoding="utf-8")
         typer.echo(text)
         typer.echo(
@@ -1138,20 +1146,22 @@ def eval_(
         )
         return
 
-    async def go() -> tuple[evaluate.EvalReport, dict[str, Any]]:
+    async def go() -> tuple[evaluate_service.EvalReport, dict[str, Any]]:
         async with open_resources(db_logs=False) as res:
-            report = await evaluate.evaluate(res, golden_set, include_inactive=all_status)
+            report = await evaluate_service.evaluate(res, golden_set, include_inactive=all_status)
             ids = [c.company_id for c in report.companies if c.company_id is not None]
             async with res.sessionmaker() as session:
-                perf = await evaluate.latest_run_perf(session, ids)
+                perf = await evaluate_service.latest_run_perf(session, ids)
             return report, perf
 
     report, perf = _run(go())
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"eval-{stamp}.md"
-    text = evaluate.markdown_report(report, perf=perf)
+    text = evaluate_service.markdown_report(report, perf=perf)
     md_path.write_text(text, encoding="utf-8")
-    (out_dir / f"eval-{stamp}.json").write_text(evaluate.report_json(report), encoding="utf-8")
+    (out_dir / f"eval-{stamp}.json").write_text(
+        evaluate_service.report_json(report), encoding="utf-8"
+    )
     typer.echo(text)
     typer.echo(f"→ {md_path}")
 

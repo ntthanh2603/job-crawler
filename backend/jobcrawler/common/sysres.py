@@ -1,5 +1,6 @@
 """Tài nguyên máy (CPU, RAM — tính cả giới hạn cgroup của container) và số job song song tự động
-của runner (như WORKER_MAX_CONCURRENCY=0 của open-asm; worker có bản riêng `jobworker/sysres.py`).
+của runner (như WORKER_MAX_CONCURRENCY=0 của open-asm; worker có bản riêng
+`jobworker/common/sysres.py`).
 
 RUNNER_*_CONCURRENCY = 0 (mặc định) thì tự tính theo máy chạy runner, giới hạn trên / dưới; đặt số
 thì dùng số đó. Một process runner là một event loop Python (tối đa ~1 core cho phần parse), phần

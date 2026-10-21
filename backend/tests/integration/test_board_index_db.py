@@ -20,8 +20,8 @@ from jobcrawler.database.models import (
     JobPosting,
     SourceProfile,
 )
-from jobcrawler.modules.boards import boards as board_service
-from jobcrawler.modules.crawl.companies import process_company
+from jobcrawler.modules.boards import boards_service
+from jobcrawler.modules.crawl.company_service import process_company
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
@@ -235,7 +235,7 @@ async def test_rematch_maps_profiles_with_name_variants(
                 )
             )
             company_id = company.id
-        report = await board_service.rematch_profiles(res, [FakeBoard.name])
+        report = await boards_service.rematch_profiles(res, [FakeBoard.name])
         assert report.renamed >= 1
         assert report.aliases >= 1
         async with res.sessionmaker() as s:
@@ -275,7 +275,7 @@ async def test_full_index_reports_companies_with_new_postings(
         company_id = await reset(res)
         since = datetime.now(UTC)
         await indexer(res, fake_site(JOBS)).run()  # ACME (profile 7) có 2 tin mới, vừa map
-        new_postings = board_service.companies_with_new_postings
+        new_postings = boards_service.companies_with_new_postings
         assert await new_postings(res, FakeBoard.name, since) == [company_id]
         assert await new_postings(res, "nguon-khac", since) == []
         # Lượt sau không có tin mới, không map thêm: không còn doanh nghiệp nào.
@@ -318,17 +318,17 @@ async def test_process_company_uses_indexed_board_jobs(
         company_id = await reset(res)
         await indexer(res, fake_site(JOBS)).run()
 
-        sources = await board_service.board_sources(res, company_id)
+        sources = await boards_service.board_sources(res, company_id)
         assert [s.name for s in sources] == ["board:fakeboard:7"]
         # KYC chưa chắc: profile chỉ khớp tên thì không dùng.
-        assert await board_service.board_sources(res, company_id, policy="strong") == []
+        assert await boards_service.board_sources(res, company_id, policy="strong") == []
         # Không tìm thấy website: profile trùng hẳn tên doanh nghiệp vẫn dùng được.
-        exact = await board_service.board_sources(
+        exact = await boards_service.board_sources(
             res, company_id, policy="exact_name", names=[ACME]
         )
         assert [s.name for s in exact] == ["board:fakeboard:7"]
         assert (
-            await board_service.board_sources(
+            await boards_service.board_sources(
                 res, company_id, policy="exact_name", names=["ACME Board Khác"]
             )
             == []
@@ -415,7 +415,7 @@ async def test_serp_lookup_adopts_profile_on_board(
         site.add(f"{HOME}cong-ty/khac-8", "<h1>Công ty TNHH Hoàn Toàn Khác</h1>")
         # SERP gọi thẳng (`api_http`), trang profile tìm được qua tầng mạng crawl (`http`).
         online = dataclasses.replace(res, http=site, api_http=site)  # pyright: ignore[reportArgumentType]
-        found = await board_service.lookup_profiles(
+        found = await boards_service.lookup_profiles(
             online, await _company(res, company_id), timeout=10, records=[]
         )
         assert found == 1
@@ -428,7 +428,7 @@ async def test_serp_lookup_adopts_profile_on_board(
         assert (profile.external_id, profile.company_id) == ("7", company_id)
         assert (profile.match_evidence or {})["via"] == "serp"
         # Đã có profile trên mọi trang: không tìm nữa.
-        again = await board_service.lookup_profiles(
+        again = await boards_service.lookup_profiles(
             online, await _company(res, company_id), timeout=10, records=[]
         )
         assert again == 0

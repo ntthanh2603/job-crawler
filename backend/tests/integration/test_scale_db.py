@@ -20,11 +20,11 @@ from jobcrawler.bootstrap import runner as runner_mod
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import CompanyIn, FetchOutcome, RunStatus
 from jobcrawler.database.models import CompanyRun, FailedPage, Job, Log, SourceFetch
-from jobcrawler.modules.companies import batch
-from jobcrawler.modules.crawl import companies
-from jobcrawler.modules.evaluate import evaluate
-from jobcrawler.modules.maintenance import maintenance
-from jobcrawler.modules.overview import stats
+from jobcrawler.modules.companies import batch_service
+from jobcrawler.modules.crawl import company_service
+from jobcrawler.modules.evaluate import evaluate_service
+from jobcrawler.modules.maintenance import maintenance_service
+from jobcrawler.modules.overview import stats_service
 from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.redis.queues import drop_queue, make_queue
@@ -116,14 +116,14 @@ async def scale(
         fetcher.add(lever_api(site), json.dumps(postings(site, i)), content_type="application/json")
 
     # Doanh nghiệp "treo": bước sau thu thập kẹt quá timeout cứng của job.
-    original = companies.process_jobs
+    original = company_service.process_jobs
 
     async def process_jobs(res: Resources, company: Any, raws: Any, **kwargs: Any) -> Any:
         if company.input_name.endswith("treo"):
             await asyncio.sleep(30)
         return await original(res, company, raws, **kwargs)
 
-    monkeypatch.setattr(companies, "process_jobs", process_jobs)
+    monkeypatch.setattr(company_service, "process_jobs", process_jobs)
     async with open_resources(settings, db_logs=False) as res:
         offline = dataclasses.replace(res, http=fetcher)  # pyright: ignore[reportArgumentType]
         rows = [
@@ -133,7 +133,7 @@ async def scale(
         rows.append(
             CompanyIn(name=f"Scale {tag} treo", website=f"https://jobs.lever.co/{sites[0]}")
         )
-        imported = await batch.import_companies(res.sessionmaker, rows)
+        imported = await batch_service.import_companies(res.sessionmaker, rows)
         try:
             yield Scale(
                 res=offline,
@@ -195,10 +195,12 @@ async def run_worker_until(sc: Scale, expected_runs: int, *, limit: float = 90) 
         await queue.disconnect()
 
 
-async def enqueue_all(sc: Scale) -> batch.EnqueueResult:
+async def enqueue_all(sc: Scale) -> batch_service.EnqueueResult:
     async with sc.res.sessionmaker() as s:
-        selected = await batch.select_companies(s, company_ids=[*sc.company_ids, sc.hang_id])
-    return await batch.enqueue_companies(sc.res, selected)
+        selected = await batch_service.select_companies(
+            s, company_ids=[*sc.company_ids, sc.hang_id]
+        )
+    return await batch_service.enqueue_companies(sc.res, selected)
 
 
 async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) -> None:
@@ -257,8 +259,8 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
 
     # stats: p95 trong timeout, tỉ lệ failed theo lượt mới nhất.
     async with sc.res.sessionmaker() as s:
-        st = await stats.run_stats(s, since, timeout_seconds=TIMEOUT)
-        sources = await stats.source_stats(s, since)
+        st = await stats_service.run_stats(s, since, timeout_seconds=TIMEOUT)
+        sources = await stats_service.source_stats(s, since)
     assert st.runs >= N + 2
     assert st.p95_seconds is not None
     assert st.p95_seconds <= TIMEOUT + 1
@@ -272,7 +274,7 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
     assert ("lever", len(SLOW)) in st.incomplete_sources
     lever = next(src for src in sources if src.kind == "lever")
     assert lever.outcomes[FetchOutcome.OK.value] >= N - len(SLOW)
-    full = await stats.collect_stats(sc.res, hours=1, storage=False)
+    full = await stats_service.collect_stats(sc.res, hours=1, storage=False)
     assert [q.name for q in full.queues] == list(sc.settings.queue_names)
     assert full.queues[0].queued == 0
 
@@ -289,7 +291,7 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
         )
     lines.append(f"{names[0]},Trưởng phòng nhân sự,")
     (golden / "jobs.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    report = await evaluate.evaluate(sc.res, evaluate.load_golden(golden))
+    report = await evaluate_service.evaluate(sc.res, evaluate_service.load_golden(golden))
     by_name = {c.name: c for c in report.companies}
     assert (by_name[names[0]].matched, by_name[names[0]].golden) == (2, 3)
     assert by_name[names[0]].missing == ["Trưởng phòng nhân sự"]
@@ -301,13 +303,13 @@ async def test_worker_scale_deadline_stats_eval(scale: Scale, tmp_path: Path) ->
     [lever_eval] = report.sources
     assert (lever_eval.source, lever_eval.predicted, lever_eval.matched) == ("lever", 4, 4)
     async with sc.res.sessionmaker() as s:
-        sample = await evaluate.sample_jobs(s, n=5, seed=1)
-        same = await evaluate.sample_jobs(s, n=5, seed=1)
+        sample = await evaluate_service.sample_jobs(s, n=5, seed=1)
+        same = await evaluate_service.sample_jobs(s, n=5, seed=1)
     assert len(sample) == 5
     assert [j.job_id for j in sample] == [j.job_id for j in same]  # seed cố định → lặp lại được
     assert all(j.title and j.url and j.excerpt for j in sample)
-    evaluate.write_sample_csv(tmp_path / "sample.csv", sample)
-    assert evaluate.read_review(tmp_path / "sample.csv").unknown == 5
+    evaluate_service.write_sample_csv(tmp_path / "sample.csv", sample)
+    assert evaluate_service.read_review(tmp_path / "sample.csv").unknown == 5
 
     # Chạy lại cả lô: không sinh job trùng, giữ nguyên id.
     assert (await enqueue_all(sc)).enqueued == N + 1
@@ -323,7 +325,9 @@ async def test_maintenance_prunes_and_closes_abandoned_runs(
     tag = uuid4().hex[:6]
     now = datetime.now(UTC)
     async with open_resources(integration_settings, db_logs=False) as res:
-        imported = await batch.import_companies(res.sessionmaker, [CompanyIn(name=f"Maint {tag}")])
+        imported = await batch_service.import_companies(
+            res.sessionmaker, [CompanyIn(name=f"Maint {tag}")]
+        )
         [company_id] = imported.company_ids
         stuck, fresh = uuid4(), uuid4()
         async with res.sessionmaker.begin() as s:
@@ -371,7 +375,7 @@ async def test_maintenance_prunes_and_closes_abandoned_runs(
                 ]
             )
 
-        report = await maintenance.run_maintenance(res, compression=False)
+        report = await maintenance_service.run_maintenance(res, compression=False)
         assert report.skipped is None
         assert report.abandoned_runs >= 1
         assert report.deleted["source_fetches"] >= 1

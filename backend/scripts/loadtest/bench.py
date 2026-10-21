@@ -16,19 +16,19 @@ from jobcrawler.common.pagination import Page
 from jobcrawler.database.compress import load_dictionaries
 from jobcrawler.database.models import Company, CompanyRun
 from jobcrawler.database.session import create_engine, create_sessionmaker
-from jobcrawler.modules.boards.queries import board_runs
-from jobcrawler.modules.companies.queries import (
-    CompanyFilters,
+from jobcrawler.modules.boards.boards_service import board_runs
+from jobcrawler.modules.companies.companies_service import (
+    CompanyListQuery,
     company_detail,
     company_jobs,
     company_rejected,
     company_runs,
     list_companies,
 )
-from jobcrawler.modules.jobs.queries import JobFilters, list_jobs
-from jobcrawler.modules.maintenance import maintenance
-from jobcrawler.modules.overview import overview, stats
-from jobcrawler.modules.runs.queries import run_detail, run_fetches
+from jobcrawler.modules.jobs.jobs_service import JobListQuery, list_jobs
+from jobcrawler.modules.maintenance import maintenance_service
+from jobcrawler.modules.overview import overview_service, stats_service
+from jobcrawler.modules.runs.runs_service import run_detail, run_fetches
 
 URL = make_url(get_settings().database_url).set(database="jobcrawler_load")
 EXPLAIN = "--explain" in sys.argv
@@ -46,7 +46,7 @@ async def main() -> None:
     if "--prepare" in sys.argv:
         t = time.perf_counter()
         async with sm.begin() as s:
-            await maintenance.refresh_company_summaries(s)
+            await maintenance_service.refresh_company_summaries(s)
         print(f"refresh_company_summaries: {time.perf_counter() - t:.1f} s")
         async with engine.connect() as c:
             await c.execution_options(isolation_level="AUTOCOMMIT")
@@ -64,7 +64,7 @@ async def main() -> None:
         info = ""
         if isinstance(out, Page):
             more = "" if out.exact else "+"
-            info = f"total={out.total}{more} items={len(out.items)} page={out.page}"
+            info = f"total={out.total}{more} data={len(out.items)} page={out.page}"
         results.append((name, ms, info))
         print(f"{ms:8.1f} ms  {name}  {info}", flush=True)
 
@@ -72,22 +72,29 @@ async def main() -> None:
         cid = await s.scalar(select(Company.id).where(Company.input_name == "Công ty Mẫu 4242"))
     assert cid is not None, "chưa seed: chạy scripts/loadtest/seed.py"
 
-    J = JobFilters
+    # Số dòng mỗi trang như giao diện (50).
+    def J(**kw: object) -> JobListQuery:
+        return JobListQuery.model_validate({"limit": 50, **kw})
+
+    def C(**kw: object) -> CompanyListQuery:
+        return CompanyListQuery.model_validate({"limit": 50, **kw})
+
     await bench("jobs: mặc định (đang mở, mới nhất)", list_jobs, J())
     await bench("jobs: trang 150", list_jobs, J(page=150))
-    await bench("jobs: tìm 'kế toán'", list_jobs, J(q="kế toán"))
-    await bench("jobs: tìm tên DN 'Mẫu 4242'", list_jobs, J(q="Mẫu 4242"))
+    await bench("jobs: cũ nhất trước (quét ngược index)", list_jobs, J(sortOrder="ASC"))
+    await bench("jobs: tìm 'kế toán'", list_jobs, J(search="kế toán"))
+    await bench("jobs: tìm tên DN 'Mẫu 4242'", list_jobs, J(search="Mẫu 4242"))
     await bench("jobs: tỉnh Đà Nẵng", list_jobs, J(province="Đà Nẵng"))
-    await bench("jobs: lương ≥ 30tr, sắp theo lương", list_jobs, J(salary_from=30, sort="salary"))
+    await bench("jobs: lương ≥ 30tr, sắp theo lương", list_jobs, J(salary_from=30, sortBy="salary"))
     await bench("jobs: nguồn topcv + senior", list_jobs, J(source="topcv", level="senior"))
-    await bench("jobs: sắp hết hạn", list_jobs, J(sort="expires"))
-    await bench("jobs: một doanh nghiệp", list_jobs, J(company_id=cid, status=""))
-    C = CompanyFilters
+    await bench("jobs: sắp hết hạn", list_jobs, J(sortBy="expires_at", sortOrder="ASC"))
+    await bench("jobs: một doanh nghiệp", list_jobs, J(company_id=cid, status="all"))
     await bench("companies: mặc định", list_companies, C())
-    await bench("companies: tìm 'Mẫu 4242'", list_companies, C(q="Mẫu 4242"))
-    await bench("companies: tìm MST", list_companies, C(q="0000004242"))
+    await bench("companies: tìm 'Mẫu 4242'", list_companies, C(search="Mẫu 4242"))
+    await bench("companies: tìm MST", list_companies, C(search="0000004242"))
     await bench("companies: lượt cuối failed", list_companies, C(run="failed"))
     await bench("companies: có việc + verified", list_companies, C(jobs="with", kyc="verified"))
+    await bench("companies: theo tên", list_companies, C(sortBy="name", sortOrder="ASC"))
     await bench("company: chi tiết", company_detail, cid)
     await bench("company: việc đang mở", company_jobs, cid)
     await bench("company: lượt chạy", company_runs, cid)
@@ -99,13 +106,13 @@ async def main() -> None:
     await bench("run: chi tiết", run_detail, run_id)
     await bench("run: request", run_fetches, run_id)
     await bench("boards: lịch sử index", board_runs)
-    await bench("overview: phân bố (cron)", overview.compute_charts)
-    await bench("overview: lượt chạy theo giờ", overview.runs_per_hour)
-    await bench("overview: request theo giờ", overview.fetches_per_hour)
+    await bench("overview: phân bố (cron)", overview_service.compute_charts)
+    await bench("overview: lượt chạy theo giờ", overview_service.runs_per_hour)
+    await bench("overview: request theo giờ", overview_service.fetches_per_hour)
     since = datetime.now(UTC) - timedelta(hours=24)
-    await bench("stats: lượt chạy 24h", stats.run_stats, since)
-    await bench("stats: nguồn 24h", stats.source_stats, since)
-    await bench("stats: trang tuyển dụng", stats.board_stats)
+    await bench("stats: lượt chạy 24h", stats_service.run_stats, since)
+    await bench("stats: nguồn 24h", stats_service.source_stats, since)
+    await bench("stats: trang tuyển dụng", stats_service.board_stats)
 
     if EXPLAIN:
         async with sm() as s:

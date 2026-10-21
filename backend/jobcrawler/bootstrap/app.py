@@ -35,30 +35,31 @@ from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.common.logging import configure_logging, get_logger
 from jobcrawler.common.watchdog import start_watchdog
 from jobcrawler.database.ids import uuid7
-from jobcrawler.modules.audit import router as audit_api
-from jobcrawler.modules.auth import auth as auth_tokens
-from jobcrawler.modules.auth import router as auth_api
-from jobcrawler.modules.auth.auth import TokenAuth
-from jobcrawler.modules.boards import router as boards_api
-from jobcrawler.modules.companies import router as companies_api
-from jobcrawler.modules.crawl import router as crawl_api
-from jobcrawler.modules.evaluate import router as evaluate_api
-from jobcrawler.modules.gateway import router as workers_api
-from jobcrawler.modules.jobs import router as jobs_api
-from jobcrawler.modules.live import live
-from jobcrawler.modules.maintenance import router as maintenance_api
-from jobcrawler.modules.meta import router as meta_api
-from jobcrawler.modules.overview import router as overview_api
-from jobcrawler.modules.proxies import router as proxies_api
-from jobcrawler.modules.queue import router as queue_api
-from jobcrawler.modules.runs import router as runs_api
-from jobcrawler.modules.settings import router as settings_api
+from jobcrawler.modules.audit import audit_router as audit_api
+from jobcrawler.modules.audit import audit_service
+from jobcrawler.modules.auth import auth_router as auth_api
+from jobcrawler.modules.auth import auth_service
+from jobcrawler.modules.auth.auth_service import TokenAuth
+from jobcrawler.modules.boards import boards_router as boards_api
+from jobcrawler.modules.companies import companies_router as companies_api
+from jobcrawler.modules.crawl import crawl_router as crawl_api
+from jobcrawler.modules.evaluate import evaluate_router as evaluate_api
+from jobcrawler.modules.gateway import gateway_router as workers_api
+from jobcrawler.modules.jobs import jobs_router as jobs_api
+from jobcrawler.modules.live import live_router, live_service
+from jobcrawler.modules.maintenance import maintenance_router as maintenance_api
+from jobcrawler.modules.meta import meta_router as meta_api
+from jobcrawler.modules.overview import overview_router as overview_api
+from jobcrawler.modules.proxies import proxies_router as proxies_api
+from jobcrawler.modules.queue import queue_router as queue_api
+from jobcrawler.modules.runs import runs_router as runs_api
+from jobcrawler.modules.settings import settings_router as settings_api
 from jobcrawler.services.resources import open_resources
 
 log = get_logger(__name__)
 
-# API của từng module (`modules/*/router.py`). Spec ghi khoá sắp xếp nên thứ tự không đổi spec, chỉ
-# đổi thứ tự khớp route: đường dẫn cố định (`/jobs/export`) đứng trước đường dẫn có tham số.
+# API của từng module (`modules/*/*_router.py`). Spec ghi khoá sắp xếp nên thứ tự không đổi spec,
+# chỉ đổi thứ tự khớp route: đường dẫn cố định (`/jobs/export`) đứng trước đường dẫn có tham số.
 ROUTERS = (
     auth_api.router,
     meta_api.router,
@@ -75,8 +76,39 @@ ROUTERS = (
     settings_api.router,
     proxies_api.router,
     workers_api.router,
-    live.router,
+    live_router.router,
 )
+
+# Nhóm endpoint ở `/api/docs`, theo thứ tự hiện: mỗi router một nhóm (`APIRouter(tags=[...])` ở
+# `modules/*/*_router.py`); test kiểm mọi endpoint thuộc đúng một nhóm có ở đây.
+OPENAPI_TAGS: list[dict[str, str]] = [
+    {"name": "auth", "description": "Đăng nhập / đăng xuất (JWT), người dùng hiện tại"},
+    {"name": "overview", "description": "Trang Tổng quan: số liệu, biểu đồ tính sẵn"},
+    {
+        "name": "companies",
+        "description": "Doanh nghiệp: danh sách, chi tiết, thêm, nạp CSV, đưa vào hàng đợi",
+    },
+    {
+        "name": "crawl",
+        "description": "Thu thập: bộ khung + lịch của doanh nghiệp, build / poll ngay, độ trễ phát"
+        " hiện",
+    },
+    {"name": "runs", "description": "Lượt chạy: tóm tắt, request, log, trang parse lỗi"},
+    {"name": "jobs", "description": "Việc làm: danh sách, xuất CSV, chi tiết, kiểm tay"},
+    {"name": "eval", "description": "Đánh giá độ chính xác trên golden set"},
+    {"name": "boards", "description": "Trang tuyển dụng: trạng thái index, chạy index ngay"},
+    {"name": "queue", "description": "Hàng đợi build / poll / index"},
+    {
+        "name": "workers",
+        "description": "Worker lấy trang: danh sách, khoá tham gia, dừng nhận việc",
+    },
+    {"name": "proxies", "description": "Proxy chung: trạng thái xoay vòng, kiểm tra qua worker"},
+    {"name": "settings", "description": "Cài đặt sửa ở giao diện (đè biến môi trường / .env)"},
+    {"name": "audit", "description": "Nhật ký thao tác"},
+    {"name": "maintenance", "description": "Chạy bảo trì ngay"},
+    {"name": "live", "description": "Cập nhật trực tiếp bằng Server-Sent Events"},
+    {"name": "meta", "description": "Giá trị cho các bộ lọc của giao diện"},
+]
 
 # Không qua đăng nhập giao diện: healthcheck.
 # Không qua đăng nhập: healthcheck, đăng nhập / đăng xuất (tự đọc token).
@@ -290,8 +322,9 @@ class GuardMiddleware:
       request đi qua nginx giao diện sau oauth2-proxy, proxy ghi đè header này) — gọi thẳng được
       thì ai cũng tự đặt header và đăng nhập thành bất kỳ ai.
     - `jwt` (UI_PASSWORD): JWT của `POST /api/auth/login` trong cookie `jc_token` hoặc header
-      `Authorization: Bearer` (`modules/auth/auth.py`): đúng chữ ký, còn hạn, chưa thu hồi. Thiếu /
-      sai thì 401 JSON kèm `WWW-Authenticate: Bearer` (giao diện chuyển tới trang đăng nhập).
+      `Authorization: Bearer` (`modules/auth/auth_service.py`): đúng chữ ký, còn hạn, chưa thu hồi.
+      Thiếu / sai thì 401 JSON kèm `WWW-Authenticate: Bearer` (giao diện chuyển tới trang đăng
+      nhập).
     - `none`: không hỏi đăng nhập, người dùng là `username`.
 
     Người dùng đã đăng nhập ở `request.state.user` (và `actor` trong contextvars của structlog để
@@ -324,9 +357,9 @@ class GuardMiddleware:
                 return value[:MAX_PROXY_USER_CHARS]
         return None
 
-    async def _token_claims(self, headers: Headers) -> auth_tokens.Claims | None:
+    async def _token_claims(self, headers: Headers) -> auth_service.Claims | None:
         auth = self.token_auth() if self.token_auth else None
-        token = auth_tokens.token_from(headers)
+        token = auth_service.token_from(headers)
         if auth is None or token is None:
             return None
         claims = auth.verify(token)
@@ -335,7 +368,7 @@ class GuardMiddleware:
         redis = self.redis()
         if redis is not None:
             try:
-                if await auth_tokens.is_revoked(redis, self.prefix, claims.jti):
+                if await auth_service.is_revoked(redis, self.prefix, claims.jti):
                     return None
             except Exception as exc:  # Redis lỗi: không khoá mọi người ở ngoài
                 log.warning("auth.revoked_check_failed", error=str(exc))
@@ -350,10 +383,15 @@ class GuardMiddleware:
         return urlsplit(source).netloc == host
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"] in PUBLIC_PATHS:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         headers = Headers(scope=scope)
+        # Nguồn request cho nhật ký thao tác (cả đăng nhập / đăng xuất, đi tắt phía dưới).
+        audit_service.bind_request(_client_ip(scope), headers.get("user-agent"))
+        if scope["path"] in PUBLIC_PATHS:
+            await self.app(scope, receive, send)
+            return
         if self.proxy_user_header is not None:
             user = self._proxy_user(headers)
             if user is None:
@@ -368,7 +406,8 @@ class GuardMiddleware:
                 await json_error(401, "Cần đăng nhập", challenge)(scope, receive, send)
                 return
             user = claims.user
-            # Request dài (luồng SSE `modules/live/live.py`) tự xét lại hạn / thu hồi của token này.
+            # Request dài (luồng SSE `modules/live/live_service.py`) tự xét lại hạn / thu hồi của
+            # token này.
             scope.setdefault("state", {})["auth_claims"] = claims
         else:
             user = self.username
@@ -388,8 +427,8 @@ class GuardMiddleware:
 
 def operation_id(route: APIRoute) -> str:
     """`operationId` trong spec = tên hàm xử lý (`get_company_jobs`): ổn định, dễ đọc (mặc định của
-    FastAPI ghép thêm đường dẫn + method). Tên hàm trong các `modules/*/router.py` không được trùng
-    nhau (test kiểm)."""
+    FastAPI ghép thêm đường dẫn + method). Tên hàm trong các `modules/*/*_router.py` không được
+    trùng nhau (test kiểm)."""
     return route.name
 
 
@@ -415,8 +454,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with open_resources(settings, db_logs=False) as res:
             app.state.res = res
             if settings.auth_mode == "jwt" and settings.ui_password is not None:
-                secret = await auth_tokens.resolve_secret(settings, res.redis)
-                app.state.token_auth = auth_tokens.TokenAuth(
+                secret = await auth_service.resolve_secret(settings, res.redis)
+                app.state.token_auth = auth_service.TokenAuth(
                     username=settings.ui_username,
                     password=settings.ui_password.get_secret_value(),
                     secret=secret,
@@ -432,7 +471,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             elif settings.auth_mode == "none":
                 log.warning("ui.no_password", reason="chưa đặt UI_PASSWORD: không hỏi đăng nhập")
             # Cập nhật trực tiếp (`GET /api/events`): task đọc chung của từng chủ đề.
-            app.state.live = live.LiveHub(live.resource_loader(res, settings))
+            app.state.live = live_service.LiveHub(live_service.resource_loader(res, settings))
             # Event loop đứng quá WATCHDOG_SECONDS (mọi request treo) thì process thoát (mã 70) để
             # Docker dựng lại (`jobcrawler.common.watchdog`).
             dog = start_watchdog("api", max_stall=settings.watchdog_seconds)
@@ -452,6 +491,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
         redoc_url=None,
         generate_unique_id_function=operation_id,
+        openapi_tags=OPENAPI_TAGS,
     )
     app.state.settings = settings
 
@@ -462,9 +502,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Chặn đoán mật khẩu ở `POST /api/auth/login`; khoá ký JWT có sau khi lifespan đọc Redis.
     app.state.throttle = LoginThrottle(redis, prefix=settings.redis_prefix)
     app.state.token_auth = None
-    app.state.live = None  # `live.LiveHub`, có sau khi lifespan mở tài nguyên
+    app.state.live = None  # `live_service.LiveHub`, có sau khi lifespan mở tài nguyên
 
-    def token_auth() -> auth_tokens.TokenAuth | None:
+    def token_auth() -> auth_service.TokenAuth | None:
         return app.state.token_auth
 
     app.add_middleware(

@@ -1,10 +1,19 @@
 // Kiểu dữ liệu của API: alias tới kiểu orval sinh từ spec của backend (src/lib/gen/queries.ts ←
-// backend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/modules/*/schemas.py;
+// backend/openapi.json ← mô hình Pydantic trong backend/jobcrawler/modules/*/*_schema.py;
 // `npm run gen:api` sinh lại). Chỉ viết tay phần spec không tả được (JSON tự do lưu trong DB).
 import type * as S from "@/lib/gen/queries"
 
-/** Một trang danh sách. `exact = false`: có hơn `total` dòng (server đếm tối đa 10.000). */
-export type Page<T> = Omit<S.PageOutJobItem, "items"> & { items: T[] }
+/** Một trang danh sách (như `GetManyBaseResponseDto` của open-asm). `exact = false`: có hơn
+ * `total` dòng (server đếm tối đa 10.000). */
+export type Page<T> = Omit<S.PageOutJobItem, "data"> & { data: T[] }
+
+export type SortOrder = S.SortOrder
+
+/** Cột + chiều sắp xếp của một danh sách (`sortBy` / `sortOrder` của API). */
+export type SortState<C extends string = string> = { sortBy: C; sortOrder: SortOrder }
+
+/** Tham số chung của các endpoint danh sách (`GetManyQuery` ở backend/common/pagination.py). */
+export type ListParams<C extends string = string> = SortState<C> & { page: number; limit: number; search: string }
 
 export type Location = S.Location
 
@@ -61,7 +70,7 @@ export type Stats = S.StatsOut
 
 export type Pair = [string, number]
 
-/** Phân bố trên job đang mở / doanh nghiệp — tính sẵn bằng cron (modules/overview/overview.py). */
+/** Phân bố trên job đang mở / doanh nghiệp — tính sẵn bằng cron (modules/overview/overview_service.py). */
 export type Charts = S.ChartsOut
 
 export type Overview = S.OverviewOut
@@ -142,6 +151,12 @@ export type CrawlPlan = S.PlanOut
 
 export type CompanyCrawl = S.CompanyCrawlOut
 
+/** Giới hạn của lượt poll (cài đặt) mà sơ đồ bộ khung nhắc tới. */
+export type PollLimits = S.PollLimitsOut
+
+/** Toàn bộ một bộ khung (`GET /api/crawl/plans/{id}`): `spec` là JSON gốc (`crawl_plans.spec`). */
+export type PlanDetail = S.PlanDetailOut
+
 /** `polls.window_histogram`: số lượt theo ngưỡng cửa sổ (giây) 30, 60, 90, 120, 135, 150, 165, 180,
  * 210, 240, 300, 600, 1800, 3600, +∞. */
 export type CrawlStatus = S.CrawlStatusOut
@@ -152,7 +167,7 @@ export type CrawlStatus = S.CrawlStatusOut
 export type AuditChange = { before: unknown; after: unknown }
 
 /** `actor`: tên đăng nhập, `system` (CLI, cron) hoặc `anonymous`; `action`: tên có chấm, ổn định
- * (`settings.update`, `company.build`...). `changes` là JSON tự do: dạng ghi ở modules/audit/audit.py. */
+ * (`settings.update`, `company.build`...). `changes` là JSON tự do: dạng ghi ở modules/audit/audit_service.py. */
 export type AuditEvent = Omit<S.AuditEventOut, "changes"> & { changes: Record<string, AuditChange> | null }
 
 /** Một trang nhật ký; `next` = id truyền vào `before` để lấy trang sau, `null` khi đã hết. */

@@ -30,13 +30,14 @@ Gói `jobcrawler/` chia như `core-api/src` của open-asm (chi tiết: `docs/AR
 | Thư mục                | Nội dung                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------- |
 | `bootstrap/`           | điểm vào: CLI (`cli.py`, script `jobcrawler`), `serve`, app FastAPI (`app.py`), `gateway`, `runner`, `scheduler` |
-| `modules/<tính năng>/` | `router.py` (API), `schemas.py` (mô hình vào / ra), `queries.py`, `actions.py` và service của tính năng (`crawl/`, `companies/`, `jobs/`, `boards/`, `settings/`, `gateway/`…) |
+| `modules/<tính năng>/` | `<module>_router.py` (API), `<module>_schema.py` (mô hình vào / ra), `<module>_service.py` (truy vấn + thao tác + nghiệp vụ chính) và `<tên>_service.py` (nghiệp vụ tách riêng) của tính năng (`crawl/`, `companies/`, `jobs/`, `boards/`, `settings/`, `gateway/`…) |
 | `pipeline/`, `sources/` | logic thu thập (KYC → tìm nguồn → thu thập → chuẩn hoá → xác minh → gộp → lưu) và nguồn tin |
 | `services/`            | hạ tầng dùng chung: `Resources`, `redis/` (hàng đợi, khoá, heartbeat), `net/` (HttpClient, proxy), LLM, SERP, mã hoá, fake cho test |
 | `database/`            | model SQLAlchemy, phiên, migration Alembic (`database/alembic/`)                 |
 | `common/`              | cấu hình, log, DTO, phần chung của API, tiện ích                                 |
 
-API mới: thêm `router.py` vào module rồi ghi vào `ROUTERS` của `bootstrap/app.py`.
+API mới: thêm `<module>_router.py` vào module (`APIRouter(prefix="/api", tags=["<nhóm>"])`) rồi ghi vào
+`ROUTERS` và mô tả nhóm vào `OPENAPI_TAGS` của `bootstrap/app.py` (nhóm hiện ở `/api/docs`).
 
 ## Chạy trên máy
 
@@ -60,7 +61,7 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
 ## Cấu hình
 
 - Cài đặt nằm trong Postgres (bảng `app_settings`), sửa ở trang Cài đặt của giao diện (danh mục,
-  giải thích, kiểm tra: `jobcrawler/modules/settings/app_settings.py`). `.env` (`.env.example`) chỉ cho
+  giải thích, kiểm tra: `jobcrawler/modules/settings/app_settings_service.py`). `.env` (`.env.example`) chỉ cho
   kết nối, bí mật hạ tầng, tên queue, gateway, đăng nhập, watchdog, log (`ENV_ONLY`).
 - Mọi field vẫn đọc được từ biến môi trường, rồi file `.env` trong thư mục đang chạy (=
   `backend/`), rồi file bí mật (dưới); giá trị trong DB thắng. Trang Cài đặt chép giá trị đặt bằng
@@ -69,7 +70,7 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
   con khi lưu đổi chúng; chạy từng lệnh riêng thì tự khởi động lại.
 - Danh sách proxy chung: bảng proxy của trang Cài đặt (cài đặt `proxies`, trong DB, mã hoá) và/hoặc
   `config/proxies.txt` (`PROXIES_FILE`, mẫu `config/proxies.example.txt`). `PROXY_MODE=worker`:
-  gateway gửi danh sách xuống worker trong `WorkerConfig.shared_proxies` (`modules/gateway/server.py`),
+  gateway gửi danh sách xuống worker trong `WorkerConfig.shared_proxies` (`modules/gateway/server_service.py`),
   worker tự xoay; `PROXY_MODE=central`: backend chọn cho từng request. `GET /api/proxies`: trạng
   thái từng proxy; `POST /api/proxies/check`: kiểm tra qua worker (`jobcrawler/modules/proxies/`).
 - API sau reverse proxy (nginx của giao diện): `jobcrawler api` bật `proxy_headers` của uvicorn;
@@ -77,7 +78,7 @@ Postgres / Redis lấy từ docker compose ở gốc repo (cổng 15432 / 16379 
   proxy nằm trong `--forwarded-allow-ips` hoặc biến môi trường `FORWARDED_ALLOW_IPS` (uvicorn đọc
   từ môi trường process: `.env` chỉ có tác dụng khi compose nạp nó làm `env_file`; mặc định
   `127.0.0.1,::1`; nhận cả CIDR).
-- Cập nhật trực tiếp `GET /api/events` (Server-Sent Events, `jobcrawler/modules/live/live.py`): luồng không
+- Cập nhật trực tiếp `GET /api/events` (Server-Sent Events, `jobcrawler/modules/live/live_service.py`): luồng không
   tự kết thúc, nên `jobcrawler api` dừng sau tối đa 5 s (`timeout_graceful_shutdown`) dù còn kết nối
   mở. Proxy đứng trước không được đệm `text/event-stream` (xem `docs/DEPLOY.md`).
 - Đăng nhập (`jobcrawler/modules/auth/`): trang đăng nhập với `UI_USERNAME` / `UI_PASSWORD`,

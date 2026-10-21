@@ -1,4 +1,6 @@
-"""Scheduler: xếp build đêm và poll ngày (modules/crawl/schedule.py) mỗi SCHEDULER_TICK_SECONDS.
+"""Scheduler: xếp build đêm và poll ngày (modules/crawl/schedule_service.py) mỗi
+SCHEDULER_TICK_SECONDS. Cùng nhịp đó, leader ghi các dòng nhật ký thao tác process không nối
+Postgres để lại trên Redis (gateway: `worker.joined`, `audit_service.flush_pending`) vào bảng.
 
 Chạy nhiều replica được: chỉ replica giữ khoá leader (lease trên Redis chính,
 `jobcrawler.services.redis.locks`, khoá `<prefix>:lock:scheduler`, hạn LEASE_SECONDS, gia hạn mỗi
@@ -29,7 +31,8 @@ from sqlalchemy import text
 from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.watchdog import Watchdog, start_watchdog
-from jobcrawler.modules.crawl import schedule
+from jobcrawler.modules.audit import audit_service
+from jobcrawler.modules.crawl import schedule_service
 from jobcrawler.services.redis.heartbeat import Heartbeat
 from jobcrawler.services.redis.locks import RedisLease
 from jobcrawler.services.resources import Resources, open_resources
@@ -51,6 +54,14 @@ async def _db_ok(res: Resources) -> None:
     """Replica dự phòng: hỏi được Postgres mới coi là khoẻ (ném lỗi khi không)."""
     async with res.engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
+
+
+async def _flush_audit(res: Resources) -> None:
+    """Dòng nhật ký chờ trên Redis → `audit_events`; lỗi thì dòng ở lại hàng chờ, nhịp sau ghi."""
+    try:
+        await audit_service.flush_pending(res.redis, res.settings.redis_prefix, res.sessionmaker)
+    except Exception as exc:
+        log.warning("scheduler.audit_flush_failed", error=f"{type(exc).__name__}: {exc}")
 
 
 async def run_loop(
@@ -83,11 +94,12 @@ async def run_loop(
                     leading = True
                 started = time.monotonic()
                 try:
-                    await schedule.tick(res, datetime.now(UTC))
+                    await schedule_service.tick(res, datetime.now(UTC))
                 except Exception:
                     log.exception("scheduler.tick_error")
                 else:
                     await beat.tick()
+                await _flush_audit(res)
                 wait = max(0.0, s.scheduler_tick_seconds - (time.monotonic() - started))
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), wait)

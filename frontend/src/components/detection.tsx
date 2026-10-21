@@ -16,7 +16,7 @@ const RANGES = [
   [360, "6 giờ"],
 ] as const
 
-// Ngưỡng (giây) của histogram cửa sổ phát hiện (modules/crawl/sla.py WINDOW_EDGES); ô cuối là > 1 giờ.
+// Ngưỡng (giây) của histogram cửa sổ phát hiện (modules/crawl/sla_service.py WINDOW_EDGES); ô cuối là > 1 giờ.
 const EDGES = [30, 60, 90, 120, 135, 150, 165, 180, 210, 240, 300, 600, 1800, 3600]
 const TICKS = ["30s", "1p", "1p30", "2p", "2p15", "2p30", "2p45", "3p", "3p30", "4p", "5p", "10p", "30p", "1h", ">1h"]
 // Nhãn trục luôn hiện; các nhãn khác chỉ hiện khi khung đủ rộng (còn lại xem khi rê / chạm).

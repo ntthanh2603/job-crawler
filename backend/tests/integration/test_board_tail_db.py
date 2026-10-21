@@ -18,7 +18,7 @@ from jobcrawler.database.models import (
     JobPosting,
     SourceProfile,
 )
-from jobcrawler.modules.boards import boards as board_service
+from jobcrawler.modules.boards import boards_service
 from jobcrawler.pipeline import kyc
 from jobcrawler.pipeline.board_index import BoardIndexer, IndexOptions
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
@@ -101,7 +101,7 @@ async def test_tail_adds_only_new_postings_and_reports_companies(
                 .values(status=JobStatus.REMOVED.value)
             )
         since = datetime.now(UTC)
-        assert await board_service.companies_with_new_postings(res, FakeBoard.name, since) == []
+        assert await boards_service.companies_with_new_postings(res, FakeBoard.name, since) == []
 
         # Tin 11 có `lastmod` mới: lượt đuôi cũng không tải lại (để lượt đủ ban đêm).
         site = fake_site(TAIL_JOBS, lastmod={"viec-lam/ke-toan-11.html": "2099-01-01"})
@@ -136,7 +136,7 @@ async def test_tail_adds_only_new_postings_and_reports_companies(
         assert run.stats["mode"] == "tail"
 
         # Runner poll ngay: ACME (tin 14) và doanh nghiệp vừa map (tin 15).
-        found = await board_service.companies_with_new_postings(res, FakeBoard.name, since)
+        found = await boards_service.companies_with_new_postings(res, FakeBoard.name, since)
         assert sorted(found) == sorted([acme_id, new_id])
 
         # Lượt đuôi sau: không còn tin mới → không tải trang chi tiết nào.
@@ -145,7 +145,7 @@ async def test_tail_adds_only_new_postings_and_reports_companies(
         again = await tail_indexer(res, again_site).run()
         assert (again.urls_seen, again.fetched, again.new) == (4, 0, 0)
         assert detail_calls(again_site) == []
-        assert await board_service.companies_with_new_postings(res, FakeBoard.name, later) == []
+        assert await boards_service.companies_with_new_postings(res, FakeBoard.name, later) == []
 
 
 async def test_tail_truncated_by_max_jobs_catches_up_next_run(
@@ -231,7 +231,7 @@ async def test_offline_board_sources_never_fetch_stale_profile(
                 .where(SourceProfile.source == FakeBoard.name)
                 .values(indexed_at=datetime(2020, 1, 1, tzinfo=UTC))
             )
-        sources = await board_service.board_sources(res, company_id, network=False)
+        sources = await boards_service.board_sources(res, company_id, network=False)
         assert [s.name for s in sources] == ["board:fakeboard:7"]
         quiet = FakeFetcher()
         session = SourceSession(

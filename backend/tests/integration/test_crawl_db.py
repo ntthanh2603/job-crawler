@@ -26,7 +26,7 @@ from jobcrawler.common.schemas import (
 )
 from jobcrawler.database import fencing
 from jobcrawler.database.models import Company, CompanyRun, CompanySchedule, CrawlPlan, Job
-from jobcrawler.modules.crawl import crawl, sla
+from jobcrawler.modules.crawl import crawl_service, sla_service
 from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.services.redis.queues import drop_queue
 from jobcrawler.services.resources import Resources, open_resources
@@ -180,7 +180,7 @@ async def test_build_then_poll_lifecycle(env: tuple[Resources, Site, UUID]) -> N
     res, site, company_id = env
 
     # 1. Build: tìm nguồn, đọc đủ, ghi bộ khung + lịch.
-    built = await crawl.build_company(res, company_id, trigger=RunTrigger.NEW)
+    built = await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
     assert built.jobs_accepted == 2, built
     assert await active_titles(res, company_id) == ["Kế toán tổng hợp", "Kỹ sư phần mềm Python"]
     async with res.sessionmaker() as s:
@@ -199,7 +199,7 @@ async def test_build_then_poll_lifecycle(env: tuple[Resources, Site, UUID]) -> N
 
     # 2. Poll không đổi: chỉ đọc trang danh sách, không mở trang tin, không ghi lượt chạy.
     calls = len(site.fetcher.calls)
-    quiet = await crawl.poll_company(res, company_id)
+    quiet = await crawl_service.poll_company(res, company_id)
     assert (quiet.status, quiet.new, quiet.gone, quiet.saved) == ("ok", 0, 0, False)
     assert [u for _, u, _ in site.fetcher.calls[calls:]] == [LISTING]
     assert site.fetcher.calls[-1][2].get("use_cache") is False, site.fetcher.calls[-1]
@@ -207,22 +207,33 @@ async def test_build_then_poll_lifecycle(env: tuple[Resources, Site, UUID]) -> N
 
     # 3. Tin mới: chỉ mở trang của tin đó, lưu, ghi một lượt poll.
     new_url = site.publish("chuyen-vien-tuyen-dung", 103, "Chuyên viên tuyển dụng")
-    fresh = await crawl.poll_company(res, company_id)
+    fresh = await crawl_service.poll_company(res, company_id)
     assert (fresh.new, fresh.saved) == (1, True), fresh
     assert site.opened(new_url) == 1
     assert site.opened(job_path("ke-toan-tong-hop", 102)) == 1  # vẫn chỉ lần mở ở lượt build
     assert "Chuyên viên tuyển dụng" in await active_titles(res, company_id)
     assert await runs(res, company_id, RunKind.POLL) == 1
+    # Trang "Bản đồ bộ khung": mỗi mã tin ghép được với tin đã lưu (theo loại nguồn + mã).
+    async with res.sessionmaker() as s:
+        found = await crawl_service.plan_detail(s, plan.id)
+    assert found is not None
+    _, _, postings = found
+    assert sorted(p.title or "" for p in postings.values()) == [
+        "Chuyên viên tuyển dụng",
+        "Kế toán tổng hợp",
+        "Kỹ sư phần mềm Python",
+    ]
+    assert new_url in {p.url for p in postings.values()}
 
     # 4. Tin bị gỡ khỏi danh sách: việc bị đóng.
     site.unpublish(job_path("ke-toan-tong-hop", 102))
-    gone = await crawl.poll_company(res, company_id)
+    gone = await crawl_service.poll_company(res, company_id)
     assert (gone.gone, gone.saved, gone.closed) == (1, True, 1), gone
     assert "Kế toán tổng hợp" not in await active_titles(res, company_id)
 
     # 5. Trang danh sách trả 404: bộ khung hỏng, doanh nghiệp được xếp build lại.
     site.break_listing(404)
-    broken = await crawl.poll_company(res, company_id)
+    broken = await crawl_service.poll_company(res, company_id)
     assert broken.status == "broken"
     assert broken.rebuild
     async with res.sessionmaker() as s:
@@ -232,13 +243,13 @@ async def test_build_then_poll_lifecycle(env: tuple[Resources, Site, UUID]) -> N
     assert plan_after.status == PlanStatus.BROKEN.value
     assert schedule is not None
     assert schedule.state == ScheduleState.BROKEN.value
-    job = await res.queues.build.job(crawl.build_key(company_id))
+    job = await res.queues.build.job(crawl_service.build_key(company_id))
     assert job is not None
     assert job.kwargs["trigger"] == RunTrigger.ERROR.value
     # Việc đang mở không bị đóng vì trang hỏng.
     assert len(await active_titles(res, company_id)) == 2
 
-    stats = await sla.poll_stats(res.redis, res.settings.redis_prefix, minutes=5)
+    stats = await sla_service.poll_stats(res.redis, res.settings.redis_prefix, minutes=5)
     assert stats.polls == 4
     assert stats.ok == 3
     assert stats.broken == 1
@@ -246,9 +257,9 @@ async def test_build_then_poll_lifecycle(env: tuple[Resources, Site, UUID]) -> N
 
 async def test_empty_listing_marks_plan_broken(env: tuple[Resources, Site, UUID]) -> None:
     res, site, company_id = env
-    await crawl.build_company(res, company_id, trigger=RunTrigger.NEW)
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
     site.break_listing(200)  # trang mở được nhưng không còn link tin nào
-    outcome = await crawl.poll_company(res, company_id)
+    outcome = await crawl_service.poll_company(res, company_id)
     assert outcome.status == "broken"
     assert "empty_listing" in outcome.sources[f"careers:{SITE.removeprefix('https://')}"]
     assert len(await active_titles(res, company_id)) == 2
@@ -256,9 +267,9 @@ async def test_empty_listing_marks_plan_broken(env: tuple[Resources, Site, UUID]
 
 async def test_poll_skips_while_company_is_building(env: tuple[Resources, Site, UUID]) -> None:
     res, _site, company_id = env
-    async with crawl.company_lock(res, company_id, ttl=30) as held:
+    async with crawl_service.company_lock(res, company_id, ttl=30) as held:
         assert held
-        outcome = await crawl.poll_company(res, company_id)
+        outcome = await crawl_service.poll_company(res, company_id)
     assert outcome.status == "skipped"
 
 
@@ -276,7 +287,7 @@ async def test_company_lock_fences_writes_of_stale_holder(
             row = await s.get(Company, company_id)
             return row.note if row else None
 
-    async with crawl.company_lock(res, company_id, ttl=30) as held:
+    async with crawl_service.company_lock(res, company_id, ttl=30) as held:
         assert held
         fence = fencing.current()
         assert fence is not None
@@ -304,21 +315,21 @@ async def test_company_lock_fences_writes_of_stale_holder(
 async def test_scheduler_tick_builds_new_and_polls_ready(
     env: tuple[Resources, Site, UUID],
 ) -> None:
-    from jobcrawler.modules.crawl import schedule
+    from jobcrawler.modules.crawl import schedule_service
 
     res, _site, company_id = env
     now = datetime.now(UTC)
-    first = await schedule.tick(res, now)
+    first = await schedule_service.tick(res, now)
     assert first["builds"] >= 1
-    assert await res.queues.build.job(crawl.build_key(company_id)) is not None
-    await crawl.build_company(res, company_id, trigger=RunTrigger.NEW)
+    assert await res.queues.build.job(crawl_service.build_key(company_id)) is not None
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
     async with res.sessionmaker.begin() as s:
         row = await s.get(CompanySchedule, company_id)
         assert row is not None
         row.next_poll_at = now  # đến hạn ngay
-    second = await schedule.tick(res, datetime.now(UTC))
+    second = await schedule_service.tick(res, datetime.now(UTC))
     assert second["polls"] >= 1
-    assert await res.queues.poll.job(crawl.poll_key(company_id)) is not None
+    assert await res.queues.poll.job(crawl_service.poll_key(company_id)) is not None
     async with res.sessionmaker() as s:
         row = await s.get(CompanySchedule, company_id)
     assert row is not None
@@ -339,24 +350,24 @@ async def test_mass_disappearance_is_not_closed_until_a_rebuild(
         "Trưởng phòng hành chính",
     ]
     extra = [site.publish(f"vi-tri-{i}", 200 + i, title) for i, title in enumerate(titles)]
-    await crawl.build_company(res, company_id, trigger=RunTrigger.NEW)
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
     assert len(await active_titles(res, company_id)) == 6
     for url in extra[:3]:
         site.unpublish(url)
     for attempt in range(1, res.settings.poll_max_failures + 1):
-        outcome = await crawl.poll_company(res, company_id)
+        outcome = await crawl_service.poll_company(res, company_id)
         assert outcome.gone == 0, outcome
         assert len(await active_titles(res, company_id)) == 6, outcome  # chưa đóng việc nào
         if attempt < res.settings.poll_max_failures:
             assert outcome.status == "ok"
             assert "coverage_drop" in next(iter(outcome.sources.values()))
     assert outcome.status == "broken"
-    job = await res.queues.build.job(crawl.build_key(company_id))
+    job = await res.queues.build.job(crawl_service.build_key(company_id))
     assert job is not None
     # Lượt build lại đọc đủ: đóng đúng 3 việc đã gỡ.
     await res.queues.build.drop()
     await res.queues.build.connect()
-    await crawl.build_company(res, company_id, trigger=RunTrigger.ERROR)
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.ERROR)
     assert len(await active_titles(res, company_id)) == 3
 
 
@@ -364,12 +375,12 @@ async def test_truncated_poll_remembers_new_jobs(env: tuple[Resources, Site, UUI
     """Lượt poll không đọc trọn (chạm POLL_MAX_DETAIL_PAGES) không đóng việc nào, nhưng tin mới đã
     xử lý được ghi vào tập mã — lượt sau không coi là mới và xử lý lại."""
     res, site, company_id = env
-    await crawl.build_company(res, company_id, trigger=RunTrigger.NEW)
+    await crawl_service.build_company(res, company_id, trigger=RunTrigger.NEW)
     first_url = site.publish("chuyen-vien-tuyen-dung", 103, "Chuyên viên tuyển dụng")
     second_url = site.publish("nhan-vien-kho-van", 104, "Nhân viên kho vận")
     res.settings = res.settings.model_copy(update={"poll_max_detail_pages": 1})
 
-    first = await crawl.poll_company(res, company_id)
+    first = await crawl_service.poll_company(res, company_id)
     assert (first.new, first.gone, first.saved) == (1, 0, True), first
     assert (site.opened(first_url), site.opened(second_url)) == (1, 0)
     async with res.sessionmaker() as s:
@@ -378,9 +389,9 @@ async def test_truncated_poll_remembers_new_jobs(env: tuple[Resources, Site, UUI
         ).all()
     assert len(plan.job_keys) == 3  # 2 mã cũ + mã vừa xử lý; tin chưa mở không được ghi
 
-    second = await crawl.poll_company(res, company_id)
+    second = await crawl_service.poll_company(res, company_id)
     assert (second.new, second.saved) == (1, True), second  # chỉ tin còn lại
     assert (site.opened(first_url), site.opened(second_url)) == (1, 1)
-    third = await crawl.poll_company(res, company_id)
+    third = await crawl_service.poll_company(res, company_id)
     assert (third.new, third.saved) == (0, False), third
     assert len(await active_titles(res, company_id)) == 4

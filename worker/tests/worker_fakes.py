@@ -224,6 +224,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE)
         elif path == "/small":
             self._send(200, b"ok")
+        elif path == "/trace":  # như https://www.cloudflare.com/cdn-cgi/trace
+            self._send(200, b"fl=1\nip=127.0.0.1\nloc=VN\n", "text/plain")
         elif path == "/redirect":
             self._send(302, b"", Location="/page")
         elif path == "/slow":
@@ -396,7 +398,7 @@ def closed_port() -> int:
 def make_settings(port: int, **kw: Any) -> Any:
     """WorkerSettings cho test: không đọc .env, không Chromium, không watchdog thật (dừng ở
     debugger quá hạn thì `os._exit` giết luôn pytest) — trừ khi ghi đè."""
-    from jobworker.config import WorkerSettings
+    from jobworker.common.config import WorkerSettings
 
     values: dict[str, Any] = {
         "gateway_addr": f"127.0.0.1:{port}",

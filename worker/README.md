@@ -10,6 +10,22 @@ Vòng lặp: `Register` → `Lease` (long-poll, chỉ xin đúng số slot còn 
 lô) song song `Heartbeat` → `Leave` khi dừng. Gateway mất kết nối thì worker thử lại với backoff
 (0.5 s → 30 s) mãi, không tự thoát; gateway quên worker (khởi động lại) thì worker tự đăng ký lại.
 
+## Bố cục mã
+
+Gói `jobworker/` chia như backend (`backend/jobcrawler/`, chi tiết: `docs/ARCHITECTURE.md` mục 2):
+
+| Thư mục            | Nội dung                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `bootstrap/`       | điểm vào: CLI (`cli.py`, script `jobworker`: `run`, `check`, `health`, `version`), process `jobworker run` (`run.py`: dựng `Worker`, tín hiệu dừng) |
+| `modules/gateway/` | vòng làm việc với gateway (`worker_service.py`: Register → Lease → Complete, Heartbeat, drain, Leave), cấu hình đang áp dụng (`runtime_service.py`: `RuntimeConfig`) |
+| `modules/fetch/`   | chạy một việc: `executor_service.py` (kiểm việc, chọn proxy, gọi HTTP / Chromium), `http_service.py` (curl_cffi), `browser_service.py` (Chromium), `render_service.py` (tắt / tạm tắt render), `results_service.py` (dựng `FetchResult`, nén body) |
+| `modules/health/`  | `status_service.py` (file trạng thái, `jobworker health`), `probe_service.py` (`jobworker check`) |
+| `services/`        | hạ tầng dùng chung: `channel.py` (kênh gRPC tới gateway, nhóm mã lỗi), `credentials.py` (khoá tham gia / token riêng), `proxies.py` (proxy tại worker) |
+| `common/`          | cấu hình (`config.py`), log, tài nguyên máy và slot tự động (`sysres.py`), watchdog, backoff |
+
+Chiều gọi: `bootstrap/` → `modules/` → `services/` → `common/`; trong `modules/`, `gateway/` dùng
+`fetch/` và `health/`, `fetch/` không biết gì về gateway.
+
 ## Chạy
 
 Worker là một service riêng: `pyproject.toml`, `uv.lock`, `.python-version`, `.venv` và
@@ -27,7 +43,9 @@ uv run jobworker version    # lệnh bất kỳ: `task cli -- version`
 
 Docker: build context là `worker/`, cộng build context tên `proto` trỏ tới `proto/` (compose:
 `additional_contexts: {proto: ./proto}`). Image không chứa `config/` hay `.env`: proxy mount lúc
-chạy, biến truyền qua môi trường.
+chạy, biến truyền qua môi trường. Base là `python:3.12-slim-bookworm` (như backend), chỉ có Chromium
+headless shell của Playwright (`/ms-playwright`, cài bằng `playwright` của uv.lock nên luôn khớp
+phiên bản) và thư viện hệ thống của nó; chạy bằng user `pwuser` (uid 1001).
 
 ```bash
 docker build --build-context proto=../proto -t jobcrawler-worker .
@@ -57,12 +75,12 @@ như không đặt.
 | `GATEWAY_ADDR` | `localhost:50051` | Địa chỉ gateway gRPC (`host:port`): máy khác dùng host:cổng giao diện của máy backend (nginx chuyển tới gateway) |
 | `GATEWAY_TOKEN` | — | Khoá tham gia cố định, khớp `GATEWAY_TOKEN` của backend: vào gateway lần đầu / khi token riêng hết hạn |
 | `WORKER_JOIN_KEY` | — | Khoá tham gia dùng một lần (trang Workers → "Thêm worker", hết hạn sau 15 phút) |
-| `WORKER_TOKEN_FILE` | `~/.jobworker/token` | Token riêng gateway cấp sau khi vào (`jobworker/credentials.py`); mount volume để giữ qua lần tạo lại container |
+| `WORKER_TOKEN_FILE` | `~/.jobworker/token` | Token riêng gateway cấp sau khi vào (`jobworker/services/credentials.py`); mount volume để giữ qua lần tạo lại container |
 | `GATEWAY_TLS` | `false` | Kết nối TLS |
 | `GATEWAY_CA_CERT` | — | File PEM của CA riêng (chứng chỉ tự ký); trống = CA hệ thống |
 | `WORKER_ID` | `<hostname>-<8 hex>` | Id duy nhất mỗi process; mặc định sinh mới mỗi lần khởi động |
 | `WORKER_POOL` | `default` | Nhóm worker (xem Pool bên dưới) |
-| `WORKER_HTTP_SLOTS` | tự động | Request HTTP cùng lúc tối đa; trống = 8 mỗi CPU, trong [8, 64] (`jobworker/sysres.py`) |
+| `WORKER_HTTP_SLOTS` | tự động | Request HTTP cùng lúc tối đa; trống = 8 mỗi CPU, trong [8, 64] (`jobworker/common/sysres.py`) |
 | `WORKER_RENDER_SLOTS` | tự động | Trang Chromium cùng lúc tối đa; trống = 1 mỗi 768 MiB RAM, không quá số CPU, trong [1, 8]; `0` = không bao giờ khởi động Chromium |
 | `WORKER_PROXIES` | — | Proxy tại worker: JSON list hoặc cách nhau bởi dấu phẩy / xuống dòng |
 | `WORKER_PROXIES_FILE` | — | File proxy, định dạng như `config/proxies.example.txt` |
@@ -157,7 +175,7 @@ cùng một máy không qua container thì đặt mỗi process một `WORKER_HE
 
 ### Watchdog
 
-Thread trong process (`jobworker.watchdog`) cho worker treo tự thoát với mã **70**, để chính sách
+Thread trong process (`jobworker/common/watchdog.py`) cho worker treo tự thoát với mã **70**, để chính sách
 khởi động lại của Docker / compose (`restart: unless-stopped`) hoặc systemd (`Restart=on-failure`)
 chạy lại. Hạn `WORKER_WATCHDOG_SECONDS` (mặc định 120; `0` = tắt;
 khác 0 thì ít nhất 10).

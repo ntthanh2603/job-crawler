@@ -10,7 +10,7 @@ import pytest
 
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import FetchOutcome
-from jobcrawler.modules.overview import overview
+from jobcrawler.modules.overview import overview_service
 from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.redis.queues import Queues
 from jobcrawler.services.resources import open_redis, wire_network
@@ -125,6 +125,6 @@ async def test_caches_on_cache_client_state_on_main_client() -> None:
 async def test_overview_cache_reads_and_writes_cache_client() -> None:
     cache = RecordingRedis("cache")
     charts = {"totals": {"active_jobs": 3}}
-    cache.data[overview.CHARTS_KEY.format(ns=PREFIX)] = json.dumps(charts).encode()
+    cache.data[overview_service.CHARTS_KEY.format(ns=PREFIX)] = json.dumps(charts).encode()
     res: Any = SimpleNamespace(settings=settings(), redis=ExplodingRedis(), cache_redis=cache)
-    assert await overview.get_charts(res) == charts
+    assert await overview_service.get_charts(res) == charts

@@ -18,8 +18,8 @@ from sqlalchemy import delete, select
 from jobcrawler.bootstrap.app import create_app
 from jobcrawler.common.config import Settings
 from jobcrawler.database.models import AppSetting
-from jobcrawler.modules.gateway import registry
-from jobcrawler.modules.settings import app_settings
+from jobcrawler.modules.gateway import registry_service
+from jobcrawler.modules.settings import app_settings_service
 from jobcrawler.services import secretbox
 from jobcrawler.services.redis.queues import drop_queue
 from jobcrawler.services.resources import Resources
@@ -57,7 +57,7 @@ async def rows(web: Web) -> dict[str, Any]:
         result = await s.execute(select(AppSetting.key, AppSetting.value, AppSetting.updated_by))
         out: dict[str, Any] = {}
         for k, v, by in result.all():
-            if k in app_settings.SPEC_BY_KEY:
+            if k in app_settings_service.SPEC_BY_KEY:
                 value = secretbox.current().decrypt(k, v) if secretbox.is_encrypted(v) else v
                 out[k] = (value, by)
         return out
@@ -116,10 +116,10 @@ async def test_get_lists_groups_without_secrets(web: Web) -> None:
     assert r.status_code == 200
     data = r.json()
     assert data["version"] == 0
-    assert [g["group"] for g in data["groups"]] == [g.key for g in app_settings.GROUPS]
+    assert [g["group"] for g in data["groups"]] == [g.key for g in app_settings_service.GROUPS]
     items = by_key(data)
-    assert set(items) == set(app_settings.SPEC_BY_KEY)
-    assert not set(items) & app_settings.ENV_ONLY
+    assert set(items) == set(app_settings_service.SPEC_BY_KEY)
+    assert not set(items) & app_settings_service.ENV_ONLY
     poll = items["poll_interval_seconds"]
     assert poll["value"] == web.settings.poll_interval_seconds
     assert poll["source"] in {"default", "env"}
@@ -133,7 +133,7 @@ async def test_get_lists_groups_without_secrets(web: Web) -> None:
 async def test_put_saves_bumps_version_and_publishes(web: Web) -> None:
     redis = web.res.redis
     pubsub = redis.pubsub()
-    await pubsub.subscribe(app_settings.channel(web.prefix))
+    await pubsub.subscribe(app_settings_service.channel(web.prefix))
     try:
         r = await web.client.put(
             "/api/settings",
@@ -178,19 +178,21 @@ async def test_put_saves_bumps_version_and_publishes(web: Web) -> None:
     stored = await rows(web)
     assert stored["poll_interval_seconds"] == (120.0, "admin")
     assert stored["rate_limits"] == ({"www.topcv.vn": 0.5}, "admin")
-    assert await app_settings.settings_version(redis, web.prefix) == 1
-    effective = await app_settings.load_effective(web.res.sessionmaker, web.settings)
+    assert await app_settings_service.settings_version(redis, web.prefix) == 1
+    effective = await app_settings_service.load_effective(web.res.sessionmaker, web.settings)
     assert (effective.poll_interval_seconds, effective.llm_model) == (120, "qwen-test")
 
     # Lưu lại đúng giá trị cũ của bí mật (ô ẩn) không phải thay đổi: version giữ nguyên.
-    r = await web.client.put("/api/settings", json={"values": {"serp_api_key": app_settings.MASK}})
+    r = await web.client.put(
+        "/api/settings", json={"values": {"serp_api_key": app_settings_service.MASK}}
+    )
     assert r.status_code == 200
     assert r.json()["version"] == 1
 
 
 async def test_restart_counter_and_state(web: Web) -> None:
     redis = web.res.redis
-    restart = app_settings.restart_key(web.prefix)
+    restart = app_settings_service.restart_key(web.prefix)
     # Mục live=True: không cần khởi động lại.
     r = await web.client.put("/api/settings", json={"values": {"poll_interval_seconds": 120}})
     assert r.status_code == 200, r.text
@@ -200,11 +202,11 @@ async def test_restart_counter_and_state(web: Web) -> None:
     assert int(await redis.get(restart)) == 1
 
     # `jobcrawler serve` đang chạy (khoá alive) nhưng chưa khởi động lại xong.
-    await redis.set(app_settings.supervisor_key(web.prefix), 0, ex=30)
-    await redis.set(app_settings.restart_applied_key(web.prefix), 0)
+    await redis.set(app_settings_service.supervisor_key(web.prefix), 0, ex=30)
+    await redis.set(app_settings_service.restart_applied_key(web.prefix), 0)
     data = (await web.client.get("/api/settings")).json()
     assert (data["auto_restart"], data["restart_pending"]) == (True, True)
-    await redis.set(app_settings.restart_applied_key(web.prefix), 1)
+    await redis.set(app_settings_service.restart_applied_key(web.prefix), 1)
     data = (await web.client.get("/api/settings")).json()
     assert (data["auto_restart"], data["restart_pending"]) == (True, False)
 
@@ -240,7 +242,7 @@ async def test_import_env_copies_env_values_into_db(integration_settings: Settin
         assert stored["llm_model"] == ("qwen-env", "admin")
         assert stored["board_concurrency"] == (9, "admin")
         # Giá trị không đổi: không cần khởi động lại.
-        assert await web.res.redis.get(app_settings.restart_key(web.prefix)) is None
+        assert await web.res.redis.get(app_settings_service.restart_key(web.prefix)) is None
 
         again = (await web.client.post("/api/settings/import-env")).json()
         assert again["imported"] == []
@@ -270,7 +272,7 @@ async def test_put_rejects_invalid_values_without_saving(web: Web) -> None:
     assert r.status_code == 422  # thiếu `values`
 
     assert await rows(web) == {}
-    assert await app_settings.settings_version(web.res.redis, web.prefix) == 0
+    assert await app_settings_service.settings_version(web.res.redis, web.prefix) == 0
 
 
 async def test_secrets_nullable_and_reset(web: Web) -> None:
@@ -288,7 +290,7 @@ async def test_secrets_nullable_and_reset(web: Web) -> None:
     stored = await rows(web)
     assert stored["serp_api_key"][0] == "sk-bi-mat"
     assert stored["llm_requests_per_minute"][0] is None  # JSON null, khác "không có dòng"
-    effective = await app_settings.load_effective(web.res.sessionmaker, web.settings)
+    effective = await app_settings_service.load_effective(web.res.sessionmaker, web.settings)
     assert effective.serp_api_key == SecretStr("sk-bi-mat")
 
     r = await web.client.delete("/api/settings/serp_api_key")
@@ -314,8 +316,8 @@ async def test_cross_site_write_is_blocked(web: Web) -> None:
 
 async def test_workers_list_and_drain(web: Web) -> None:
     redis = web.res.redis
-    keys = registry.Keys(web.prefix)
-    alive = registry.WorkerStatus(
+    keys = registry_service.Keys(web.prefix)
+    alive = registry_service.WorkerStatus(
         worker_id="w-alive",
         hostname="may-1",
         version="0.1.0",
@@ -323,16 +325,18 @@ async def test_workers_list_and_drain(web: Web) -> None:
         http_slots=8,
         render_slots=2,
         local_proxies=3,
-        stats=registry.WorkerStats(http_inflight=3, render_inflight=1, http_done=40, http_failed=2),
+        stats=registry_service.WorkerStats(
+            http_inflight=3, render_inflight=1, http_done=40, http_failed=2
+        ),
     )
-    gone = registry.WorkerStatus(
+    gone = registry_service.WorkerStatus(
         worker_id="w-gone",
         pool="residential",
         http_slots=4,
-        stats=registry.WorkerStats(http_done=5, render_failed=1),
+        stats=registry_service.WorkerStats(http_done=5, render_failed=1),
     )
-    await registry.save_worker(redis, keys, alive, ttl=30)
-    await registry.save_worker(redis, keys, gone, ttl=30)
+    await registry_service.save_worker(redis, keys, alive, ttl=30)
+    await registry_service.save_worker(redis, keys, gone, ttl=30)
     # Hạn báo sống đã qua: coi như đã rời (vẫn còn thông tin trong TTL của `worker:<id>`).
     await redis.zadd(keys.workers, {"w-gone": int(time.time() * 1000) - 1000})
 
@@ -359,14 +363,14 @@ async def test_workers_list_and_drain(web: Web) -> None:
     r = await web.client.post("/api/workers/w-alive/drain")
     assert r.status_code == 200
     assert r.json() == {"worker_id": "w-alive", "draining": True}
-    assert await registry.is_draining(redis, keys, "w-alive")
+    assert await registry_service.is_draining(redis, keys, "w-alive")
     data = (await web.client.get("/api/workers")).json()
     assert data["workers"][0]["draining"] is True
     assert data["summary"]["draining"] == 1
 
     r = await web.client.delete("/api/workers/w-alive/drain")
     assert r.status_code == 200
-    assert not await registry.is_draining(redis, keys, "w-alive")
+    assert not await registry_service.is_draining(redis, keys, "w-alive")
 
     assert (await web.client.post("/api/workers/khong-co/drain")).status_code == 404
     assert (await web.client.delete("/api/workers/khong-co/drain")).status_code == 404
@@ -439,7 +443,7 @@ async def test_sensitive_settings_are_encrypted_at_rest(web: Web) -> None:
         assert secretbox.is_encrypted(raw[key]), key
     assert "sk-rat-bi-mat" not in str(raw)
     assert "mat-khau-proxy" not in str(raw)
-    effective = await app_settings.load_effective(web.res.sessionmaker, web.settings)
+    effective = await app_settings_service.load_effective(web.res.sessionmaker, web.settings)
     assert effective.serp_api_key is not None
     assert effective.serp_api_key.get_secret_value() == "sk-rat-bi-mat"
     assert effective.proxies == proxies
@@ -447,16 +451,18 @@ async def test_sensitive_settings_are_encrypted_at_rest(web: Web) -> None:
     # Dòng cũ còn nguyên văn (trước khi có mã hoá): `seal_stored` mã hoá lại, giá trị không đổi.
     async with web.res.sessionmaker.begin() as s:
         s.add(AppSetting(key="llm_api_key", value="sk-cu", updated_by="test"))
-    assert await app_settings.seal_stored(web.res.sessionmaker) == 1
+    assert await app_settings_service.seal_stored(web.res.sessionmaker) == 1
     assert secretbox.is_encrypted((await raw_rows(web))["llm_api_key"])
-    assert (await app_settings.load_overrides(web.res.sessionmaker))["llm_api_key"] == "sk-cu"
-    assert await app_settings.seal_stored(web.res.sessionmaker) == 0
+    assert (await app_settings_service.load_overrides(web.res.sessionmaker))[
+        "llm_api_key"
+    ] == "sk-cu"
+    assert await app_settings_service.seal_stored(web.res.sessionmaker) == 0
 
     # Mất khoá (đổi ENCRYPTION_KEYS mà bỏ khoá cũ): dòng không giải mã được thì bỏ qua.
     saved = secretbox.current()
     secretbox.configure(secretbox.SecretBox.from_secrets(["khoa-khac"]))
     try:
-        assert "serp_api_key" not in await app_settings.load_overrides(web.res.sessionmaker)
+        assert "serp_api_key" not in await app_settings_service.load_overrides(web.res.sessionmaker)
     finally:
         secretbox.configure(saved)
 

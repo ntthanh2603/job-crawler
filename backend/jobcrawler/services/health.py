@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 
 from jobcrawler.common.logging import get_logger
-from jobcrawler.modules.gateway.dispatch import DispatchError
+from jobcrawler.modules.gateway.dispatch_service import DispatchError
 from jobcrawler.prompts import healthcheck
 from jobcrawler.services.llm import LLMResult
 from jobcrawler.services.net.http import FetchResult, TransportError, decode_body

@@ -13,7 +13,7 @@ from starlette.routing import Route
 from jobcrawler.bootstrap.app import GuardMiddleware, create_app
 from jobcrawler.common.config import Settings
 from jobcrawler.common.markdown import to_html
-from jobcrawler.modules.auth.auth import TokenAuth
+from jobcrawler.modules.auth.auth_service import TokenAuth
 
 
 async def whoami(request: Request) -> PlainTextResponse:

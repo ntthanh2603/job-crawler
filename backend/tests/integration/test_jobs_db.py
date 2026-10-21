@@ -16,9 +16,9 @@ from typer.testing import CliRunner
 from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.common.schemas import CompanyIn, JobOut, JobStatus
 from jobcrawler.database.models import Company, Job, JobPosting
-from jobcrawler.modules.crawl.companies import process_company
-from jobcrawler.modules.jobs import export as export_service
-from jobcrawler.modules.maintenance import maintenance
+from jobcrawler.modules.crawl.company_service import process_company
+from jobcrawler.modules.jobs import export_service
+from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.pipeline import dedup, store
 from jobcrawler.pipeline.verify import Verdict
 from jobcrawler.services.fakes import FakeFetcher
@@ -129,18 +129,18 @@ async def test_reclean_jobs_applies_new_cleaning_rules(
         async with res.sessionmaker.begin() as s:
             await s.execute(update(Job).where(Job.id == job_id).values(description_md=dirty))
 
-        dry = await maintenance.reclean_jobs(res.sessionmaker, dry_run=True)
+        dry = await maintenance_service.reclean_jobs(res.sessionmaker, dry_run=True)
         assert dry.changed >= 1
         async with res.sessionmaker() as s:
             assert await s.scalar(select(Job.description_md).where(Job.id == job_id)) == dirty
 
-        done = await maintenance.reclean_jobs(res.sessionmaker)
+        done = await maintenance_service.reclean_jobs(res.sessionmaker)
         assert done.changed == dry.changed
         async with res.sessionmaker() as s:
             cleaned = await s.scalar(select(Job.description_md).where(Job.id == job_id))
         assert cleaned == "- **Tuổi:** Từ 18\n\n- Tên / Chức danh: [liên hệ đã ẩn] - HRBP"
         # Chạy lại: nội dung đã sạch không đổi.
-        assert (await maintenance.reclean_jobs(res.sessionmaker)).changed == 0
+        assert (await maintenance_service.reclean_jobs(res.sessionmaker)).changed == 0
 
 
 async def test_cluster_key_is_kept_when_canonical_changes(integration_settings: Settings) -> None:
@@ -394,7 +394,7 @@ async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
                     source_urls=["https://careers.acme.vn/jobs/old"],
                 )
             )
-        report = await maintenance.dedupe_jobs(res.sessionmaker)
+        report = await maintenance_service.dedupe_jobs(res.sessionmaker)
         assert report.merged >= 1
         statuses = {r.cluster_key: r.status for r in await company_jobs(res, company_id)}
         assert statuses[job.cluster_key] == "active"

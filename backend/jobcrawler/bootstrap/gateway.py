@@ -20,8 +20,12 @@ from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import configure_logging, get_logger
 from jobcrawler.common.watchdog import start_watchdog
 from jobcrawler.database.session import create_engine, create_sessionmaker
-from jobcrawler.modules.gateway.server import STOP_GRACE_SECONDS, GatewayServer, SettingsProvider
-from jobcrawler.modules.settings.live_settings import LiveSettings
+from jobcrawler.modules.gateway.server_service import (
+    STOP_GRACE_SECONDS,
+    GatewayServer,
+    SettingsProvider,
+)
+from jobcrawler.modules.settings.live_settings_service import LiveSettings
 from jobcrawler.services import secretbox
 from jobcrawler.services.resources import ResourceUnavailableError, redis_location
 

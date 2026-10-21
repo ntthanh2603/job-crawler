@@ -14,6 +14,7 @@ import {
   PageLoading,
   ReasonList,
   Section,
+  SortHead,
   StatCard,
   StatGrid,
   StatusBadge,
@@ -51,8 +52,11 @@ import {
   getGetCompanyRunsQueryOptions,
   useGetCompany,
   useGetCompanyRuns,
+  type GetCompanyJobsSortBy,
+  type GetCompanyRejectedSortBy,
+  type GetCompanyRunsSortBy,
 } from "@/lib/gen/queries"
-import type { CompanyDetail } from "@/lib/types"
+import type { CompanyDetail, SortState } from "@/lib/types"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -75,6 +79,11 @@ const ALIAS_KINDS: Record<string, string> = {
 }
 
 const TABS = ["jobs", "crawl", "runs", "rejected"] as const
+
+const JOB_SORT: SortState<GetCompanyJobsSortBy> = { sortBy: "first_seen_at", sortOrder: "DESC" }
+const RUN_SORT: SortState<GetCompanyRunsSortBy> = { sortBy: "started_at", sortOrder: "DESC" }
+const RUN_LIMIT = 20
+const REJECTED_SORT: SortState<GetCompanyRejectedSortBy> = { sortBy: "verified_at", sortOrder: "DESC" }
 
 /** Việc làm của doanh nghiệp theo trang, chuyển giữa đang mở / đã đóng. */
 function CompanyJobs({ id, active, inactive }: { id: string; active: number; inactive: number }) {
@@ -100,17 +109,26 @@ function CompanyJobs({ id, active, inactive }: { id: string; active: number; ina
     >
       <PagedList
         key={status}
-        options={(page) => getGetCompanyJobsQueryOptions(id, { status, page })}
+        options={(p) => getGetCompanyJobsQueryOptions(id, { ...p, status })}
+        defaultSort={JOB_SORT}
+        searchPlaceholder="Tìm theo tiêu đề…"
         empty={status === "active" ? "Chưa có việc làm đang mở." : "Không có việc làm đã đóng."}
       >
-        {(jobs) => (
+        {(jobs, { sort, onSort }) => (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Vị trí</TableHead>
                 <TableHead>Nơi làm</TableHead>
-                <TableHead>Lương</TableHead>
-                <TableHead>Hạn nộp</TableHead>
+                <SortHead column="salary" sort={sort} onSort={onSort}>
+                  Lương
+                </SortHead>
+                <SortHead column="expires_at" sort={sort} onSort={onSort}>
+                  Hạn nộp
+                </SortHead>
+                <SortHead column="first_seen_at" sort={sort} onSort={onSort}>
+                  Thấy lúc
+                </SortHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -132,6 +150,7 @@ function CompanyJobs({ id, active, inactive }: { id: string; active: number; ina
                   <TableCell className="max-w-48 text-meta whitespace-normal">{provinces(j)}</TableCell>
                   <TableCell className="text-meta whitespace-nowrap">{salary(j.salary)}</TableCell>
                   <TableCell className="text-meta whitespace-nowrap tabular-nums">{date(j.expires_at)}</TableCell>
+                  <TableCell className="text-meta whitespace-nowrap text-muted-foreground">{cap(ago(j.first_seen_at))}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -145,18 +164,29 @@ function CompanyJobs({ id, active, inactive }: { id: string; active: number; ina
 function CompanyRuns({ id }: { id: string }) {
   const rowLink = useRowLink()
   return (
-    <Section bodyClassName="p-0" title="Các lượt chạy" description="Mới nhất trước · bấm một dòng để xem request và log">
+    <Section bodyClassName="p-0" title="Các lượt chạy" description="Bấm một dòng để xem request và log">
       <PagedList
-        options={(page) => getGetCompanyRunsQueryOptions(id, { page })}
+        options={(p) => getGetCompanyRunsQueryOptions(id, p)}
+        defaultSort={RUN_SORT}
+        defaultLimit={RUN_LIMIT}
+        searchPlaceholder="Tìm trong lỗi, hoặc đúng trạng thái / loại (ok, build, poll…)"
         empty="Chưa chạy lần nào.">
-        {(runs) => (
+        {(runs, { sort, onSort }) => (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Bắt đầu</TableHead>
-                <TableHead>Kết quả</TableHead>
-                <TableHead className="text-right">Tin nhận / thấy</TableHead>
-                <TableHead className="text-right">Mới / đóng</TableHead>
+                <SortHead column="started_at" sort={sort} onSort={onSort}>
+                  Bắt đầu
+                </SortHead>
+                <SortHead column="duration_ms" sort={sort} onSort={onSort}>
+                  Kết quả · thời gian
+                </SortHead>
+                <SortHead column="jobs_found" sort={sort} onSort={onSort} className="text-right">
+                  Tin nhận / thấy
+                </SortHead>
+                <SortHead column="jobs_new" sort={sort} onSort={onSort} className="text-right">
+                  Mới / đóng
+                </SortHead>
                 <TableHead>Nguồn chưa xong, lỗi</TableHead>
               </TableRow>
             </TableHeader>
@@ -200,16 +230,22 @@ function CompanyRuns({ id }: { id: string }) {
 
 function CompanyRejected({ id }: { id: string }) {
   return (
-    <Section bodyClassName="p-0" title="Tin bị loại" description="Tin không qua bước xác minh, kèm lý do · mới nhất trước">
+    <Section bodyClassName="p-0" title="Tin bị loại" description="Tin không qua bước xác minh, kèm lý do">
       <PagedList
-        options={(page) => getGetCompanyRejectedQueryOptions(id, { page })}
+        options={(p) => getGetCompanyRejectedQueryOptions(id, p)}
+        defaultSort={REJECTED_SORT}
+        searchPlaceholder="Tìm theo URL tin…"
         empty="Không có tin bị loại.">
-        {(postings) => (
+        {(postings, { sort, onSort }) => (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Tin</TableHead>
-                <TableHead>Lý do loại</TableHead>
+                <SortHead column="verified_at" sort={sort} onSort={onSort}>
+                  Tin
+                </SortHead>
+                <SortHead column="confidence" sort={sort} onSort={onSort}>
+                  Lý do loại
+                </SortHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -242,7 +278,7 @@ export function CompanyPage() {
   // `kyc_evidence` là JSON tự do (spec: unknown): đọc theo `KycEvidence`.
   const query = useGetCompany(id, { query: { select: (d) => d as CompanyDetail } })
   // Trang 1 các lượt chạy (cùng khoá với tab "Lượt chạy" nên chỉ tải một lần).
-  const runs = useGetCompanyRuns(id, { page: 1 })
+  const runs = useGetCompanyRuns(id, { ...RUN_SORT, page: 1, limit: RUN_LIMIT, search: "" })
   // Lịch thu thập (cùng khoá với tab "Bộ khung & lịch"): trạng thái hiện ở thẻ số liệu.
   const crawl = useCompanyCrawl(id)
   const { poll } = useCrawlActions(id)
@@ -253,7 +289,7 @@ export function CompanyPage() {
   const c = d.company
   const ev = d.kyc_evidence ?? {}
   const shown = companyName(c)
-  const last = runs.data?.items[0]
+  const last = runs.data?.data[0]
 
   return (
     <>

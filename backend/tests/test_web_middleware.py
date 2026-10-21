@@ -26,8 +26,8 @@ from jobcrawler.bootstrap.app import (
     create_app,
 )
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.auth import router as auth_api
-from jobcrawler.modules.auth.auth import COOKIE, TokenAuth
+from jobcrawler.modules.auth import auth_router as auth_api
+from jobcrawler.modules.auth.auth_service import COOKIE, TokenAuth
 
 PREFIX = "jc-test"
 Logs = list[EventDict]

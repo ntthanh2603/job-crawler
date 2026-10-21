@@ -12,6 +12,7 @@ import {
   PageHeader,
   PageLoading,
   Section,
+  SortHead,
   StatCard,
   StatGrid,
   StatusBadge,
@@ -27,8 +28,11 @@ import {
   getGetQueueQueryKey,
   useGetBoards,
   usePostBoardIndex,
+  type GetBoardRunsSortBy,
 } from "@/lib/gen/queries"
-import type { BoardRun } from "@/lib/types"
+import type { BoardRun, SortState } from "@/lib/types"
+
+const RUN_SORT: SortState<GetBoardRunsSortBy> = { sortBy: "started_at", sortOrder: "DESC" }
 
 const MODES: Record<BoardRun["mode"], { label: string; title: string; className: string }> = {
   full: {
@@ -192,7 +196,7 @@ export function BoardsPage() {
 
           <Section
             title="Các lượt index gần đây"
-            description="Mới nhất trước · index đủ chạy ban đêm, index đuôi chạy vài phút một lần ban ngày"
+            description="Index đủ chạy ban đêm, index đuôi chạy vài phút một lần ban ngày"
             actions={
               <FilterSelect
                 label="Kiểu"
@@ -206,27 +210,33 @@ export function BoardsPage() {
             }
             bodyClassName="p-0"
           >
-            <PagedList options={(page) => getGetBoardRunsQueryOptions({ page })} empty="Chưa có lượt index nào.">
-              {(all) => {
-                const runs = mode ? all.filter((r) => (r.mode ?? "full") === mode) : all
-                if (!runs.length)
-                  return (
-                    <p className="px-5 py-10 text-center text-sm text-muted-foreground">
-                      Trang này không có lượt index {mode === "tail" ? "đuôi" : "đủ"} nào. Chuyển trang hoặc bỏ lọc để xem
-                      thêm.
-                    </p>
-                  )
+            <PagedList
+              key={mode}
+              options={(p) => getGetBoardRunsQueryOptions({ ...p, mode: mode || undefined })}
+              defaultSort={RUN_SORT}
+              searchPlaceholder="Tìm theo trang tuyển dụng…"
+              empty={mode ? `Chưa có lượt index ${mode === "tail" ? "đuôi" : "đủ"} nào.` : "Chưa có lượt index nào."}
+            >
+              {(runs, { sort, onSort }) => {
                 return (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Trang</TableHead>
+                        <SortHead column="started_at" sort={sort} onSort={onSort}>
+                          Trang
+                        </SortHead>
                         <TableHead>Kết quả</TableHead>
                         <TableHead className="px-2 text-right">Thấy</TableHead>
-                        <TableHead className="px-2 text-right">Tải</TableHead>
-                        <TableHead className="px-2 text-right">Mới</TableHead>
+                        <SortHead column="fetched" sort={sort} onSort={onSort} className="px-2 text-right">
+                          Tải
+                        </SortHead>
+                        <SortHead column="new" sort={sort} onSort={onSort} className="px-2 text-right">
+                          Mới
+                        </SortHead>
                         <TableHead className="px-2 text-right">Đổi</TableHead>
-                        <TableHead className="px-2 text-right">Lỗi</TableHead>
+                        <SortHead column="failed" sort={sort} onSort={onSort} className="px-2 text-right">
+                          Lỗi
+                        </SortHead>
                         <TableHead className="px-2 text-right">Gỡ</TableHead>
                         <TableHead className="text-right">
                           <span className="inline-flex items-center gap-1">

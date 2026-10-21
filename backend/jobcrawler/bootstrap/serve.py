@@ -7,11 +7,10 @@ Process con nào thoát thì dừng các process còn lại và thoát theo mã 
 con, chờ chúng dừng tối đa STOP_SECONDS rồi giết nốt.
 
 Cài đặt `live=False` (trang Cài đặt): lưu xong thì bộ đếm `<REDIS_PREFIX>:settings:restart` tăng
-(`modules.settings.app_settings`); mỗi WATCH_SECONDS serve đọc bộ đếm, tăng thì khởi động lại mọi
-process con (dừng êm như trên) rồi ghi số đã áp dụng vào `...:settings:restart_applied`. Serve cũng
-giữ khoá `<REDIS_PREFIX>:serve:alive` (TTL ALIVE_TTL_SECONDS) để trang Cài đặt biết cài đặt được tự
-áp dụng. Mất Redis không làm serve thoát (chỉ log, thử lại ở nhịp sau).
-"""
+(`modules.settings.app_settings_service`); mỗi WATCH_SECONDS serve đọc bộ đếm, tăng thì khởi động
+lại mọi process con (dừng êm như trên) rồi ghi số đã áp dụng vào `...:settings:restart_applied`.
+Serve cũng giữ khoá `<REDIS_PREFIX>:serve:alive` (TTL ALIVE_TTL_SECONDS) để trang Cài đặt biết cài
+đặt được tự áp dụng. Mất Redis không làm serve thoát (chỉ log, thử lại ở nhịp sau)."""
 
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ from types import FrameType
 from typing import Any, Protocol
 
 from jobcrawler.common.logging import get_logger
-from jobcrawler.modules.settings import app_settings
+from jobcrawler.modules.settings import app_settings_service
 
 log = get_logger(__name__)
 
@@ -62,12 +61,12 @@ class RestartWatch:
         self._prefix = prefix
 
     def wanted(self) -> int:
-        return int(self._redis.get(app_settings.restart_key(self._prefix)) or 0)
+        return int(self._redis.get(app_settings_service.restart_key(self._prefix)) or 0)
 
     def applied(self, value: int) -> None:
         pipe = self._redis.pipeline()
-        pipe.set(app_settings.restart_applied_key(self._prefix), value)
-        pipe.set(app_settings.supervisor_key(self._prefix), value, ex=ALIVE_TTL_SECONDS)
+        pipe.set(app_settings_service.restart_applied_key(self._prefix), value)
+        pipe.set(app_settings_service.supervisor_key(self._prefix), value, ex=ALIVE_TTL_SECONDS)
         pipe.execute()
 
 
@@ -193,14 +192,14 @@ class Supervisor:
 async def _prepare(*, demo: bool) -> None:
     """Trước khi chạy process con: mã hoá các trường nhạy cảm còn lưu nguyên văn / bằng khoá cũ,
     và (DEMO_COMPANIES) nạp doanh nghiệp mẫu khi DB chưa có doanh nghiệp nào. Lỗi chỉ ghi log."""
-    from jobcrawler.modules.companies.actions import seed_demo_if_empty
-    from jobcrawler.modules.settings import app_settings
+    from jobcrawler.modules.companies.companies_service import seed_demo_if_empty
+    from jobcrawler.modules.settings import app_settings_service
     from jobcrawler.services.resources import open_resources
 
     try:
         # Nạp cả cài đặt trong DB (như process con) để log khởi động không báo nhầm thiếu LLM.
         async with open_resources(db_logs=False) as res:
-            await app_settings.seal_stored(res.sessionmaker)
+            await app_settings_service.seal_stored(res.sessionmaker)
             outcome = await seed_demo_if_empty(res) if demo else None
     except Exception as exc:
         log.warning("serve.prepare_failed", error=str(exc))

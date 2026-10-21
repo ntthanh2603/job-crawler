@@ -1,4 +1,4 @@
-"""`modules.proxies.proxies`: danh sách proxy chung và kiểm tra theo id."""
+"""`modules.proxies.proxies_service`: danh sách proxy chung và kiểm tra theo id."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.proxies import proxies as svc
+from jobcrawler.modules.proxies import proxies_service
 from jobcrawler.services import health
 from jobcrawler.services.net.proxy_pool import parse_proxy_line
 
@@ -28,7 +28,7 @@ def test_listed_merges_settings_then_file_without_duplicates(tmp_path: Path) -> 
         ["http://u:p@1.1.1.1:80", "1.1.1.2:81"],
         ["http://u:p@1.1.1.1:80", "socks5://1.1.1.3:1080", "khong-hop-le"],
     )
-    items = svc.listed(s)
+    items = proxies_service.listed(s)
     assert [(i.source, i.line) for i in items] == [
         ("settings", "http://u:•••@1.1.1.1:80"),
         ("settings", "1.1.1.2:81"),
@@ -50,12 +50,12 @@ async def test_check_only_selected_ids(tmp_path: Path, monkeypatch: pytest.Monke
         redis = None
 
     monkeypatch.setattr(health, "check_proxies", fake_check)
-    assert await svc.check(FakeRes(), s, [wanted.id, "khong-co"]) == []  # pyright: ignore[reportArgumentType]
+    assert await proxies_service.check(FakeRes(), s, [wanted.id, "khong-co"]) == []  # pyright: ignore[reportArgumentType]
     assert seen == {
         "ids": [wanted.id],
         "url": s.proxy_check_url,
-        "timeout": svc.CHECK_TIMEOUT_SECONDS,
+        "timeout": proxies_service.CHECK_TIMEOUT_SECONDS,
     }
     seen.clear()
-    assert await svc.check(FakeRes(), s, ["khong-co"]) == []  # pyright: ignore[reportArgumentType]
+    assert await proxies_service.check(FakeRes(), s, ["khong-co"]) == []  # pyright: ignore[reportArgumentType]
     assert seen == {}

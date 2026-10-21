@@ -11,8 +11,8 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
     start_gateway,
 )
 
-from jobworker import config
-from jobworker.config import WorkerSettings
+from jobworker.common import config
+from jobworker.common.config import WorkerSettings
 
 
 @pytest.fixture(autouse=True)

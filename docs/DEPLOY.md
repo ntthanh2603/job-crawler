@@ -54,6 +54,10 @@ frontend`.
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
   Máy chạy đặt `REGISTRY=ghcr.io/<owner>/`, `IMAGE_TAG=…` trong `.env` gốc rồi `docker compose pull &&
 docker compose up -d`; quay lại bản trước = đổi `IMAGE_TAG`. Phát hành: `task release VERSION=X.Y.Z`.
+  Cả backend và worker dựng trên `python:3.12-slim-bookworm` (chung lớp base), hai giai đoạn: image
+  chạy chỉ có venv `/opt/venv`, không có uv / mã nguồn. Worker chỉ cài Chromium headless shell
+  (`playwright install --with-deps --only-shell chromium`, worker luôn mở headless): ~1,4 GB thay vì
+  ~4,2 GB của image Playwright chính thức (kèm Firefox, WebKit, Chromium đầy đủ). Backend ~0,7 GB.
 - **Nâng cấp**: đẩy image → khởi động lại `backend` (migration chạy lúc khởi động, job đang chạy được
   xếp lại) → khởi động lại worker (làm nốt việc rồi thoát). Backend và worker khác phiên bản vẫn
   chạy được với nhau trong lúc chuyển: gateway mới giao được việc kiểu cũ còn trong stream, worker

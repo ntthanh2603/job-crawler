@@ -17,8 +17,11 @@ import {
   Pager,
   SearchBox,
   Section,
+  SortHead,
+  SortSelect,
   StatusBadge,
   TextLink,
+  nextSort,
   useRowLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
@@ -46,13 +49,26 @@ import {
   useGetMeta,
   usePostCompany,
   usePostImport,
+  type GetCompaniesSortBy,
 } from "@/lib/gen/queries"
-import type { CompanyItem, EnqueueResult } from "@/lib/types"
+import type { CompanyItem, EnqueueResult, SortOrder, SortState } from "@/lib/types"
 import { useUrlFilters, type FilterChanges } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
 
-/** Bộ lọc trên URL (mặc định: không lọc). */
-const FILTERS = { q: "", kyc: "", run: "", jobs: "" }
+/** Bộ lọc, số dòng và sắp xếp trên URL (như open-asm: `search`, `pageSize`, `sortBy`, `sortOrder`);
+ * giá trị mặc định không ghi lên URL. */
+const FILTERS = { search: "", kyc: "", run: "", jobs: "", pageSize: "50", sortBy: "created_at", sortOrder: "DESC" }
+
+const SORTS: readonly (readonly [GetCompaniesSortBy, SortOrder, string])[] = [
+  ["created_at", "DESC", "Mới thêm trước"],
+  ["created_at", "ASC", "Thêm sớm nhất trước"],
+  ["name", "ASC", "Tên A → Z"],
+  ["name", "DESC", "Tên Z → A"],
+  ["active_jobs", "DESC", "Nhiều việc mở nhất"],
+  ["active_jobs", "ASC", "Ít việc mở nhất"],
+  ["last_run_at", "DESC", "Chạy gần đây nhất"],
+  ["last_run_at", "ASC", "Lâu chưa chạy nhất"],
+]
 
 /** File CSV mẫu (50 doanh nghiệp lớn của Việt Nam), đúng định dạng nạp danh sách. */
 const SAMPLE_CSV_URL = "/api/companies/import/sample.csv"
@@ -419,8 +435,8 @@ function KycBadge({ status }: { status: string | null }) {
 
 export function CompaniesPage() {
   const { filters, page, update: setFilters, reset, isFiltered } = useUrlFilters(FILTERS)
-  const [search, setSearch] = useState(filters.q)
-  useEffect(() => setSearch(filters.q), [filters.q])
+  const [search, setSearch] = useState(filters.search)
+  useEffect(() => setSearch(filters.search), [filters.search])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [runOpen, setRunOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -428,7 +444,16 @@ export function CompaniesPage() {
   const rowLink = useRowLink()
 
   const meta = useGetMeta({ query: { staleTime: 300_000 } })
-  const query = useGetCompanies({ ...filters, page }, { query: { placeholderData: (prev) => prev } })
+  const sort: SortState<GetCompaniesSortBy> = {
+    sortBy: filters.sortBy as GetCompaniesSortBy,
+    sortOrder: filters.sortOrder === "ASC" ? "ASC" : "DESC",
+  }
+  const { pageSize, ...rest } = filters
+  const query = useGetCompanies(
+    { ...rest, ...sort, page, limit: Number(pageSize) || 50 },
+    { query: { placeholderData: (prev) => prev } },
+  )
+  const onSort = (column: GetCompaniesSortBy) => update(nextSort(sort, column))
 
   // Đổi bộ lọc thì bỏ chọn (các dòng đã chọn không còn trên trang); chuyển trang thì giữ.
   const update = (changes: FilterChanges<keyof typeof FILTERS>) => {
@@ -438,7 +463,7 @@ export function CompaniesPage() {
 
   const enqueue = useEnqueue(() => setSelected(new Set()))
 
-  const items = query.data?.items ?? []
+  const items = query.data?.data ?? []
   const allChecked = items.length > 0 && items.every((r) => selected.has(r.company.id))
   const someChecked = !allChecked && items.some((r) => selected.has(r.company.id))
   const toggleAll = () => setSelected(allChecked ? new Set() : new Set(items.map((r) => r.company.id)))
@@ -449,7 +474,7 @@ export function CompaniesPage() {
       else next.add(id)
       return next
     })
-  const filtered = isFiltered()
+  const filtered = isFiltered("pageSize", "sortBy", "sortOrder")
 
   return (
     <>
@@ -484,10 +509,11 @@ export function CompaniesPage() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              onSubmit={(v) => update({ q: (v ?? search).trim() })}
+              onSubmit={(v) => update({ search: (v ?? search).trim() })}
               placeholder="Tìm theo tên, MST, domain hoặc tên gọi khác"
             />
           }
+          end={<SortSelect sort={sort} onChange={update} options={SORTS} />}
         >
           <FilterSelect
             label="KYC"
@@ -569,10 +595,16 @@ export function CompaniesPage() {
                         aria-label="Chọn cả trang"
                       />
                     </TableHead>
-                    <TableHead>Doanh nghiệp</TableHead>
+                    <SortHead column="name" sort={sort} onSort={onSort}>
+                      Doanh nghiệp
+                    </SortHead>
                     <TableHead>KYC</TableHead>
-                    <TableHead>Lượt chạy mới nhất</TableHead>
-                    <TableHead className="text-right">Việc đang mở</TableHead>
+                    <SortHead column="last_run_at" sort={sort} onSort={onSort}>
+                      Lượt chạy mới nhất
+                    </SortHead>
+                    <SortHead column="active_jobs" sort={sort} onSort={onSort} className="text-right">
+                      Việc đang mở
+                    </SortHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -637,7 +669,9 @@ export function CompaniesPage() {
               }
             />
           ))}
-        {query.data && <Pager {...query.data} onPage={(p) => update({ page: p })} />}
+        {query.data && (
+          <Pager {...query.data} onPage={(p) => update({ page: p })} onLimit={(n) => update({ pageSize: String(n) })} />
+        )}
       </Section>
 
       {/* Thanh thao tác khi đã chọn doanh nghiệp: luôn nằm ở đáy màn hình. */}

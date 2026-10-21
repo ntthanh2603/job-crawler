@@ -1,5 +1,6 @@
-"""Phần chung của các router API JSON (`modules/*/router.py`): gốc mô hình trả về `ApiOut`,
-trang `PageOut`, `known_values`, lấy tài nguyên / cài đặt / người thao tác của request.
+"""Phần chung của các router API JSON (`modules/*/*_router.py`): gốc mô hình trả về `ApiOut`,
+trang `PageOut` (như open-asm; tham số danh sách `GetManyQuery` ở `common/pagination.py`),
+`known_values`, lấy tài nguyên / cài đặt / người thao tác của request.
 
 Mỗi endpoint trả một mô hình Pydantic (`...Out`): spec `/api/openapi.json` (bản commit ở
 `backend/openapi.json`, `scripts/export_openapi.py`) mô tả đúng JSON trả về, kiểu TypeScript của
@@ -17,7 +18,7 @@ from pydantic import BaseModel, WithJsonSchema
 from jobcrawler.common import pagination
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import API_OUTPUT
-from jobcrawler.modules.audit import audit
+from jobcrawler.modules.audit import audit_service
 from jobcrawler.services.resources import Resources
 
 
@@ -35,8 +36,8 @@ def user_of(request: Request) -> str | None:
 
 
 def actor_of(request: Request) -> str:
-    """Người thao tác ghi vào nhật ký (`modules/audit/audit.py`)."""
-    return audit.actor_of(user_of(request))
+    """Người thao tác ghi vào nhật ký (`modules/audit/audit_service.py`)."""
+    return audit_service.actor_of(user_of(request))
 
 
 class ApiOut(BaseModel):
@@ -47,7 +48,8 @@ class ApiOut(BaseModel):
 
 
 # Mốc thời gian: `datetime` (ISO 8601), hoặc chuỗi đã có sẵn trong JSON cache của trang tổng quan
-# (`modules/overview/overview.py` ghi bằng `str()`) — giữ nguyên chuỗi đó. Spec chỉ ghi `date-time`.
+# (`modules/overview/overview_service.py` ghi bằng `str()`) — giữ nguyên chuỗi đó. Spec chỉ ghi
+# `date-time`.
 Timestamp = Annotated[datetime | str, WithJsonSchema({"type": "string", "format": "date-time"})]
 
 
@@ -59,21 +61,25 @@ def known_values(values: Iterable[str], *, nullable: bool = False) -> WithJsonSc
 
 
 class PageOut[T](ApiOut):
-    items: list[T]
+    """Một trang danh sách (như `GetManyBaseResponseDto` của open-asm)."""
+
+    data: list[T]
     total: int  # đếm tối đa pagination.COUNT_CAP
     page: int
-    pages: int
-    size: int = pagination.PAGE_SIZE
-    exact: bool = True  # False: thực tế nhiều hơn `total`
+    limit: int
+    pageCount: int
+    hasNextPage: bool
+    exact: bool = True  # False: thực tế nhiều hơn `total` (server chỉ đếm tới COUNT_CAP)
 
 
 def page_out[T](page: pagination.Page[Any], items: list[T]) -> PageOut[T]:
     return PageOut(
-        items=items,
+        data=items,
         total=page.total,
         page=page.page,
-        pages=page.pages,
-        size=page.size,
+        limit=page.limit,
+        pageCount=page.page_count,
+        hasNextPage=page.has_next_page,
         exact=page.exact,
     )
 

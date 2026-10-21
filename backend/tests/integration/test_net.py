@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 
 from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.common.schemas import FetchOutcome
-from jobcrawler.modules.gateway.remote import RemoteRenderer, RemoteTransport
+from jobcrawler.modules.gateway.remote_service import RemoteRenderer, RemoteTransport
 from jobcrawler.services.net.direct import DirectTransport
 from jobcrawler.services.net.http import HttpClient, HttpConfig, TransportError
 from jobcrawler.services.net.kv import RedisKV

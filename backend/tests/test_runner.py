@@ -12,7 +12,8 @@ import pytest
 from jobcrawler.bootstrap import runner
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import CompanyResult, RunStatus, RunTrigger
-from jobcrawler.modules.crawl import companies, crawl
+from jobcrawler.modules.boards import boards_service
+from jobcrawler.modules.crawl import company_service, crawl_service
 from jobcrawler.services.redis.streamqueue import StreamWorker
 
 
@@ -56,8 +57,8 @@ def test_board_role_runs_full_index_at_night_and_tail_by_day(clean_env: None) ->
     full, tail = w.cron_jobs
     assert (full.cron, full.function) == ("30 0 * * *", runner.index_boards_cron)
     assert (tail.cron, tail.function) == ("*/2 6-23 * * *", runner.tail_boards_cron)
-    assert runner.board_job_timeout(settings) == 1500
-    assert runner.board_tail_timeout(settings) == 210
+    assert boards_service.board_job_timeout(settings) == 1500
+    assert boards_service.board_tail_timeout(settings) == 210
 
 
 class RecordingQueue:
@@ -120,8 +121,8 @@ async def test_partial_build_enqueues_a_continuation(
     async def no_lock(*_args: Any, **_kwargs: Any) -> AsyncIterator[bool]:
         yield True
 
-    monkeypatch.setattr(companies, "process_company", fake_process)
-    monkeypatch.setattr(crawl, "company_lock", no_lock)
+    monkeypatch.setattr(company_service, "process_company", fake_process)
+    monkeypatch.setattr(crawl_service, "company_lock", no_lock)
     queue = RecordingQueue()
     settings = Settings(company_max_continuations=2, company_continuation_delay_seconds=60)
     res = SimpleNamespace(
@@ -163,8 +164,8 @@ async def test_build_is_skipped_while_another_run_holds_the_company(
         assert kwargs["wait"] > Settings().poll_timeout_seconds  # chờ lượt poll đang chạy xong
         yield False
 
-    monkeypatch.setattr(companies, "process_company", fake_process)
-    monkeypatch.setattr(crawl, "company_lock", busy_lock)
+    monkeypatch.setattr(company_service, "process_company", fake_process)
+    monkeypatch.setattr(crawl_service, "company_lock", busy_lock)
     settings = Settings()
     res = SimpleNamespace(settings=settings, sessionmaker=FakeSession)
     ctx: Any = {"settings": settings, "resources": res}

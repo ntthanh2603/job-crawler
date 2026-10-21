@@ -37,10 +37,10 @@ from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import RunTrigger
 from jobcrawler.common.watchdog import start_watchdog
-from jobcrawler.modules.boards import boards
-from jobcrawler.modules.crawl import crawl
-from jobcrawler.modules.maintenance import maintenance
-from jobcrawler.modules.overview import overview
+from jobcrawler.modules.boards import boards_service
+from jobcrawler.modules.crawl import crawl_service
+from jobcrawler.modules.maintenance import maintenance_service
+from jobcrawler.modules.overview import overview_service
 from jobcrawler.services.redis.heartbeat import Heartbeat, runner_component
 from jobcrawler.services.redis.queues import make_queue
 from jobcrawler.services.redis.streamqueue import CronJob, StreamWorker
@@ -93,7 +93,7 @@ async def build_company(
     if cid is None:
         return {"error": f"company_id không hợp lệ: {company_id!r}"}
     try:
-        result = await crawl.build_company(
+        result = await crawl_service.build_company(
             res,
             cid,
             trigger=RunTrigger(trigger),
@@ -101,7 +101,7 @@ async def build_company(
             queued_at=job_ready_at(ctx.get("job")),
             refresh=refresh,
         )
-    except crawl.CompanyBusyError as exc:
+    except crawl_service.CompanyBusyError as exc:
         # Lượt khác của doanh nghiệp đang chạy: không chạy chồng; scheduler xếp lại khi còn cần.
         log.warning("company.build_skipped", company_id=company_id, error=str(exc))
         return {"status": "skipped", "error": str(exc)}
@@ -116,34 +116,27 @@ async def poll_company(
     cid = _as_uuid(company_id)
     if cid is None:
         return {"error": f"company_id không hợp lệ: {company_id!r}"}
-    outcome = await crawl.poll_company(
+    outcome = await crawl_service.poll_company(
         res, cid, trigger=RunTrigger(trigger), queued_at=job_ready_at(ctx.get("job"))
     )
     return outcome.as_dict()
 
 
-def board_job_timeout(settings: Settings) -> int:
-    # Ngân sách của lượt index + thời gian ghi DB/map profile cuối lượt.
-    return int(settings.board_index_budget_seconds) + 900
-
-
-def board_tail_timeout(settings: Settings) -> int:
-    return int(settings.board_tail_budget_seconds) + 120
-
-
 async def _poll_companies_with_new_jobs(res: Resources, source: str, since: datetime) -> int:
     if not res.settings.board_poll_companies:
         return 0
-    company_ids = await boards.companies_with_new_postings(res, source, since)
-    return await crawl.enqueue_polls(res, company_ids, trigger=RunTrigger.BOARD)
+    company_ids = await boards_service.companies_with_new_postings(res, source, since)
+    return await crawl_service.enqueue_polls(res, company_ids, trigger=RunTrigger.BOARD)
 
 
 async def index_board(ctx: RunnerContext, *, source: str) -> dict[str, Any]:
     """Index đủ một trang tuyển dụng, rồi poll ngay doanh nghiệp có profile vừa có tin mới."""
     res = ctx["resources"]
-    [adapter] = boards.selected_boards(res.settings, [source])
+    [adapter] = boards_service.selected_boards(res.settings, [source])
     started = datetime.now(UTC)
-    stats = await boards.index_board(res, adapter, boards.index_options(res.settings))
+    stats = await boards_service.index_board(
+        res, adapter, boards_service.index_options(res.settings)
+    )
     out = dataclasses.asdict(stats)
     out["companies_polled"] = await _poll_companies_with_new_jobs(res, adapter.name, started)
     return out
@@ -152,9 +145,9 @@ async def index_board(ctx: RunnerContext, *, source: str) -> dict[str, Any]:
 async def tail_board(ctx: RunnerContext, *, source: str) -> dict[str, Any]:
     """Index đuôi (phần mới nhất) một trang tuyển dụng, rồi poll doanh nghiệp có tin mới."""
     res = ctx["resources"]
-    [adapter] = boards.selected_boards(res.settings, [source])
+    [adapter] = boards_service.selected_boards(res.settings, [source])
     started = datetime.now(UTC)
-    stats = await boards.tail_board(res, adapter)
+    stats = await boards_service.tail_board(res, adapter)
     out = dataclasses.asdict(stats)
     out["companies_polled"] = await _poll_companies_with_new_jobs(res, adapter.name, started)
     return out
@@ -164,7 +157,7 @@ async def _enqueue_boards(ctx: RunnerContext, function: str, timeout: int) -> di
     settings = ctx["resources"].settings
     queue = ctx["worker"].queue
     enqueued: list[str] = []
-    for adapter in boards.selected_boards(settings):
+    for adapter in boards_service.selected_boards(settings):
         job = await queue.enqueue(
             function, source=adapter.name, key=f"board:{adapter.name}", timeout=timeout
         )
@@ -177,23 +170,27 @@ async def _enqueue_boards(ctx: RunnerContext, function: str, timeout: int) -> di
 async def index_boards_cron(ctx: RunnerContext) -> dict[str, Any]:
     """Cron (đêm): mỗi trang tuyển dụng một job `index_board` (khoá theo trang nên không trùng
     với lượt trước chưa xong, kể cả lượt đuôi)."""
-    return await _enqueue_boards(ctx, "index_board", board_job_timeout(ctx["resources"].settings))
+    return await _enqueue_boards(
+        ctx, "index_board", boards_service.board_job_timeout(ctx["resources"].settings)
+    )
 
 
 async def tail_boards_cron(ctx: RunnerContext) -> dict[str, Any]:
     """Cron (ngày): mỗi trang tuyển dụng một job `tail_board`."""
-    return await _enqueue_boards(ctx, "tail_board", board_tail_timeout(ctx["resources"].settings))
+    return await _enqueue_boards(
+        ctx, "tail_board", boards_service.board_tail_timeout(ctx["resources"].settings)
+    )
 
 
 async def maintenance_cron(ctx: RunnerContext) -> dict[str, Any]:
     """Cron: dọn dữ liệu cũ, đánh dấu lượt chạy treo, huấn luyện từ điển nén + nén lại."""
-    report = await maintenance.run_maintenance(ctx["resources"])
+    report = await maintenance_service.run_maintenance(ctx["resources"])
     return report.as_dict()
 
 
 async def overview_cron(ctx: RunnerContext) -> dict[str, Any]:
     """Cron: tính sẵn số liệu phân bố cho trang tổng quan (người xem chỉ đọc từ Redis)."""
-    charts = await overview.refresh_charts(ctx["resources"])
+    charts = await overview_service.refresh_charts(ctx["resources"])
     return charts["totals"]
 
 

@@ -70,7 +70,7 @@ Mã nguồn backend (`backend/jobcrawler/`) chia như `core-api/src` của open-
 | Thư mục                | Nội dung                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------- |
 | `bootstrap/`           | điểm vào process: CLI `jobcrawler` (`cli.py`), `serve`, ứng dụng FastAPI (`app.py`: middleware, ghép router), `gateway`, `runner`, `scheduler` |
-| `modules/<tính năng>/` | `router.py` (API `/api/...`), `schemas.py` (mô hình `...Out` / `...In`), `queries.py` (truy vấn cho giao diện), `actions.py` (thao tác của API) và service: `companies/`, `crawl/` (build, poll, bộ khung, lịch, độ trễ phát hiện), `jobs/`, `runs/`, `boards/`, `queue/`, `overview/`, `maintenance/`, `evaluate/`, `audit/`, `auth/`, `meta/`, `settings/`, `proxies/`, `gateway/` (gRPC cho worker + API Workers), `live/` (SSE) |
+| `modules/<tính năng>/` | mỗi file đặt tên `<tên>_<loại>.py`: `<module>_router.py` (API `/api/...`), `<module>_schema.py` (mô hình `...Out` / `...In`), `<module>_service.py` (truy vấn cho giao diện + thao tác của API + nghiệp vụ chính), `<tên>_service.py` cho phần nghiệp vụ tách riêng (vd. `crawl/plan_service.py`, `crawl/sla_service.py`): `companies/`, `crawl/` (build, poll, bộ khung, lịch, độ trễ phát hiện), `jobs/`, `runs/`, `boards/`, `queue/`, `overview/`, `maintenance/`, `evaluate/`, `audit/`, `auth/`, `meta/`, `settings/`, `proxies/`, `gateway/` (gRPC cho worker + API Workers), `live/` (SSE) |
 | `pipeline/`            | logic: KYC, tìm nguồn, thu thập, chuẩn hoá, xác minh, gộp, lưu                  |
 | `sources/`             | nguồn tin (ATS, careers, trang tuyển dụng), chỉ biết `SourceSession`, không biết DB |
 | `services/`            | hạ tầng dùng chung: `resources.py` (`Resources`), `redis/` (hàng đợi Streams, khoá, heartbeat), `net/` (HttpClient, proxy pool, rate limit, robots), LLM, SERP, mã hoá, fake cho test |
@@ -79,9 +79,23 @@ Mã nguồn backend (`backend/jobcrawler/`) chia như `core-api/src` của open-
 | `prompts/`             | prompt LLM (mỗi prompt một file, kèm schema output)                             |
 
 Chiều gọi: `sources/` → `pipeline/` → service trong `modules/` (ghép pipeline với `Resources`) →
-`router.py` của module và `bootstrap/`; router chỉ gọi service / `queries` / `actions` của module.
+`<module>_router.py` và `bootstrap/`; router chỉ gọi `*_service.py` của module.
 
-## 3. Build đêm (`modules/crawl/crawl.build_company`)
+Mã nguồn worker (`worker/jobworker/`) chia cùng kiểu:
+
+| Thư mục            | Nội dung                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `bootstrap/`       | điểm vào: CLI `jobworker` (`cli.py`), process `jobworker run` (`run.py`: dựng `Worker`, tín hiệu dừng) |
+| `modules/gateway/` | vòng làm việc với gateway (`worker_service.py`): Register → Lease → chạy việc → Complete, Heartbeat, drain, Leave; `RuntimeConfig` (`runtime_service.py`: cấu hình worker kết hợp `WorkerConfig`) |
+| `modules/fetch/`   | chạy một việc: kiểm việc, chọn proxy, curl_cffi / Chromium (`executor_service.py`, `http_service.py`, `browser_service.py`), tắt / tạm tắt render khi Chromium lỗi (`render_service.py`), dựng `FetchResult` (`results_service.py`) |
+| `modules/health/`  | file trạng thái cho healthcheck (`status_service.py`, `jobworker health`), kiểm tra kết nối (`probe_service.py`, `jobworker check`) |
+| `services/`        | kênh gRPC tới gateway (`channel.py`), khoá tham gia / token riêng (`credentials.py`), proxy tại worker (`proxies.py`) |
+| `common/`          | cấu hình, log, tài nguyên máy (slot tự động), watchdog, backoff                     |
+
+Chiều gọi: `bootstrap/` → `modules/` → `services/` → `common/`; `modules/gateway/` dùng
+`modules/fetch/` và `modules/health/`, `fetch/` không biết gì về gateway.
+
+## 3. Build đêm (`modules/crawl/crawl_service.build_company`)
 
 Mỗi doanh nghiệp một lượt trong `BUILD_WINDOW` (00:00–06:00, `CRAWL_TIMEZONE`), rải đều theo pha
 cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì build ngay, bất kể giờ. Deadline mềm
@@ -112,13 +126,13 @@ Mỗi nguồn website / ATS một dòng: trang / API cần đọc lại và mã 
 | `ats`                  | bảng tin ATS                                                                 |
 | `pages`                | **số trang một lượt poll được đọc ở nguồn này**                              |
 
-**Chia trang** (`modules/crawl/plans.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10)
+**Chia trang** (`modules/crawl/plan_service.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10)
 trang mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) + số
 trang API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday: 20 tin / trang). Chia theo thứ tự: mỗi
 nguồn tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho nguồn careers
 (site thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
 
-## 4. Poll ngày (`modules/crawl/crawl.poll_company`)
+## 4. Poll ngày (`modules/crawl/crawl_service.poll_company`)
 
 Trong `POLL_WINDOW` (06:00–24:00), mỗi doanh nghiệp mỗi `POLL_INTERVAL_SECONDS` (150 s) ±
 `POLL_JITTER_SECONDS` (10 s). Ngoài khung không poll: tin đăng ban đêm được lượt build đêm hoặc lượt
@@ -139,7 +153,20 @@ poll đầu tiên lúc 06:00 thấy.
 6. **Chốt chặn đóng nhầm**: mất ≥ 30% tin (≥ 3 tin, nguồn ≥ 5 tin) trong một lượt → không đóng, đếm
    như lỗi; lặp 3 lượt → build lại, lượt build đọc đủ mới đóng đúng.
 
-Build và poll của cùng doanh nghiệp không chạy chồng (`crawl.company_lock`):
+Tab "Bộ khung & lịch" của doanh nghiệp (`GET /api/companies/{id}/crawl`, `modules/crawl/crawl_service.py:
+plan_view`) vẽ đường này cho từng nguồn: các API và trang theo thứ tự lượt poll đọc, số mã tin, phần
+trang của nguồn, và **kết quả lượt poll gần nhất** (`last_poll`). Vì lượt không đổi không ghi
+`company_runs`, kết quả này suy từ cột của `crawl_plans`: `retired` / `broken` theo `status`; chưa poll
+khi `polled_at` trống hoặc trước `built_at`; lỗi tạm khi `failures` > 0; có thay đổi khi `changed_at ≥
+polled_at` (lượt có tin mới / tin gỡ ghi `changed_at` lúc xong); còn lại là không đổi.
+
+Trang "Bản đồ bộ khung" (`/plans/:id`, `GET /api/crawl/plans/{id}`, `crawl_service.plan_detail`) vẽ một
+bộ khung dạng cây: nguồn → trang danh sách / danh mục (trang sau gom dưới trang đầu theo URL bỏ số
+trang) → API mà trang đó gọi (`ApiSpec.listing`). Kèm các mã tin `job_keys` ghép với tin đã lưu
+(`job_postings` cùng loại nguồn + `external_id`, tiêu đề lấy từ việc đã gộp), link bỏ qua, danh mục
+mã → tên và `spec` nguyên văn. Bộ khung không chứa selector: trang chỉ cho thấy đường đi.
+
+Build và poll của cùng doanh nghiệp không chạy chồng (`crawl_service.company_lock`):
 
 - Khoá Redis `<prefix>:lock:company:<id>` (`locks.RedisLease`, 60 s, tự gia hạn mỗi 20 s). Poll gặp
   khoá thì bỏ lượt; build chờ tối đa `POLL_TIMEOUT_SECONDS` + 15 s, vẫn không giữ được (lượt build
@@ -153,18 +180,19 @@ Build và poll của cùng doanh nghiệp không chạy chồng (`crawl.company_
 
 Lượt poll đi làn ưu tiên ở hàng việc lấy trang, nên build ban ngày không làm chậm poll.
 
-**Độ trễ phát hiện** (`modules/crawl/sla.py`): mỗi lượt poll đủ ghi **cửa sổ phát hiện** = lúc xong
+**Độ trễ phát hiện** (`modules/crawl/sla_service.py`): mỗi lượt poll đủ ghi **cửa sổ phát hiện** = lúc xong
 − lúc bắt đầu lượt poll đủ trước (độ trễ xấu nhất của tin đăng ngay sau lượt trước) vào histogram
 Redis theo phút. P95 ≈ 0,95 × T + thời gian một lượt ≈ 142 + 10–20 s. Trang Tổng quan hiện P50 /
 P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của từng doanh nghiệp).
 
-## 5. Lịch và scheduler (`modules/crawl/schedule.py`)
+## 5. Lịch và scheduler (`modules/crawl/schedule_service.py`)
 
 - Mỗi doanh nghiệp có pha cố định trong [0, 1): build đêm lúc `đầu BUILD_WINDOW + pha × độ dài`
   (10.000 doanh nghiệp / 6 giờ ≈ 0,46 lượt / giây), poll đầu ngày lúc `đầu POLL_WINDOW + pha × T`.
 - Scheduler mỗi giây: tạo lịch cho doanh nghiệp mới (`new` → build ngay); lấy dòng đến hạn bằng
   `FOR UPDATE SKIP LOCKED`, dời mốc kế tiếp, xếp job. Hàng đợi còn quá
-  `BUILD_QUEUE_MAX_BACKLOG` / `POLL_QUEUE_MAX_BACKLOG` việc chờ thì không xếp thêm.
+  `BUILD_QUEUE_MAX_BACKLOG` / `POLL_QUEUE_MAX_BACKLOG` việc chờ thì không xếp thêm. Cùng nhịp, ghi
+  các dòng nhật ký thao tác gateway để lại trên Redis vào `audit_events` (mục 10).
 - Chỉ một scheduler làm việc: lease Redis `<prefix>:lock:scheduler` (`locks.RedisLease`, 30 s, gia
   hạn mỗi nhịp; hai scheduler chồng nhau trong chốc lát vô hại vì job có khoá duy nhất). Bảo trì giữ
   lease bằng `hold()`: mất lease thì lượt bảo trì bị huỷ. Không dùng khoá advisory theo phiên
@@ -237,7 +265,8 @@ sequenceDiagram
   chung). Lease / Heartbeat chỉ trả `config_version`; đổi phiên bản → worker đăng ký lại.
 - **Xác thực** (bật khi đặt `GATEWAY_TOKEN`): `Register` bằng khoá tham gia (`GATEWAY_TOKEN` hoặc khoá
   dùng một lần, TTL 15 phút) → nhận `worker_token` riêng (chỉ trên Redis, băm SHA-256, hạn trượt 7
-  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id`. "Thêm worker" ghép lệnh `docker run`
+  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id`. Dùng khoá tham gia thì ghi nhật ký
+  thao tác `worker.joined` qua hàng chờ Redis (mục 10). "Thêm worker" ghép lệnh `docker run`
   từ khoá + `GATEWAY_PUBLIC_URL` (trống = địa chỉ trang web) + `GATEWAY_WORKER_IMAGE`.
 - **Slot**: `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống = tự tính theo máy (HTTP 8 / CPU trong
   [8, 64], render 1 / 768 MiB trong [1, 8]); gateway gửi mức trần.
@@ -296,20 +325,31 @@ trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
 Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sách luôn phân trang ở server,
 đếm có giới hạn; index theo đúng truy vấn (trigram cho tên, BRIN theo thời gian).
 
+**Phân trang như open-asm** (`common/pagination.py`): mọi endpoint danh sách nhận `GetManyQuery`
+(`search`, `page` từ 1, `limit` 1–100 mặc định 10, `sortOrder` `ASC` / `DESC`) cộng `sortBy` là
+`Literal` các cột được phép của endpoint (giá trị khác → 422, không bao giờ thành tên cột tuỳ ý) và
+bộ lọc riêng; trả `PageOut` `{data, total, page, limit, pageCount, hasNextPage, exact}` (`exact =
+false`: đếm chạm `COUNT_CAP` 10.000). `ordering()` thêm cột phá hoà cùng chiều và chỉ ghi `NULLS
+LAST` cho cột có NULL, để cột NOT NULL vẫn khớp index khi quét ngược. Giao diện giữ trạng thái như
+console của open-asm: trang danh sách chính ghi `search`, `page`, `pageSize`, `sortBy`, `sortOrder`
+lên URL; danh sách con (`PagedList`) giữ trong component; bấm tiêu đề cột: cột khác → tăng dần, cùng
+cột → đảo chiều. Ngoại lệ: nhật ký thao tác phân trang theo con trỏ (`before`), hàng đợi theo trang
+của Redis.
+
 ## 10. Web và API
 
 - `frontend` (nginx) phục vụ bản build React và chuyển `/api/` tới API (FastAPI, ghép router
-  `modules/*/router.py` ở `bootstrap/app.py`). Một origin nên cookie và chống CSRF giữ nguyên.
+  `modules/*/*_router.py` ở `bootstrap/app.py`). Một origin nên cookie và chống CSRF giữ nguyên.
   Cùng cổng đó nhận gRPC của worker (`http2 on`, `/jobcrawler.crawl.v1.CrawlGateway/` →
   `GATEWAY_UPSTREAM`): hệ thống chỉ mở một cổng.
-- **Đăng nhập** (`modules/auth/auth.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie
+- **Đăng nhập** (`modules/auth/auth_service.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie
   httpOnly `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP
   / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt
   `AUTH_PROXY_USER_HEADER`.
 - **Hợp đồng có kiểu**: mỗi endpoint trả một mô hình `...Out`; `backend/openapi.json` là bản commit
   của spec; orval sinh `frontend/src/lib/gen/queries.ts` (hàm, hook React Query, kiểu). `task api` làm
   cả hai; lệch thì test đỏ.
-- **Cập nhật trực tiếp** (`modules/live/live.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
+- **Cập nhật trực tiếp** (`modules/live/live_service.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
   `GET /api/events?topic=…`, một kết nối mỗi tab cho mọi chủ đề — `workers` (trang Workers),
   `queue` (trang Hàng đợi, thanh bên, thẻ Hàng đợi ở Tổng quan), `run` (trang lượt chạy khi lượt
   build đang chạy: trạng thái, số log / request, danh sách log; lượt poll chỉ ghi khi xong). Mỗi
@@ -324,8 +364,21 @@ Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sá
   thanh bên 15 s) và thử nối lại 2 → 30 s; tab ẩn quá 60 s thì đóng kết nối.
   Phần còn poll (đổi chậm hoặc số liệu tính sẵn): Tổng quan và độ trễ phát hiện 30 s, bộ khung
   doanh nghiệp 15 s, trang tuyển dụng 30 s, proxy trong Cài đặt 15 s.
-- Mọi thao tác thay đổi trạng thái ghi `audit_events` (bí mật bị che). Giao diện chỉ hiện trạng thái
-  và cài đặt, không hiện lệnh vận hành.
+- Mọi thao tác thay đổi trạng thái ghi `audit_events` (bí mật bị che), cùng đăng nhập / đăng nhập sai
+  (kèm số lần sai, có bị khoá không) / đăng xuất, xuất dữ liệu việc làm (định dạng + bộ lọc), kiểm
+  tra proxy, nạp cài đặt từ `.env`. Mỗi dòng ghi nguồn request: IP (sau reverse proxy tin cậy là IP
+  thật) và User-Agent (`GuardMiddleware` → `audit_service.bind_request`), cùng `request_id` để nối
+  với log. `GET /api/audit` trả thêm tên hiện của đối tượng (`resource_label`: tên doanh nghiệp,
+  tiêu đề việc làm), tra theo lô lúc đọc chứ không lưu vào dòng. Worker vào bằng khoá tham gia ghi
+  `worker.joined` (người thực hiện `worker`, đối tượng là worker; metadata `join_id`, máy, nhóm,
+  phiên bản; IP của worker): gateway không nối Postgres để ghi, nên đẩy dòng vào list
+  `<prefix>:audit:pending` trên Redis chính (`audit_service.queue_pending`, id UUIDv7 và thời điểm
+  lấy lúc xảy ra) và scheduler leader ghi vào bảng mỗi nhịp (`flush_pending`: LPOP theo lô, Postgres
+  lỗi thì trả lô về hàng chờ, trùng id thì bỏ). Register lại bằng `worker_token` hay vào bằng
+  `GATEWAY_TOKEN` không ghi. IP là địa chỉ kết nối gRPC, hoặc `X-Forwarded-For` (nginx của
+  `frontend` ghi đè) khi kết nối tới từ `FORWARDED_ALLOW_IPS` như API. Lọc nhật ký theo một khoá
+  tham gia kèm dòng `worker.joined` của worker đã dùng khoá; trang Nhật ký link worker / khoá tới
+  nhật ký của chính nó. Giao diện chỉ hiện trạng thái và cài đặt, không hiện lệnh vận hành.
 
 ## 11. Quan sát và kiểm thử
 

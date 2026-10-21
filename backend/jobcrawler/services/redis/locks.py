@@ -9,12 +9,11 @@ PgBouncer chế độ transaction (khoá advisory theo phiên không dùng đư�
 huỷ khối đang chạy và ném `LeaseLost` — process đứng lâu hơn `ttl` (GC, máy ngủ) rồi chạy tiếp tự
 dừng ở lần gia hạn kế tiếp. Khoảng chồng ngắn đó vẫn có thể xảy ra: việc ghi DB cần an toàn tuyệt
 đối thì kèm fencing token (`database/fencing.py`, khoá theo doanh nghiệp
-`modules/crawl/crawl.company_lock`).
+`modules/crawl/crawl_service.company_lock`).
 
 Dùng cho: leader của scheduler (`bootstrap/scheduler.py`, gọi `acquire()` mỗi nhịp, chỉ xếp job có
-khoá duy nhất nên chạy trùng vô hại), lượt bảo trì (`modules/maintenance/maintenance.py`), khoá theo
-doanh nghiệp (`modules/crawl/crawl.py`).
-"""
+khoá duy nhất nên chạy trùng vô hại), lượt bảo trì (`modules/maintenance/maintenance_service.py`),
+khoá theo doanh nghiệp (`modules/crawl/crawl_service.py`)."""
 
 from __future__ import annotations
 

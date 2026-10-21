@@ -13,7 +13,7 @@ bị gộp.
 Mã nguồn: [`pipeline/dedup.py`](../backend/jobcrawler/pipeline/dedup.py) (luật so),
 [`pipeline/store.py`](../backend/jobcrawler/pipeline/store.py) (gắn vào việc đã lưu),
 [`pipeline/verify.py`](../backend/jobcrawler/pipeline/verify.py) (`mark_reposts`),
-[`modules/maintenance/maintenance.py`](../backend/jobcrawler/modules/maintenance/maintenance.py) (`dedupe_jobs`).
+[`modules/maintenance/maintenance_service.py`](../backend/jobcrawler/modules/maintenance/maintenance_service.py) (`dedupe_jobs`).
 
 ## 1. Các lớp chống trùng
 

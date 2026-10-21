@@ -304,8 +304,8 @@ class Job(Base):
             unique=True,
             postgresql_where=text("status = 'active' AND fingerprint IS NOT NULL"),
         ),
-        # Danh sách việc làm: lọc trạng thái + từng kiểu sắp xếp (queries.SORTS), nguồn, tỉnh,
-        # tìm kiếm; BRIN cho biểu đồ theo ngày thấy.
+        # Danh sách việc làm: lọc trạng thái + từng cột sắp xếp (jobs/queries.JOB_SORTS), nguồn,
+        # tỉnh, tìm kiếm; BRIN cho biểu đồ theo ngày thấy.
         Index(
             "ix_jobs_status_first_seen_at", "status", text("first_seen_at DESC"), text("id DESC")
         ),
@@ -543,7 +543,7 @@ class AppSetting(Base):
 
 class AuditEvent(Base):
     """Nhật ký thao tác của người vận hành (giao diện / API: lưu cài đặt, đưa việc vào queue,
-    import, kiểm tay...), ghi qua `modules/audit/audit.py`.
+    import, kiểm tay...), ghi qua `modules/audit/audit_service.py`.
 
     Chỉ ghi thêm: không có đường sửa / xoá trong code, bảo trì định kỳ không dọn bảng này. Id
     UUIDv7 tăng theo thời gian nên trang danh sách phân trang theo `id` giảm dần."""
@@ -567,6 +567,10 @@ class AuditEvent(Base):
     resource_id: Mapped[str | None]
     # Id request HTTP (middleware gắn vào contextvars của structlog), để nối với log.
     request_id: Mapped[str | None]
+    # Nguồn request (`GuardMiddleware` gắn): IP người dùng (sau reverse proxy tin cậy là IP thật)
+    # và User-Agent của trình duyệt / client; trống với thao tác không đến từ request (CLI, cron).
+    ip: Mapped[str | None]
+    user_agent: Mapped[str | None]
     # {key: {"before": ..., "after": ...}}; bí mật đã che (`app_settings.MASK`).
     changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Thông tin nhỏ kèm theo (số đếm, cách kích hoạt, tên...). `metadata` là tên dành riêng của

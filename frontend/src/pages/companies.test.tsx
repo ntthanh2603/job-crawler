@@ -11,7 +11,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
 }
 
-const EMPTY_PAGE = { items: [], total: 0, page: 1, pages: 1, size: 50, exact: true }
+const EMPTY_PAGE = { data: [], total: 0, page: 1, limit: 50, pageCount: 1, hasNextPage: false, exact: true }
 
 /** Trang Doanh nghiệp (danh sách rỗng); `POST /api/companies` trả lần lượt từng phần tử của `created`. */
 function renderPage(created: Response[]) {

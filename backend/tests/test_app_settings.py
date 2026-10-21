@@ -10,8 +10,8 @@ import pytest
 from pydantic import SecretStr
 
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.settings import app_settings as a
-from jobcrawler.modules.settings.app_settings import SettingsError
+from jobcrawler.modules.settings import app_settings_service as a
+from jobcrawler.modules.settings.app_settings_service import SettingsError
 
 pytestmark = pytest.mark.usefixtures("clean_env")
 

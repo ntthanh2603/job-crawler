@@ -1,4 +1,5 @@
-"""Cập nhật trực tiếp (`GET /api/events`, `modules/live/live.py`) không cần DB: dữ liệu từ loader
+"""Cập nhật trực tiếp (`GET /api/events`, `modules/live/live_service.py`) không cần DB: dữ liệu từ
+loader
 giả, đọc luồng SSE qua ASGI từng phần (httpx.ASGITransport chờ hết body nên không đọc được luồng vô
 hạn)."""
 
@@ -20,14 +21,14 @@ from pydantic import SecretStr
 
 from jobcrawler.bootstrap.app import create_app
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.auth.auth import COOKIE, TokenAuth
-from jobcrawler.modules.gateway.registry import WorkerStatus
-from jobcrawler.modules.gateway.schemas import WorkersPageOut, WorkersSummaryOut
-from jobcrawler.modules.live import live
-from jobcrawler.modules.queue.schemas import QueueOut, QueuePageOut
+from jobcrawler.modules.auth.auth_service import COOKIE, TokenAuth
+from jobcrawler.modules.gateway.gateway_schema import WorkersPageOut, WorkersSummaryOut
+from jobcrawler.modules.gateway.registry_service import WorkerStatus
+from jobcrawler.modules.live import live_schema, live_service
+from jobcrawler.modules.queue.queue_schema import QueueOut, QueuePageOut
 
 PASSWORD = "x"
-FAST: dict[live.LiveTopic, float] = {"workers": 0.02, "queue": 0.02, "run": 0.02}
+FAST: dict[live_schema.LiveTopic, float] = {"workers": 0.02, "queue": 0.02, "run": 0.02}
 
 
 def workers_page(*ids: str, now_ms: int = 1) -> WorkersPageOut:
@@ -78,7 +79,7 @@ class FakeSource:
     pages: list[tuple[Any, ...]] = field(default_factory=list)
     fail: int = 0  # số lần đọc tới bị lỗi
 
-    async def load(self, key: live.TopicKey) -> live.LiveOut:
+    async def load(self, key: live_service.TopicKey) -> live_schema.LiveOut:
         self.loads[key.topic] += 1
         if self.fail:
             self.fail -= 1
@@ -86,11 +87,11 @@ class FakeSource:
         if key.topic == "workers":
             # now_ms đổi mỗi lần đọc: không được tính là "đổi".
             page = workers_page(*self.workers, now_ms=int(time.time() * 1000))
-            return live.LiveOut(topic="workers", workers=page)
+            return live_schema.LiveOut(topic="workers", workers=page)
         if key.topic == "queue":
             self.pages.append(key.params)
-            return live.LiveOut(topic="queue", queue=queue_page(self.queued, key.params[0]))
-        return live.LiveOut(topic="run", run=None)
+            return live_schema.LiveOut(topic="queue", queue=queue_page(self.queued, key.params[0]))
+        return live_schema.LiveOut(topic="run", run=None)
 
 
 @dataclass
@@ -216,7 +217,7 @@ class SseStream:
 class Live:
     app: FastAPI
     source: FakeSource
-    hub: live.LiveHub
+    hub: live_service.LiveHub
     auth: TokenAuth
 
     def stream(self, query: str, **headers: str) -> SseStream:
@@ -234,7 +235,7 @@ async def web() -> AsyncIterator[Live]:
     auth = TokenAuth(username="admin", password=PASSWORD, secret=b"k" * 32, hours=1)
     app.state.token_auth = auth
     source = FakeSource()
-    hub = live.LiveHub(source.load, intervals=FAST, refresh=60, linger=0.05)
+    hub = live_service.LiveHub(source.load, intervals=FAST, refresh=60, linger=0.05)
     app.state.live = hub
     yield Live(app, source, hub, auth)
     hub.close()
@@ -251,7 +252,7 @@ async def test_requires_login_and_reads_cookie(web: Live) -> None:
         assert s.response_headers["cache-control"] == "no-cache"
         assert s.response_headers["x-accel-buffering"] == "no"  # nginx không đệm
         first = await s.next_event()
-        assert first.retry == live.RETRY_MS
+        assert first.retry == live_service.RETRY_MS
         assert first.data is None
 
 
@@ -275,7 +276,7 @@ async def test_pushes_snapshot_then_only_changes(web: Live) -> None:
 
 
 async def test_refresh_resends_unchanged_snapshot(web: Live) -> None:
-    hub = live.LiveHub(web.source.load, intervals=FAST, refresh=0.2, linger=0.05)
+    hub = live_service.LiveHub(web.source.load, intervals=FAST, refresh=0.2, linger=0.05)
     web.app.state.live = hub
     try:
         async with web.stream("topic=workers") as s:
@@ -363,7 +364,7 @@ class RevokedRedis:
 async def test_stream_ends_when_token_is_revoked(
     web: Live, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(live, "AUTH_CHECK_SECONDS", 0.05)
+    monkeypatch.setattr(live_service, "AUTH_CHECK_SECONDS", 0.05)
     redis = RevokedRedis()
     web.app.state.res = SimpleNamespace(redis=redis)
     issued = web.auth.issue()
@@ -375,7 +376,7 @@ async def test_stream_ends_when_token_is_revoked(
 
 
 async def test_stream_ends_when_token_expires(web: Live, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(live, "AUTH_CHECK_SECONDS", 0.05)
+    monkeypatch.setattr(live_service, "AUTH_CHECK_SECONDS", 0.05)
     # Token còn hạn đúng một giây.
     issued = web.auth.issue(now=time.time() - web.auth.ttl + 1)
     headers = {"cookie": f"{COOKIE}={issued.token}"}
@@ -394,8 +395,8 @@ async def test_ping_keeps_idle_connection_alive(web: Live, monkeypatch: pytest.M
 
 def test_event_id_roundtrip() -> None:
     sent = {"workers": "0a1b2c3d4e5f6071", "queue": "ffeeddccbbaa9988"}
-    assert live.event_id(sent) == "queue:ffeeddccbbaa9988,workers:0a1b2c3d4e5f6071"
-    assert live.parse_event_id(live.event_id(sent)) == sent
-    assert live.parse_event_id(None) == {}
-    assert live.parse_event_id("workers:XYZ,khac:12,run:,queue:ab") == {"queue": "ab"}
-    assert live.parse_event_id("queue:ab" + "," * live.MAX_EVENT_ID) == {}
+    assert live_service.event_id(sent) == "queue:ffeeddccbbaa9988,workers:0a1b2c3d4e5f6071"
+    assert live_service.parse_event_id(live_service.event_id(sent)) == sent
+    assert live_service.parse_event_id(None) == {}
+    assert live_service.parse_event_id("workers:XYZ,khac:12,run:,queue:ab") == {"queue": "ab"}
+    assert live_service.parse_event_id("queue:ab" + "," * live_service.MAX_EVENT_ID) == {}

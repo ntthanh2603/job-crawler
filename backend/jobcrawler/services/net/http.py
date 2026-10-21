@@ -1,10 +1,9 @@
 """HTTP client: robots + cache + proxy pool + rate limit + retry + nhận diện trang chặn.
 
-Request đi qua `Transport` / `Renderer`: khi crawl là worker lấy trang (`modules.gateway.remote`,
-worker gửi bằng curl_cffi / Chromium), khi gọi API bên ngoài là httpx (`services.net.direct`). Các
-nguồn (sources/) chỉ phụ thuộc giao diện `Fetcher`; test inject `FakeFetcher` (fakes.py). Bản thân
-`HttpClient` test được bằng `FakeTransport`/`FakeRenderer`.
-"""
+Request đi qua `Transport` / `Renderer`: khi crawl là worker lấy trang
+(`modules.gateway.remote_service`, worker gửi bằng curl_cffi / Chromium), khi gọi API bên ngoài là
+httpx (`services.net.direct`). Các nguồn (sources/) chỉ phụ thuộc giao diện `Fetcher`; test inject
+`FakeFetcher` (fakes.py). Bản thân `HttpClient` test được bằng `FakeTransport`/`FakeRenderer`."""
 
 from __future__ import annotations
 

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from jobcrawler.common.schemas import JobOut, JobStatus
 from jobcrawler.database.models import Job
-from jobcrawler.modules.jobs.export import CSV_COLUMNS, JobWriter, output_path
+from jobcrawler.modules.jobs.export_service import CSV_COLUMNS, JobWriter, output_path
 from jobcrawler.pipeline.store import job_to_out, job_values
 
 from .jobs_fixtures import NOW, normalized, raw_job

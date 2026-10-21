@@ -257,9 +257,9 @@ export function QueuePage() {
                   {q.pages > 1 && (
                     <Pager
                       page={q.page}
-                      pages={q.pages}
+                      pageCount={q.pages}
                       total={q.total}
-                      size={25}
+                      limit={25}
                       onPage={(p) => setPages((cur) => ({ ...cur, [meta.param]: p }))}
                     />
                   )}

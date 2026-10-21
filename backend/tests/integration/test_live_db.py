@@ -17,9 +17,9 @@ from redis.asyncio import Redis
 
 from jobcrawler.bootstrap.app import create_app
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.auth.auth import COOKIE
-from jobcrawler.modules.gateway import registry
-from jobcrawler.modules.live import live
+from jobcrawler.modules.auth.auth_service import COOKIE
+from jobcrawler.modules.gateway import registry_service
+from jobcrawler.modules.live import live_service
 from jobcrawler.services.redis.queues import drop_queue
 
 from ..test_live import FAST, SseStream
@@ -68,8 +68,8 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
         async with app.router.lifespan_context(app):
             # Hub của lifespan, chỉ đọc nhanh hơn cho test.
             app.state.live.close()
-            loader = live.resource_loader(app.state.res, settings)
-            app.state.live = live.LiveHub(loader, intervals=FAST, linger=0.05)
+            loader = live_service.resource_loader(app.state.res, settings)
+            app.state.live = live_service.LiveHub(loader, intervals=FAST, linger=0.05)
             yield Web(app, settings, tag, app.state.token_auth.issue().token)
     finally:
         redis = Redis.from_url(settings.redis_url)
@@ -85,9 +85,9 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
 
 async def test_topics_match_json_endpoints_and_push_changes(web: Web) -> None:
     res = web.app.state.res
-    keys = registry.Keys(web.settings.redis_prefix)
-    worker = registry.WorkerStatus(worker_id="w-live", hostname="may-1", http_slots=4)
-    await registry.save_worker(res.redis, keys, worker, ttl=30)
+    keys = registry_service.Keys(web.settings.redis_prefix)
+    worker = registry_service.WorkerStatus(worker_id="w-live", hostname="may-1", http_slots=4)
+    await registry_service.save_worker(res.redis, keys, worker, ttl=30)
     _, run_id, *_ = await seed(web.app.state, web.tag)
 
     query = f"topic=workers&topic=queue&topic=run&run_id={run_id}"

@@ -73,8 +73,8 @@ class PlanSpec(BaseModel):
     jobs: int = 0  # số tin lượt build
     links: int = 0  # số link tin thấy trên các trang danh sách
     # Số trang (danh sách, danh mục, trang API) một lượt poll được đọc ở nguồn này: phần của nguồn
-    # trong PLAN_MAX_PAGES của doanh nghiệp (`modules.crawl.plans.allocate_pages`). 0 = bộ khung ghi
-    # trước khi có giới hạn này: poll dùng PLAN_MAX_PAGES.
+    # trong PLAN_MAX_PAGES của doanh nghiệp (`modules.crawl.plan_service.allocate_pages`). 0 = bộ
+    # khung ghi trước khi có giới hạn này: poll dùng PLAN_MAX_PAGES.
     pages: int = 0
 
     def add(

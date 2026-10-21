@@ -1,8 +1,8 @@
 """`Transport` gọi thẳng từ backend bằng httpx (HTTP/1.1), chỉ cho API bên ngoài (SERP).
 
 Không dùng để crawl: website / ATS / trang tuyển dụng đi qua worker lấy trang
-(`modules.gateway.remote`). Tham số `proxy` bị bỏ qua: API bên ngoài gọi thẳng, không qua proxy.
-"""
+(`modules.gateway.remote_service`). Tham số `proxy` bị bỏ qua: API bên ngoài gọi thẳng, không qua
+proxy."""
 
 from __future__ import annotations
 

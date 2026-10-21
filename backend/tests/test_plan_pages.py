@@ -1,5 +1,5 @@
 """Bộ khung 3–10 trang mỗi doanh nghiệp: lượt build chia trang cho các nguồn
-(`modules.crawl.plans.allocate_pages`), lượt poll chỉ đọc đúng phần trang của nguồn."""
+(`modules.crawl.plan_service.allocate_pages`), lượt poll chỉ đọc đúng phần trang của nguồn."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from jobcrawler.common.schemas import RawJob
-from jobcrawler.modules.crawl.plans import allocate_pages, built_plans
+from jobcrawler.modules.crawl.plan_service import allocate_pages, built_plans
 from jobcrawler.pipeline.collect import SourceReport
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.services.llm import LLMClient

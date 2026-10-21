@@ -1,7 +1,9 @@
-// Lịch thu thập: nhãn loại / lý do lượt chạy, trạng thái lịch, bộ khung của doanh nghiệp.
+// Lịch thu thập: nhãn loại / lý do lượt chạy, trạng thái lịch, bộ khung của doanh nghiệp (sơ đồ ở
+// plan-flow.tsx).
 import { useQueryClient } from "@tanstack/react-query"
-import { ChevronRight, Hammer, Radar, Waypoints } from "lucide-react"
+import { Hammer, Map as MapIcon, Radar, Waypoints } from "lucide-react"
 import type { ReactNode } from "react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
 import {
@@ -14,6 +16,7 @@ import {
   StatusBadge,
   type Tone,
 } from "@/components/common"
+import { CrawlDay, PlanFlow, PlanReads } from "@/components/plan-flow"
 import { Button } from "@/components/ui/button"
 import { ago, cap, dec, duration, dt, num, shortUrl, sourceLabel } from "@/lib/format"
 import {
@@ -23,7 +26,7 @@ import {
   usePostCompanyBuild,
   usePostCompanyPoll,
 } from "@/lib/gen/queries"
-import type { CrawlPlan, CrawlSchedule, RunKind, RunTrigger, ScheduleState } from "@/lib/types"
+import type { CrawlPlan, CrawlSchedule, PollLimits, RunKind, RunTrigger, ScheduleState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // --- nhãn ------------------------------------------------------------------------------------------
@@ -65,7 +68,7 @@ export const SCHEDULE_STATES: Record<ScheduleState, { label: string; tone: Tone;
 
 export const SCHEDULE_ORDER: ScheduleState[] = ["ready", "new", "no_sources", "broken", "paused"]
 
-const PLAN_STATUS: Record<CrawlPlan["status"], { label: string; tone: Tone }> = {
+export const PLAN_STATUS: Record<CrawlPlan["status"], { label: string; tone: Tone }> = {
   active: { label: "Đang dùng", tone: "good" },
   broken: { label: "Hỏng, chờ build lại", tone: "bad" },
   retired: { label: "Không còn dùng", tone: "muted" },
@@ -244,45 +247,11 @@ function ScheduleFacts({ schedule: s }: { schedule: CrawlSchedule }) {
   )
 }
 
-function LinkList({ title, urls }: { title: string; urls: string[] }) {
-  if (!urls.length) return null
-  return (
-    <details className="group text-meta">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-muted-foreground transition-colors select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
-        {title} ({num(urls.length)})
-      </summary>
-      <ul className="mt-1.5 space-y-1 border-l pl-4">
-        {urls.map((u) => (
-          <li key={u} className="min-w-0">
-            <ExternalLink href={u} className="break-all">
-              {shortUrl(u)}
-            </ExternalLink>
-          </li>
-        ))}
-      </ul>
-    </details>
-  )
-}
-
-function PlanItem({ plan: p }: { plan: CrawlPlan }) {
+function PlanItem({ plan: p, limits }: { plan: CrawlPlan; limits: PollLimits }) {
   const st = PLAN_STATUS[p.status] ?? { label: cap(p.status), tone: "muted" as Tone }
   const target = p.source.includes(":") ? p.source.split(":").slice(1).join(":") : ""
-  const counts = [
-    // Phần trang của nguồn trong bộ khung: lượt poll đọc tối đa chừng này trang danh sách / API.
-    p.pages > 0
-      ? p.pages_needed > p.pages
-        ? `Poll đọc ${num(p.pages)}/${num(p.pages_needed)} trang`
-        : `Poll đọc trọn ${num(Math.max(p.pages_needed, 1))} trang`
-      : null,
-    p.listings.length ? `${num(p.listings.length)} trang danh sách` : null,
-    p.apis.length ? `${num(p.apis.length)} API` : null,
-    p.hubs ? `${num(p.hubs)} trang danh mục` : null,
-    p.rendered ? `${num(p.rendered)} trang cần render` : null,
-    p.ignored ? `${num(p.ignored)} trang bỏ qua` : null,
-  ].filter(Boolean) as string[]
   return (
-    <li className={cn("space-y-2.5 px-4 py-4 sm:px-5", p.status === "retired" && "opacity-70")}>
+    <li className={cn("space-y-4 px-4 py-4 sm:px-5", p.status === "retired" && "opacity-70")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -293,36 +262,35 @@ function PlanItem({ plan: p }: { plan: CrawlPlan }) {
           <ExternalLink href={p.url} className="block text-meta break-all">
             {shortUrl(p.url)}
           </ExternalLink>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-0.5 text-meta text-muted-foreground">
+            <span>Build {ago(p.built_at)}</span>
+            <span>{p.polled_at ? `Poll ${ago(p.polled_at)}` : "Chưa poll"}</span>
+            {p.changed_at && <span>Thay đổi {ago(p.changed_at)}</span>}
+            {p.failures > 0 && <span className="font-medium text-warning-ink">{num(p.failures)} lỗi liên tiếp</span>}
+          </div>
         </div>
-        <span className="shrink-0 text-right">
-          <span className="block text-base font-semibold text-brand tabular-nums">{num(p.jobs)}</span>
-          <span className="text-caption text-muted-foreground">tin lúc build</span>
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-meta text-muted-foreground">
-        <span>Build {ago(p.built_at)}</span>
-        <span>{p.polled_at ? `Poll ${ago(p.polled_at)}` : "Chưa poll"}</span>
-        {p.changed_at && <span>Thay đổi {ago(p.changed_at)}</span>}
-        {p.failures > 0 && <span className="font-medium text-warning-ink">{num(p.failures)} lỗi liên tiếp</span>}
-      </div>
-      {(counts.length > 0 || p.llm_listing) && (
-        <div className="flex flex-wrap gap-1">
-          {counts.map((c) => (
-            <Pill key={c} className="bg-secondary text-secondary-foreground">
-              {c}
-            </Pill>
-          ))}
-          {p.llm_listing && (
-            <Pill className="bg-neutral-tone/12 text-neutral-ink" title="Trang danh sách không có cấu trúc rõ, LLM đọc giúp">
-              LLM đọc danh sách
-            </Pill>
-          )}
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <span className="text-right">
+            <span className="block text-base font-semibold text-brand tabular-nums">{num(p.jobs)}</span>
+            <span className="text-caption text-muted-foreground">tin trong bộ khung</span>
+          </span>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/plans/${p.id}`}>
+              <MapIcon /> Bản đồ bộ khung
+            </Link>
+          </Button>
         </div>
+      </div>
+      {p.status === "retired" ? (
+        <p className="text-meta text-muted-foreground">Lượt build gần nhất không còn thấy nguồn này nên lượt poll không đọc nữa.</p>
+      ) : p.readable ? (
+        <PlanFlow plan={p} limits={limits} />
+      ) : (
+        <p className="text-meta text-warning-ink">
+          Bộ khung ghi theo phiên bản cũ nên không đọc lại được: lượt poll tới đánh hỏng và doanh nghiệp được build lại.
+        </p>
       )}
-      <div className="space-y-1.5">
-        <LinkList title="Trang danh sách" urls={p.listings} />
-        <LinkList title="API danh sách tin" urls={p.apis} />
-      </div>
+      <PlanReads plan={p} />
       {p.last_error && (
         <pre className="overflow-x-auto rounded-lg bg-destructive/6 p-2.5 font-mono text-meta whitespace-pre-wrap text-danger-ink [overflow-wrap:anywhere]">
           {p.last_error}
@@ -343,7 +311,7 @@ export function CompanyCrawlTab({ id }: { id: string }) {
         <Loading rows={4} />
       </Section>
     )
-  const { schedule, plans, poll_interval_seconds: interval } = query.data
+  const { schedule, plans, poll_interval_seconds: interval, windows, limits } = query.data
   const active = plans.filter((p) => p.status === "active").length
   return (
     <div className="space-y-6">
@@ -371,8 +339,9 @@ export function CompanyCrawlTab({ id }: { id: string }) {
           </>
         }
       >
+        <CrawlDay windows={windows} interval={secondsText(interval)} lastBuildAt={schedule?.last_build_at} />
         {schedule ? (
-          <div className="space-y-4">
+          <div className="mt-5 space-y-4 border-t pt-5">
             <ScheduleFacts schedule={schedule} />
             {schedule.last_error && (
               <div className="rounded-lg border border-destructive/25 bg-destructive/5 p-3">
@@ -384,7 +353,7 @@ export function CompanyCrawlTab({ id }: { id: string }) {
             )}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">
+          <p className="mt-5 border-t pt-5 text-sm text-muted-foreground">
             Doanh nghiệp chưa có lịch thu thập. Lịch và bộ khung được tạo ở lượt build đầu tiên.
           </p>
         )}
@@ -402,7 +371,7 @@ export function CompanyCrawlTab({ id }: { id: string }) {
         {plans.length ? (
           <ul className="divide-y">
             {plans.map((p) => (
-              <PlanItem key={p.id} plan={p} />
+              <PlanItem key={p.id} plan={p} limits={limits} />
             ))}
           </ul>
         ) : (

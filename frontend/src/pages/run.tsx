@@ -11,6 +11,7 @@ import {
   PageHeader,
   PageLoading,
   Section,
+  SortHead,
   StatCard,
   StatGrid,
   StatusBadge,
@@ -25,9 +26,14 @@ import { LiveStatus, useLiveRun } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { getGetRunFetchesQueryOptions, getGetRunLogsQueryOptions } from "@/lib/gen/queries"
+import {
+  getGetRunFetchesQueryOptions,
+  getGetRunLogsQueryOptions,
+  type GetRunFetchesSortBy,
+  type GetRunLogsSortBy,
+} from "@/lib/gen/queries"
 import { ago, byCount, cap, companyName, dt, duration, failReason, hour, label, num, shortUrl, sourceLabel } from "@/lib/format"
-import type { RunDetail } from "@/lib/types"
+import type { RunDetail, SortState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const LEVELS: Record<string, [Tone, string]> = {
@@ -39,6 +45,10 @@ const LEVELS: Record<string, [Tone, string]> = {
 }
 
 const TABS = ["fetches", "logs"] as const
+
+// Request theo thứ tự gửi, log theo thời gian (cũ trước), như lượt chạy diễn ra.
+const FETCH_SORT: SortState<GetRunFetchesSortBy> = { sortBy: "created_at", sortOrder: "ASC" }
+const LOG_SORT: SortState<GetRunLogsSortBy> = { sortBy: "ts", sortOrder: "ASC" }
 
 function value(v: unknown): string {
   const text = typeof v === "object" ? JSON.stringify(v) : String(v)
@@ -246,15 +256,27 @@ export function RunPage() {
           <TabsContent value="fetches">
             <Section bodyClassName="p-0">
               <PagedList
-                options={(page) => getGetRunFetchesQueryOptions(r.run_id, { page })}
+                options={(p) => getGetRunFetchesQueryOptions(r.run_id, p)}
+                defaultSort={FETCH_SORT}
+                defaultLimit={50}
+                searchPlaceholder="Tìm theo URL hoặc nguồn…"
                 empty="Không có request nào.">
-                {(fetches) => (
+                {(fetches, { sort, onSort }) => (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>URL</TableHead>
-                        <TableHead>Kết quả</TableHead>
-                        <TableHead className="text-right">Số tin</TableHead>
+                        <SortHead column="created_at" sort={sort} onSort={onSort}>
+                          URL
+                        </SortHead>
+                        <SortHead column="http_status" sort={sort} onSort={onSort}>
+                          Kết quả
+                        </SortHead>
+                        <SortHead column="items" sort={sort} onSort={onSort} className="text-right">
+                          Số tin
+                        </SortHead>
+                        <SortHead column="duration_ms" sort={sort} onSort={onSort} className="text-right">
+                          Thời gian
+                        </SortHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -279,7 +301,9 @@ export function RunPage() {
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {f.items ?? <span className="text-muted-foreground">–</span>}
-                            <div className="text-meta text-muted-foreground">{duration(f.duration_ms)}</div>
+                          </TableCell>
+                          <TableCell className="text-right text-meta text-muted-foreground tabular-nums">
+                            {duration(f.duration_ms)}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -292,7 +316,10 @@ export function RunPage() {
           <TabsContent value="logs">
             <Section bodyClassName="p-0">
               <PagedList
-                options={(page) => getGetRunLogsQueryOptions(r.run_id, { page })}
+                options={(p) => getGetRunLogsQueryOptions(r.run_id, p)}
+                defaultSort={LOG_SORT}
+                defaultLimit={100}
+                searchPlaceholder="Tìm theo tên sự kiện…"
                 empty="Không có log cho lượt chạy này.">
                 {(logs) => (
                   <div className="divide-y">

@@ -53,6 +53,17 @@
             "title": "Id",
             "type": "string"
           },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
           "metadata": {
             "anyOf": [
               {
@@ -92,6 +103,17 @@
             ],
             "title": "Resource Id"
           },
+          "resource_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Label"
+          },
           "resource_type": {
             "anyOf": [
               {
@@ -102,6 +124,17 @@
               }
             ],
             "title": "Resource Type"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
           }
         },
         "required": [
@@ -111,7 +144,10 @@
           "action",
           "resource_type",
           "resource_id",
+          "resource_label",
           "request_id",
+          "ip",
+          "user_agent",
           "changes",
           "metadata"
         ],
@@ -681,6 +717,9 @@
       },
       "CompanyCrawlOut": {
         "properties": {
+          "limits": {
+            "$ref": "#/components/schemas/PollLimitsOut"
+          },
           "plans": {
             "items": {
               "$ref": "#/components/schemas/PlanOut"
@@ -701,12 +740,17 @@
                 "type": "null"
               }
             ]
+          },
+          "windows": {
+            "$ref": "#/components/schemas/CrawlWindowsOut"
           }
         },
         "required": [
           "schedule",
           "plans",
-          "poll_interval_seconds"
+          "poll_interval_seconds",
+          "limits",
+          "windows"
         ],
         "title": "CompanyCrawlOut",
         "type": "object"
@@ -2604,29 +2648,32 @@
       },
       "PageOut_BoardRunOut_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BoardRunOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/BoardRunOut"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2635,11 +2682,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[BoardRunOut]",
@@ -2647,29 +2695,32 @@
       },
       "PageOut_CompanyItem_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/CompanyItem"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2678,11 +2729,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[CompanyItem]",
@@ -2690,29 +2742,32 @@
       },
       "PageOut_FetchOut_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/FetchOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/FetchOut"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2721,11 +2776,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[FetchOut]",
@@ -2733,29 +2789,32 @@
       },
       "PageOut_JobItem_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/JobItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/JobItem"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2764,11 +2823,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[JobItem]",
@@ -2776,29 +2836,32 @@
       },
       "PageOut_LogOut_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/LogOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/LogOut"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2807,11 +2870,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[LogOut]",
@@ -2819,29 +2883,32 @@
       },
       "PageOut_PostingOut_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PostingOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/PostingOut"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2850,11 +2917,12 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[PostingOut]",
@@ -2862,29 +2930,32 @@
       },
       "PageOut_RunOut_": {
         "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
           "exact": {
             "default": true,
             "title": "Exact",
             "type": "boolean"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/RunOut"
-            },
-            "title": "Items",
-            "type": "array"
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
           },
           "page": {
             "title": "Page",
             "type": "integer"
           },
-          "pages": {
-            "title": "Pages",
-            "type": "integer"
-          },
-          "size": {
-            "default": 50,
-            "title": "Size",
+          "pageCount": {
+            "title": "Pagecount",
             "type": "integer"
           },
           "total": {
@@ -2893,24 +2964,284 @@
           }
         },
         "required": [
-          "items",
+          "data",
           "total",
           "page",
-          "pages",
-          "size",
+          "limit",
+          "pageCount",
+          "hasNextPage",
           "exact"
         ],
         "title": "PageOut[RunOut]",
+        "type": "object"
+      },
+      "PlanApiOut": {
+        "description": "Một API danh sách tin (`PlanSpec.apis`): poll gọi thẳng bằng HTTP.",
+        "properties": {
+          "by_offset": {
+            "title": "By Offset",
+            "type": "boolean"
+          },
+          "embedded": {
+            "title": "Embedded",
+            "type": "boolean"
+          },
+          "listing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listing"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "page_param": {
+            "title": "Page Param",
+            "type": "string"
+          },
+          "paged": {
+            "title": "Paged",
+            "type": "boolean"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "method",
+          "embedded",
+          "paged",
+          "page_param",
+          "by_offset",
+          "size",
+          "total",
+          "pages",
+          "listing"
+        ],
+        "title": "PlanApiOut",
+        "type": "object"
+      },
+      "PlanDetailOut": {
+        "description": "Toàn bộ một bộ khung: trang / API (như `PlanOut`), các mã tin, link bỏ qua, danh mục\nmã → tên và JSON gốc.",
+        "properties": {
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "ignored_links": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored Links",
+            "type": "array"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PlanJobOut"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "jobs_total": {
+            "title": "Jobs Total",
+            "type": "integer"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PollLimitsOut"
+          },
+          "names": {
+            "items": {
+              "$ref": "#/components/schemas/PlanNameOut"
+            },
+            "title": "Names",
+            "type": "array"
+          },
+          "names_total": {
+            "title": "Names Total",
+            "type": "integer"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanOut"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          }
+        },
+        "required": [
+          "company_id",
+          "company_name",
+          "plan",
+          "limits",
+          "jobs",
+          "jobs_total",
+          "ignored_links",
+          "names",
+          "names_total",
+          "spec"
+        ],
+        "title": "PlanDetailOut",
+        "type": "object"
+      },
+      "PlanJobOut": {
+        "description": "Một mã tin trong bộ khung (`crawl_plans.job_keys`) và tin đã lưu của nó (nếu có).",
+        "properties": {
+          "accepted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted"
+          },
+          "indirect": {
+            "title": "Indirect",
+            "type": "boolean"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "key",
+          "indirect",
+          "url",
+          "title",
+          "status",
+          "accepted",
+          "job_id"
+        ],
+        "title": "PlanJobOut",
+        "type": "object"
+      },
+      "PlanNameOut": {
+        "description": "Một mục danh mục mã → tên tải kèm trang (`PlanSpec.names`), vd. tỉnh `33` → \"Hà Nội\".",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "title": "PlanNameOut",
         "type": "object"
       },
       "PlanOut": {
         "properties": {
           "apis": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/PlanApiOut"
             },
             "title": "Apis",
             "type": "array"
+          },
+          "apis_total": {
+            "title": "Apis Total",
+            "type": "integer"
+          },
+          "ats": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats"
           },
           "built_at": {
             "format": "date-time",
@@ -2933,10 +3264,6 @@
             "title": "Failures",
             "type": "integer"
           },
-          "hubs": {
-            "title": "Hubs",
-            "type": "integer"
-          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2944,6 +3271,10 @@
           },
           "ignored": {
             "title": "Ignored",
+            "type": "integer"
+          },
+          "indirect": {
+            "title": "Indirect",
             "type": "integer"
           },
           "jobs": {
@@ -2965,12 +3296,19 @@
             ],
             "title": "Last Error"
           },
+          "last_poll": {
+            "$ref": "#/components/schemas/PlanPollResult"
+          },
           "listings": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/PlanPageOut"
             },
             "title": "Listings",
             "type": "array"
+          },
+          "listings_total": {
+            "title": "Listings Total",
+            "type": "integer"
           },
           "llm_listing": {
             "title": "Llm Listing",
@@ -2996,9 +3334,9 @@
             ],
             "title": "Polled At"
           },
-          "rendered": {
-            "title": "Rendered",
-            "type": "integer"
+          "readable": {
+            "title": "Readable",
+            "type": "boolean"
           },
           "source": {
             "title": "Source",
@@ -3024,17 +3362,63 @@
           "changed_at",
           "failures",
           "last_error",
+          "last_poll",
+          "readable",
+          "ats",
           "listings",
-          "hubs",
+          "listings_total",
           "apis",
-          "rendered",
+          "apis_total",
           "llm_listing",
           "ignored",
+          "indirect",
           "pages",
           "pages_needed"
         ],
         "title": "PlanOut",
         "type": "object"
+      },
+      "PlanPageOut": {
+        "description": "Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs`).",
+        "properties": {
+          "api_only": {
+            "title": "Api Only",
+            "type": "boolean"
+          },
+          "hub": {
+            "title": "Hub",
+            "type": "boolean"
+          },
+          "rendered": {
+            "title": "Rendered",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "hub",
+          "rendered",
+          "api_only"
+        ],
+        "title": "PlanPageOut",
+        "type": "object"
+      },
+      "PlanPollResult": {
+        "description": "Lượt poll gần nhất của một nguồn đi đường nào (suy từ cột của `crawl_plans`: lượt poll\nkhông đổi gì không ghi `company_runs`).",
+        "enum": [
+          "never",
+          "unchanged",
+          "changed",
+          "retrying",
+          "broken",
+          "retired"
+        ],
+        "title": "PlanPollResult",
+        "type": "string"
       },
       "PlanStatus": {
         "description": "Trạng thái bộ khung một nguồn (`crawl_plans`).",
@@ -3045,6 +3429,30 @@
         ],
         "title": "PlanStatus",
         "type": "string"
+      },
+      "PollLimitsOut": {
+        "description": "Giới hạn của lượt poll (cài đặt `POLL_MAX_FAILURES`, `POLL_MAX_DETAIL_PAGES`,\n`PLAN_MAX_PAGES`).",
+        "properties": {
+          "max_detail_pages": {
+            "title": "Max Detail Pages",
+            "type": "integer"
+          },
+          "max_failures": {
+            "title": "Max Failures",
+            "type": "integer"
+          },
+          "max_pages": {
+            "title": "Max Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_failures",
+          "max_detail_pages",
+          "max_pages"
+        ],
+        "title": "PollLimitsOut",
+        "type": "object"
       },
       "PollStatsOut": {
         "description": "Các lượt poll trong `minutes` phút gần nhất; thời gian tính bằng giây.",
@@ -5378,6 +5786,14 @@
         "title": "SettingsUpdate",
         "type": "object"
       },
+      "SortOrder": {
+        "enum": [
+          "ASC",
+          "DESC"
+        ],
+        "title": "SortOrder",
+        "type": "string"
+      },
       "SourceCount": {
         "properties": {
           "outcomes": {
@@ -6276,7 +6692,7 @@
         },
         "summary": "Get Audit",
         "tags": [
-          "api"
+          "audit"
         ]
       }
     },
@@ -6302,7 +6718,7 @@
         },
         "summary": "Get Audit Actions",
         "tags": [
-          "api"
+          "audit"
         ]
       }
     },
@@ -6344,7 +6760,7 @@
         },
         "summary": "Login",
         "tags": [
-          "api"
+          "auth"
         ]
       }
     },
@@ -6366,7 +6782,7 @@
         },
         "summary": "Logout",
         "tags": [
-          "api"
+          "auth"
         ]
       }
     },
@@ -6387,7 +6803,7 @@
         },
         "summary": "Get Boards",
         "tags": [
-          "api"
+          "boards"
         ]
       }
     },
@@ -6396,13 +6812,53 @@
         "operationId": "get_board_runs",
         "parameters": [
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
             }
           },
           {
@@ -6421,6 +6877,22 @@
               ],
               "description": "full | tail",
               "title": "Mode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "started_at",
+              "enum": [
+                "started_at",
+                "new",
+                "fetched",
+                "failed"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -6448,7 +6920,7 @@
         },
         "summary": "Get Board Runs",
         "tags": [
-          "api"
+          "boards"
         ]
       }
     },
@@ -6490,62 +6962,115 @@
         },
         "summary": "Post Board Index",
         "tags": [
-          "api"
+          "boards"
         ]
       }
     },
     "/api/companies": {
       "get": {
+        "description": "Doanh nghiệp theo bộ lọc, một trang.",
         "operationId": "get_companies",
         "parameters": [
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
             "in": "query",
-            "name": "q",
+            "name": "search",
             "required": false,
             "schema": {
               "default": "",
-              "title": "Q",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
               "type": "string"
             }
           },
           {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "description": "verified | ambiguous | not_found | none",
             "in": "query",
             "name": "kyc",
             "required": false,
             "schema": {
               "default": "",
+              "description": "verified | ambiguous | not_found | none",
               "title": "Kyc",
               "type": "string"
             }
           },
           {
+            "description": "trạng thái lượt mới nhất | never",
             "in": "query",
             "name": "run",
             "required": false,
             "schema": {
               "default": "",
+              "description": "trạng thái lượt mới nhất | never",
               "title": "Run",
               "type": "string"
             }
           },
           {
+            "description": "with | without (việc đang mở)",
             "in": "query",
             "name": "jobs",
             "required": false,
             "schema": {
               "default": "",
+              "description": "with | without (việc đang mở)",
               "title": "Jobs",
               "type": "string"
             }
           },
           {
             "in": "query",
-            "name": "page",
+            "name": "sortBy",
             "required": false,
             "schema": {
-              "default": 1,
-              "title": "Page",
-              "type": "integer"
+              "default": "created_at",
+              "enum": [
+                "created_at",
+                "name",
+                "active_jobs",
+                "last_run_at"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -6573,7 +7098,7 @@
         },
         "summary": "Get Companies",
         "tags": [
-          "api"
+          "companies"
         ]
       },
       "post": {
@@ -6613,7 +7138,7 @@
         },
         "summary": "Post Company",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6654,7 +7179,7 @@
         },
         "summary": "Post Import",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6674,7 +7199,7 @@
         },
         "summary": "Get Import Sample",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6717,7 +7242,7 @@
         },
         "summary": "Get Company",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6761,7 +7286,7 @@
         },
         "summary": "Post Company Build",
         "tags": [
-          "api"
+          "crawl"
         ]
       }
     },
@@ -6805,7 +7330,7 @@
         },
         "summary": "Get Company Crawl",
         "tags": [
-          "api"
+          "crawl"
         ]
       }
     },
@@ -6824,6 +7349,56 @@
             }
           },
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
             "description": "active | inactive",
             "in": "query",
             "name": "status",
@@ -6837,12 +7412,18 @@
           },
           {
             "in": "query",
-            "name": "page",
+            "name": "sortBy",
             "required": false,
             "schema": {
-              "default": 1,
-              "title": "Page",
-              "type": "integer"
+              "default": "first_seen_at",
+              "enum": [
+                "first_seen_at",
+                "posted_at",
+                "salary",
+                "expires_at"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -6870,7 +7451,7 @@
         },
         "summary": "Get Company Jobs",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6914,7 +7495,7 @@
         },
         "summary": "Post Company Poll",
         "tags": [
-          "api"
+          "crawl"
         ]
       }
     },
@@ -6933,13 +7514,68 @@
             }
           },
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "verified_at",
+              "enum": [
+                "verified_at",
+                "last_seen_at",
+                "confidence"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -6967,7 +7603,7 @@
         },
         "summary": "Get Company Rejected",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -6986,13 +7622,70 @@
             }
           },
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "started_at",
+              "enum": [
+                "started_at",
+                "duration_ms",
+                "jobs_found",
+                "jobs_new",
+                "jobs_closed"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -7020,7 +7713,51 @@
         },
         "summary": "Get Company Runs",
         "tags": [
-          "api"
+          "companies"
+        ]
+      }
+    },
+    "/api/crawl/plans/{plan_id}": {
+      "get": {
+        "description": "Toàn bộ một bộ khung: trang / API lượt poll đọc lại, mã tin (kèm tin đã lưu), link bỏ qua,\ndanh mục mã → tên, JSON gốc.",
+        "operationId": "get_crawl_plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Crawl Plan",
+        "tags": [
+          "crawl"
         ]
       }
     },
@@ -7064,7 +7801,7 @@
         },
         "summary": "Get Crawl Status",
         "tags": [
-          "api"
+          "crawl"
         ]
       }
     },
@@ -7105,7 +7842,7 @@
         },
         "summary": "Post Enqueue",
         "tags": [
-          "api"
+          "companies"
         ]
       }
     },
@@ -7146,7 +7883,7 @@
         },
         "summary": "Post Eval",
         "tags": [
-          "api"
+          "eval"
         ]
       }
     },
@@ -7168,7 +7905,7 @@
         },
         "summary": "Get Eval Server",
         "tags": [
-          "api"
+          "eval"
         ]
       }
     },
@@ -7353,7 +8090,7 @@
         },
         "summary": "Get Failed Page",
         "tags": [
-          "api"
+          "runs"
         ]
       }
     },
@@ -7394,21 +8131,24 @@
         },
         "summary": "Get Failed Page Raw",
         "tags": [
-          "api"
+          "runs"
         ]
       }
     },
     "/api/jobs": {
       "get": {
+        "description": "Việc làm theo bộ lọc, một trang (`search` trong tiêu đề / tên doanh nghiệp).",
         "operationId": "get_jobs",
         "parameters": [
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
             "in": "query",
-            "name": "q",
+            "name": "search",
             "required": false,
             "schema": {
               "default": "",
-              "title": "Q",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
               "type": "string"
             }
           },
@@ -7475,7 +8215,7 @@
             }
           },
           {
-            "description": "triệu VND",
+            "description": "triệu VND / tháng",
             "in": "query",
             "name": "salary_from",
             "required": false,
@@ -7488,7 +8228,7 @@
                   "type": "null"
                 }
               ],
-              "description": "triệu VND",
+              "description": "triệu VND / tháng",
               "title": "Salary From"
             }
           },
@@ -7522,25 +8262,59 @@
             }
           },
           {
-            "description": "new | posted | salary | expires",
-            "in": "query",
-            "name": "sort",
-            "required": false,
-            "schema": {
-              "default": "new",
-              "description": "new | posted | salary | expires",
-              "title": "Sort",
-              "type": "string"
-            }
-          },
-          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "description": "Cột sắp xếp",
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "first_seen_at",
+              "description": "Cột sắp xếp",
+              "enum": [
+                "first_seen_at",
+                "posted_at",
+                "salary",
+                "expires_at"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -7568,32 +8342,24 @@
         },
         "summary": "Get Jobs",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
     "/api/jobs/export": {
       "get": {
+        "description": "Mọi việc làm theo bộ lọc (không phân trang), CSV hoặc JSONL.",
         "operationId": "get_jobs_export",
         "parameters": [
           {
+            "description": "Tìm trong tiêu đề / tên doanh nghiệp",
             "in": "query",
-            "name": "fmt",
-            "required": false,
-            "schema": {
-              "default": "csv",
-              "pattern": "^(csv|jsonl)$",
-              "title": "Fmt",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
+            "name": "search",
             "required": false,
             "schema": {
               "default": "",
-              "title": "Q",
+              "description": "Tìm trong tiêu đề / tên doanh nghiệp",
+              "title": "Search",
               "type": "string"
             }
           },
@@ -7648,16 +8414,19 @@
             }
           },
           {
+            "description": "active | expired | removed | all",
             "in": "query",
             "name": "status",
             "required": false,
             "schema": {
               "default": "active",
+              "description": "active | expired | removed | all",
               "title": "Status",
               "type": "string"
             }
           },
           {
+            "description": "triệu VND / tháng",
             "in": "query",
             "name": "salary_from",
             "required": false,
@@ -7670,6 +8439,7 @@
                   "type": "null"
                 }
               ],
+              "description": "triệu VND / tháng",
               "title": "Salary From"
             }
           },
@@ -7691,12 +8461,25 @@
             }
           },
           {
+            "description": "no | yes | correct | wrong",
             "in": "query",
             "name": "reviewed",
             "required": false,
             "schema": {
               "default": "",
+              "description": "no | yes | correct | wrong",
               "title": "Reviewed",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": false,
+            "schema": {
+              "default": "csv",
+              "pattern": "^(csv|jsonl)$",
+              "title": "Fmt",
               "type": "string"
             }
           }
@@ -7723,7 +8506,7 @@
         },
         "summary": "Get Jobs Export",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
@@ -7766,7 +8549,7 @@
         },
         "summary": "Get Job",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
@@ -7809,7 +8592,7 @@
         },
         "summary": "Delete Review",
         "tags": [
-          "api"
+          "jobs"
         ]
       },
       "post": {
@@ -7860,7 +8643,7 @@
         },
         "summary": "Post Review",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
@@ -7881,7 +8664,7 @@
         },
         "summary": "Post Maintenance",
         "tags": [
-          "api"
+          "maintenance"
         ]
       }
     },
@@ -7902,7 +8685,7 @@
         },
         "summary": "Get Me",
         "tags": [
-          "api"
+          "auth"
         ]
       }
     },
@@ -7924,7 +8707,7 @@
         },
         "summary": "Get Meta",
         "tags": [
-          "api"
+          "meta"
         ]
       }
     },
@@ -7980,7 +8763,7 @@
         },
         "summary": "Get Overview",
         "tags": [
-          "api"
+          "overview"
         ]
       }
     },
@@ -8002,7 +8785,7 @@
         },
         "summary": "Get Proxies",
         "tags": [
-          "settings"
+          "proxies"
         ]
       }
     },
@@ -8044,7 +8827,7 @@
         },
         "summary": "Check Proxies",
         "tags": [
-          "settings"
+          "proxies"
         ]
       }
     },
@@ -8108,7 +8891,7 @@
         },
         "summary": "Get Queue",
         "tags": [
-          "api"
+          "queue"
         ]
       }
     },
@@ -8159,7 +8942,7 @@
         },
         "summary": "Get Review",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
@@ -8180,7 +8963,7 @@
         },
         "summary": "Get Review Summary",
         "tags": [
-          "api"
+          "jobs"
         ]
       }
     },
@@ -8223,7 +9006,7 @@
         },
         "summary": "Get Run",
         "tags": [
-          "api"
+          "runs"
         ]
       }
     },
@@ -8242,13 +9025,69 @@
             }
           },
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "ASC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "created_at",
+              "enum": [
+                "created_at",
+                "duration_ms",
+                "http_status",
+                "items"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -8276,7 +9115,7 @@
         },
         "summary": "Get Run Fetches",
         "tags": [
-          "api"
+          "runs"
         ]
       }
     },
@@ -8295,13 +9134,79 @@
             }
           },
           {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "ASC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "description": "debug | info | warning | error | critical",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "debug | info | warning | error | critical",
+              "title": "Level",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "ts",
+              "enum": [
+                "ts",
+                "level"
+              ],
+              "title": "Sortby",
+              "type": "string"
             }
           }
         ],
@@ -8329,7 +9234,7 @@
         },
         "summary": "Get Run Logs",
         "tags": [
-          "api"
+          "runs"
         ]
       }
     },
@@ -8511,7 +9416,7 @@
         },
         "summary": "Get Stats",
         "tags": [
-          "api"
+          "overview"
         ]
       }
     },
@@ -8533,7 +9438,7 @@
         },
         "summary": "Get Workers",
         "tags": [
-          "settings"
+          "workers"
         ]
       }
     },
@@ -8555,7 +9460,7 @@
         },
         "summary": "Create Join Key",
         "tags": [
-          "settings"
+          "workers"
         ]
       }
     },
@@ -8598,7 +9503,7 @@
         },
         "summary": "Revoke Join Key",
         "tags": [
-          "settings"
+          "workers"
         ]
       },
       "get": {
@@ -8639,7 +9544,7 @@
         },
         "summary": "Get Join Key",
         "tags": [
-          "settings"
+          "workers"
         ]
       }
     },
@@ -8682,7 +9587,7 @@
         },
         "summary": "Undrain Worker",
         "tags": [
-          "settings"
+          "workers"
         ]
       },
       "post": {
@@ -8723,9 +9628,75 @@
         },
         "summary": "Drain Worker",
         "tags": [
-          "settings"
+          "workers"
         ]
       }
     }
-  }
+  },
+  "tags": [
+    {
+      "description": "Đăng nhập / đăng xuất (JWT), người dùng hiện tại",
+      "name": "auth"
+    },
+    {
+      "description": "Trang Tổng quan: số liệu, biểu đồ tính sẵn",
+      "name": "overview"
+    },
+    {
+      "description": "Doanh nghiệp: danh sách, chi tiết, thêm, nạp CSV, đưa vào hàng đợi",
+      "name": "companies"
+    },
+    {
+      "description": "Thu thập: bộ khung + lịch của doanh nghiệp, build / poll ngay, độ trễ phát hiện",
+      "name": "crawl"
+    },
+    {
+      "description": "Lượt chạy: tóm tắt, request, log, trang parse lỗi",
+      "name": "runs"
+    },
+    {
+      "description": "Việc làm: danh sách, xuất CSV, chi tiết, kiểm tay",
+      "name": "jobs"
+    },
+    {
+      "description": "Đánh giá độ chính xác trên golden set",
+      "name": "eval"
+    },
+    {
+      "description": "Trang tuyển dụng: trạng thái index, chạy index ngay",
+      "name": "boards"
+    },
+    {
+      "description": "Hàng đợi build / poll / index",
+      "name": "queue"
+    },
+    {
+      "description": "Worker lấy trang: danh sách, khoá tham gia, dừng nhận việc",
+      "name": "workers"
+    },
+    {
+      "description": "Proxy chung: trạng thái xoay vòng, kiểm tra qua worker",
+      "name": "proxies"
+    },
+    {
+      "description": "Cài đặt sửa ở giao diện (đè biến môi trường / .env)",
+      "name": "settings"
+    },
+    {
+      "description": "Nhật ký thao tác",
+      "name": "audit"
+    },
+    {
+      "description": "Chạy bảo trì ngay",
+      "name": "maintenance"
+    },
+    {
+      "description": "Cập nhật trực tiếp bằng Server-Sent Events",
+      "name": "live"
+    },
+    {
+      "description": "Giá trị cho các bộ lọc của giao diện",
+      "name": "meta"
+    }
+  ]
 }

@@ -13,8 +13,11 @@ import {
   Pager,
   SearchBox,
   Section,
+  SortHead,
+  SortSelect,
   StatusBadge,
   TextLink,
+  nextSort,
   useRowLink,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
@@ -22,13 +25,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { qs } from "@/lib/api"
 import { cap, date, displayName, num, provinces, salary, sourceLabel } from "@/lib/format"
-import { useGetJobs, useGetMeta } from "@/lib/gen/queries"
+import { useGetJobs, useGetMeta, type GetJobsSortBy } from "@/lib/gen/queries"
+import type { SortOrder, SortState } from "@/lib/types"
 import { useUrlFilters } from "@/lib/url-filters"
 import { cn } from "@/lib/utils"
 
 /** Bộ lọc trên URL và giá trị mặc định (không ghi lên URL). */
 const FILTERS = {
-  q: "",
+  search: "",
   province: "",
   level: "",
   employment_type: "",
@@ -38,7 +42,9 @@ const FILTERS = {
   salary_from: "",
   company_id: "",
   reviewed: "",
-  sort: "new",
+  pageSize: "50",
+  sortBy: "first_seen_at",
+  sortOrder: "DESC",
 }
 
 const STATUSES = [
@@ -48,12 +54,16 @@ const STATUSES = [
   ["all", "Mọi trạng thái"],
 ] as const
 
-const SORTS = [
-  ["new", "Mới thấy nhất"],
-  ["posted", "Ngày đăng"],
-  ["salary", "Lương cao nhất"],
-  ["expires", "Sắp hết hạn"],
-] as const
+const SORTS: readonly (readonly [GetJobsSortBy, SortOrder, string])[] = [
+  ["first_seen_at", "DESC", "Mới thấy nhất"],
+  ["first_seen_at", "ASC", "Thấy lâu nhất"],
+  ["posted_at", "DESC", "Mới đăng nhất"],
+  ["posted_at", "ASC", "Đăng lâu nhất"],
+  ["salary", "DESC", "Lương cao nhất"],
+  ["salary", "ASC", "Lương thấp nhất"],
+  ["expires_at", "ASC", "Sắp hết hạn"],
+  ["expires_at", "DESC", "Hạn xa nhất"],
+]
 
 /** Giá trị trống: gạch mờ thay vì "–" đậm lặp lại cả cột. */
 function Muted({ value }: { value: string }) {
@@ -78,23 +88,35 @@ function Reviewed({ value }: { value: boolean | null }) {
 
 export function JobsPage() {
   const { filters, page, update, reset, isFiltered } = useUrlFilters(FILTERS)
-  const [search, setSearch] = useState(filters.q)
+  const [search, setSearch] = useState(filters.search)
   const [salaryFrom, setSalaryFrom] = useState(filters.salary_from)
-  useEffect(() => setSearch(filters.q), [filters.q])
+  useEffect(() => setSearch(filters.search), [filters.search])
   useEffect(() => setSalaryFrom(filters.salary_from), [filters.salary_from])
   const rowLink = useRowLink()
 
   const meta = useGetMeta({ query: { staleTime: 300_000 } })
+  const sort: SortState<GetJobsSortBy> = {
+    sortBy: filters.sortBy as GetJobsSortBy,
+    sortOrder: filters.sortOrder === "ASC" ? "ASC" : "DESC",
+  }
+  const { pageSize, sortBy: _sortBy, sortOrder: _sortOrder, ...jobFilters } = filters
   const query = useGetJobs(
     // Bộ lọc trên URL là chuỗi; `salary_from` trống thì không gửi.
-    { ...filters, salary_from: filters.salary_from ? Number(filters.salary_from) : undefined, page },
+    {
+      ...jobFilters,
+      ...sort,
+      salary_from: filters.salary_from ? Number(filters.salary_from) : undefined,
+      page,
+      limit: Number(pageSize) || 50,
+    },
     { query: { placeholderData: (prev) => prev } },
   )
+  const onSort = (column: GetJobsSortBy) => update(nextSort(sort, column))
 
-  // File tải về (CSV / JSONL), không phải JSON: dùng liên kết thường.
-  const exportUrl = (fmt: string) => `/api/jobs/export${qs({ ...filters, fmt })}`
-  const items = query.data?.items ?? []
-  const filtered = isFiltered("sort")
+  // File tải về (CSV / JSONL), không phải JSON: dùng liên kết thường. Xuất mọi dòng theo bộ lọc.
+  const exportUrl = (fmt: string) => `/api/jobs/export${qs({ ...jobFilters, fmt })}`
+  const items = query.data?.data ?? []
+  const filtered = isFiltered("pageSize", "sortBy", "sortOrder")
 
   return (
     <>
@@ -134,12 +156,12 @@ export function JobsPage() {
             <SearchBox
               value={search}
               onChange={setSearch}
-              onSubmit={(v) => update({ q: (v ?? search).trim(), salary_from: salaryFrom })}
+              onSubmit={(v) => update({ search: (v ?? search).trim(), salary_from: salaryFrom })}
               placeholder="Tìm vị trí hoặc doanh nghiệp"
             />
           }
           end={
-            <FilterSelect label="Sắp xếp" value={filters.sort} onChange={(v) => update({ sort: v })} options={SORTS} all={null} />
+            <SortSelect sort={sort} onChange={update} options={SORTS} />
           }
         >
           <FilterSelect label="Trạng thái" value={filters.status} onChange={(v) => update({ status: v })} options={STATUSES} all={null} />
@@ -242,11 +264,17 @@ export function JobsPage() {
               <Table className="max-md:hidden">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Vị trí</TableHead>
+                    <SortHead column="first_seen_at" sort={sort} onSort={onSort}>
+                      Vị trí
+                    </SortHead>
                     <TableHead>Nơi làm</TableHead>
-                    <TableHead>Lương</TableHead>
+                    <SortHead column="salary" sort={sort} onSort={onSort}>
+                      Lương
+                    </SortHead>
                     <TableHead>Nguồn</TableHead>
-                    <TableHead>Hạn nộp</TableHead>
+                    <SortHead column="expires_at" sort={sort} onSort={onSort}>
+                      Hạn nộp
+                    </SortHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -306,7 +334,9 @@ export function JobsPage() {
               }
             />
           ))}
-        {query.data && <Pager {...query.data} onPage={(p) => update({ page: p })} />}
+        {query.data && (
+          <Pager {...query.data} onPage={(p) => update({ page: p })} onLimit={(n) => update({ pageSize: String(n) })} />
+        )}
       </Section>
     </>
   )

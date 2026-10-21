@@ -11,12 +11,12 @@ import pytest
 
 from jobcrawler.bootstrap.app import create_app
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.crawl.actions import crawl_status
-from jobcrawler.modules.crawl.schemas import CrawlStatusOut
-from jobcrawler.modules.overview import overview, stats
-from jobcrawler.modules.overview.schemas import OverviewOut, StatsOut
-from jobcrawler.modules.settings import app_settings
-from jobcrawler.modules.settings.schemas import SettingsPageOut
+from jobcrawler.modules.crawl.crawl_schema import CrawlStatusOut
+from jobcrawler.modules.crawl.crawl_service import crawl_status
+from jobcrawler.modules.overview import overview_service, stats_service
+from jobcrawler.modules.overview.overview_schema import OverviewOut, StatsOut
+from jobcrawler.modules.settings import app_settings_service
+from jobcrawler.modules.settings.settings_schema import SettingsPageOut
 from jobcrawler.services.redis.queues import drop_queue
 from jobcrawler.services.resources import Resources
 
@@ -42,21 +42,21 @@ async def test_service_payloads_have_no_untyped_keys(integration_settings: Setti
         async with app.router.lifespan_context(app):
             await seed(app.state, tag)
             res: Resources = app.state.res
-            st = await stats.collect_stats(res, hours=None, storage=True)
+            st = await stats_service.collect_stats(res, hours=None, storage=True)
             StatsOut.model_validate(dataclasses.asdict(st), extra="forbid")
-            view = await overview.build_overview(res, hours=1, storage=True)
+            view = await overview_service.build_overview(res, hours=1, storage=True)
             assert view["recent_runs"]
             OverviewOut.model_validate(view, extra="forbid")
             # Lần hai đọc JSON cache trong Redis.
-            cached = await overview.build_overview(res, hours=1, storage=True)
+            cached = await overview_service.build_overview(res, hours=1, storage=True)
             OverviewOut.model_validate(cached, extra="forbid")
             CrawlStatusOut.model_validate(await crawl_status(res), extra="forbid")
-            groups = app_settings.describe(settings, {}, settings)
+            groups = app_settings_service.describe(settings, {}, settings)
             SettingsPageOut.model_validate(
                 {
                     "version": 0,
                     "groups": groups,
-                    "env_keys": sorted(app_settings.env_overrides(settings, {})),
+                    "env_keys": sorted(app_settings_service.env_overrides(settings, {})),
                     "auto_restart": False,
                     "restart_pending": False,
                 },

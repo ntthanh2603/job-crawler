@@ -24,7 +24,7 @@ from jobcrawler.common import logging as jlog
 from jobcrawler.common import watchdog
 from jobcrawler.common.config import Settings
 from jobcrawler.common.watchdog import EXIT_CODE, Stall, Watchdog, start_watchdog
-from jobcrawler.modules.settings import app_settings
+from jobcrawler.modules.settings import app_settings_service
 from jobcrawler.services.redis import streamqueue
 from jobcrawler.services.redis.heartbeat import Heartbeat
 from jobcrawler.services.redis.streamqueue import StreamWorker
@@ -305,4 +305,4 @@ def test_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WATCHDOG_SECONDS", "-1")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
-    assert "watchdog_seconds" in app_settings.ENV_ONLY
+    assert "watchdog_seconds" in app_settings_service.ENV_ONLY

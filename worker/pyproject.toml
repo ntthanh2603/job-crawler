@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-jobworker = "jobworker.main:main"
+jobworker = "jobworker.bootstrap.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13"]
@@ -69,5 +69,5 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
     "browser: cần Chromium của Playwright (`uv run playwright install chromium`)",
 ]
-# Giống bộ lọc trong jobworker.main (pytest reset bộ lọc đặt lúc import).
+# Giống bộ lọc trong jobworker.bootstrap.cli (pytest reset bộ lọc đặt lúc import).
 filterwarnings = ['ignore:\s*Proactor event loop:curl_cffi.utils.CurlCffiWarning']

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
@@ -23,8 +24,9 @@ from redis.asyncio import Redis
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import FetchOutcome
-from jobcrawler.modules.gateway import dispatch, registry
-from jobcrawler.modules.gateway.dispatch import (
+from jobcrawler.modules.audit import audit_service
+from jobcrawler.modules.gateway import dispatch_service, registry_service
+from jobcrawler.modules.gateway.dispatch_service import (
     DispatchError,
     FetchClient,
     NoReplyError,
@@ -32,8 +34,8 @@ from jobcrawler.modules.gateway.dispatch import (
     priority_fetches,
     push_results,
 )
-from jobcrawler.modules.gateway.remote import RemoteRenderer, RemoteTransport
-from jobcrawler.modules.gateway.server import GatewayServer
+from jobcrawler.modules.gateway.remote_service import RemoteRenderer, RemoteTransport
+from jobcrawler.modules.gateway.server_service import GatewayServer
 from jobcrawler.services import health
 from jobcrawler.services.net.http import HttpClient, HttpConfig
 from jobcrawler.services.net.kv import MemoryKV, RedisKV
@@ -282,7 +284,9 @@ async def test_fetch_through_worker(redis: Redis, prefix: str) -> None:
         posted = await http.fetch(
             "https://jobs.example.vn/api/search", method="POST", json={"q": "kế toán"}
         )
-        status = await registry.load_worker(redis, registry.Keys(prefix), worker.worker_id)
+        status = await registry_service.load_worker(
+            redis, registry_service.Keys(prefix), worker.worker_id
+        )
 
     assert page.ok, page.error
     assert (page.text, page.final_url, page.proxy_id) == (
@@ -315,7 +319,7 @@ async def test_fetch_through_worker(redis: Redis, prefix: str) -> None:
     assert (status.leased, status.completed, status.labels) == (3, 3, {"region": "vn"})
     assert (status.dropped, status.lost) == (0, 0)
     # Kết quả đã nhận thì worker không còn giữ việc.
-    assert not await redis.exists(registry.Keys(prefix).inflight(worker.worker_id))
+    assert not await redis.exists(registry_service.Keys(prefix).inflight(worker.worker_id))
 
 
 async def test_render_with_captured_json_and_zstd(redis: Redis, prefix: str) -> None:
@@ -400,7 +404,7 @@ async def test_timeout_when_no_worker_replies(redis: Redis, prefix: str) -> None
             await client.submit(http_task("https://slow.example.vn/", timeout=0.3))
         assert 0.7 <= time.monotonic() - t0 < 3
         assert info.value.kind == "timeout"
-        await wait_len(redis, registry.Keys(prefix).stream("default", "http"), 0)
+        await wait_len(redis, registry_service.Keys(prefix).stream("default", "http"), 0)
         result = await http_client(client).fetch(
             "https://slow.example.vn/", check_robots=False, retries=0, timeout=0.3
         )
@@ -408,7 +412,7 @@ async def test_timeout_when_no_worker_replies(redis: Redis, prefix: str) -> None
         # Kết quả tới muộn bị bỏ.
         await push_results(
             redis,
-            registry.Keys(prefix),
+            registry_service.Keys(prefix),
             [crawl_pb2.FetchResult(task_id=f"{client.client_id}.1", status=200)],
         )
         for _ in range(50):
@@ -421,7 +425,7 @@ async def test_timeout_when_no_worker_replies(redis: Redis, prefix: str) -> None
 
 async def test_expired_tasks_are_not_delivered(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     stream = keys.stream("default", "http")
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         now = int(time.time() * 1000)
@@ -466,7 +470,7 @@ async def test_lease_waits_then_returns_new_task(redis: Redis, prefix: str) -> N
     assert (result.status, result.body) == (200, HTML.encode())
 
 
-async def queue_task(redis: Redis, keys: registry.Keys, task_id: str, **kw: Any) -> None:
+async def queue_task(redis: Redis, keys: registry_service.Keys, task_id: str, **kw: Any) -> None:
     """Việc vào stream như `FetchClient.submit` ghi (`t` + `id` + `d`)."""
     task = http_task(f"https://x.example.vn/{task_id}")
     task.task_id = task_id
@@ -475,14 +479,14 @@ async def queue_task(redis: Redis, keys: registry.Keys, task_id: str, **kw: Any)
     await redis.xadd(keys.stream("default", "http", **kw), fields)  # pyright: ignore[reportArgumentType]
 
 
-async def replies(redis: Redis, keys: registry.Keys, client_id: str) -> list[Any]:
+async def replies(redis: Redis, keys: registry_service.Keys, client_id: str) -> list[Any]:
     raw = await redis.lrange(keys.reply(client_id), 0, -1)  # pyright: ignore[reportGeneralTypeIssues]
     return [crawl_pb2.FetchResult.FromString(b) for b in raw]
 
 
 async def test_complete_accepts_only_tasks_the_worker_holds(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     async with (
         gateway(redis, settings) as gw,
         FakeWorker(gw.port, serve=False) as worker,
@@ -513,7 +517,7 @@ async def test_complete_accepts_only_tasks_the_worker_holds(redis: Redis, prefix
         [result] = await replies(redis, keys, "c-1")
         assert result.status == 200
         assert not await redis.exists(keys.inflight(worker.worker_id))
-        status = await registry.load_worker(redis, keys, worker.worker_id)
+        status = await registry_service.load_worker(redis, keys, worker.worker_id)
         assert status is not None
         assert (status.leased, status.completed, status.dropped) == (1, 1, 2)
 
@@ -523,7 +527,7 @@ async def test_complete_accepts_only_tasks_the_worker_holds(redis: Redis, prefix
 
 async def test_unknown_worker_drain_heartbeat_leave(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         for call in (
             worker.lease(worker_id="ghost", wait_ms=0),
@@ -541,14 +545,14 @@ async def test_unknown_worker_drain_heartbeat_leave(redis: Redis, prefix: str) -
         )
         assert worker.config is not None
         assert (beat.config_version, beat.drain) == (worker.config.version, False)
-        [status] = await registry.list_workers(redis, keys)
+        [status] = await registry_service.list_workers(redis, keys)
         assert (status.alive, status.stats.http_done, status.stats.proxies_alive) == (True, 12, 3)
         assert status.stats.cpu_percent == 1.5
 
         await redis.xadd(
             keys.stream("default", "http"), {"t": http_task("https://x.vn/").SerializeToString()}
         )
-        await registry.request_drain(redis, keys, worker.worker_id)
+        await registry_service.request_drain(redis, keys, worker.worker_id)
         resp = await worker.lease(wait_ms=0)
         assert (resp.drain, len(resp.tasks)) == (True, 0)
         beat = await worker.stub.Heartbeat(crawl_pb2.HeartbeatRequest(worker_id=worker.worker_id))
@@ -556,8 +560,8 @@ async def test_unknown_worker_drain_heartbeat_leave(redis: Redis, prefix: str) -
         assert await redis.xlen(keys.stream("default", "http")) == 1  # việc chờ worker khác
 
     # Thoát context: worker gọi Leave.
-    assert await registry.live_pools(redis, keys) == {}
-    [gone] = await registry.list_workers(redis, keys)
+    assert await registry_service.live_pools(redis, keys) == {}
+    [gone] = await registry_service.list_workers(redis, keys)
     assert (gone.alive, gone.worker_id) == (False, worker.worker_id)
 
 
@@ -573,7 +577,7 @@ async def test_register_rejects_bad_pool(redis: Redis, prefix: str) -> None:
 
 async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         now = int(time.time() * 1000)
         await queue_task(redis, keys, "c-1.1", high=True)
@@ -584,7 +588,7 @@ async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
         await asyncio.sleep(1.6)
         await redis.zadd(keys.workers, {worker.worker_id: int(time.time() * 1000) - 1})
         assert await gw.servicer.prune() == [worker.worker_id]
-        assert await registry.live_pools(redis, keys) == {}
+        assert await registry_service.live_pools(redis, keys) == {}
         lost = await replies(redis, keys, "c-1")
         assert sorted(r.task_id for r in lost) == ["c-1.1", "c-1.2"]
         assert all(r.error_kind == crawl_pb2.ERROR_KIND_WORKER_LOST for r in lost)
@@ -593,7 +597,7 @@ async def test_prune_removes_expired_worker(redis: Redis, prefix: str) -> None:
         # Worker thật ra còn sống, trả kết quả muộn: bỏ (backend đã thử lại).
         resp = await worker.complete(crawl_pb2.FetchResult(task_id="c-1.1", status=200))
         assert (resp.accepted, resp.dropped) == (0, 1)
-        status = await registry.load_worker(redis, keys, worker.worker_id)
+        status = await registry_service.load_worker(redis, keys, worker.worker_id)
         assert status is not None
         assert (status.lost, status.dropped) == (2, 1)
         with pytest.raises(grpc.aio.AioRpcError) as info:
@@ -607,23 +611,23 @@ async def test_prune_skips_worker_that_registered_again(redis: Redis, prefix: st
     # Prune đọc danh sách quá hạn, worker kịp Register lại và nhận việc mới trước khi prune xử lý
     # tới nó: việc mới không bị trả `worker_lost` oan.
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         await redis.zadd(keys.workers, {worker.worker_id: int(time.time() * 1000) - 1})
-        assert await registry.expired_workers(redis, keys) == [worker.worker_id]
+        assert await registry_service.expired_workers(redis, keys) == [worker.worker_id]
         await worker.register()
         await queue_task(redis, keys, "c-1.1")
         assert len((await worker.lease(wait_ms=0)).tasks) == 1
-        assert await dispatch.release_expired_worker(redis, keys, worker.worker_id) is None
+        assert await dispatch_service.release_expired_worker(redis, keys, worker.worker_id) is None
         assert await gw.servicer.prune() == []
         assert await redis.hexists(keys.inflight(worker.worker_id), "c-1.1")  # pyright: ignore[reportGeneralTypeIssues]
         assert await replies(redis, keys, "c-1") == []
-        assert await registry.live_pools(redis, keys) == {"default": 1}
+        assert await registry_service.live_pools(redis, keys) == {"default": 1}
 
 
 async def test_lease_drops_expired_and_records_in_one_step(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     stream = keys.stream("default", "http")
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         now = int(time.time() * 1000)
@@ -646,7 +650,7 @@ async def test_heartbeat_reconciles_tasks_the_worker_holds(
     redis: Redis, prefix: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     async with gateway(redis, settings) as gw, FakeWorker(gw.port, serve=False) as worker:
         for task_id in ("c-1.1", "c-1.2"):
             await queue_task(redis, keys, task_id)
@@ -664,7 +668,7 @@ async def test_heartbeat_reconciles_tasks_the_worker_holds(
         assert list(resp.revoked_task_ids) == []
         assert await redis.hlen(keys.inflight(worker.worker_id)) == 2  # pyright: ignore[reportGeneralTypeIssues]
 
-        monkeypatch.setattr(dispatch, "ORPHAN_GRACE_MS", 0)
+        monkeypatch.setattr(dispatch_service, "ORPHAN_GRACE_MS", 0)
         # Worker cũ (không kể việc): không đối soát.
         await beat(reports=False)
         assert await redis.hlen(keys.inflight(worker.worker_id)) == 2  # pyright: ignore[reportGeneralTypeIssues]
@@ -674,10 +678,10 @@ async def test_heartbeat_reconciles_tasks_the_worker_holds(
         assert list(resp.revoked_task_ids) == ["c-1.9"]
         [lost] = await replies(redis, keys, "c-1")
         assert (lost.task_id, lost.error_kind) == ("c-1.2", crawl_pb2.ERROR_KIND_WORKER_LOST)
-        assert lost.error == dispatch.ORPHAN_ERROR
+        assert lost.error == dispatch_service.ORPHAN_ERROR
         held = await redis.hgetall(keys.inflight(worker.worker_id))  # pyright: ignore[reportGeneralTypeIssues]
         assert list(held) == [b"c-1.1"]
-        status = await registry.load_worker(redis, keys, worker.worker_id)
+        status = await registry_service.load_worker(redis, keys, worker.worker_id)
         assert status is not None
         assert status.lost == 1
         # Kết quả muộn của việc đã trả `worker_lost`: bỏ; việc còn giữ: nhận.
@@ -801,6 +805,47 @@ async def test_one_time_join_key_and_token_binding(redis: Redis, prefix: str) ->
         assert await auth.join_key_status(spare.id) == ("expired", None)
 
 
+async def test_join_key_use_queues_one_audit_event(redis: Redis, prefix: str) -> None:
+    """Worker vào bằng khoá tham gia: một dòng `worker.joined` chờ trên Redis (scheduler ghi vào
+    Postgres). Register lại bằng token riêng hay vào bằng GATEWAY_TOKEN không ghi."""
+    settings = make_settings(prefix, gateway_token="s3cret")
+    pending = audit_service.pending_key(prefix)
+    async with gateway(redis, settings, forwarded_allow_ips="127.0.0.1") as gw:
+        auth = gw.servicer.auth
+        assert auth is not None
+        join = await auth.create_join_key(created_by="admin")
+        worker = FakeWorker(gw.port, pool="vn")
+        # Qua nginx của `frontend` (127.0.0.1 nằm trong FORWARDED_ALLOW_IPS): IP thật của worker.
+        worker.metadata = cast(
+            Any, (("authorization", f"Bearer {join.key}"), ("x-forwarded-for", "203.0.113.7"))
+        )
+        try:
+            await worker.register()
+            assert await redis.llen(pending) == 1  # pyright: ignore[reportGeneralTypeIssues]
+            await worker.register()  # khởi động lại: Register bằng token riêng
+        finally:
+            await worker.__aexit__()
+        async with FakeWorker(gw.port, token="s3cret", serve=False):
+            pass
+    raw = await redis.lrange(pending, 0, -1)  # pyright: ignore[reportGeneralTypeIssues]
+    assert len(raw) == 1
+    item = json.loads(raw[0])
+    assert {k: item[k] for k in ("action", "actor", "resource_type", "resource_id", "ip")} == {
+        "action": audit_service.WORKER_JOINED,
+        "actor": "worker",
+        "resource_type": "worker",
+        "resource_id": worker.worker_id,
+        "ip": "203.0.113.7",
+    }
+    assert item["metadata"] == {
+        "join_id": join.id,
+        "hostname": "test-host",
+        "pool": "vn",
+        "version": "0.0-test",
+    }
+    assert join.key not in raw[0].decode()
+
+
 # --- việc worker đang giữ, hàng ưu tiên, thời gian chờ -------------------------------------------
 
 
@@ -849,7 +894,7 @@ async def test_worker_leaving_returns_held_tasks_for_retry(redis: Redis, prefix:
 
 async def test_priority_tasks_are_leased_first(redis: Redis, prefix: str) -> None:
     settings = make_settings(prefix)
-    keys = registry.Keys(prefix)
+    keys = registry_service.Keys(prefix)
     hi, normal = keys.streams("default", "http")
     async with (
         gateway(redis, settings) as gw,
@@ -925,7 +970,7 @@ async def test_queue_wait_stops_at_max_wait_and_unqueues(redis: Redis, prefix: s
     settings = make_settings(
         prefix, fetch_queue_grace_seconds=0.3, fetch_queue_max_wait_seconds=1.0
     )
-    stream = registry.Keys(prefix).stream("default", "http")
+    stream = registry_service.Keys(prefix).stream("default", "http")
     async with (
         gateway(redis, settings) as gw,
         FakeWorker(gw.port, serve=False) as worker,

@@ -130,6 +130,9 @@ server {
         access_log off;
         set $gateway_upstream "${GATEWAY_UPSTREAM}";
         grpc_pass $gateway_upstream;
+        # IP của worker cho nhật ký thao tác (`worker.joined`): ghi đè như `/api/`, gateway chỉ tin
+        # header này khi kết nối tới từ FORWARDED_ALLOW_IPS.
+        grpc_set_header X-Forwarded-For $remote_addr;
         grpc_connect_timeout 10s;
         # Lease chờ việc tối đa 30 s.
         grpc_read_timeout 120s;

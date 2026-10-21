@@ -335,11 +335,12 @@ class Settings(BaseSettings):
     # Số dòng tối đa nén lại bằng từ điển mới mỗi lượt bảo trì.
     compression_recompress_rows: int = Field(default=50_000, ge=0)
 
-    # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth.py`). Không đặt
-    # UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.
+    # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth_service.py`).
+    # Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.
     ui_username: str = "admin"
     ui_password: SecretStr | None = None
-    # Khoá ký JWT đăng nhập (`modules/auth/auth.py`); trống = khoá ngẫu nhiên lưu trên Redis chính.
+    # Khoá ký JWT đăng nhập (`modules/auth/auth_service.py`); trống = khoá ngẫu nhiên lưu trên Redis
+    # chính.
     jwt_secret: SecretStr | None = None
     # Khoá mã hoá trường nhạy cảm trong DB (`jobcrawler.services.secretbox`): các chuỗi bí mật cách
     # nhau dấu phẩy, chuỗi cuối dùng để mã hoá. Trống = khoá ngẫu nhiên lưu trên Redis chính.

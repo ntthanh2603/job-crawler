@@ -12,20 +12,20 @@ from pydantic import BaseModel
 
 from jobcrawler.bootstrap.app import openapi_document
 from jobcrawler.database import compress
-from jobcrawler.modules.companies import batch
-from jobcrawler.modules.companies.actions import CreateOutcome, ImportOutcome
-from jobcrawler.modules.companies.schemas import (
+from jobcrawler.modules.companies import batch_service
+from jobcrawler.modules.companies.companies_schema import (
     CompanyCreatedOut,
     EnqueueResultOut,
     ImportOutcomeOut,
 )
-from jobcrawler.modules.crawl import sla
-from jobcrawler.modules.crawl.schemas import FreshnessOut, PollStatsOut
-from jobcrawler.modules.evaluate import evaluate
-from jobcrawler.modules.evaluate.schemas import CompanyEvalOut, SourceEvalOut
-from jobcrawler.modules.jobs.schemas import SourceReviewOut
-from jobcrawler.modules.overview import stats
-from jobcrawler.modules.overview.schemas import (
+from jobcrawler.modules.companies.companies_service import CreateOutcome, ImportOutcome
+from jobcrawler.modules.crawl import sla_service
+from jobcrawler.modules.crawl.crawl_schema import FreshnessOut, PollStatsOut
+from jobcrawler.modules.evaluate import evaluate_service
+from jobcrawler.modules.evaluate.evaluate_schema import CompanyEvalOut, SourceEvalOut
+from jobcrawler.modules.jobs.jobs_schema import SourceReviewOut
+from jobcrawler.modules.overview import stats_service
+from jobcrawler.modules.overview.overview_schema import (
     BoardStatsOut,
     QueueStatsOut,
     RunStatsOut,
@@ -34,8 +34,8 @@ from jobcrawler.modules.overview.schemas import (
     StorageStatsOut,
     TargetOut,
 )
-from jobcrawler.modules.proxies import proxies
-from jobcrawler.modules.proxies.schemas import ProxyCheckOut, ProxyStatusOut
+from jobcrawler.modules.proxies import proxies_service
+from jobcrawler.modules.proxies.proxies_schema import ProxyCheckOut, ProxyStatusOut
 from jobcrawler.services import health
 
 SPEC = Path(__file__).resolve().parents[1] / "openapi.json"
@@ -51,6 +51,19 @@ def test_committed_spec_is_up_to_date() -> None:
         "backend/openapi.json đã cũ so với mã: chạy `task api` (backend/) rồi sinh lại kiểu của"
         " giao diện"
     )
+
+
+def test_every_endpoint_is_in_one_documented_group(spec: dict) -> None:
+    groups = [t["name"] for t in spec["tags"]]
+    assert len(groups) == len(set(groups))
+    used: set[str] = set()
+    for path, ops in spec["paths"].items():
+        for method, op in ops.items():
+            tags = op.get("tags", [])
+            assert len(tags) == 1, f"{method.upper()} {path}: cần đúng một nhóm, có {tags}"
+            assert tags[0] in groups, f"{method.upper()} {path}: nhóm {tags[0]!r} chưa khai báo"
+            used.add(tags[0])
+    assert used == set(groups), f"nhóm không có endpoint nào: {set(groups) - used}"
 
 
 def test_operation_ids_are_handler_names(spec: dict) -> None:
@@ -115,22 +128,22 @@ def test_response_fields_are_required(spec: dict) -> None:
 
 # Mô hình trả về chép trường từ dataclass của services (+ property tính thêm).
 MIRRORS: list[tuple[type[BaseModel], type, set[str]]] = [
-    (QueueStatsOut, stats.QueueStats, set()),
-    (RunStatsOut, stats.RunStats, set()),
-    (SourceStatsOut, stats.SourceStats, set()),
-    (BoardStatsOut, stats.BoardStats, set()),
-    (TargetOut, stats.Target, set()),
-    (StatsOut, stats.Stats, set()),
+    (QueueStatsOut, stats_service.QueueStats, set()),
+    (RunStatsOut, stats_service.RunStats, set()),
+    (SourceStatsOut, stats_service.SourceStats, set()),
+    (BoardStatsOut, stats_service.BoardStats, set()),
+    (TargetOut, stats_service.Target, set()),
+    (StatsOut, stats_service.Stats, set()),
     (StorageStatsOut, compress.StorageStats, set()),
-    (PollStatsOut, sla.PollStats, set()),
-    (FreshnessOut, sla.Freshness, set()),
+    (PollStatsOut, sla_service.PollStats, set()),
+    (FreshnessOut, sla_service.Freshness, set()),
     (ImportOutcomeOut, ImportOutcome, set()),
     (CompanyCreatedOut, CreateOutcome, set()),
-    (EnqueueResultOut, batch.EnqueueResult, set()),
-    (CompanyEvalOut, evaluate.CompanyEval, {"precision", "recall"}),
-    (SourceEvalOut, evaluate.SourceEval, {"precision", "recall"}),
-    (SourceReviewOut, evaluate.SourceReview, {"precision"}),
-    (ProxyStatusOut, proxies.ProxyStatus, set()),
+    (EnqueueResultOut, batch_service.EnqueueResult, set()),
+    (CompanyEvalOut, evaluate_service.CompanyEval, {"precision", "recall"}),
+    (SourceEvalOut, evaluate_service.SourceEval, {"precision", "recall"}),
+    (SourceReviewOut, evaluate_service.SourceReview, {"precision"}),
+    (ProxyStatusOut, proxies_service.ProxyStatus, set()),
     (ProxyCheckOut, health.ProxyCheck, set()),
 ]
 

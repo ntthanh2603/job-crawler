@@ -1,9 +1,9 @@
-"""`jobworker.sysres`: số slot tự động theo CPU / RAM (như open-asm)."""
+"""`jobworker.common.sysres`: số slot tự động theo CPU / RAM (như open-asm)."""
 
 from __future__ import annotations
 
-from jobworker import sysres
-from jobworker.config import WorkerSettings
+from jobworker.common import sysres
+from jobworker.common.config import WorkerSettings
 
 GIB = 1024**3
 

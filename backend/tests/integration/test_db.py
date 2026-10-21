@@ -11,7 +11,7 @@ from jobcrawler.common.logging import configure_logging
 from jobcrawler.common.schemas import CompanyIn, RunStatus
 from jobcrawler.database import migrate
 from jobcrawler.database.models import Company, CompanyRun, Log, SourceFetch
-from jobcrawler.modules.crawl.companies import process_company
+from jobcrawler.modules.crawl.company_service import process_company
 from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.services.resources import open_resources
 
