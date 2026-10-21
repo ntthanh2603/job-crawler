@@ -1,7 +1,47 @@
 name: jobcrawler
 
-# Production một máy, tự chứa toàn bộ cấu hình. Tìm CHANGE_ME và sửa trước khi chạy.
-# Không cần clone repo, .env, .env.example hay file cấu hình nào khác.
+# Production một máy, chỉ cần file này. Không dùng build, env_file, .env hay file trong repo.
+# Tất cả giá trị bên dưới đều chạy được ngay. Tìm comment đánh dấu để thay giá trị production.
+# Giữ ba image cùng một tag phiên bản/sha; mật khẩu DB/Redis chỉ nên dùng chữ và số vì chúng xuất
+# hiện nguyên trong URL kết nối.
+x-production:
+  backend-image: &backend-image "ghcr.io/ntthanh2603/jobcrawler-backend:main" # CHANGE_ME: ghim tag vX.Y.Z hoặc sha-*
+  frontend-image: &frontend-image "ghcr.io/ntthanh2603/jobcrawler-frontend:main" # CHANGE_ME: cùng tag backend
+  worker-image: &worker-image "ghcr.io/ntthanh2603/jobcrawler-worker:main" # CHANGE_ME: cùng tag backend
+
+  database-password: &database-password "jobcrawler" # CHANGE_ME: mật khẩu Postgres chữ/số
+  database-url: &database-url "postgresql+asyncpg://jobcrawler:jobcrawler@postgres:5432/jobcrawler" # CHANGE_ME: cùng mật khẩu trên
+  redis-password: &redis-password "jobcrawler" # CHANGE_ME: mật khẩu Redis chữ/số
+  redis-url: &redis-url "redis://:jobcrawler@redis:6379/0" # CHANGE_ME: cùng mật khẩu Redis trên
+
+  gateway-token: &gateway-token "jobcrawler-gateway-token" # CHANGE_ME: chuỗi ngẫu nhiên dài
+  ui-username: &ui-username "admin"
+  ui-password: &ui-password "admin" # CHANGE_ME: mật khẩu đăng nhập mạnh
+  jwt-secret: &jwt-secret "jobcrawler-jwt-secret" # CHANGE_ME: chuỗi ngẫu nhiên dài
+  encryption-key: &encryption-key "jobcrawler-encryption-key" # CHANGE_ME: chuỗi ngẫu nhiên dài, phải sao lưu
+
+  # An toàn mặc định cho reverse proxy chạy cùng máy. Đổi thành 0.0.0.0:8000:8080 nếu thật sự
+  # muốn mở HTTP trực tiếp; production nên kết thúc TLS ở reverse proxy.
+  web-listen: &web-listen "127.0.0.1:8000:8080" # CHANGE_ME: 0.0.0.0 nếu không có reverse proxy cùng máy
+  # IP/CIDR của reverse proxy tin cậy; để trống nếu không có reverse proxy.
+  real-ip-from: &real-ip-from "" # CHANGE_ME: IP/CIDR reverse proxy nếu có
+  worker-replicas: &worker-replicas 1 # CHANGE_ME: số worker trên máy
+  # JSON list hoặc danh sách proxy phân cách bằng dấu phẩy; trống = dùng cấu hình từ backend.
+  worker-proxies: &worker-proxies "" # CHANGE_ME: proxy riêng của worker nếu có
+
+  # Giới hạn mặc định cho máy khoảng 8 vCPU / 16 GB RAM; các giới hạn có thể overcommit nhưng tổng
+  # mức dùng thực tế không được vượt tài nguyên máy.
+  postgres-cpus: &postgres-cpus "2.0" # CHANGE_ME: CPU tối đa cho Postgres
+  postgres-memory: &postgres-memory 2g # CHANGE_ME: RAM tối đa cho Postgres
+  redis-cpus: &redis-cpus "1.0" # CHANGE_ME: CPU tối đa cho Redis
+  redis-memory: &redis-memory 1g # CHANGE_ME: RAM tối đa cho Redis
+  redis-maxmemory: &redis-maxmemory 768mb # CHANGE_ME: phải thấp hơn redis-memory
+  backend-cpus: &backend-cpus "4.0" # CHANGE_ME: CPU tối đa cho backend + runner
+  backend-memory: &backend-memory 4g # CHANGE_ME: RAM tối đa cho backend + runner
+  frontend-cpus: &frontend-cpus "0.5" # CHANGE_ME: CPU tối đa cho nginx
+  frontend-memory: &frontend-memory 256m # CHANGE_ME: RAM tối đa cho nginx
+  worker-cpus: &worker-cpus "4.0" # CHANGE_ME: CPU tối đa cho worker
+  worker-memory: &worker-memory 4g # CHANGE_ME: RAM tối đa cho worker + Chromium
 
 x-logging: &logging
   driver: json-file
@@ -14,9 +54,11 @@ services:
     image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: jobcrawler
-      # CHANGE_ME: dùng chuỗi chữ/số để chèn nguyên vào DATABASE_URL bên dưới.
-      POSTGRES_PASSWORD: CHANGE_ME_DATABASE_PASSWORD
+      POSTGRES_PASSWORD: *database-password
       POSTGRES_DB: jobcrawler
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    expose:
+      - "5432"
     shm_size: 512mb
     volumes:
       - pgdata:/var/lib/postgresql
@@ -25,7 +67,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 10s
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: *postgres-cpus
+          memory: *postgres-memory
     restart: unless-stopped
+    networks:
+      - data
     logging: *logging
 
   redis:
@@ -36,8 +87,17 @@ services:
       - "yes"
       - --appendfsync
       - everysec
+      - --maxmemory
+      - *redis-maxmemory
       - --maxmemory-policy
       - noeviction
+      - --requirepass
+      - *redis-password
+    environment:
+      # redis-cli của healthcheck tự đọc biến này; không lộ mật khẩu trong câu lệnh healthcheck.
+      REDISCLI_AUTH: *redis-password
+    expose:
+      - "6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -45,30 +105,44 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+      start_period: 5s
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: *redis-cpus
+          memory: *redis-memory
     restart: unless-stopped
+    networks:
+      - data
     logging: *logging
 
   backend:
-    # CHANGE_ME nếu dùng owner/tag khác; nên ghim tag phiên bản hoặc sha-* thay cho main.
-    image: ghcr.io/ntthanh2603/jobcrawler-backend:main
+    image: *backend-image
     command: ["jobcrawler", "serve", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      # CHANGE_ME_DATABASE_PASSWORD phải giống POSTGRES_PASSWORD ở trên.
-      DATABASE_URL: postgresql+asyncpg://jobcrawler:CHANGE_ME_DATABASE_PASSWORD@postgres:5432/jobcrawler
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: *database-url
+      REDIS_URL: *redis-url
       CACHE_REDIS_URL: ""
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: "50051"
-      GATEWAY_TOKEN: &gateway-token CHANGE_ME_GATEWAY_TOKEN
-      UI_USERNAME: admin
-      UI_PASSWORD: CHANGE_ME_UI_PASSWORD
-      JWT_SECRET: CHANGE_ME_LONG_RANDOM_JWT_SECRET
-      ENCRYPTION_KEYS: CHANGE_ME_LONG_RANDOM_ENCRYPTION_KEY
+      GATEWAY_TOKEN: *gateway-token
+      GATEWAY_WORKER_IMAGE: *worker-image
+
+      UI_USERNAME: *ui-username
+      UI_PASSWORD: *ui-password
+      JWT_SECRET: *jwt-secret
+      ENCRYPTION_KEYS: *encryption-key
+      AUTH_TOKEN_HOURS: "12"
       FORWARDED_ALLOW_IPS: "*"
       DEMO_COMPANIES: "false"
+      WATCHDOG_SECONDS: "120"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
       LOG_DB_LEVEL: WARNING
+    expose:
+      - "8000"
+      - "50051"
     depends_on:
       postgres:
         condition: service_healthy
@@ -87,20 +161,25 @@ services:
       start_interval: 5s
     stop_grace_period: 30s
     init: true
+    deploy:
+      resources:
+        limits:
+          cpus: *backend-cpus
+          memory: *backend-memory
     restart: unless-stopped
+    networks:
+      - app
+      - data
     logging: *logging
 
   frontend:
-    # CHANGE_ME nếu dùng owner/tag khác; giữ cùng tag với backend và worker.
-    image: ghcr.io/ntthanh2603/jobcrawler-frontend:main
+    image: *frontend-image
     environment:
       API_UPSTREAM: http://backend:8000
       GATEWAY_UPSTREAM: grpc://backend:50051
-      # CHANGE_ME nếu có reverse proxy/load balancer: điền IP hoặc CIDR của nó.
-      REAL_IP_FROM: ""
+      REAL_IP_FROM: *real-ip-from
     ports:
-      # CHANGE_ME địa chỉ/cổng công khai nếu cần. Production nên đặt sau HTTPS reverse proxy.
-      - "0.0.0.0:8000:8080"
+      - *web-listen
     depends_on:
       backend:
         condition: service_healthy
@@ -109,23 +188,30 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: *frontend-cpus
+          memory: *frontend-memory
     restart: unless-stopped
+    networks:
+      - app
     logging: *logging
 
   worker:
-    # CHANGE_ME nếu dùng owner/tag khác; giữ cùng tag với backend và frontend.
-    image: ghcr.io/ntthanh2603/jobcrawler-worker:main
+    image: *worker-image
     command: ["jobworker", "run"]
     environment:
       GATEWAY_ADDR: backend:50051
       GATEWAY_TOKEN: *gateway-token
       GATEWAY_TLS: "false"
       WORKER_POOL: default
-      # Để trống để worker tự tính theo CPU/RAM của container.
       WORKER_HTTP_SLOTS: ""
       WORKER_RENDER_SLOTS: ""
-      # CHANGE_ME nếu dùng proxy riêng: JSON list hoặc danh sách phân cách bằng dấu phẩy.
-      WORKER_PROXIES: ""
+      WORKER_PROXIES: *worker-proxies
+      WORKER_SHUTDOWN_GRACE_SECONDS: "30"
+      WORKER_WATCHDOG_SECONDS: "120"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
     depends_on:
@@ -139,14 +225,24 @@ services:
       start_period: 60s
       start_interval: 5s
     deploy:
-      # CHANGE_ME nếu cần nhiều worker trên cùng máy.
-      replicas: 1
+      replicas: *worker-replicas
+      resources:
+        limits:
+          cpus: *worker-cpus
+          memory: *worker-memory
     stop_grace_period: 40s
     init: true
     shm_size: 1gb
     restart: unless-stopped
+    networks:
+      - app
     logging: *logging
 
 volumes:
   pgdata:
   redisdata:
+
+networks:
+  app:
+  data:
+    internal: true

@@ -12,15 +12,39 @@ trang mỗi doanh nghiệp, build lại mọi doanh nghiệp trong 6 giờ đêm
 
 Chỉ cần chép `docker-compose.prod.yaml` lên máy chủ:
 
-1. Mở file, tìm `CHANGE_ME`, sửa ba image/tag, mật khẩu Postgres (ở hai chỗ), token gateway,
-   mật khẩu UI và hai khoá bí mật.
-2. Chạy `docker compose -f docker-compose.prod.yaml pull`.
-3. Chạy `docker compose -f docker-compose.prod.yaml up -d`.
-4. Kiểm tra bằng `docker compose -f docker-compose.prod.yaml ps` và mở cổng `8000`.
+1. File chạy được ngay bằng giá trị mặc định. Trước khi mở ra Internet, `Ctrl+F` từ `CHANGE_ME` và
+   sửa giá trị ở trước comment đó: mật khẩu, token, khoá, image, cổng và giới hạn phần cứng.
+   `database-password` phải khớp `database-url`; `redis-password` phải khớp `redis-url`; ba image
+   phải dùng cùng tag phiên bản hoặc `sha-*`.
+2. Giới hạn quyền đọc vì file chứa bí mật: `chmod 600 docker-compose.prod.yaml`.
+3. Kiểm tra và tải image: `docker compose -f docker-compose.prod.yaml config --quiet`, rồi
+   `docker compose -f docker-compose.prod.yaml pull` (đăng nhập GHCR trước nếu package riêng tư).
+4. Khởi động và chờ healthcheck: `docker compose -f docker-compose.prod.yaml up -d --wait`.
+5. Kiểm tra bằng `docker compose -f docker-compose.prod.yaml ps`; giao diện mặc định ở
+   `127.0.0.1:8000`, dành cho reverse proxy HTTPS trên cùng máy.
 
 File này không dùng `build`, `env_file`, `.env` hay file trong repo. Chỉ `frontend` mở cổng; Postgres,
-Redis, backend và worker chỉ ở mạng nội bộ của Compose. Nên đặt cổng `8000` sau reverse proxy HTTPS.
+Redis và backend không mở cổng host; Postgres/Redis còn nằm trên mạng dữ liệu `internal`. Muốn truy
+cập HTTP trực tiếp từ máy khác thì đổi `web-listen` thành `0.0.0.0:8000:8080`, nhưng production nên
+đặt cổng `8000` sau reverse proxy HTTPS.
 `docker-compose.yaml` chỉ dành cho dev: build từ mã nguồn và nạp `backend/.env`, `worker/.env`.
+
+Mặc định phần cứng dành cho máy khoảng 8 vCPU / 16 GB (giới hạn có thể overcommit, Docker chia sẻ
+CPU khi các service cùng tải):
+
+| Service  | CPU tối đa | RAM tối đa |
+| -------- | ---------- | ---------- |
+| Postgres | 2          | 2 GB       |
+| Redis    | 1          | 1 GB       |
+| Backend  | 4          | 4 GB       |
+| Frontend | 0,5        | 256 MB     |
+| Worker   | 4          | 4 GB       |
+
+Redis bắt buộc mật khẩu cả ở healthcheck và backend. Hãy đổi các bí mật trước lần chạy đầu tiên.
+`redis-maxmemory` phải thấp hơn `redis-memory` để Redis còn bộ nhớ nền và trả lỗi ghi theo
+`noeviction`, thay vì container bị OOM-kill.
+Riêng `POSTGRES_PASSWORD` chỉ khởi tạo mật khẩu khi volume `pgdata` còn trống; với DB đã có dữ liệu,
+phải đổi mật khẩu role trong Postgres trước rồi mới sửa hai giá trị trong compose.
 
 ```mermaid
 flowchart LR
@@ -42,8 +66,8 @@ flowchart LR
 ```
 
 - **Một máy production**: dùng `docker-compose.prod.yaml` như hướng dẫn trên. Nếu dùng Postgres /
-  Redis quản lý, sửa trực tiếp `DATABASE_URL` / `REDIS_URL` trong file và chỉ chạy `backend frontend
-  worker`.
+  Redis quản lý, sửa `database-url` / `redis-url`, rồi bỏ hai service và hai điều kiện `depends_on`
+  tương ứng khỏi một bản compose dành riêng cho hạ tầng đó.
 - **Một cổng**: chỉ `frontend` mở cổng (mặc định `8000`); nginx chuyển gRPC của worker
   (`/jobcrawler.crawl.v1.CrawlGateway/`, HTTP/2) tới gateway. Load balancer trước `frontend` phải
   chuyển HTTP/2 cho đường đó (nginx `grpc_pass`, Caddy `h2c://`, ALB target group gRPC). Backend
@@ -65,8 +89,9 @@ flowchart LR
   chuyển tiếp giá trị đó cho backend, backend mới đặt cookie đăng nhập `Secure`.
 - **Image**: CI build và đẩy `jobcrawler-backend`, `-worker`, `-frontend` lên GHCR sau khi mọi kiểm
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
-  Production sửa trực tiếp ba dòng `image:` trong compose và nên ghim cùng một tag; quay lại bản
-  trước bằng cách đổi tag rồi pull/up lại. Phát hành: `task release VERSION=X.Y.Z`.
+  Production sửa ba image trong `x-production` và ghim cùng một tag; giá trị worker được dùng cả
+  cho service lẫn lệnh sinh từ nút "Thêm worker". Quay lại bản trước bằng cách đổi tag rồi pull/up
+  lại. Phát hành: `task release VERSION=X.Y.Z`.
   Cả backend và worker dựng trên `python:3.12-slim-bookworm` (chung lớp base), hai giai đoạn: image
   chạy chỉ có venv `/opt/venv`, không có uv / mã nguồn. Worker chỉ cài Chromium headless shell
   (`playwright install --with-deps --only-shell chromium`, worker luôn mở headless): ~1,4 GB thay vì
