@@ -20,7 +20,7 @@ x-logging: &logging
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jobcrawler}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobcrawler}
@@ -31,7 +31,9 @@ services:
     # /dev/shm mặc định của Docker (64 MB) không đủ cho truy vấn / VACUUM song song khi bảng lớn.
     shm_size: 512mb
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Image Postgres 18+ giữ dữ liệu ở /var/lib/postgresql/<major>/docker: mount thư mục cha (mount
+      # vào .../data như bản 16 thì container từ chối khởi động).
+      - pgdata:/var/lib/postgresql
       # Chỉ chạy khi volume còn trống: tạo thêm DB `jobcrawler_test` cho test tích hợp.
       - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:

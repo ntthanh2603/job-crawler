@@ -11,7 +11,7 @@ trang mỗi doanh nghiệp, build lại mọi doanh nghiệp trong 6 giờ đêm
 ```mermaid
 flowchart LR
   subgraph data["Postgres + Redis (máy riêng hoặc dịch vụ quản lý)"]
-    PG[(PostgreSQL 16 + PgBouncer)]
+    PG[(PostgreSQL 18 + PgBouncer)]
     RD[(Redis 7, AOF)]
   end
   subgraph app["Máy backend × M"]

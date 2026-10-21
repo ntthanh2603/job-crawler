@@ -174,6 +174,11 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   Khôi phục: `docker compose stop backend worker`, chép file vào container, `pg_restore --clean
 --if-exists -U jobcrawler -d jobcrawler /tmp/jobcrawler.dump`, `docker compose up -d`. Production dùng
   Postgres quản lý (snapshot + PITR).
+- Compose chạy Postgres 18 (`pgvector/pgvector:pg18`, volume `pgdata` mount ở `/var/lib/postgresql`).
+  Volume tạo từ bản 16 không dùng tiếp được (khác major, khác chỗ đặt dữ liệu): sao lưu như trên bằng
+  container cũ, `docker compose down`, `docker volume rm jobcrawler_pgdata`, `docker compose up -d`
+  (migration chạy khi `backend` khởi động; script `deploy/postgres/init` tạo lại `jobcrawler_test`), rồi
+  khôi phục bằng `pg_restore`.
 
 ## 10. Sự cố hay gặp
 

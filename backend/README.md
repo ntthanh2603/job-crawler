@@ -19,7 +19,7 @@ Ngoài ra CLI có lệnh vận hành / debug: `import`, `enqueue`, `build`, `pol
 `index-boards`, `queue`, `stats`, `export`, `eval`, `db maintain`, `llm check`, `proxies check`,
 `fetch` (`uv run jobcrawler --help`). `jobcrawler ui` là tên cũ của `jobcrawler api` (ẩn, sẽ bỏ).
 
-Cần: Postgres 16 (pgvector/pg_trgm), Redis 7, ít nhất một worker nối vào gateway. Hợp đồng gRPC
+Cần: Postgres 18 (pg_trgm, unaccent), Redis 7, ít nhất một worker nối vào gateway. Hợp đồng gRPC
 dùng chung với worker nằm ở `../proto` (gói `jobcrawler-proto`, phụ thuộc qua đường dẫn, cài dạng
 editable khi dev).
 
