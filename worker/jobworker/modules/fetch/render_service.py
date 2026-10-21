@@ -56,7 +56,7 @@ class RenderGate:
                 log.error("worker.browser_unavailable", error=str(exc), permanent=True)
                 self.off = True
                 self.reason = f"không có Chromium: {exc}"
-                self._on_change()
+                self._notify()
             return crawl_pb2.ERROR_KIND_UNSUPPORTED
         # Nhiều việc render cùng chờ mở Chromium: chỉ lần lỗi đầu của đợt tính vào backoff.
         if not self.paused():
@@ -70,11 +70,16 @@ class RenderGate:
                 failures=self.failures,
                 retry_in=delay,
             )
-            self._on_change()
+            self._notify()
             self._cancel_timer()
             if not self._closed:
                 self._timer = asyncio.get_running_loop().call_later(delay, self._retry)
         return crawl_pb2.ERROR_KIND_OTHER
+
+    def _notify(self) -> None:
+        """Báo worker Register lại với số slot render mới; worker đã thôi xin việc thì thôi."""
+        if not self._closed:
+            self._on_change()
 
     def _retry(self) -> None:
         """Hết hạn tạm tắt: Register lại với đủ slot render, việc render sau mở lại Chromium."""

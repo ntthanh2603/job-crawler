@@ -12,6 +12,7 @@ nâng được quá số của worker): xem `jobworker.modules.gateway.runtime_s
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import socket
 import tempfile
@@ -37,11 +38,16 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 DEFAULT_SECRETS_DIR = Path("/run/secrets")
 # WORKER_WATCHDOG_SECONDS khác 0 thì ít nhất chừng này: hạn ngắn hơn giết cả worker khoẻ.
 MIN_WATCHDOG_SECONDS = 10.0
+# Như gateway (`Register` trả INVALID_ARGUMENT khi khác dạng): kiểm ngay lúc khởi động.
+WORKER_ID_PATTERN = r"^[A-Za-z0-9_.:@-]{1,128}$"
+WORKER_POOL_PATTERN = r"^[A-Za-z0-9_.-]{1,64}$"
 
 
 def default_worker_id() -> str:
-    """`<hostname>-<8 ký tự hex ngẫu nhiên>`: mỗi process một id, khởi động lại là id mới."""
-    return f"{socket.gethostname()}-{secrets.token_hex(4)}"
+    """`<hostname>-<8 ký tự hex ngẫu nhiên>`: mỗi process một id, khởi động lại là id mới. Ký tự
+    hostname gateway không nhận được thay bằng `-`."""
+    host = re.sub(r"[^A-Za-z0-9_.-]", "-", socket.gethostname())[:100] or "worker"
+    return f"{host}-{secrets.token_hex(4)}"
 
 
 def default_health_file() -> Path:
@@ -100,17 +106,19 @@ class WorkerSettings(BaseSettings):
     # Khoá tham gia cố định (giống GATEWAY_TOKEN của backend): vào gateway lần đầu / khi token
     # riêng hết hạn (`jobworker.services.credentials`).
     gateway_token: SecretStr | None = None
-    # Khoá tham gia dùng một lần (tạo ở trang Workers, hết hạn sau 5 phút).
+    # Khoá tham gia dùng một lần (tạo ở trang Workers, hết hạn sau 15 phút).
     worker_join_key: SecretStr | None = None
-    # Nơi lưu token riêng gateway cấp; mount volume vào đây để worker tạo lại vẫn giữ token.
+    # Nơi lưu token riêng gateway cấp; mount volume vào đây để worker tạo lại vẫn giữ token. Mỗi
+    # process một file: token gắn với worker_id của process vừa Register bằng nó.
     worker_token_file: Path = Field(default_factory=default_token_file)
     gateway_tls: bool = False
-    # CA riêng (PEM) khi gateway dùng chứng chỉ tự ký; trống = CA hệ thống.
+    # CA riêng (PEM) khi gateway dùng chứng chỉ tự ký / CA nội bộ; trống = bộ CA công khai đóng kèm
+    # grpcio (không đọc kho CA của hệ điều hành).
     gateway_ca_cert: Path | None = None
 
-    worker_id: str = Field(default_factory=default_worker_id)
+    worker_id: str = Field(default_factory=default_worker_id, pattern=WORKER_ID_PATTERN)
     # Nhóm worker (backend định tuyến domain → pool qua FETCH_ROUTES).
-    worker_pool: str = "default"
+    worker_pool: str = Field(default="default", pattern=WORKER_POOL_PATTERN)
     # Trống = tự tính theo CPU / RAM của máy (`jobworker.common.sysres`, như open-asm); đặt số
     # thì dùng số đó. Dùng `http_slots` / `render_slots` (đã tính) thay vì đọc thẳng hai field này.
     worker_http_slots: int | None = Field(default=None, ge=1)

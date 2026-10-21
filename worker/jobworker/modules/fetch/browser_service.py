@@ -3,7 +3,8 @@
 Một browser mỗi process, khởi động ở việc render đầu tiên (WORKER_RENDER_SLOTS=0 thì không bao
 giờ). Mỗi việc một context riêng (cookie/storage không lẫn giữa các việc, proxy theo context), chặn
 tải ảnh, font, media. User-Agent lấy từ chính Chromium đang chạy (bỏ chữ "Headless") để khớp
-fingerprint thật của browser.
+fingerprint thật của browser. Không mở được Chromium (hoặc không đọc được User-Agent) thì đóng cả
+browser lẫn driver Playwright: lần sau khởi động lại từ đầu (driver chết không làm render hỏng mãi).
 
 Proxy theo context: Playwright 1.63 trên Windows không còn cần proxy toàn cục lúc launch (proxy giả
 lúc launch còn làm context không proxy hỏng), nên launch không kèm proxy trên mọi nền tảng.
@@ -191,17 +192,38 @@ class BrowserManager:
     async def get(self) -> Browser:
         async with self._lock:
             if self._browser is None or not self._browser.is_connected():
+                browser: Browser | None = None
                 try:
                     if self._playwright is None:
                         self._playwright = await async_playwright().start()
-                    self._browser = await self._playwright.chromium.launch(headless=self._headless)
-                    self.user_agent = await self._detect_user_agent(self._browser)
+                    browser = await self._playwright.chromium.launch(headless=self._headless)
+                    user_agent = await self._detect_user_agent(browser)
                 except PlaywrightError as exc:
+                    permanent = self._not_installed(exc)
+                    # Driver Playwright (node) có thể đã chết: bỏ cả browser lẫn driver, lần sau
+                    # khởi động lại từ đầu thay vì lỗi mãi trên driver cũ.
+                    await self._discard(browser)
                     raise BrowserUnavailableError(
-                        str(exc).splitlines()[0], permanent=self._not_installed(exc)
+                        str(exc).splitlines()[0], permanent=permanent
                     ) from exc
+                # Chỉ giữ browser khi đã có User-Agent (không thì chạy với UA "HeadlessChrome").
+                self._browser, self.user_agent = browser, user_agent
                 log.info("worker.browser_started", user_agent=self.user_agent)
             return self._browser
+
+    async def _discard(self, launched: Browser | None) -> None:
+        """Đóng (bỏ qua lỗi) browser vừa mở, browser cũ và driver Playwright. Gọi khi đang giữ
+        `_lock`."""
+        browsers = [b for b in (launched, self._browser) if b is not None]
+        playwright = self._playwright
+        self._browser = self._playwright = None
+        self.user_agent = None
+        for browser in browsers:
+            with contextlib.suppress(Exception):
+                await browser.close()
+        if playwright is not None:
+            with contextlib.suppress(Exception):
+                await playwright.stop()
 
     def _not_installed(self, exc: PlaywrightError) -> bool:
         """Lỗi mở Chromium là do máy chưa cài Chromium của Playwright."""

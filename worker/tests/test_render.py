@@ -76,3 +76,15 @@ async def test_close_stops_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     gate.close()  # worker dừng / drain
     await asyncio.sleep(0.2)
     assert changes.count == 1
+
+
+async def test_failure_after_close_does_not_reregister() -> None:
+    """Worker đã thôi xin việc (dừng / drain): lỗi Chromium của việc còn dở không đòi Register
+    lại."""
+    changes = Changes()
+    gate = RenderGate(on_change=changes)
+    gate.close()
+    gate.failed(BrowserUnavailableError("hết RAM"))
+    gate.failed(BrowserUnavailableError("Executable doesn't exist", permanent=True))
+    assert gate.off
+    assert changes.count == 0

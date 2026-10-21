@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,11 +24,12 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
 from jobworker import __version__
 from jobworker.common.backoff import Backoff
-from jobworker.modules.fetch import render_service
+from jobworker.modules.fetch import browser_service, render_service
 from jobworker.modules.fetch.browser_service import BrowserUnavailableError
 from jobworker.modules.fetch.results_service import now_ms
+from jobworker.modules.gateway import worker_service
 from jobworker.modules.gateway.runtime_service import RuntimeConfig
-from jobworker.modules.gateway.worker_service import Worker
+from jobworker.modules.gateway.worker_service import RegisterRejectedError, Worker
 from jobworker.services.proxies import LocalProxyPool, parse_proxy_line
 
 Gateway = tuple[FakeGateway, int]
@@ -207,6 +209,32 @@ async def test_config_version_change_reregisters_and_applies(
     assert gw.registers[1].info.http_slots == 4
 
 
+@pytest.mark.parametrize("stopping", [False, True])
+async def test_heartbeat_continues_while_reregister_pending(
+    gateway: Gateway, web: WebServer, stopping: bool
+) -> None:
+    """Mọi slot đang bận mà cấu hình đổi (kể cả lúc đang dừng êm): Register lại không chờ slot
+    trống, Heartbeat không ngưng — gateway không được thấy worker quá hạn báo sống khi việc còn
+    chạy (việc sẽ bị trả `worker_lost`)."""
+    gw, port = gateway
+    gw.config.heartbeat_seconds = 1
+    gw.add(http_task("slow", web.url("/slow"), timeout_seconds=10))
+    run = start(port, worker_http_slots=1)
+    try:
+        await gw.wait_for(lambda: run.worker.stats().http_inflight == 1)
+        if stopping:
+            run.worker.stop("test")
+        gw.config.version = 2
+        seen = len(gw.heartbeats)
+        # /slow trả sau 3 s: hai nhịp báo sống (1 s) phải tới trong lúc việc còn chạy.
+        await gw.wait_for(lambda: len(gw.heartbeats) >= seen + 2, timeout=2.5)
+        assert run.worker.stats().http_inflight == 1
+        assert len(gw.registers) == (1 if stopping else 2)
+    finally:
+        await (run.wait() if stopping else run.stop())  # stop() lần hai là dừng cưỡng bức
+    assert gw.result("slow").status == 200
+
+
 async def test_heartbeat_sends_stats_and_drain(gateway: Gateway, web: WebServer) -> None:
     gw, port = gateway
     gw.config.heartbeat_seconds = 1
@@ -291,6 +319,79 @@ async def test_join_key_then_own_token_saved_and_renewed(
     assert gw.metadata[0]["authorization"] == "Bearer jcw_rieng"  # token cũ bị từ chối
     assert gw.metadata[1]["authorization"] == "Bearer jcj_khoa"
     assert token_file.read_text(encoding="utf-8") == "jcw_moi"
+
+
+async def test_token_bound_to_other_process_reregisters_with_same_token(
+    gateway: Gateway, web: WebServer, tmp_path: Path
+) -> None:
+    """Process khác dùng chung WORKER_TOKEN_FILE vừa Register bằng token đó (gateway gắn token với
+    worker_id của nó) → PERMISSION_DENIED: Register lại bằng chính token đó (gắn lại), không xoá
+    file token, không quay về khoá tham gia đã dùng."""
+    gw, port = gateway
+    gw.token, gw.worker_token = "jcj_khoa_moi", "jcw_rieng"
+    token_file = tmp_path / "token"
+    token_file.write_text("jcw_rieng", encoding="utf-8")
+    run = start(port, worker_join_key="jcj_da_dung", worker_token_file=token_file)
+    try:
+        await gw.wait_for(lambda: len(gw.registers) == 1)
+        gw.token_owner = "process-khac"
+        await gw.wait_for(lambda: len(gw.registers) == 2)
+        gw.add(http_task("t1", web.url("/small")))
+        await gw.wait_results(1)
+    finally:
+        await run.stop()
+    assert gw.permission_denied >= 1
+    assert gw.auth_failures == 0
+    assert {md["authorization"] for md in gw.metadata} == {"Bearer jcw_rieng"}
+    assert token_file.read_text(encoding="utf-8") == "jcw_rieng"
+
+
+async def test_register_invalid_argument_is_fatal(gateway: Gateway) -> None:
+    """Gateway từ chối WORKER_ID / WORKER_POOL (INVALID_ARGUMENT): lỗi cấu hình, thử lại vô ích —
+    worker thoát thay vì thử lại mãi như mất kết nối."""
+    gw, port = gateway
+    gw.register_errors = [grpc.StatusCode.INVALID_ARGUMENT] * 10
+    run = start(port)
+    with pytest.raises(RegisterRejectedError, match="Register bị từ chối"):
+        await run.wait(timeout=5)
+    assert len(gw.register_errors) == 9  # không thử lại
+    assert gw.leaves == []
+
+
+async def test_oversized_result_becomes_too_large(
+    gateway: Gateway, web: WebServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Một kết quả vượt trần message gRPC thành lỗi TOO_LARGE ngay ở worker, không kéo cả lô
+    Complete hỏng theo."""
+    monkeypatch.setattr(worker_service, "MAX_RESULT_BYTES", 32 * 1024)
+    gw, port = gateway
+    gw.add(http_task("noise", web.url("/noise")), http_task("small", web.url("/small")))
+    run = start(port)
+    try:
+        await gw.wait_results(2)
+    finally:
+        await run.stop()
+    big = gw.result("noise")
+    assert big.error_kind == crawl_pb2.ERROR_KIND_TOO_LARGE
+    assert big.status == 200
+    assert not big.body
+    assert gw.result("small").status == 200
+    assert run.worker.counters.http_failed == 1
+
+
+async def test_complete_resource_exhausted_not_retried(gateway: Gateway, web: WebServer) -> None:
+    """RESOURCE_EXHAUSTED ở Complete (lô vượt trần message) gửi lại vẫn hỏng: không thử lại."""
+    gw, port = gateway
+    gw.complete_errors = [grpc.StatusCode.RESOURCE_EXHAUSTED]
+    gw.add(http_task("t1", web.url("/small")))
+    run = start(port)
+    try:
+        await gw.wait_for(lambda: gw.completes == 1)
+        await asyncio.sleep(0.8)  # lần thử lại đầu (nếu có) sau 0.5 s
+    finally:
+        await run.stop()
+    assert gw.completes == 1
+    assert gw.results == []
 
 
 async def test_wrong_token_keeps_retrying(gateway: Gateway) -> None:
@@ -424,6 +525,108 @@ def test_missing_chromium_is_permanent() -> None:
     assert manager._not_installed(missing)  # pyright: ignore[reportPrivateUsage]
     crashed = PlaywrightError("BrowserType.launch: Target page, context or browser has been closed")
     assert not manager._not_installed(crashed)  # pyright: ignore[reportPrivateUsage]
+
+
+class FakeChromium:
+    """`async_playwright().start()` giả (kiêm `.chromium`): `dead` = driver node đã chết, mọi
+    `launch` lỗi; `ua_error` = browser đầu tiên mở được nhưng hỏng khi đọc User-Agent."""
+
+    executable_path = sys.executable  # file có thật: lỗi launch không bị coi là chưa cài
+
+    def __init__(self, *, dead: bool = False, ua_error: bool = False) -> None:
+        self.dead = dead
+        self.ua_error = ua_error
+        self.chromium = self
+        self.browsers: list[FakeBrowser] = []
+        self.stopped = False
+
+    async def launch(self, *, headless: bool) -> FakeBrowser:
+        from playwright.async_api import Error as PlaywrightError
+
+        if self.dead:
+            raise PlaywrightError("BrowserType.launch: Connection closed while reading from driver")
+        browser = FakeBrowser(ua_error=self.ua_error and not self.browsers)
+        self.browsers.append(browser)
+        return browser
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+
+class FakeBrowser:
+    def __init__(self, *, ua_error: bool) -> None:
+        self.ua_error = ua_error
+        self.closed = False
+
+    def is_connected(self) -> bool:
+        return not self.closed
+
+    async def new_page(self) -> FakePage:
+        return FakePage(self.ua_error)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakePage:
+    def __init__(self, ua_error: bool) -> None:
+        self.ua_error = ua_error
+
+    async def evaluate(self, expression: str) -> str:
+        from playwright.async_api import Error as PlaywrightError
+
+        if self.ua_error:
+            raise PlaywrightError("Target page, context or browser has been closed")
+        return "Mozilla/5.0 HeadlessChrome/140.0.0.0 Safari/537.36"
+
+    async def close(self) -> None:
+        pass
+
+
+def scripted_playwright(monkeypatch: pytest.MonkeyPatch, *drivers: FakeChromium) -> None:
+    """Mỗi lần khởi động Playwright lấy driver kế tiếp trong `drivers`."""
+    queue = list(drivers)
+
+    class Starter:
+        async def start(self) -> FakeChromium:
+            return queue.pop(0)
+
+    monkeypatch.setattr(browser_service, "async_playwright", Starter)
+
+
+async def test_dead_playwright_driver_is_restarted(monkeypatch: pytest.MonkeyPatch) -> None:
+    dead, fresh = FakeChromium(dead=True), FakeChromium()
+    scripted_playwright(monkeypatch, dead, fresh)
+    manager = browser_service.BrowserManager(worker_id="w1", max_pages=1)
+    with pytest.raises(BrowserUnavailableError) as exc:
+        await manager.get()
+    assert not exc.value.permanent
+    assert dead.stopped  # driver chết bị bỏ, lần sau khởi động driver mới
+    assert not manager.started
+    await manager.get()
+    assert manager.started
+    assert manager.user_agent == "Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36"
+    await manager.close()
+    assert fresh.stopped
+
+
+async def test_user_agent_failure_does_not_keep_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mở được Chromium nhưng không đọc được User-Agent: không giữ browser đó (sẽ chạy với UA
+    "HeadlessChrome"), lần sau mở lại từ đầu."""
+    first, second = FakeChromium(ua_error=True), FakeChromium()
+    scripted_playwright(monkeypatch, first, second)
+    manager = browser_service.BrowserManager(worker_id="w1", max_pages=1)
+    with pytest.raises(BrowserUnavailableError):
+        await manager.get()
+    assert not manager.started
+    assert manager.user_agent is None
+    assert first.browsers[0].closed
+    assert first.stopped
+    browser = await manager.get()
+    assert browser is second.browsers[0]
+    assert manager.user_agent is not None
+    assert "Headless" not in manager.user_agent
+    await manager.close()
 
 
 def test_headless_shell_counts_as_installed(tmp_path: Path) -> None:
@@ -615,6 +818,10 @@ def test_backoff_grows_and_caps() -> None:
     delays = [backoff.next() for _ in range(12)]
     assert 0.5 <= delays[0] <= 0.75
     assert delays[3] > delays[0]
-    assert max(delays) == pytest.approx(30)
+    assert max(delays) <= 30
+    # Ở mức trần vẫn có jitter (20–30 s): các worker mất gateway cùng lúc không thử lại cùng nhịp.
+    capped = [backoff.next() for _ in range(50)]
+    assert all(20 <= d <= 30 for d in capped)
+    assert max(capped) - min(capped) > 1
     backoff.reset()
     assert backoff.next() <= 0.75

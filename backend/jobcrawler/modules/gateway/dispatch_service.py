@@ -15,7 +15,8 @@
   Lease không tới worker) thì gateway trả `ERROR_KIND_WORKER_LOST` cho việc đó để backend thử lại
   ngay thay vì chờ hết hạn. Việc worker kể là đang giữ mà gateway đã thu hồi thì báo lại để worker
   huỷ (`HeartbeatResponse.revoked_task_ids`).
-- Mốc hạn sống / mốc giao việc theo đồng hồ Redis (`TIME`), không theo đồng hồ từng gateway.
+- Mốc hạn sống / mốc giao việc / `deadline_ms` của việc theo đồng hồ Redis (`TIME`), không theo
+  đồng hồ từng gateway / backend. Worker so `deadline_ms` với đồng hồ máy nó (máy worker cần NTP).
 - `task_id` = `<client_id>.<seq>`: gateway đọc `client_id` từ đó rồi LPUSH `FetchResult` vào
   `Keys.reply(client_id)` (hết hạn sau REPLY_TTL_SECONDS), nên gateway không giữ trạng thái.
 - `FetchClient` (mỗi process backend một cái): XADD việc, một task nền BRPOP list kết quả của
@@ -598,14 +599,17 @@ class FetchClient:
         progress = self.keys.progress(pool, kind)
         timeout = max(0.0, task.timeout_seconds)
         task.task_id = f"{self.client_id}.{next(self._seq)}"
-        # Worker bỏ việc quá mốc này: đúng lúc backend thôi chờ hẳn.
-        task.deadline_ms = _now_ms() + int((timeout + self.max_wait) * 1000)
         future: asyncio.Future[crawl_pb2.FetchResult] = asyncio.get_running_loop().create_future()
         self._pending[task.task_id] = future
         entry_id: Any = None
         answered = False
         try:
             try:
+                # Worker bỏ việc quá mốc này: đúng lúc backend thôi chờ hẳn. Tính theo đồng hồ Redis
+                # như gateway khi giao việc / trả `worker_lost` (backend lệch giờ không làm việc bị
+                # bỏ oan); worker so với đồng hồ máy nó.
+                wait_ms = int((timeout + self.max_wait) * 1000)
+                task.deadline_ms = await redis_now_ms(self.redis) + wait_ms
                 async with self.redis.pipeline(transaction=False) as pipe:
                     pipe.get(progress)
                     pipe.xadd(

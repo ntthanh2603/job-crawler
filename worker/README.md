@@ -8,7 +8,11 @@ limit: toàn bộ logic thu thập nằm ở backend.
 
 Vòng lặp: `Register` → `Lease` (long-poll, chỉ xin đúng số slot còn trống) → tải → `Complete` (gộp
 lô) song song `Heartbeat` → `Leave` khi dừng. Gateway mất kết nối thì worker thử lại với backoff
-(0.5 s → 30 s) mãi, không tự thoát; gateway quên worker (khởi động lại) thì worker tự đăng ký lại.
+(0.5 s → 30 s, ở mức trần ngẫu nhiên 20–30 s) mãi, không tự thoát; gateway quên worker (khởi động
+lại) thì worker tự đăng ký lại. Đổi cấu hình (phiên bản mới) thì đăng ký lại ngay, không chờ slot
+trống, và vẫn `Heartbeat` trong lúc đó (cả lúc đang dừng êm) để việc đang chạy không bị trả
+`worker_lost`. Riêng gateway từ chối `WORKER_ID` / `WORKER_POOL` (`INVALID_ARGUMENT`) là lỗi cấu
+hình: worker thoát mã 1.
 
 ## Bố cục mã
 
@@ -75,18 +79,18 @@ như không đặt.
 | `GATEWAY_ADDR` | `localhost:50051` | Địa chỉ gateway gRPC (`host:port`): máy khác dùng host:cổng giao diện của máy backend (nginx chuyển tới gateway) |
 | `GATEWAY_TOKEN` | — | Khoá tham gia cố định, khớp `GATEWAY_TOKEN` của backend: vào gateway lần đầu / khi token riêng hết hạn |
 | `WORKER_JOIN_KEY` | — | Khoá tham gia dùng một lần (trang Workers → "Thêm worker", hết hạn sau 15 phút) |
-| `WORKER_TOKEN_FILE` | `~/.jobworker/token` | Token riêng gateway cấp sau khi vào (`jobworker/services/credentials.py`); mount volume để giữ qua lần tạo lại container |
+| `WORKER_TOKEN_FILE` | `~/.jobworker/token` | Token riêng gateway cấp sau khi vào (`jobworker/services/credentials.py`); mount volume để giữ qua lần tạo lại container. **Mỗi process một file**: nhiều process cùng máy / cùng user (hoặc chung volume) phải đặt file riêng |
 | `GATEWAY_TLS` | `false` | Kết nối TLS |
-| `GATEWAY_CA_CERT` | — | File PEM của CA riêng (chứng chỉ tự ký); trống = CA hệ thống |
-| `WORKER_ID` | `<hostname>-<8 hex>` | Id duy nhất mỗi process; mặc định sinh mới mỗi lần khởi động |
-| `WORKER_POOL` | `default` | Nhóm worker (xem Pool bên dưới) |
+| `GATEWAY_CA_CERT` | — | File PEM của CA riêng (chứng chỉ tự ký / CA nội bộ); trống = bộ CA công khai đóng kèm grpcio, **không** đọc kho CA của hệ điều hành (CA nội bộ cài vào máy cũng phải trỏ biến này tới file PEM) |
+| `WORKER_ID` | `<hostname>-<8 hex>` | Id duy nhất mỗi process; mặc định sinh mới mỗi lần khởi động. Chỉ `A-Z a-z 0-9 _ . : @ -`, tối đa 128 ký tự (sai thì worker không chạy) |
+| `WORKER_POOL` | `default` | Nhóm worker (xem Pool bên dưới). Chỉ `A-Z a-z 0-9 _ . -`, tối đa 64 ký tự |
 | `WORKER_HTTP_SLOTS` | tự động | Request HTTP cùng lúc tối đa; trống = 8 mỗi CPU, trong [8, 64] (`jobworker/common/sysres.py`) |
 | `WORKER_RENDER_SLOTS` | tự động | Trang Chromium cùng lúc tối đa; trống = 1 mỗi 768 MiB RAM, không quá số CPU, trong [1, 8]; `0` = không bao giờ khởi động Chromium |
 | `WORKER_PROXIES` | — | Proxy tại worker: JSON list hoặc cách nhau bởi dấu phẩy / xuống dòng |
 | `WORKER_PROXIES_FILE` | — | File proxy, định dạng như `config/proxies.example.txt` |
 | `WORKER_IMPERSONATE` | `chrome` | Fingerprint curl_cffi |
 | `WORKER_LABELS` | `{}` | Nhãn tự do, JSON (`{"region": "hn", "provider": "x"}`), hiện ở trang Workers |
-| `WORKER_MAX_BODY_BYTES` | `10485760` | Body lớn hơn thì trả `ERROR_KIND_TOO_LARGE` (không kèm body) |
+| `WORKER_MAX_BODY_BYTES` | `10485760` | Body lớn hơn thì trả `ERROR_KIND_TOO_LARGE` (không kèm body). Dù giới hạn này cao bao nhiêu, kết quả (body đã nén + JSON bắt được) quá 55 MiB cũng thành `ERROR_KIND_TOO_LARGE` để lô `Complete` lọt trần message gRPC 64 MiB |
 | `WORKER_SHUTDOWN_GRACE_SECONDS` | `30` | Chờ việc đang chạy khi dừng |
 | `WORKER_PROXY_STICKY_SECONDS` | `600` | Giữ một proxy cho mỗi domain chừng này giây |
 | `WORKER_PROXY_COOLDOWN_SECONDS` | `120` | Proxy nghỉ với domain sau lỗi kết nối / 403 / 407 / 429 |
@@ -104,9 +108,10 @@ trống giữ cấu hình của worker. Riêng `WORKER_RENDER_SLOTS=0` là tắt
 lên được.
 
 Không mở được Chromium (thiếu RAM, Chromium chết rồi mở lại không được...): việc render đó trả lỗi,
-worker tạm tắt render (đăng ký lại với 0 slot render để backend không gửi việc render tới) trong
-30 s, 60 s, 120 s... tối đa 10 phút theo số lần lỗi liên tiếp, hết hạn thì đăng ký lại với đủ slot
-và thử mở lại; mở được thì đếm lại từ đầu. Máy không có Chromium (chưa `playwright install
+worker đóng cả Chromium lẫn driver Playwright (lần mở sau khởi động lại từ đầu), tạm tắt render
+(đăng ký lại với 0 slot render để backend không gửi việc render tới) trong 30 s, 60 s, 120 s...
+tối đa 10 phút theo số lần lỗi liên tiếp, hết hạn thì đăng ký lại với đủ slot và thử mở lại; mở
+được thì đếm lại từ đầu. Máy không có Chromium (chưa `playwright install
 chromium`) thì việc render đầu tiên trả `ERROR_KIND_UNSUPPORTED` và worker tắt render hẳn. Trang
 Workers hiện lý do và giờ thử lại (`WorkerStats.render_disabled_reason` / `render_retry_at_ms`).
 
@@ -128,8 +133,12 @@ cả hai `.env`.
 
 Xác thực (backend đặt `GATEWAY_TOKEN`): `Register` bằng khoá tham gia — `WORKER_JOIN_KEY` rồi
 `GATEWAY_TOKEN` — nhận `worker_token` riêng, các lời gọi sau (Lease / Complete / Heartbeat / Leave,
-Register lại) dùng token đó. Gateway từ chối token (hết hạn sau 7 ngày không chạy, mất Redis) thì
-worker bỏ token và vào lại bằng khoá tham gia; khoá một lần đã dùng thì cần khoá mới.
+Register lại) dùng token đó. Gateway từ chối token (`UNAUTHENTICATED`: hết hạn sau 7 ngày không
+chạy, mất Redis) thì worker bỏ token và vào lại bằng khoá tham gia; khoá một lần đã dùng thì cần
+khoá mới. Token gắn với `worker_id` của process vừa `Register` bằng nó: process khác dùng chung
+`WORKER_TOKEN_FILE` đăng ký bằng token đó thì lời gọi của process này bị `PERMISSION_DENIED` —
+worker giữ token và đăng ký lại (gắn token về mình), hai process cứ thế giành nhau; mỗi process
+một `WORKER_TOKEN_FILE`.
 
 ## Healthcheck
 

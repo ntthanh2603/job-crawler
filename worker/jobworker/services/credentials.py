@@ -2,8 +2,10 @@
 
 - **Token riêng** (`jcw_…`): gateway cấp khi Register bằng khoá tham gia; dùng cho mọi lời gọi
   sau, lưu ở WORKER_TOKEN_FILE (quyền 0600) để khởi động lại không cần khoá mới. Gateway từ chối
-  (hết hạn, mất Redis) thì bỏ token, vào lại bằng khoá tham gia.
-- **Khoá tham gia**, thử lần lượt: WORKER_JOIN_KEY (một lần, tạo ở trang Workers, hết hạn sau 5
+  (UNAUTHENTICATED: hết hạn, mất Redis) thì bỏ token, vào lại bằng khoá tham gia. Token gắn với
+  worker_id của process vừa Register bằng nó: mỗi process một WORKER_TOKEN_FILE — dùng chung thì
+  các process giành token của nhau (PERMISSION_DENIED → Register lại, token vẫn giữ).
+- **Khoá tham gia**, thử lần lượt: WORKER_JOIN_KEY (một lần, tạo ở trang Workers, hết hạn sau 15
   phút) rồi GATEWAY_TOKEN (cố định, cho worker trong hạ tầng của mình).
 
 Gateway không bật xác thực thì gửi gì cũng được (khoá bị bỏ qua, không cấp token).
@@ -66,7 +68,8 @@ class Credentials:
             log.warning("worker.token_not_saved", path=str(self.path), error=str(exc))
 
     def reject(self) -> bool:
-        """Gateway từ chối khoá vừa dùng. Trả True nếu còn khoá khác để thử ngay."""
+        """Gateway từ chối khoá vừa dùng (UNAUTHENTICATED). Trả True nếu còn khoá khác để thử
+        ngay."""
         if self.token is not None:
             log.warning("worker.token_rejected", reason="token hết hạn hoặc bị thu hồi")
             self.token = None

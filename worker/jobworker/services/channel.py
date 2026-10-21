@@ -11,16 +11,24 @@ from jobworker.common.config import WorkerSettings
 
 MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 
-# Gateway không biết worker này (khởi động lại, đã prune): Register lại.
-REREGISTER_CODES = frozenset({grpc.StatusCode.NOT_FOUND, grpc.StatusCode.FAILED_PRECONDITION})
-# Khoá / token bị từ chối: thử khoá kế tiếp, hết khoá thì chờ rồi thử lại.
-AUTH_CODES = frozenset({grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.PERMISSION_DENIED})
-# Lỗi tạm thời: thử lại lời gọi.
+# Gateway không biết worker này (khởi động lại, đã prune), hoặc token còn hạn nhưng đang gắn với
+# worker_id khác (PERMISSION_DENIED: process khác dùng chung WORKER_TOKEN_FILE vừa Register bằng
+# nó): Register lại, giữ token (gateway gắn lại token với worker này).
+REREGISTER_CODES = frozenset(
+    {
+        grpc.StatusCode.NOT_FOUND,
+        grpc.StatusCode.FAILED_PRECONDITION,
+        grpc.StatusCode.PERMISSION_DENIED,
+    }
+)
+# Khoá / token bị từ chối (sai, hết hạn): bỏ token, thử khoá kế tiếp, hết khoá thì chờ rồi thử lại.
+AUTH_CODES = frozenset({grpc.StatusCode.UNAUTHENTICATED})
+# Lỗi tạm thời: thử lại lời gọi. Không có RESOURCE_EXHAUSTED: message vượt trần thì gửi lại vẫn
+# hỏng.
 RETRY_CODES = frozenset(
     {
         grpc.StatusCode.UNAVAILABLE,
         grpc.StatusCode.DEADLINE_EXCEEDED,
-        grpc.StatusCode.RESOURCE_EXHAUSTED,
         grpc.StatusCode.ABORTED,
     }
 )
@@ -44,7 +52,9 @@ def channel_options() -> list[tuple[str, Any]]:
 
 
 def open_channel(settings: WorkerSettings) -> grpc.aio.Channel:
-    """Kênh tới gateway: TLS khi GATEWAY_TLS (CA riêng nếu có GATEWAY_CA_CERT)."""
+    """Kênh tới gateway: TLS khi GATEWAY_TLS. Kiểm chứng chỉ bằng GATEWAY_CA_CERT nếu có, không thì
+    bằng bộ CA công khai đóng kèm grpcio (`grpc/_cython/_credentials/roots.pem`) — không phải kho
+    CA của hệ điều hành."""
     if settings.gateway_tls:
         root = settings.gateway_ca_cert.read_bytes() if settings.gateway_ca_cert else None
         creds = grpc.ssl_channel_credentials(root_certificates=root)

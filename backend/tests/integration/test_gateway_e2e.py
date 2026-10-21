@@ -782,6 +782,9 @@ async def test_one_time_join_key_and_token_binding(redis: Redis, prefix: str) ->
         async with FakeWorker(gw.port, token=join.key, serve=False) as worker:
             assert worker.worker_token is not None
             assert await auth.join_key_status(join.id) == ("used", worker.worker_id)
+            # Huỷ khoá đã dùng (hộp thoại đóng ngay sau khi worker vào): không huỷ, giữ `used`.
+            assert not await auth.revoke_join_key(join.id)
+            assert await auth.join_key_status(join.id) == ("used", worker.worker_id)
             token = worker.worker_token
             # Khoá tham gia chỉ dùng một lần.
             again = FakeWorker(gw.port, token=join.key)
@@ -803,6 +806,78 @@ async def test_one_time_join_key_and_token_binding(redis: Redis, prefix: str) ->
         spare = await auth.create_join_key(created_by="admin")
         assert await auth.revoke_join_key(spare.id)
         assert await auth.join_key_status(spare.id) == ("expired", None)
+
+
+async def test_live_worker_id_belongs_to_one_token(redis: Redis, prefix: str) -> None:
+    """Worker khác (khoá tham gia, token riêng hay GATEWAY_TOKEN) không đăng ký được trùng id của
+    worker đang sống (ALREADY_EXISTS: worker thử lại, giữ token), nên không Leave / Complete thay
+    worker đó được. Worker khởi động lại với cùng id và token của nó vào ngay; id rời thì dùng lại
+    được."""
+    settings = make_settings(prefix, gateway_token="s3cret")
+    keys = registry_service.Keys(prefix)
+    async with gateway(redis, settings) as gw:
+        auth = gw.servicer.auth
+        assert auth is not None
+        join = await auth.create_join_key(created_by="admin")
+        intruder = FakeWorker(gw.port, token=join.key, serve=False)
+        try:
+            async with FakeWorker(gw.port, token="s3cret", serve=False) as victim:
+                await queue_task(redis, keys, "c-1.1")
+                assert len((await victim.lease(wait_ms=0)).tasks) == 1
+                own_id = intruder.worker_id
+                intruder.worker_id = victim.worker_id
+                with pytest.raises(grpc.aio.AioRpcError) as info:
+                    await intruder.register()
+                assert info.value.code() == grpc.StatusCode.ALREADY_EXISTS
+                # Khoá tham gia chưa bị dùng: vào được dưới id của chính nó.
+                assert await auth.join_key_status(join.id) == ("pending", None)
+                intruder.worker_id = own_id
+                await intruder.register()
+                assert await auth.join_key_status(join.id) == ("used", own_id)
+                own = intruder.metadata
+                for metadata in (own, (("authorization", "Bearer s3cret"),)):
+                    intruder.metadata = metadata
+                    intruder.worker_id = victim.worker_id
+                    with pytest.raises(grpc.aio.AioRpcError) as info:
+                        await intruder.register()
+                    assert info.value.code() == grpc.StatusCode.ALREADY_EXISTS
+                intruder.metadata = own
+                with pytest.raises(grpc.aio.AioRpcError) as info:
+                    await intruder.leave()  # token của nó vẫn gắn với id của nó
+                assert info.value.code() == grpc.StatusCode.PERMISSION_DENIED
+                assert await redis.hexists(keys.inflight(victim.worker_id), "c-1.1")  # pyright: ignore[reportGeneralTypeIssues]
+                # Worker thật Register lại (đổi cấu hình / khởi động lại cùng id, token đã lưu).
+                await victim.register()
+                assert not (await victim.lease(wait_ms=0)).drain
+            # Worker kia đã rời: id dùng lại được.
+            await intruder.register()
+            assert not (await intruder.lease(wait_ms=0)).drain
+        finally:
+            await intruder.__aexit__()
+
+
+async def test_processes_sharing_a_token_file_can_rebind(redis: Redis, prefix: str) -> None:
+    """Hai process cùng máy dùng chung WORKER_TOKEN_FILE (id khác nhau, cùng token): Register bằng
+    token đó gắn lại token qua lại, không bị coi là trùng id của token khác."""
+    settings = make_settings(prefix, gateway_token="s3cret")
+    async with gateway(redis, settings) as gw:
+        first = FakeWorker(gw.port, token="s3cret", serve=False)
+        second = FakeWorker(gw.port, serve=False)
+        try:
+            await first.register()
+            second.metadata = first.metadata
+            await second.register()  # token gắn sang id thứ hai
+            with pytest.raises(grpc.aio.AioRpcError) as info:
+                await first.lease(wait_ms=0)
+            assert info.value.code() == grpc.StatusCode.PERMISSION_DENIED
+            for _ in range(2):  # worker gặp PERMISSION_DENIED thì Register lại bằng chính token
+                await first.register()
+                assert not (await first.lease(wait_ms=0)).drain
+                await second.register()
+                assert not (await second.lease(wait_ms=0)).drain
+        finally:
+            await first.__aexit__()
+            await second.__aexit__()
 
 
 async def test_join_key_use_queues_one_audit_event(redis: Redis, prefix: str) -> None:

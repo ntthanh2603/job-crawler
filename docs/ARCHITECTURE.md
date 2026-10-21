@@ -274,15 +274,26 @@ sequenceDiagram
 - **Đối soát qua Heartbeat**: worker kể mọi việc còn nợ kết quả (`task_ids`). Việc đã giao quá 60 s
   mà worker không kể (lời trả Lease không tới worker) → `worker_lost`; việc worker kể mà gateway đã
   thu hồi → `revoked_task_ids`, worker huỷ ngay. Worker cũ không kể việc thì không đối soát.
-- **Đồng hồ**: hạn báo sống, mốc giao việc, hạn của việc so theo `TIME` của Redis, không theo đồng
-  hồ từng máy. `GATEWAY_WORKER_TTL_SECONDS` phải ≥ 3 × `GATEWAY_HEARTBEAT_SECONDS`.
+- **Đồng hồ**: hạn báo sống, mốc giao việc, hạn của việc (`deadline_ms`, backend tính từ `TIME`
+  lúc gửi) ở backend / gateway theo `TIME` của Redis, không theo đồng hồ từng máy. Worker so
+  `deadline_ms` với đồng hồ máy nó (bỏ việc quá hạn, rút ngắn timeout): máy worker lệch giờ thì bỏ
+  việc oan (nhanh) hoặc tải việc backend đã thôi chờ (chậm) — máy worker cần NTP.
+  `GATEWAY_WORKER_TTL_SECONDS` phải ≥ 3 × `GATEWAY_HEARTBEAT_SECONDS`.
 - **Pool**: worker khai `WORKER_POOL`; `FETCH_ROUTES` định tuyến domain → pool (vd. trang tuyển dụng qua
   proxy dân cư); pool không có worker thì về `default`; không có worker nào → lỗi `no_worker` ngay.
 - **Đăng ký**: `Register` trả `WorkerConfig` (slot trần, impersonate, heartbeat, danh sách proxy
-  chung). Lease / Heartbeat chỉ trả `config_version`; đổi phiên bản → worker đăng ký lại.
+  chung). Lease / Heartbeat chỉ trả `config_version`; đổi phiên bản → worker đăng ký lại ngay (không
+  chờ slot trống) và vẫn Heartbeat trong lúc đó. `worker_id` / pool sai dạng → `INVALID_ARGUMENT`,
+  worker thoát (lỗi cấu hình).
 - **Xác thực** (bật khi đặt `GATEWAY_TOKEN`): `Register` bằng khoá tham gia (`GATEWAY_TOKEN` hoặc khoá
   dùng một lần, TTL 15 phút) → nhận `worker_token` riêng (chỉ trên Redis, băm SHA-256, hạn trượt 7
-  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id`. Dùng khoá tham gia thì ghi nhật ký
+  ngày); mọi RPC sau phải dùng token đó và đúng `worker_id` (token đang gắn với id khác →
+  `PERMISSION_DENIED`, worker `Register` lại bằng chính token đó để gắn lại; mỗi process một
+  `WORKER_TOKEN_FILE`). Một `worker_id` đang sống chỉ thuộc một token (`gw:owner:<id>`): Register
+  bằng khoá / token khác với id đó → `ALREADY_EXISTS` (worker giữ token, thử lại tới khi bản cũ hết
+  hạn báo sống), nên worker khác không Leave / Complete thay được. Kiểm khoá, giành id, dùng khoá
+  tham gia, ghi token là một script Lua (lỗi Redis giữa chừng không làm mất khoá tham gia); khoá đã
+  dùng thì không huỷ được. Dùng khoá tham gia thì ghi nhật ký
   thao tác `worker.joined` qua hàng chờ Redis (mục 10). "Thêm worker" ghép lệnh `docker run`
   từ khoá + `GATEWAY_PUBLIC_URL` (trống = địa chỉ trang web) + `GATEWAY_WORKER_IMAGE`.
 - **Slot**: `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống = tự tính theo máy (HTTP 8 / CPU trong

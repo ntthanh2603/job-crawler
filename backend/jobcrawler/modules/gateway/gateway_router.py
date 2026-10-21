@@ -133,15 +133,18 @@ async def get_join_key(request: Request, join_id: str) -> JoinKeyStatusOut:
 @router.delete("/workers/join-keys/{join_id}")
 async def revoke_join_key(request: Request, join_id: str) -> JoinKeyStatusOut:
     """Huỷ khoá tham gia chưa dùng (đóng hộp thoại, tạo khoá mới)."""
-    revoked = await _worker_auth(request).revoke_join_key(join_id)
-    if revoked:
-        await audit_service.record_safely(
-            res_of(request).sessionmaker,
-            action=audit_service.WORKER_JOIN_KEY_REVOKE,
-            actor=actor_of(request),
-            resource_type="join_key",
-            resource_id=join_id,
-        )
+    auth = _worker_auth(request)
+    if not await auth.revoke_join_key(join_id):
+        # Không có gì để huỷ: hết hạn, hoặc worker vừa dùng khoá (trả `used`, không ghi nhật ký).
+        status, worker_id = await auth.join_key_status(join_id)
+        return JoinKeyStatusOut(id=join_id, status=status, worker_id=worker_id)
+    await audit_service.record_safely(
+        res_of(request).sessionmaker,
+        action=audit_service.WORKER_JOIN_KEY_REVOKE,
+        actor=actor_of(request),
+        resource_type="join_key",
+        resource_id=join_id,
+    )
     return JoinKeyStatusOut(id=join_id, status="expired", worker_id=None)
 
 

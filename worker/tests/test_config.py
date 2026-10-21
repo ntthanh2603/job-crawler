@@ -114,3 +114,20 @@ def test_watchdog_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
         settings(worker_watchdog_seconds=5)
     with pytest.raises(ValidationError):
         settings(worker_watchdog_seconds=-1)
+
+
+def test_worker_id_and_pool_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gateway từ chối id / pool khác dạng (INVALID_ARGUMENT): báo lỗi ngay lúc khởi động."""
+    s = settings(worker_id="may-1.hn:2@vn_x", worker_pool="residential.hn_1")
+    assert (s.worker_id, s.worker_pool) == ("may-1.hn:2@vn_x", "residential.hn_1")
+    for bad in ("máy 1", "a/b", "x" * 129):
+        with pytest.raises(ValidationError, match="worker_id"):
+            settings(worker_id=bad)
+    for bad in ("dân cư", "a:b", "x" * 65):
+        with pytest.raises(ValidationError, match="worker_pool"):
+            settings(worker_pool=bad)
+    # Id mặc định lấy từ hostname: ký tự lạ được thay, luôn hợp lệ.
+    monkeypatch.setattr(config.socket, "gethostname", lambda: "Máy chủ#1")
+    worker_id = config.default_worker_id()
+    assert worker_id.startswith("M-y-ch--1-")
+    assert settings(worker_id=worker_id).worker_id == worker_id

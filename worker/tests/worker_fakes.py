@@ -7,6 +7,7 @@ import base64
 import contextlib
 import http.client
 import json
+import random
 import tempfile
 import threading
 import time
@@ -45,6 +46,13 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         self.token: str | None = None
         self.worker_token: str | None = None
         self.auth_failures = 0
+        # Như gateway thật: token riêng gắn với worker_id vừa Register; lời gọi khác bằng token đó
+        # với id khác → PERMISSION_DENIED (process khác dùng chung file token vừa Register).
+        self.token_owner: str | None = None
+        self.permission_denied = 0
+        self.register_errors: list[grpc.StatusCode] = []  # mã lỗi cho các lần Register tới
+        self.complete_errors: list[grpc.StatusCode] = []  # mã lỗi cho các lần Complete tới
+        self.completes = 0  # số lời gọi Complete (kể cả lỗi)
         self._changed = asyncio.Event()
 
     # --- điều khiển từ test ---
@@ -73,7 +81,9 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
 
     # --- RPC ---
 
-    async def _auth(self, context: grpc.aio.ServicerContext, *, register: bool = False) -> None:
+    async def _auth(
+        self, context: grpc.aio.ServicerContext, worker_id: str = "", *, register: bool = False
+    ) -> None:
         md = {str(k): str(v) for k, v in context.invocation_metadata() or ()}
         self.metadata.append(md)
         if self.token is None and self.worker_token is None:
@@ -87,15 +97,22 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         if md.get("authorization") not in {f"Bearer {a}" for a in allowed if a}:
             self.auth_failures += 1
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "token sai")
+        if not register and self.token_owner not in (None, worker_id):
+            self.permission_denied += 1
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, "token thuộc worker khác")
 
     async def Register(self, request: Any, context: Any) -> crawl_pb2.RegisterResponse:
         await self._auth(context, register=True)
+        if self.register_errors:
+            await context.abort(self.register_errors.pop(0), "Register bị từ chối")
         self.registers.append(request)
         self.known.add(request.info.worker_id)
+        if self.worker_token is not None:
+            self.token_owner = request.info.worker_id
         return crawl_pb2.RegisterResponse(config=self.config, worker_token=self.worker_token or "")
 
     async def Lease(self, request: Any, context: Any) -> crawl_pb2.LeaseResponse:
-        await self._auth(context)
+        await self._auth(context, request.worker_id)
         if self.not_found_leases > 0:
             self.not_found_leases -= 1
             await context.abort(grpc.StatusCode.NOT_FOUND, "worker không rõ")
@@ -132,12 +149,15 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         return taken
 
     async def Complete(self, request: Any, context: Any) -> crawl_pb2.CompleteResponse:
-        await self._auth(context)
+        self.completes += 1
+        await self._auth(context, request.worker_id)
+        if self.complete_errors:
+            await context.abort(self.complete_errors.pop(0), "Complete lỗi")
         self.results.extend(request.results)
         return crawl_pb2.CompleteResponse(accepted=len(request.results))
 
     async def Heartbeat(self, request: Any, context: Any) -> crawl_pb2.HeartbeatResponse:
-        await self._auth(context)
+        await self._auth(context, request.worker_id)
         if request.worker_id not in self.known:
             await context.abort(grpc.StatusCode.NOT_FOUND, "worker không rõ")
         self.heartbeats.append(request)
@@ -147,7 +167,7 @@ class FakeGateway(crawl_pb2_grpc.CrawlGatewayServicer):
         )
 
     async def Leave(self, request: Any, context: Any) -> crawl_pb2.LeaveResponse:
-        await self._auth(context)
+        await self._auth(context, request.worker_id)
         self.leaves.append(request.worker_id)
         self.known.discard(request.worker_id)
         return crawl_pb2.LeaveResponse()
@@ -179,6 +199,7 @@ def render_task(task_id: str, url: str, **kw: Any) -> crawl_pb2.FetchTask:
 
 PAGE = ("<html><head><title>Trang</title></head><body>" + "<p>việc làm</p>" * 400).encode()
 BIG_BYTES = 256 * 1024
+NOISE = random.Random(0).randbytes(64 * 1024)  # không nén được: kết quả vẫn lớn sau zstd
 SPA = b"""<html><body><div id="out">loading</div><script>
 fetch('/api/jobs', {method: 'POST', headers: {'content-type': 'application/json'},
                     body: JSON.stringify({q: 'x'})})
@@ -233,6 +254,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, b"cham")
         elif path == "/big":
             self._send(200, b"x" * BIG_BYTES, "text/plain")
+        elif path == "/noise":
+            self._send(200, NOISE, "application/octet-stream")
         elif path == "/big-chunked":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")

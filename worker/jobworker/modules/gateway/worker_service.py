@@ -1,17 +1,23 @@
 """Vòng làm việc của worker với gateway: Register → (Lease → chạy việc → Complete) song song
 Heartbeat → Leave.
 
-- Lease chỉ xin đúng số slot còn trống (HTTP / render); hết slot thì chờ việc đang chạy xong.
+- Lease chỉ xin đúng số slot còn trống (HTTP / render); hết slot thì chờ việc đang chạy xong
+  (cần Register lại thì không chờ).
 - Kết quả gộp lô (16 kết quả, ~50 ms hoặc ~8 MiB) rồi Complete; gateway mất kết nối thì thử lại vài
   lần rồi bỏ (chấp nhận at-most-once): việc đó thôi được kể trong Heartbeat nên gateway trả
-  `worker_lost` cho backend, backend thử lại request.
+  `worker_lost` cho backend, backend thử lại request. Một kết quả lớn hơn MAX_RESULT_BYTES (lô sẽ
+  vượt trần message gRPC) thành lỗi `ERROR_KIND_TOO_LARGE`; RESOURCE_EXHAUSTED không thử lại.
 - Heartbeat kể mọi việc còn nợ kết quả (`task_ids`: đang chạy hoặc chưa Complete xong); gateway
   đối soát với việc đã giao và trả lại `revoked_task_ids` = việc nó đã thu hồi (worker từng quá hạn
   báo sống, đã trả `worker_lost`): worker huỷ việc đó ngay thay vì tải tiếp vô ích.
-- `config_version` trong Lease/Heartbeat khác bản đang dùng → Register lại để lấy cấu hình mới.
-  NOT_FOUND / FAILED_PRECONDITION (gateway không biết worker này) → Register lại.
+- `config_version` trong Lease/Heartbeat khác bản đang dùng → Register lại để lấy cấu hình mới;
+  Heartbeat vẫn chạy trong lúc chờ (gateway vẫn biết worker), kể cả lúc dừng êm.
+  NOT_FOUND / FAILED_PRECONDITION (gateway không biết worker này) / PERMISSION_DENIED (token đang
+  gắn với worker_id khác: process khác dùng chung WORKER_TOKEN_FILE) → thôi Heartbeat, Register lại
+  (bằng chính token đó, gateway gắn lại).
 - UNAVAILABLE và lỗi kết nối → thử lại với backoff 0.5 s → 30 s, process không bao giờ tự thoát.
-  UNAUTHENTICATED → log lỗi, thử lại mỗi phút.
+  UNAUTHENTICATED → log lỗi, thử lại mỗi phút. INVALID_ARGUMENT ở Register (gateway từ chối
+  WORKER_ID / WORKER_POOL) → lỗi cấu hình: `RegisterRejectedError`, process thoát.
 - `drain` (từ gateway) hoặc SIGTERM/Ctrl-C → thôi xin việc, chờ việc đang chạy tối đa
   WORKER_SHUTDOWN_GRACE_SECONDS (kết quả vẫn được Complete), Leave rồi thoát.
 - Chạy một việc (chọn proxy, HTTP / Chromium): `jobworker.modules.fetch.executor_service`. Không
@@ -51,7 +57,13 @@ from jobworker.modules.fetch.render_service import RenderGate
 from jobworker.modules.fetch.results_service import failure, now_ms
 from jobworker.modules.gateway.runtime_service import RuntimeConfig
 from jobworker.modules.health.status_service import HealthStatus
-from jobworker.services.channel import AUTH_CODES, REREGISTER_CODES, RETRY_CODES, open_channel
+from jobworker.services.channel import (
+    AUTH_CODES,
+    MAX_MESSAGE_BYTES,
+    REREGISTER_CODES,
+    RETRY_CODES,
+    open_channel,
+)
 from jobworker.services.credentials import Credentials
 from jobworker.services.proxies import LocalProxyPool, load_proxies, shared_proxies, start_offset
 
@@ -60,6 +72,9 @@ log = get_logger(__name__)
 COMPLETE_BATCH = 16
 COMPLETE_FLUSH_SECONDS = 0.05
 COMPLETE_MAX_BYTES = 8 * 1024 * 1024
+# Một kết quả lớn hơn chừng này thì đổi thành lỗi TOO_LARGE: lô Complete (các kết quả trước nó
+# < COMPLETE_MAX_BYTES, cộng nó) luôn lọt trần message gRPC, không kéo các kết quả khác hỏng theo.
+MAX_RESULT_BYTES = MAX_MESSAGE_BYTES - COMPLETE_MAX_BYTES - 1024 * 1024
 COMPLETE_ATTEMPTS = 4
 RPC_TIMEOUT_SECONDS = 15.0
 LEAVE_TIMEOUT_SECONDS = 5.0
@@ -75,6 +90,11 @@ async def wait_any(timeout: float, *events: asyncio.Event) -> None:
     finally:
         for waiter in waiters:
             waiter.cancel()
+
+
+class RegisterRejectedError(RuntimeError):
+    """Gateway từ chối Register vì thông tin của worker (INVALID_ARGUMENT: WORKER_ID / WORKER_POOL
+    sai dạng): lỗi cấu hình, thử lại vô ích."""
 
 
 @dataclass(slots=True)
@@ -157,6 +177,9 @@ class Worker:
         self._config_changed = asyncio.Event()
         self.draining = False
         self._need_register = True
+        # Gateway đang nhận worker này (đã Register, chưa báo quên worker / từ chối token): chỉ khi
+        # đó mới Heartbeat. Chờ Register lại vì đổi cấu hình thì vẫn Heartbeat.
+        self._registered = False
         self._registered_once = False
         self._http_inflight = 0
         self._render_inflight = 0
@@ -242,11 +265,11 @@ class Worker:
                 code = exc.code()
                 if code in REREGISTER_CODES:
                     log.info("worker.reregister", code=code.name, details=exc.details())
-                    self._need_register = True
+                    self._unregistered()
                     await self._pause(backoff.next())
                 elif code in AUTH_CODES:
                     # Token hết hạn / khoá sai: thử khoá kế tiếp ngay, hết khoá thì chờ rồi thử lại.
-                    self._need_register = True
+                    self._unregistered()
                     if self.credentials.reject():
                         await self._pause(backoff.next())
                         continue
@@ -268,6 +291,8 @@ class Worker:
                         retry_in=round(delay, 2),
                     )
                     await self._pause(delay)
+            except RegisterRejectedError:
+                raise
             except Exception:
                 # Lỗi không lường trước: không để process chết, thử lại như mất kết nối.
                 self.health.failed()
@@ -287,15 +312,22 @@ class Worker:
             labels=self.settings.worker_labels,
             started_at_ms=self._started_at_ms,
         )
-        resp: crawl_pb2.RegisterResponse = await self._call(
-            self._stub.Register,
-            crawl_pb2.RegisterRequest(info=info),
-            timeout=RPC_TIMEOUT_SECONDS,
-        )
+        try:
+            resp: crawl_pb2.RegisterResponse = await self._call(
+                self._stub.Register,
+                crawl_pb2.RegisterRequest(info=info),
+                timeout=RPC_TIMEOUT_SECONDS,
+            )
+        except grpc.aio.AioRpcError as exc:
+            if exc.code() == grpc.StatusCode.INVALID_ARGUMENT:
+                log.error("worker.register_rejected", details=exc.details())
+                raise RegisterRejectedError(exc.details() or "INVALID_ARGUMENT") from exc
+            raise
         if resp.worker_token:
             self.credentials.accept(resp.worker_token)
         self._apply(resp.config)
         self._need_register = False
+        self._registered = True
         self._registered_once = True
         self.health.ok()
         log.info(
@@ -343,12 +375,19 @@ class Worker:
     def _check_version(self, version: int) -> None:
         if version and version != self.config.version and not self._need_register:
             log.info("worker.config_changed", old=self.config.version, new=version)
-            self._need_register = True
+            self._reregister()
 
     def _reregister(self) -> None:
-        """Register lại ở lượt kế tiếp của vòng xin việc (cấu hình / số slot render đổi)."""
+        """Register lại ở lượt kế tiếp của vòng xin việc (cấu hình / số slot render đổi), không
+        chờ slot trống."""
         self._need_register = True
         self._wake.set()
+
+    def _unregistered(self) -> None:
+        """Gateway không còn nhận worker này (quên worker / từ chối token): thôi Heartbeat (chắc
+        chắn lỗi), Register lại."""
+        self._registered = False
+        self._reregister()
 
     def _render_capacity(self) -> int:
         if self.browser is None or self.render.off or self.render.paused():
@@ -356,8 +395,9 @@ class Worker:
         return self.config.render_slots
 
     async def _free_slots(self) -> tuple[int, int]:
-        """Số slot HTTP / render còn trống; chờ tới khi có ít nhất một (hoặc dừng)."""
-        while not self._halt.is_set():
+        """Số slot HTTP / render còn trống; chờ tới khi có ít nhất một (hoặc dừng / cần Register
+        lại)."""
+        while not self._halt.is_set() and not self._need_register:
             free_http = max(0, self.config.http_slots - self._http_inflight)
             free_render = max(0, self._render_capacity() - self._render_inflight)
             if free_http or free_render:
@@ -461,6 +501,20 @@ class Worker:
             self._wake.set()
         if not result.duration_ms:
             result.duration_ms = int((time.monotonic() - started) * 1000)
+        size = result.ByteSize()
+        if size > MAX_RESULT_BYTES:
+            log.warning("worker.result_too_large", task_id=task.task_id, url=task.url, bytes=size)
+            big = result
+            result = failure(
+                task,
+                crawl_pb2.ERROR_KIND_TOO_LARGE,
+                f"kết quả {size} byte vượt {MAX_RESULT_BYTES} byte (trần message gRPC)",
+                worker_id=self.worker_id,
+                proxy_id=big.proxy_id,
+                duration_ms=big.duration_ms,
+                status=big.status,
+            )
+            result.final_url = big.final_url or task.url
         ok = result.error_kind == crawl_pb2.ERROR_KIND_NONE
         if render:
             self.counters.render_done += ok
@@ -529,7 +583,7 @@ class Worker:
             except grpc.aio.AioRpcError as exc:
                 code = exc.code()
                 if code in REREGISTER_CODES:
-                    self._need_register = True
+                    self._unregistered()
                 if code in RETRY_CODES and attempt + 1 < COMPLETE_ATTEMPTS:
                     await asyncio.sleep(BACKOFF_BASE_SECONDS * 2**attempt)
                     continue
@@ -584,7 +638,7 @@ class Worker:
             # Mỗi nhịp ghi lại file trạng thái (kể cả lúc chưa đăng ký được): file còn mới nghĩa
             # là event loop còn chạy; lời gọi bên dưới cập nhật trạng thái kết nối.
             self.health.touch()
-            if self._need_register:
+            if not self._registered:
                 continue
             try:
                 request = crawl_pb2.HeartbeatRequest(
@@ -600,8 +654,7 @@ class Worker:
                 if exc.code() in REREGISTER_CODES or exc.code() in AUTH_CODES:
                     # Gateway quên worker / token hết hạn: vòng xin việc Register lại.
                     log.info("worker.reregister", code=exc.code().name, details=exc.details())
-                    self._need_register = True
-                    self._wake.set()
+                    self._unregistered()
                 else:
                     self.health.failed()
                     log.debug("worker.heartbeat_failed", code=exc.code().name)

@@ -63,7 +63,12 @@ from jobcrawler.modules.gateway.registry_service import (
     save_worker,
     touch_worker,
 )
-from jobcrawler.modules.gateway.worker_auth_service import WorkerAuth, bearer
+from jobcrawler.modules.gateway.worker_auth_service import (
+    Registration,
+    WorkerAuth,
+    WorkerIdBusyError,
+    bearer,
+)
 from jobcrawler.services.net.proxy_pool import central_proxies
 
 log = get_logger(__name__)
@@ -271,29 +276,42 @@ class CrawlGateway:
 
     async def _join(
         self, context: grpc.aio.ServicerContext, info: crawl_pb2.WorkerInfo, pool: str
-    ) -> tuple[str, str | None]:
-        """Register: (cách vào, token mới cho worker hoặc None = giữ token đang dùng)."""
+    ) -> Registration:
+        """Register khi bật xác thực: kiểm khoá và giành worker_id (`WorkerAuth.register`)."""
         assert self.auth is not None
         worker_id = info.worker_id
         credential = bearer(context.invocation_metadata())
         if credential is None:
             await context.abort(grpc.StatusCode.UNAUTHENTICATED, "thiếu khoá: gửi Bearer <khoá>")
             raise AssertionError("unreachable")
-        if self.auth.is_static(credential):
-            return "static", await self.auth.issue_token(worker_id=worker_id, via="static")
-        record = await self.auth.check_token(credential)
-        if record is not None:
-            await self.auth.bind(credential, record, worker_id)
-            return "token", None
-        join_id = await self.auth.consume_join_key(credential, worker_id=worker_id)
-        if join_id is not None:
-            token = await self.auth.issue_token(worker_id=worker_id, via="join")
+        try:
+            joined = await self.auth.register(
+                credential, worker_id=worker_id, workers=self.keys.workers
+            )
+        except WorkerIdBusyError:
+            # Không phải lỗi khoá: worker giữ khoá / token và thử lại (bản cũ cùng id hết hạn báo
+            # sống thì vào được); trùng WORKER_ID thật thì gặp mãi.
+            log.warning("gateway.worker_id_busy", worker_id=worker_id)
+            await context.abort(
+                grpc.StatusCode.ALREADY_EXISTS,
+                f"worker_id {worker_id!r} đang được worker khác (token khác) dùng: chờ bản cũ hết "
+                "hạn báo sống, hoặc đặt WORKER_ID khác",
+            )
+            raise AssertionError("unreachable") from None
+        if joined is None:
+            log.warning("gateway.unauthenticated", worker_id=worker_id, method="Register")
+            await context.abort(
+                grpc.StatusCode.UNAUTHENTICATED,
+                "khoá không hợp lệ, hết hạn hoặc khoá tham gia đã được dùng",
+            )
+            raise AssertionError("unreachable")
+        if joined.via == "join":
             ip = client_ip(
                 context.peer(),
                 context.invocation_metadata(),
                 forwarded_allow_ips=self.forwarded_allow_ips,
             )
-            log.info("gateway.joined", worker_id=worker_id, join_id=join_id, ip=ip)
+            log.info("gateway.joined", worker_id=worker_id, join_id=joined.join_id, ip=ip)
             # Chỉ lần khoá tham gia được dùng; Register lại bằng token (worker / backend khởi động
             # lại) không ghi.
             await audit_service.queue_pending(
@@ -304,20 +322,14 @@ class CrawlGateway:
                 resource_type="worker",
                 resource_id=worker_id,
                 metadata={
-                    "join_id": join_id,
+                    "join_id": joined.join_id,
                     "hostname": info.hostname or None,
                     "pool": pool,
                     "version": info.version or None,
                 },
                 ip=ip,
             )
-            return "join", token
-        log.warning("gateway.unauthenticated", worker_id=worker_id, method="Register")
-        await context.abort(
-            grpc.StatusCode.UNAUTHENTICATED,
-            "khoá không hợp lệ, hết hạn hoặc khoá tham gia đã được dùng",
-        )
-        raise AssertionError("unreachable")
+        return joined
 
     @staticmethod
     async def _unknown(context: grpc.aio.ServicerContext, worker_id: str) -> None:
@@ -336,12 +348,13 @@ class CrawlGateway:
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "worker_id không hợp lệ")
         if not _POOL.match(pool):
             await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"pool không hợp lệ: {pool!r}")
-        via, worker_token = (
+        # Đọc cài đặt trước khi dùng khoá: lỗi ở đây không làm mất khoá tham gia.
+        settings, config = self._current()
+        joined = (
             await self._join(context, info, pool)
             if self.auth is not None and self.auth.enabled
-            else ("open", None)
+            else None
         )
-        settings, config = self._current()
         status = WorkerStatus(
             worker_id=info.worker_id,
             hostname=info.hostname,
@@ -354,7 +367,18 @@ class CrawlGateway:
             started_at_ms=info.started_at_ms,
             registered_at_ms=_now_ms(),
         )
-        await save_worker(self.redis, self.keys, status, ttl=settings.gateway_worker_ttl_seconds)
+        token = joined.token if joined is not None else None
+        try:
+            await save_worker(
+                self.redis, self.keys, status, ttl=settings.gateway_worker_ttl_seconds
+            )
+        except RedisError as exc:
+            if token is None:
+                raise
+            # Khoá đã dùng và token mới đã ghi (cùng một bước): vẫn trả token, không thì worker mất
+            # khoá tham gia mà chưa vào được. Lease sau đó gặp NOT_FOUND → worker Register lại bằng
+            # token này.
+            log.warning("gateway.register_save_failed", worker_id=info.worker_id, error=repr(exc))
         log.info(
             "gateway.register",
             worker_id=info.worker_id,
@@ -364,9 +388,9 @@ class CrawlGateway:
             http_slots=info.http_slots,
             render_slots=info.render_slots,
             local_proxies=info.local_proxies,
-            auth=via,
+            auth=joined.via if joined is not None else "open",
         )
-        return crawl_pb2.RegisterResponse(config=config, worker_token=worker_token or "")
+        return crawl_pb2.RegisterResponse(config=config, worker_token=token or "")
 
     @_redis_guard
     async def Lease(
@@ -437,7 +461,7 @@ class CrawlGateway:
         worker_id = request.worker_id
         token = await self._authorize(context, worker_id)
         if token is not None and self.auth is not None:
-            await self.auth.touch(token)  # worker còn sống: token không hết hạn
+            await self.auth.touch(token, worker_id)  # worker còn sống: token không hết hạn
         raw, draining = await self._lookup(worker_id)
         if raw is None:
             await self._unknown(context, worker_id)
@@ -595,6 +619,11 @@ class GatewayServer:
                 await self.servicer.prune()
             except (RedisError, OSError) as exc:
                 log.warning("gateway.prune_failed", error=repr(exc))
+            except Exception:
+                # Lỗi không lường trước (vd. PROXIES_FILE hỏng khi đọc cài đặt): vòng dọn không
+                # được chết lặng lẽ (worker chết không còn bị bỏ, `stop()` ném lại lỗi) — thử nhịp
+                # sau.
+                log.exception("gateway.prune_error")
 
     async def wait(self) -> None:
         """Chờ tới khi server dừng."""

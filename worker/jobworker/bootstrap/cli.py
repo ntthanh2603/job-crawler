@@ -46,10 +46,20 @@ def _settings() -> WorkerSettings:
 @app.command()
 def run() -> None:
     """Kết nối gateway và nhận việc tới khi có SIGTERM / Ctrl-C (hoặc gateway yêu cầu drain).
-    Treo quá WORKER_WATCHDOG_SECONDS thì thoát mã 70."""
+    Treo quá WORKER_WATCHDOG_SECONDS thì thoát mã 70; gateway từ chối WORKER_ID / WORKER_POOL thì
+    thoát mã 1."""
     from jobworker.bootstrap.run import run_worker
+    from jobworker.modules.gateway.worker_service import RegisterRejectedError
 
-    asyncio.run(run_worker(_settings()))
+    try:
+        asyncio.run(run_worker(_settings()))
+    except RegisterRejectedError as exc:
+        typer.secho(
+            f"gateway từ chối đăng ký (kiểm tra WORKER_ID / WORKER_POOL): {exc}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1) from None
 
 
 @app.command()

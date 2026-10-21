@@ -111,6 +111,12 @@ Trang Cài đặt → **Proxy**.
   `GATEWAY_CA_CERT` vào lệnh. Xoá container rồi tạo lại cần khoá mới. Worker trong compose dùng
   `GATEWAY_TOKEN` (cùng giá trị ở `backend/.env` và `worker/.env`). Thu hồi một worker: xoá
   `<prefix>:gw:wtoken:*` của nó trên Redis.
+- Log worker `ALREADY_EXISTS` ("worker_id đang được worker khác dùng"): id đó đang sống dưới token
+  khác. Worker vừa mất file token (container tạo lại với `WORKER_ID` cố định) tự vào được khi bản cũ
+  hết hạn báo sống (`GATEWAY_WORKER_TTL_SECONDS`, 30 s); gặp mãi là hai worker đặt trùng
+  `WORKER_ID` — đổi một bên.
+- Máy worker cần đồng bộ giờ (NTP): worker so hạn của việc với đồng hồ máy nó, máy nhanh giờ vài
+  phút bỏ việc oan (`expired`), chậm giờ thì tải cả việc backend đã thôi chờ.
 - Không có worker nào → mọi request lỗi `no_worker`; worker quay lại thì tự chạy tiếp.
 - Slot: cấu hình ở trang Cài đặt → "Worker lấy trang" là **mức trần**; worker tự tính theo máy khi
   `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống. Chromium lỗi → worker tạm tắt render rồi thử lại

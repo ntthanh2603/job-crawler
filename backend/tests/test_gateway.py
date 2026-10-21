@@ -1,5 +1,6 @@
-"""Gateway / hàng việc lấy trang, phần không cần Redis: mã hoá request, đọc kết quả của worker,
-định tuyến, cấu hình worker, task_id, token, mức ưu tiên, khoá Redis."""
+"""Gateway / hàng việc lấy trang, phần không cần Redis thật: mã hoá request, đọc kết quả của
+worker, định tuyến, cấu hình worker, task_id, token, mức ưu tiên, khoá Redis; Register / huỷ khoá
+tham gia / vòng dọn worker / hạn của việc với Redis giả."""
 
 from __future__ import annotations
 
@@ -7,13 +8,16 @@ import asyncio
 import json
 from typing import Any, cast
 
+import grpc
 import pytest
 import zstandard
+from redis.exceptions import RedisError
 
 from jcproto.v1 import crawl_pb2
 from jobcrawler.common.config import Settings
-from jobcrawler.modules.gateway import remote_service
+from jobcrawler.modules.gateway import dispatch_service, remote_service
 from jobcrawler.modules.gateway.dispatch_service import (
+    FetchClient,
     NoWorkerError,
     choose_pool,
     fetch_priority,
@@ -31,12 +35,19 @@ from jobcrawler.modules.gateway.remote_service import (
     to_raw_response,
 )
 from jobcrawler.modules.gateway.server_service import (
+    CrawlGateway,
+    GatewayServer,
     client_ip,
     config_version,
     peer_ip,
     worker_config,
 )
-from jobcrawler.modules.gateway.worker_auth_service import bearer
+from jobcrawler.modules.gateway.worker_auth_service import (
+    Registration,
+    WorkerAuth,
+    WorkerIdBusyError,
+    bearer,
+)
 from jobcrawler.services.net.http import CapturedJson, TransportError
 from jobcrawler.services.net.proxy_pool import parse_proxy_line
 
@@ -484,3 +495,275 @@ def test_task_json_round_trip_keeps_unicode() -> None:
     task = crawl_pb2.FetchTask(body=encode_body({}, json={"q": "Hà Nội"})[1])
     again = crawl_pb2.FetchTask.FromString(task.SerializeToString())
     assert json.loads(again.body) == {"q": "Hà Nội"}
+
+
+# --- huỷ khoá tham gia ---------------------------------------------------------------------------
+
+
+class JoinRedis:
+    """Redis giả cho khoá tham gia: GET, DELETE (trả số khoá đã xoá). `between`: chạy ngay sau GET
+    (giả lập worker dùng khoá giữa GET và DEL của lượt huỷ)."""
+
+    def __init__(self, data: dict[str, str]) -> None:
+        self.data = data
+        self.between: Any = None
+
+    async def get(self, key: str) -> str | None:
+        value = self.data.get(key)
+        if self.between is not None:
+            self.between(self.data)
+            self.between = None
+        return value
+
+    async def delete(self, *keys: str) -> int:
+        return sum(self.data.pop(k, None) is not None for k in keys)
+
+
+async def test_revoke_join_key_only_revokes_unused_keys() -> None:
+    redis = JoinRedis(
+        {
+            "jc:gw:join-id:a1": "d1",
+            "jc:gw:join:d1": "{}",
+            "jc:gw:join-id:u1": "used:w-1",
+            "jc:gw:join-id:r1": "d2",
+            "jc:gw:join:d2": "{}",
+        }
+    )
+    auth = WorkerAuth(redis, "jc:gw", static_token="s3cret")
+    assert await auth.revoke_join_key("a1")
+    assert "jc:gw:join-id:a1" not in redis.data
+    assert "jc:gw:join:d1" not in redis.data
+    assert not await auth.revoke_join_key("a1")  # đã huỷ
+    # Worker đã dùng khoá: không huỷ, giữ dấu `used:` (giao diện thấy worker đã vào).
+    assert not await auth.revoke_join_key("u1")
+    assert await auth.join_key_status("u1") == ("used", "w-1")
+
+    # Worker dùng khoá ngay sau GET của lượt huỷ: khoá đã mất → không xoá dấu worker vừa ghi.
+    def joined(data: dict[str, str]) -> None:
+        del data["jc:gw:join:d2"]
+        data["jc:gw:join-id:r1"] = "used:w-2"
+
+    redis.between = joined
+    assert not await auth.revoke_join_key("r1")
+    assert await auth.join_key_status("r1") == ("used", "w-2")
+
+
+# --- Register (auth giả) -------------------------------------------------------------------------
+
+
+class Aborted(Exception):
+    def __init__(self, code: grpc.StatusCode, details: str) -> None:
+        super().__init__(details)
+        self.code = code
+
+
+class FakeContext:
+    def __init__(self, credential: str | None = "k") -> None:
+        self.metadata = [("authorization", f"Bearer {credential}")] if credential else []
+
+    def invocation_metadata(self) -> list[tuple[str, str]]:
+        return self.metadata
+
+    def peer(self) -> str:
+        return "ipv4:10.0.0.5:51234"
+
+    async def abort(self, code: grpc.StatusCode, details: str) -> None:
+        raise Aborted(code, details)
+
+
+class SaveRedis:
+    """Redis giả cho `save_worker` (một EVAL); `broken`: lỗi Redis."""
+
+    def __init__(self, *, broken: bool = False) -> None:
+        self.broken = broken
+        self.saved: list[str] = []
+
+    async def eval(self, script: str, numkeys: int, *args: Any) -> None:
+        if self.broken:
+            raise RedisError("mất kết nối")
+        self.saved.append(str(args[numkeys]))  # worker_id
+
+    def pipeline(self, **kw: Any) -> Any:  # hàng chờ nhật ký thao tác: bỏ qua
+        raise RedisError("không có")
+
+
+class FakeAuth:
+    enabled = True
+
+    def __init__(self, outcome: Registration | Exception | None) -> None:
+        self.outcome = outcome
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def register(self, credential: str, *, worker_id: str, workers: str) -> Any:
+        self.calls.append((credential, worker_id, workers))
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
+
+
+def _gateway(redis: Any, auth: Any, provider: Any = None) -> CrawlGateway:
+    return CrawlGateway(
+        redis, Keys("jc"), provider or (lambda: _settings()), config_cache_seconds=0, auth=auth
+    )
+
+
+def _register_request(worker_id: str = "w-1") -> crawl_pb2.RegisterRequest:
+    return crawl_pb2.RegisterRequest(info=crawl_pb2.WorkerInfo(worker_id=worker_id))
+
+
+async def test_register_refuses_worker_id_alive_under_another_token() -> None:
+    redis = SaveRedis()
+    auth = FakeAuth(WorkerIdBusyError("w-1"))
+    with pytest.raises(Aborted) as info:
+        await _gateway(redis, auth).Register(_register_request(), cast(Any, FakeContext("jcj_x")))
+    # ALREADY_EXISTS: worker giữ khoá / token và thử lại (không phải lỗi xác thực: không bỏ token).
+    assert info.value.code == grpc.StatusCode.ALREADY_EXISTS
+    assert auth.calls == [("jcj_x", "w-1", "jc:gw:workers")]
+    assert redis.saved == []
+
+
+async def test_register_rejects_bad_credential() -> None:
+    redis = SaveRedis()
+    for context, calls in ((FakeContext(None), 0), (FakeContext("sai"), 1)):
+        auth = FakeAuth(None)
+        with pytest.raises(Aborted) as info:
+            await _gateway(redis, auth).Register(_register_request(), cast(Any, context))
+        assert info.value.code == grpc.StatusCode.UNAUTHENTICATED
+        assert len(auth.calls) == calls
+    assert redis.saved == []
+
+
+async def test_register_returns_new_token_even_if_saving_the_worker_fails() -> None:
+    """Khoá tham gia đã dùng (cùng bước với ghi token): Redis lỗi ở bước sau vẫn trả token, không
+    thì worker mất khoá mà không vào được."""
+    joined = Registration("join", "jcw_new", "j1")
+    resp = await _gateway(SaveRedis(broken=True), FakeAuth(joined)).Register(
+        _register_request(), cast(Any, FakeContext("jcj_x"))
+    )
+    assert resp.worker_token == "jcw_new"
+    # Register lại bằng token đang dùng: không có gì để mất, lỗi Redis → UNAVAILABLE như thường.
+    with pytest.raises(Aborted) as info:
+        await _gateway(SaveRedis(broken=True), FakeAuth(Registration("token", None))).Register(
+            _register_request(), cast(Any, FakeContext("jcw_old"))
+        )
+    assert info.value.code == grpc.StatusCode.UNAVAILABLE
+    redis = SaveRedis()
+    resp = await _gateway(redis, FakeAuth(Registration("token", None))).Register(
+        _register_request(), cast(Any, FakeContext("jcw_old"))
+    )
+    assert (resp.worker_token, redis.saved) == ("", ["w-1"])
+
+
+async def test_register_reads_settings_before_using_the_key() -> None:
+    def broken() -> Settings:
+        raise RuntimeError("PROXIES_FILE hỏng")
+
+    auth = FakeAuth(Registration("join", "jcw_new", "j1"))
+    with pytest.raises(RuntimeError):
+        await _gateway(SaveRedis(), auth, broken).Register(
+            _register_request(), cast(Any, FakeContext("jcj_x"))
+        )
+    assert auth.calls == []  # khoá tham gia chưa bị dùng
+
+
+# --- vòng dọn worker -----------------------------------------------------------------------------
+
+
+async def test_prune_loop_survives_unexpected_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    server = GatewayServer(cast(Any, object()), _settings(), prune_seconds=0)
+    calls = 0
+    third = asyncio.Event()
+
+    async def prune() -> list[str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        if calls == 2:
+            raise RedisError("mất kết nối")
+        third.set()
+        return []
+
+    monkeypatch.setattr(server.servicer, "prune", prune)
+    server._pruner = asyncio.get_running_loop().create_task(server._prune_loop())  # pyright: ignore[reportPrivateUsage]
+    await asyncio.wait_for(third.wait(), 5)
+    await server.stop(0)  # không ném lại lỗi của vòng dọn
+    assert server._pruner is None  # pyright: ignore[reportPrivateUsage]
+
+
+# --- hạn của việc theo đồng hồ Redis -------------------------------------------------------------
+
+
+class SubmitRedis:
+    """Redis giả cho `FetchClient.submit`: TIME cố định, pipeline GET + XADD (ghi lại entry)."""
+
+    def __init__(self, now: tuple[int, int]) -> None:
+        self.now = now
+        self.entries: list[dict[str, Any]] = []
+        self.added = asyncio.Event()
+
+    async def time(self) -> tuple[int, int]:
+        return self.now
+
+    def pipeline(self, **kw: Any) -> Any:
+        return SubmitPipe(self)
+
+    async def xdel(self, *args: Any) -> int:
+        return 0
+
+
+class SubmitPipe:
+    def __init__(self, redis: SubmitRedis) -> None:
+        self.redis = redis
+
+    async def __aenter__(self) -> SubmitPipe:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def get(self, key: str) -> None:
+        return None
+
+    def xadd(self, stream: str, fields: dict[str, Any], **kw: Any) -> None:
+        self.redis.entries.append(fields)
+
+    async def execute(self) -> list[Any]:
+        self.redis.added.set()
+        return [b"0", b"1-0"]
+
+
+class IdleRedis:
+    """Kết nối BRPOP riêng của `FetchClient`: không có kết quả nào."""
+
+    async def brpop(self, keys: Any, timeout: int = 0) -> None:
+        await asyncio.sleep(0.01)
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_task_deadline_uses_redis_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`deadline_ms` theo `TIME` của Redis (như gateway so khi giao việc / trả `worker_lost`), không
+    theo đồng hồ của backend."""
+
+    async def live(redis: Any, keys: Any) -> dict[str, dict[str, int]]:
+        return {"default": {"http": 1, "render": 0}}
+
+    monkeypatch.setattr(dispatch_service, "_clone", lambda redis: IdleRedis())
+    monkeypatch.setattr(dispatch_service, "live_capacity", live)
+    redis = SubmitRedis((1_000_000, 250_000))  # đồng hồ Redis: 1 000 000 250 ms
+    settings = _settings(fetch_queue_grace_seconds=5, fetch_queue_max_wait_seconds=60)
+    client = FetchClient(cast(Any, redis), settings)
+    try:
+        sent = asyncio.ensure_future(client.submit(crawl_pb2.FetchTask(url=URL, timeout_seconds=7)))
+        await asyncio.wait_for(redis.added.wait(), 5)
+        [entry] = redis.entries
+        task = crawl_pb2.FetchTask.FromString(entry["t"])
+        client._resolve(  # pyright: ignore[reportPrivateUsage]
+            crawl_pb2.FetchResult(task_id=task.task_id, status=200).SerializeToString()
+        )
+        assert (await sent).status == 200
+    finally:
+        await client.close()
+    assert task.deadline_ms == entry["d"] == 1_000_000_250 + (7 + 60) * 1000
