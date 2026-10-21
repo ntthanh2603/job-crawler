@@ -158,6 +158,19 @@ def test_find_provinces_in_title() -> None:
         # Năm không phải số tiền.
         ("Lương 2025: 15 triệu", (15e6, 15e6, "VND", SalaryPeriod.MONTH, False)),
         ("2000 USD gross", (2000, 2000, "USD", SalaryPeriod.MONTH, False)),
+        # Dấu cách ngăn hàng nghìn.
+        ("15 000 000 VND", (15e6, 15e6, "VND", SalaryPeriod.MONTH, False)),
+        ("8 000 000 - 12 000 000", (8e6, 12e6, "VND", SalaryPeriod.MONTH, False)),
+        # "tối" (ca tối) không phải "tới"; "tối đa" vẫn là mức trần. Theo giờ, không ghi tiền: VND.
+        ("Ca tối 25k/giờ", (25_000, 25_000, "VND", SalaryPeriod.HOUR, False)),
+        ("Tối đa 30 triệu", (None, 30e6, "VND", SalaryPeriod.MONTH, False)),
+        # Số năm / tháng kinh nghiệm, ngoặc không ghi lương: không phải mức lương.
+        ("Lương 8 triệu (yêu cầu 2 năm kinh nghiệm)", (8e6, 8e6, "VND", SalaryPeriod.MONTH, False)),
+        ("Lương 8 triệu (làm 6 ngày/tuần)", (8e6, 8e6, "VND", SalaryPeriod.MONTH, False)),
+        ("Lương 10 triệu, thưởng 2 tháng lương", (10e6, 10e6, "VND", SalaryPeriod.MONTH, False)),
+        # "/ 1 năm" là kỳ trả, số 1 không phải mức lương.
+        ("300 triệu / 1 năm", (300e6, 300e6, "VND", SalaryPeriod.YEAR, False)),
+        ("500 USD / 1 month", (500, 500, "USD", SalaryPeriod.MONTH, False)),
     ],
 )
 def test_parse_salary_text(raw: str, expected: tuple[object, ...]) -> None:
@@ -204,6 +217,8 @@ def test_parse_salary_without_amount_drops_default_currency() -> None:
         ("Salary range: $1,500 - $2,500", (1500, 2500, False)),
         ("**Mức lương:** Thỏa thuận", (None, None, True)),
         ("Mức lương: Tối thiểu 10 triệu/tháng", (10e6, None, False)),
+        ("Mức lương: 15 000 000", (15e6, 15e6, False)),
+        ("Lương: 8 triệu (yêu cầu 2 năm kinh nghiệm)", (8e6, 8e6, False)),
         # Không phải mức lương.
         ("- Lương tháng 13, thưởng lễ Tết", None),
         ("- Lương thưởng hấp dẫn", None),
@@ -319,6 +334,12 @@ def test_parse_date_rejects_garbage() -> None:
         ("Trình độ: CĐ trở lên", EducationLevel.COLLEGE),
         ("TC/CĐ/ĐH", EducationLevel.VOCATIONAL),
         ("PTTH trở lên", EducationLevel.HIGH_SCHOOL),
+        # "12/12", "9/12" là lớp, trừ khi là ngày.
+        ("Tốt nghiệp 12/12", EducationLevel.HIGH_SCHOOL),
+        ("THPT (12/12)", EducationLevel.HIGH_SCHOOL),
+        ("Lớp 9/12", EducationLevel.HIGH_SCHOOL),
+        ("Tốt nghiệp ngày 9/12", EducationLevel.UNKNOWN),
+        ("Tốt nghiệp 12/12/2023", EducationLevel.UNKNOWN),
         ("2 năm kinh nghiệm", EducationLevel.UNKNOWN),
         (None, EducationLevel.UNKNOWN),
     ],
@@ -361,6 +382,8 @@ def test_parse_education_from_jd_needs_context() -> None:
         ("Trình độ: CĐ trở lên", EducationLevel.COLLEGE),
         ("Tốt nghiệp TC/CĐ/ĐH", EducationLevel.VOCATIONAL),
         ("Tốt nghiệp PTTH trở lên", EducationLevel.HIGH_SCHOOL),
+        ("Tốt nghiệp 12/12", EducationLevel.HIGH_SCHOOL),
+        ("Tốt nghiệp ngày 9/12", EducationLevel.UNKNOWN),
     ],
 )
 def test_parse_education_from_jd(jd: str, level: EducationLevel) -> None:

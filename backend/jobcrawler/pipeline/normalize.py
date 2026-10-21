@@ -753,9 +753,26 @@ _MULTIPLIER = {
     "ty": 1e9,
 }
 _VND_UNITS = frozenset({"tr", "trieu", "cu", "ty", "nghin", "ngan"})
-# "tới" bỏ dấu là "toi", trùng chữ đầu của "tối thiểu".
+# Dấu cách ngăn hàng nghìn: "15 000 000 VND" (không gộp "10 - 15", "8 000 000 - 12 000 000").
+_SPACED_THOUSANDS = re.compile(r"(?<![\d.,])\d{1,3}(?: \d{3})+(?!\d)")
+# "tới" bỏ dấu là "toi", trùng chữ đầu của "tối thiểu" (chữ không dấu).
 _MAX_ONLY = re.compile(
     r"\b(up ?to|toi(?! thieu)|len (den|toi)|den|max|toi da|duoi|under|below)\b|<"
+)
+# "tối" có dấu ("ca tối", "buổi tối") không phải "tới": che đi trước khi bỏ dấu, trừ "tối đa",
+# "tối thiểu".
+_EVENING = re.compile(r"\btối\b(?!\s*(?:đa|thiểu)\b)", re.IGNORECASE)
+# Số chỉ thời gian ("yêu cầu 2 năm kinh nghiệm", "thưởng 2 tháng lương"), không phải số tiền hay
+# kỳ trả; số sau "/" vẫn là kỳ trả ("300 triệu / 1 năm").
+_DURATION = re.compile(
+    r"(?<![\d.,/])(?<!/ )\d+(?:[.,]\d+)?(?:\s*(?:-|–|~|den|to)\s*\d+(?:[.,]\d+)?)?\s*\+?\s*"
+    r"(?:nam|thang|years?|months?|yrs?)\b"
+)
+# Ngoặc có số mà không phải mức lương ("(yêu cầu 2 năm kinh nghiệm)", "(6 ngày/tuần)").
+_PAREN = re.compile(r"\(([^()]*)\)")
+# "/ 1 năm" là kỳ trả như "/năm": số 1 không phải mức lương ("300 triệu / 1 năm").
+_PER_ONE = re.compile(
+    r"/\s*1\s*(?=(?:nam|thang|tuan|ngay|gio|years?|months?|weeks?|days?|hours?)\b)"
 )
 _MIN_ONLY = re.compile(
     r"\b(tu|from|tren|over|hon|min|toi thieu|above|starting|at least|it nhat)\b|>"
@@ -855,15 +872,30 @@ def _is_year(s: str, m: re.Match[str]) -> bool:
     return bool(_YEAR_AFTER.match(s, m.end()) or _YEAR_BEFORE.search(s[: m.start()]))
 
 
+def _salary_part(text: str) -> str:
+    """Chữ thường bỏ dấu của chuỗi lương, đã gộp số có dấu cách hàng nghìn và bỏ phần không phải
+    lương ("tối" của "ca tối", thời gian "2 năm", ngoặc không ghi lương)."""
+    s = _salary_lower(_EVENING.sub(" ", text))
+    s = _SPACED_THOUSANDS.sub(lambda m: m.group(0).replace(" ", ""), s)
+    s = _PER_ONE.sub("/", s)
+    s = _PAREN.sub(
+        lambda m: (
+            " " if re.search(r"\d", m.group(1)) and not _SALARY_VALUE.search(m.group(1)) else m[0]
+        ),
+        s,
+    )
+    return _DURATION.sub(" ", s)
+
+
 def _parse_amounts(text: str) -> _Amounts:
-    s = _salary_lower(text)
+    s = _salary_part(text)
     found = [
         (m, parse_number(m.group(1)), m.group(2))
         for m in _SAL_NUM.finditer(s)
         if not _is_year(s, m)
     ]
     nums = [(m, v, unit) for m, v, unit in found if v is not None]
-    out = _Amounts(currency=_currency(s), period=_period(text), other_period=_other_period(text))
+    out = _Amounts(currency=_currency(s), period=_period(s), other_period=_other_period(s))
     if not nums:
         return out
     if len(nums) >= 2 and nums[0][2] is None and nums[1][2] is not None:
@@ -888,8 +920,11 @@ def _parse_amounts(text: str) -> _Amounts:
         if out.currency == "VND" and top < 1000:
             out.low = out.low * 1e6 if out.low is not None else None
             out.high = out.high * 1e6 if out.high is not None else None
-    if out.currency is None and top >= 100_000:
-        out.currency = "VND"  # số lớn không ghi tiền tệ ("300k/giờ", "Upto 30M") là VND
+    # Không ghi tiền tệ: số lớn ("300k/giờ", "Upto 30M") là VND; theo giờ / ngày / tuần thì từ
+    # 10.000 đã là VND ("25k/giờ").
+    short_period = out.period is SalaryPeriod.HOUR or out.other_period
+    if out.currency is None and (top >= 100_000 or (short_period and top >= 10_000)):
+        out.currency = "VND"
     return out
 
 
@@ -950,12 +985,13 @@ _SALARY_LABEL = re.compile(
     r"(?:\s+(?:co ban|tham khao|du kien|offer|range|thang|gross|net))*"
     r"[*_]*\s*[:\-–]?\s*[*_]*\s*(.*)$"
 )
-# Giá trị trông như mức lương: khoảng số, số kèm đơn vị tiền, hoặc số lớn ("8.000.000").
+# Giá trị trông như mức lương: khoảng số, số kèm đơn vị tiền, hoặc số lớn ("8.000.000",
+# "8 000 000").
 _SALARY_VALUE = re.compile(
     r"\d[\d.,]*\s*(?:-|–|~|den|to)\s*\$?\d"
     r"|\d[\d.,]*\s*(?:trieu|tr\b|vnd|d\b|usd|\$|k\b|m\b)"
     r"|\$\s*\d"
-    r"|\d{1,3}(?:[.,]\d{3}){2,}"
+    r"|\d{1,3}(?:[., ]\d{3}){2,}"
 )
 
 # Giá trị chỉ là "thoả thuận" (không nhận "Lương thưởng hấp dẫn").
@@ -1151,6 +1187,14 @@ _AMBIGUOUS_LEVELS = frozenset({"master", "masters", "associate", "associates", "
 _SENTENCES = re.compile(r"[.;!?\n]")
 _CLAUSES = re.compile(r"[,()\[\]]|\s[-–]\s")
 _SHORT_VALUE = 80  # "yêu cầu" ngắn hơn thì thường chỉ là trình độ ("Đại học", "Trình độ: Cao đẳng")
+# "12/12", "9/12" là lớp, trừ khi là ngày: "ngày 9/12", "hạn nộp 12/12", "thứ hai 9/12",
+# "9/12/2025".
+_GRADES = frozenset({"12 12", "9 12"})
+_DATE_BEFORE = re.compile(
+    r"\b(?:ngay|thang|han(?: chot| nop(?: ho so)?)?|truoc|sau|chu nhat|"
+    r"thu (?:hai|ba|tu|nam|sau|bay|[2-7]))\s*$"
+)
+_YEAR_AFTER_DATE = re.compile(r" (?:19|20)\d\d\b")
 
 
 def _education_runs(text: str) -> list[tuple[int, int, list[tuple[EducationLevel, str]]]]:
@@ -1160,6 +1204,10 @@ def _education_runs(text: str) -> list[tuple[int, int, list[tuple[EducationLevel
     for level, pattern in _EDUCATION_PATTERNS:  # sau đại học trước: che "đại học" bên trong
         for m in pattern.finditer(text):
             if any(a < m.end() and m.start() < b for a, b, _, _ in found):
+                continue
+            if m.group() in _GRADES and (
+                _DATE_BEFORE.search(text, 0, m.start()) or _YEAR_AFTER_DATE.match(text, m.end())
+            ):
                 continue
             found.append((m.start(), m.end(), level, m.group()))
     runs: list[tuple[int, int, list[tuple[EducationLevel, str]]]] = []
