@@ -295,6 +295,19 @@ JOB_SALARY_MONTH_SQL = (
     "WHEN salary_currency = 'VND' AND salary_period = 'month' "
     "THEN coalesce(salary_max, salary_min) END)"
 )
+# Cùng biểu thức như Postgres in lại trong `pg_get_indexdef(..., true)` (ép kiểu, `ELSE NULL`, nhiều
+# dòng). Alembic so index biểu thức bằng chuỗi (chỉ bỏ `::kiểu`, nháy, dấu cách), nên index khai
+# báo theo đúng bản in này thì `db check` mới khớp DB; planner so theo cây biểu thức nên truy vấn
+# viết bằng JOB_SALARY_MONTH_SQL vẫn dùng index.
+_JOB_SALARY_MONTH_INDEX_SQL = (
+    "(\nCASE\n"
+    "    WHEN salary_currency = 'VND'::text AND salary_period = 'year'::text"
+    " THEN COALESCE(salary_max, salary_min) / 12::double precision\n"
+    "    WHEN salary_currency = 'VND'::text AND salary_period = 'month'::text"
+    " THEN COALESCE(salary_max, salary_min)\n"
+    "    ELSE NULL::double precision\n"
+    "END)"
+)
 
 
 class Job(Base):
@@ -330,7 +343,7 @@ class Job(Base):
         Index(
             "ix_jobs_status_salary",
             "status",
-            text(f"{JOB_SALARY_MONTH_SQL} DESC NULLS LAST"),
+            text(f"{_JOB_SALARY_MONTH_INDEX_SQL} DESC NULLS LAST"),
             text("id DESC"),
         ),
         Index("ix_jobs_status_source_kind", "status", text("split_part(canonical_source, ':', 1)")),

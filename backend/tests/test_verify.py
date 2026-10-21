@@ -370,9 +370,16 @@ async def test_llm_answers_are_cached_per_company_and_content() -> None:
     assert again.accepted
     assert again.reasons == first.reasons
     assert len(chat.calls) == 1  # lần hai lấy từ cache
-    # Không còn LLM vẫn dùng được câu trả lời đã cache.
-    [offline] = await verify_jobs([job], ACME, no_llm(), now=NOW, until=until, kv=kv)
+    # Không còn LLM (thiếu API key: `from_settings` không tạo client, vẫn giữ LLM_MODEL) vẫn dùng
+    # được câu trả lời đã cache của model đó.
+    offline_llm = LLMClient(None, model=llm.model)
+    [offline] = await verify_jobs([job], ACME, offline_llm, now=NOW, until=until, kv=kv)
     assert offline.accepted
+    # Đổi model: cache của model cũ không dùng nữa.
+    [other_model] = await verify_jobs(
+        [job], ACME, LLMClient(None, model="model-khac"), now=NOW, until=until, kv=kv
+    )
+    assert not other_model.accepted
     # Doanh nghiệp khác / nội dung khác: hỏi lại.
     other = dataclasses.replace(ACME, company_id=UUID(int=99))
     await verify_jobs([job], other, llm, now=NOW, until=until, kv=kv)
