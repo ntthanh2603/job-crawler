@@ -115,7 +115,9 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
    theo `CRAWL_TIMEZONE` (Asia/Ho_Chi_Minh), không phải UTC. Windows cần gói `tzdata` (đã có).
 5. **Image Docker phải `--reinstall-package`** chính service và `jobcrawler-proto`: cache của uv cho
    gói cục bộ chỉ theo `pyproject.toml`, bỏ cờ này thì image mang mã cũ. Lệnh CLI mới (vd.
-   `gateway-health` dùng làm healthcheck) chỉ có sau khi build lại image.
+   `gateway-health` dùng làm healthcheck) chỉ có sau khi build lại image. Image chạy chép venv của
+   stage `deps` rồi `/layer` (chỉ file của gói cục bộ): đừng chép cả `/opt/venv` của stage `build`,
+   không thì mỗi lần sửa code lại đẩy / kéo cả venv vài trăm MB.
 6. **Log không kèm locals**: traceback render với `show_locals=False`, Typer
    `pretty_exceptions_show_locals=False`. Bật Rich / locals làm mỗi lần log lỗi tốn 1–5 s trên event
    loop và có thể lộ token.

@@ -34,18 +34,30 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,from=proto,target=/src/proto \
     uv sync --frozen --no-dev --no-install-project --no-install-local
 
-# --- Build: venv đủ (jobworker + proto) -----------------------------------------------------------
+# --- Build: jobworker + proto, gom vào /layer -----------------------------------------------------
 FROM deps AS build
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 COPY --from=proto pyproject.toml /src/proto/
 COPY --from=proto jcproto /src/proto/jcproto
 COPY pyproject.toml uv.lock ./
 COPY jobworker jobworker
 # Gói cục bộ luôn cài lại: cache của uv cho gói cục bộ chỉ theo pyproject.toml, không theo mã
-# nguồn, nên không ép thì image có thể mang mã cũ.
+# nguồn, nên không ép thì image có thể mang mã cũ. File mới / đổi so với venv dependency (so tổng
+# kiểm, không theo mtime: uv giữ mtime gốc khi chép) chép sang /layer/opt/venv: image chạy chép venv
+# dependency (lớp lớn, chỉ đổi khi uv.lock đổi) rồi /layer (vài MB) — sửa code thì CI chỉ đẩy và máy
+# worker chỉ tải lớp nhỏ. Cài lại mà xoá file của venv dependency thì dừng build (lớp chồng lên
+# không xoá được).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable \
-        --reinstall-package jobworker --reinstall-package jobcrawler-proto
+    (cd /opt/venv && find . -type f -print0 | xargs -0 sha1sum | sort) > /tmp/before \
+    && uv sync --frozen --no-dev --no-editable \
+        --reinstall-package jobworker --reinstall-package jobcrawler-proto \
+    && (cd /opt/venv && find . -type f -print0 | xargs -0 sha1sum | sort) > /tmp/after \
+    && gone="$(comm -23 <(cut -c43- /tmp/before | sort) <(cut -c43- /tmp/after | sort))" \
+    && { [ -z "$gone" ] || { echo "file bị xoá khỏi venv dependency: $gone" >&2; exit 1; }; } \
+    && mkdir -p /layer/opt/venv \
+    && comm -13 /tmp/before /tmp/after | cut -c43- \
+        | (cd /opt/venv && xargs -d '\n' -r cp -a --parents -t /layer/opt/venv)
 
 # --- Runtime -------------------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE}
@@ -65,7 +77,9 @@ RUN --mount=type=bind,from=deps,source=/opt/venv,target=/opt/venv \
 
 # Cùng uid với user `pwuser` của image Playwright trước đây (file mount từ máy không đổi quyền).
 RUN groupadd --gid 1001 pwuser && useradd --create-home --uid 1001 --gid 1001 pwuser
-COPY --from=build /opt/venv /opt/venv
+# Dependency trước (lớp lớn, giữ nguyên khi chỉ sửa code), mã sau.
+COPY --from=deps /opt/venv /opt/venv
+COPY --from=build /layer/ /
 
 USER pwuser
 WORKDIR /home/pwuser

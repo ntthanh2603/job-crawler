@@ -92,8 +92,10 @@ flowchart LR
   Production sửa ba image trong `x-production` và ghim cùng một tag; giá trị worker được dùng cả
   cho service lẫn lệnh sinh từ nút "Thêm worker". Quay lại bản trước bằng cách đổi tag rồi pull/up
   lại. Phát hành: `task release VERSION=X.Y.Z`.
-  Cả backend và worker dựng trên `python:3.12-slim-bookworm` (chung lớp base), hai giai đoạn: image
-  chạy chỉ có venv `/opt/venv`, không có uv / mã nguồn. Worker chỉ cài Chromium headless shell
+  Cả backend và worker dựng trên `python:3.12-slim-bookworm` (chung lớp base): image chạy chỉ có venv
+  `/opt/venv`, không có uv / mã nguồn, chia hai lớp — dependency (backend ~415 MB, worker ~265 MB,
+  chỉ đổi khi `uv.lock` đổi) rồi mã `jobcrawler` / `jobworker` + proto (vài MB). Bản mới chỉ sửa
+  code thì CI đẩy và máy chạy kéo về vài MB. Worker chỉ cài Chromium headless shell
   (`playwright install --with-deps --only-shell chromium`, worker luôn mở headless): ~1,4 GB thay vì
   ~4,2 GB của image Playwright chính thức (kèm Firefox, WebKit, Chromium đầy đủ). Backend ~0,7 GB.
 - **Nâng cấp**: đẩy image → khởi động lại `backend` (migration chạy lúc khởi động, job đang chạy được
