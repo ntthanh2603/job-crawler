@@ -1,20 +1,32 @@
 from __future__ import annotations
 
+import dataclasses
+import random
+import time
 from datetime import timedelta
+from typing import Any
 
 import pytest
 
 from jobcrawler.common.schemas import ExtractionMethod, WorkMode
+from jobcrawler.pipeline import dedup, verify
 from jobcrawler.pipeline.dedup import (
+    Cluster,
+    Signatures,
     cluster_jobs,
+    decode_signature,
     jd_minhash,
     jd_similarity,
     job_fingerprint,
     merge,
     rank_conflict,
+    signature_cache_key,
     stored_fingerprint,
     title_similarity,
 )
+from jobcrawler.pipeline.normalize import NormalizedJob
+from jobcrawler.pipeline.verify import Verdict
+from jobcrawler.services.net.kv import MemoryKV
 
 from .jobs_fixtures import NOW, board_job, normalized, raw_job
 
@@ -253,3 +265,145 @@ def test_junior_and_senior_with_template_jd_stay_separate() -> None:
         external_id="s", title="Senior Java Developer", url="https://careers.acme.vn/jobs/s"
     )
     assert len(cluster_jobs([junior, senior])) == 2
+
+
+def test_narrower_title_needs_a_near_identical_jd() -> None:
+    """ "Kế toán" và "Kế toán tổng hợp" (tiêu đề chứa nhau: 100 điểm) dùng chung mẫu JD là hai vị
+    trí; JD gần như trùng (đăng lại đổi tiêu đề) thì vẫn gộp. Khác nhau chỉ ở từ đệm ("Nhân
+    viên") thì giữ ngưỡng thường."""
+    similar_jd = JD + "<p>Phụ trách thêm mảng thuế doanh nghiệp.</p>"
+    general = careers(title="Kế toán")
+    template = board(description=similar_jd)
+    assert 0.8 <= jd_similarity(jd_minhash(general.jd_text), jd_minhash(template.jd_text)) < 0.95
+    assert len(cluster_jobs([general, template])) == 2
+    assert len(cluster_jobs([general, board()])) == 1  # cùng JD
+
+    sales = careers(title="Kinh doanh")
+    staff = board(title="Nhân viên kinh doanh", description=similar_jd)
+    assert len(cluster_jobs([sales, staff])) == 1
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "narrower"),
+    [
+        ("ke toan", "ke toan tong hop", True),
+        ("java developer", "java backend developer", True),
+        ("nhan vien kinh doanh", "kinh doanh", False),
+        ("chuyen vien tuyen dung", "tuyen dung", False),
+        ("ke toan tong hop", "ke toan tong hop", False),
+        ("ke toan kho", "ke toan tong hop", False),
+    ],
+)
+def test_narrower_title(a: str, b: str, narrower: bool) -> None:
+    assert dedup.narrower_title(a, b) is narrower
+    assert dedup.narrower_title(b, a) is narrower
+
+
+def _variants(n: int, *, seed: int) -> list[NormalizedJob]:
+    """n tin của một doanh nghiệp: vài mẫu JD, mỗi tin sửa ngẫu nhiên vài từ (JD giống nhau quanh
+    ngưỡng 0,8), tiêu đề / nơi làm / nguồn lẫn lộn."""
+    rng = random.Random(seed)
+    vocab = [f"tu{i}" for i in range(80)]
+    templates = [[rng.choice(vocab) for _ in range(90)] for _ in range(15)]
+    titles = {
+        t: careers(title=t).title_normalized
+        for t in (
+            "Kế toán tổng hợp",
+            "Kế toán kho",
+            "Kế toán",
+            "Nhân viên kinh doanh",
+            "Kinh doanh",
+        )
+    }
+    template = careers()
+    jobs: list[NormalizedJob] = []
+    for i in range(n):
+        words = list(templates[i % len(templates)])
+        for _ in range(rng.randint(0, 14)):
+            words[rng.randrange(len(words))] = rng.choice(vocab)
+        source = rng.choice(["careers", "topcv", "vietnamworks"])
+        title = rng.choice(list(titles))
+        jobs.append(
+            dataclasses.replace(
+                template,
+                raw=template.raw.model_copy(
+                    update={
+                        "source": source,
+                        "external_id": f"{source}-{i % (n - 5)}",
+                        "url": f"https://jobs.acme.vn/{source}/{i}",
+                    }
+                ),
+                board=source != "careers",
+                title=title,
+                title_normalized=titles[title],
+                description_md=" ".join(words),
+                requirements_md=None,
+                locations=template.locations if rng.random() < 0.8 else [],
+                places=template.places,
+            )
+        )
+    return jobs
+
+
+def test_band_candidates_cluster_exactly_like_every_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Băng LSH chỉ bỏ qua cặp chắc chắn khác: gom cụm y như so mọi cặp."""
+    jobs = _variants(400, seed=7)
+    fast = cluster_jobs(jobs)
+    monkeypatch.setattr(dedup, "candidate_pairs", lambda *_args, **_kwargs: None)
+    slow = cluster_jobs(jobs)
+
+    def ids(clusters: list[Cluster]) -> list[list[str]]:
+        return [[m.raw.url for m in c.members] for c in clusters]
+
+    assert ids(fast) == ids(slow)
+    assert len(slow) < len(jobs)  # có gộp
+    assert any(len(c.members) == 1 for c in slow)  # và có tin riêng
+
+
+def test_mark_reposts_with_bands_matches_every_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    jobs = _variants(300, seed=11)
+
+    def reject(pairs_of: Any) -> list[str | None]:
+        monkeypatch.setattr(verify, "band_pairs", pairs_of)
+        verdicts = [Verdict(accepted=True, confidence=0.9) for _ in jobs]
+        verify.mark_reposts(jobs, verdicts, Signatures())
+        return [v.code for v in verdicts]
+
+    banded = reject(dedup.band_pairs)
+    every = reject(
+        lambda sigs, *_: {(i, j) for i in range(len(sigs)) for j in range(i + 1, len(sigs))}
+    )
+    assert banded == every
+    assert verify.SPAM_REPOST in banded
+
+
+def test_two_thousand_postings_cluster_quickly() -> None:
+    """Doanh nghiệp 2.000 tin: so mọi cặp mất khoảng 60 s (docs/DEDUP.md mục 13), băng LSH vài
+    giây (phần lớn là tính chữ ký, lượt sau lấy từ cache)."""
+    jobs = _variants(2000, seed=3)
+    sigs = Signatures()
+    for job in jobs:
+        sigs(job)
+    started = time.perf_counter()
+    clusters = cluster_jobs(jobs, sigs=sigs)
+    assert time.perf_counter() - started < 8
+    assert len(clusters) < len(jobs)
+
+
+async def test_signatures_round_trip_through_the_cache() -> None:
+    kv = MemoryKV()
+    jd = careers().jd_text
+    first = Signatures()
+    sig = first.of_text(jd)
+    await first.save(kv, {"job:fp1": sig})
+    again = Signatures()
+    assert await again.load(kv, [jd, jd, "JD chưa từng gặp"]) == 1
+    cached = again.of_text(jd)
+    assert cached is not sig
+    assert jd_similarity(cached, sig) == 1.0
+    assert jd_similarity(cached, jd_minhash("Lập trình backend Java Spring, thiết kế API")) < 0.2
+    raw = await kv.get(signature_cache_key("job:fp1"))
+    assert raw is not None
+    assert decode_signature(raw) is not None
+    assert decode_signature(b"short") is None
+    await Signatures().save(kv)  # không có gì mới: không ghi

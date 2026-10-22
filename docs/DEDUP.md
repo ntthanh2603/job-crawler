@@ -68,14 +68,20 @@ chỉ là danh sách tỉnh/thành ("Hà Nội, Hồ Chí Minh", "HN/HCM") thàn
 
 | A                  | B                      | Điểm             |
 | ------------------ | ---------------------- | ---------------- |
-| Kế toán            | Kế toán tổng hợp       | 100              |
-| Java Developer     | Java Backend Developer | 100              |
+| Kế toán            | Kế toán tổng hợp       | 100 (hẹp hơn)    |
+| Java Developer     | Java Backend Developer | 100 (hẹp hơn)    |
 | Java Developer     | Senior Java Developer  | 0 (lệch cấp bậc) |
 | Kế toán            | Kế toán trưởng         | 0 (lệch cấp bậc) |
 | Tester             | Testers                | 92,3             |
 | Frontend Developer | Backend Developer      | 74,3             |
 
 Tiêu đề chỉ là **bộ lọc lỏng**; JD mới là phép quyết định.
+
+**Tiêu đề hẹp hơn** (`narrower_title`): từ của tiêu đề này nằm trọn trong tiêu đề kia và bên kia còn
+thêm từ, sau khi bỏ từ đệm (nhân viên, chuyên viên, NV, CV, staff, officer, executive, specialist).
+`token_set_ratio` cho 100 nhưng đây thường là hai vị trí dùng chung mẫu JD ("Kế toán" / "Kế toán tổng
+hợp"), nên JD phải **≥ 0,95** thay vì 0,8 (`jd_threshold_for`, dùng ở `same_job`, `same_existing`
+và `mark_reposts`). Chỉ khác từ đệm ("Nhân viên kinh doanh" / "Kinh doanh") thì giữ ngưỡng thường.
 
 ### 3.2. Nơi làm
 
@@ -90,8 +96,8 @@ Tiêu đề chỉ là **bộ lọc lỏng**; JD mới là phép quyết định.
 1. `fold(jd_text)`, cắt thành các cụm 3 từ liên tiếp: "lap bao cao tai chinh" → `lap bao cao`,
    `bao cao tai`, `cao tai chinh`.
 2. Độ giống = Jaccard của hai tập cụm: số cụm chung / tổng số cụm khác nhau.
-3. Ước lượng bằng MinHash 128 hàm băm (sai số khoảng ±0,03); chữ ký tính một lần mỗi tin
-   (`Signatures`). JD rỗng → 0.
+3. Ước lượng bằng MinHash 128 hàm băm (sai số khoảng ±0,03); chữ ký tính một lần cho mỗi nội dung
+   JD (`Signatures`) và lưu trên Redis cache (mục 13). JD rỗng → 0.
 
 Đổi một từ làm hỏng tới 3 cụm, nên JD càng ngắn điểm càng tụt. Ví dụ JD kế toán 56 từ: đổi "hàng
 tháng" → "hàng quý" được 0,867; thêm một câu được 0,852.
@@ -120,7 +126,7 @@ flowchart TD
   PL -- không --> F
   PL -- có --> AP{"Cùng nơi nộp hồ sơ?"}
   AP -- có --> T
-  AP -- không --> JD{"JD ≥ 0,8?"}
+  AP -- không --> JD{"JD ≥ 0,8 (0,95 khi tiêu đề hẹp hơn)?"}
   JD -- có --> T
   JD -- không --> F
 ```
@@ -142,7 +148,9 @@ Trước khi gom cụm, bước xác minh loại các bản đăng lại **cùng
 
 - `places` phải bằng nhau;
 - không rõ nơi làm → luật đăng lại (mục 5);
-- có nơi làm → tiêu đề ≥ 90 và JD ≥ 0,9.
+- có nơi làm → tiêu đề ≥ 90 và JD ≥ 0,9 (0,95 khi tiêu đề hẹp hơn, mục 3.1).
+
+Chỉ so các cặp cùng nguồn trùng một băng LSH của JD (mục 13), không so mọi cặp.
 
 Giữ bản mới nhất (`posted_at`, bằng nhau thì JD dài hơn), loại các bản còn lại (trừ bản cùng mã tin
 với bản giữ lại: chính tin đó, không phải đăng lại). Tin bị loại không vào cụm; việc cũ của nó vẫn
@@ -150,8 +158,9 @@ với bản giữ lại: chính tin đó, không phải đăng lại). Tin bị 
 
 ## 7. Gom cụm và bản chuẩn — `cluster_jobs`, `merge`
 
-- So **từng cặp** tin được nhận của doanh nghiệp bằng `same_job`, nối bằng union-find
-  (`connected_groups`).
+- So các **cặp ứng viên** (`candidate_pairs`: cùng mã tin, cùng nơi nộp, hoặc trùng một băng LSH
+  của JD — mục 13) bằng `same_job`, nối bằng union-find (`connected_groups`) theo thứ tự cặp tăng
+  dần: cùng kết quả như so từng cặp.
 - Trước khi nối hai nhóm, tập tỉnh của hai nhóm phải còn tương thích: một tin không rõ địa điểm (khớp
   với mọi nơi) không được nối tin Hà Nội với tin Đà Nẵng.
 - **Bản chuẩn** (`canonical_rank`): website / ATS của doanh nghiệp trước trang tuyển dụng → cách bóc
@@ -171,13 +180,20 @@ Mỗi cụm cần một `cluster_key`:
 1. **Tin đã gắn việc từ lượt trước** (và được nhận lượt này) → dùng lại khoá của việc đó. Cụm chứa tin
    của nhiều việc cũ thì giữ việc đầu tiên chưa bị cụm khác dùng; các việc cũ còn lại không còn tin
    nào được nhận nên bị đóng (`removed`).
-2. **Cụm mới** → `_ExistingMatcher.find`, chỉ xét việc **đang mở** chưa bị cụm nào của lượt này nhận:
-   1. việc có **dấu vân tay y hệt** (mục 9);
-   2. không có: nạp một lần danh sách việc đang mở (tiêu đề, nguồn chuẩn, địa điểm), lọc ứng viên tiêu
-      đề ≥ 90, rồi mới nạp JD đã lưu (mô tả + yêu cầu) của các ứng viên đó;
+2. **Cụm mới** → `_ExistingMatcher.find`, xét việc **đang mở** và việc **đã đóng** (gỡ / hết hạn)
+   chưa quá 30 ngày (`REOPEN_DAYS`), chưa bị cụm nào của lượt này nhận:
+   1. việc có **dấu vân tay y hệt** (mục 9), đang mở trước;
+   2. không có: nạp một lần danh sách các việc đó (tiêu đề, nguồn chuẩn, địa điểm), lọc ứng viên tiêu
+      đề ≥ 90, rồi lấy chữ ký JD của ứng viên từ Redis cache theo dấu vân tay (`job:<dấu vân tay>`,
+      lượt lưu trước ghi); chỉ việc chưa có trong cache mới phải nạp JD đã lưu (mô tả + yêu cầu, giải
+      nén) và tính lại;
    3. so bằng `same_existing`: cùng luật với `same_job` nhưng **không có lối tắt** cùng mã tin / cùng
       nơi nộp; nguồn của việc cũ là `canonical_source`;
-   4. nhiều ứng viên khớp → chọn việc có JD giống nhất. Mỗi việc cũ chỉ nhận một cụm mỗi lượt.
+   4. nhiều ứng viên khớp → việc đang mở trước việc đã đóng, rồi việc có JD giống nhất. Mỗi việc cũ chỉ
+      nhận một cụm mỗi lượt.
+
+   Khớp việc đã đóng thì việc đó **được mở lại** (doanh nghiệp gỡ tin rồi đăng lại với mã mới ở một
+   lượt sau): giữ `first_seen_at`, không tính là việc mới.
 3. **Không khớp việc nào** → việc mới, khoá `sha1(source:external_id)` của bản chuẩn.
 
 **Lượt chưa đủ** (poll ban ngày, build `partial`) chỉ thấy một phần tin của doanh nghiệp. Cụm ghi vào
@@ -190,7 +206,10 @@ giữ giá trị đã lưu (lượt đủ đã hỏi LLM theo bản chuẩn), kh
 này thấy. Lượt đủ không gộp thêm gì: tin không còn thấy thì không thuộc việc nữa.
 
 Upsert việc theo `(company_id, cluster_key)`; `first_seen_at` chỉ lùi về sớm hơn (`least`), không
-bao giờ tiến lên.
+bao giờ tiến lên. Số **việc mới** của lượt (`SaveResult.new`, cột `company_runs.jobs_new`) đếm việc có
+`first_seen_at` là lượt này: tin đăng lại với mã mới gắn vào việc đã có (kể cả việc mở lại) không
+tính. Số "mới" của lượt poll (`PollOutcome.new`, số đo phát hiện tin mới) vẫn đếm mã tin mới trên bộ
+khung.
 
 ## 9. Dấu vân tay và index trong DB
 
@@ -226,7 +245,11 @@ fingerprint = sha1( fold(tiêu đề) | places sắp xếp, nối bằng dấu p
 | `REPOST_TITLE_THRESHOLD`          | 97      | luật đăng lại                                       |
 | `REPOST_JD_THRESHOLD`             | 0,95    | luật đăng lại                                       |
 | `SPAM_JD_THRESHOLD` (`verify.py`) | 0,9     | `mark_reposts` khi có nơi làm                       |
+| `NARROWER_JD_THRESHOLD`           | 0,95    | JD khi một tiêu đề hẹp hơn tiêu đề kia (mục 3.1)    |
 | `SHINGLE` / `NUM_PERM`            | 3 / 128 | cụm từ / số hàm băm MinHash                         |
+| `LSH_BANDS`                       | 32      | băng LSH × 4 hàm băm, tìm cặp ứng viên (mục 13)     |
+| `SIGNATURE_TTL`                   | 3 ngày  | chữ ký JD trên Redis cache                          |
+| `REOPEN_DAYS` (`store.py`)        | 30      | việc đã đóng còn được mở lại (mục 8)                |
 
 ## 12. Giới hạn đã biết
 
@@ -247,69 +270,45 @@ fingerprint = sha1( fold(tiêu đề) | places sắp xếp, nối bằng dấu p
   - tiêu đề rất ngắn: "Sales" → "Sale" 88,9, "IT" → "IT1" 80 (< 90);
   - JD sát mức tối thiểu (`verify_min_jd_chars` = 200 ký tự, khoảng 30–40 từ);
   - rơi vào luật đăng lại: "Java Developer" → "Java Develper" 96,3 (< 97), JD dưới khoảng 200 từ.
-- **Chỉ so với việc đang mở.** Việc đã `removed` / `expired` trước khi bản đăng lại xuất hiện (gỡ và
-  đăng lại ở hai lượt poll khác nhau) → việc mới, `first_seen_at` mới.
-- **Chỉ trong một doanh nghiệp.** Cùng một việc bị map vào hai doanh nghiệp thì không gộp.
-- **Tiêu đề chứa nhau được 100 điểm.** Hai vị trí khác nhau dùng chung mẫu JD, cùng tỉnh ("Kế toán" /
-  "Kế toán tổng hợp", JD ≥ 0,8) bị gộp làm một.
-- **Số "mới" đếm tin, không đếm việc** (`SaveResult.new`, `PollOutcome.new`, `jobs_new`): tin đăng
-  lại với mã mới đã gắn vào việc cũ vẫn được tính là mới.
-- **Ban đêm so lại từng cặp, chạy trên event loop**: xem mục 13.
+- **Việc đã đóng quá 30 ngày** (`REOPEN_DAYS`): tin đăng lại là việc mới, `first_seen_at` mới.
+- **Chỉ trong một doanh nghiệp** — chủ ý: một việc thuộc một nhà tuyển dụng. Cùng một việc thấy ở hai
+  doanh nghiệp (trang careers của công ty mẹ và profile trang tuyển dụng của công ty con) là hai việc
+  của hai doanh nghiệp; tin bị gắn nhầm doanh nghiệp sửa ở bước map profile / KYC, không ở bước gộp.
+- **Tiêu đề hẹp hơn mà JD gần như trùng** (≥ 0,95) vẫn gộp: hai vị trí dùng nguyên văn một JD thì
+  không phân biệt được bằng nội dung.
 
 ## 13. Chi phí tính toán
 
-Không phải lượt nào cũng tính lại toàn bộ:
+| Bước                                        | Cách làm                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Chuẩn hoá, luật xác minh, đăng lại, gom cụm | chạy trong thread (`asyncio.to_thread`): event loop của runner vẫn tải trang, gia hạn lease cho job khác; watchdog không dừng runner |
+| Chữ ký MinHash                              | một lần mỗi nội dung JD; lưu Redis cache 3 ngày theo sha1 của JD và theo dấu vân tay của việc đã lưu — lượt sau chỉ tính JD đổi |
+| Tìm cặp so                                  | băng LSH trên chữ ký (`band_pairs`) + cùng mã tin / cùng nơi nộp (`candidate_pairs`), thay vì n(n−1)/2 cặp                       |
+| So tiêu đề                                  | `title_similarity`, `rank_conflict`, `narrower_title` nhớ kết quả theo cặp tiêu đề (doanh nghiệp lặp lại vài chục tiêu đề)       |
+| Poll, so với việc đã lưu                     | lọc theo tiêu đề, chữ ký của việc ứng viên lấy từ cache (mục 8), chỉ việc chưa có mới nạp và giải nén JD                          |
 
-| Lượt                      | Đọc DB                                                                                                                                                                                                                  | Tính                                                                                                                        |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Poll, không có tin mã mới | —                                                                                                                                                                                                                       | không so gì                                                                                                                 |
-| Poll, có tin mã mới       | tra dấu vân tay qua index (≤ 1 dòng); không trúng thì 6 cột nhẹ của mọi việc đang mở (không có JD), một lần mỗi lượt; JD (giải nén zstd) chỉ của ứng viên tiêu đề ≥ 90; `raw` (giải nén) các tin khác của việc được ghi | MinHash tin mới, so tiêu đề cụm mới × việc đang mở, MinHash JD ứng viên; chuẩn hoá lại + `merge` tin khác của việc được ghi |
-| Lượt đủ ban đêm           | —                                                                                                                                                                                                                       | MinHash **mọi** tin; `mark_reposts` (cặp cùng nguồn) và `cluster_jobs` so **từng cặp**: n(n−1)/2                            |
+**Băng LSH không làm đổi kết quả.** 128 hàm băm chia 32 băng × 4. Hai JD có Jaccard (ước lượng
+MinHash) ≥ t lệch nhau ở tối đa ⌊128·(1 − t)⌋ hàm: với t = 0,8 là 25 < 32 băng, nên ít nhất một băng
+trùng trọn (chuồng bồ câu) — mọi cặp mà so từng cặp thấy giống đều là cặp ứng viên (`bands_exact`).
+Ngưỡng JD thấp hơn 0,76 thì không còn chắc, `candidate_pairs` trả None và so mọi cặp. Cặp ứng viên
+được xét theo thứ tự tăng dần như vòng so mọi cặp, nên cả luật chặn nối hai nhóm khác tỉnh cũng cho
+cùng kết quả (test `test_band_candidates_cluster_exactly_like_every_pair`).
 
 ### 13.1. Số đo
 
-DB local (43 doanh nghiệp, 2.478 việc đang mở), ba doanh nghiệp nhiều tin nhất, mã ở `6fc0813`. Cột
-poll: 5 cụm lấy từ tin đã có, dấu vân tay giả để buộc đi đường so mờ.
+Máy dev, 2.000 tin tổng hợp của một doanh nghiệp (15 mẫu JD, mỗi tin sửa ngẫu nhiên tới 14 từ, 5 tiêu
+đề — nặng hơn thực tế vì rất nhiều cặp gần ngưỡng):
 
-| Tin được nhận | JD trung vị | MinHash mọi tin | `cluster_jobs`      | Poll: 5 cụm mới so với việc đã lưu |
-| ------------- | ----------- | --------------- | ------------------- | ---------------------------------- |
-| 595           | 318 từ      | 1,2 s           | 5,2 s (176.715 cặp) | 156 ms, nạp JD 7 việc              |
-| 476           | 627 từ      | 1,2 s           | 4,0 s (113.050 cặp) | 323 ms, nạp JD 84 việc             |
-| 176           | 225 từ      | 0,24 s          | 0,4 s (15.400 cặp)  | 79 ms, nạp JD 25 việc              |
+| Bước                                | So mọi cặp (trước)         | Băng LSH + cache       |
+| ----------------------------------- | -------------------------- | ---------------------- |
+| Cặp đem so                          | 1.999.000                  | 93.806                 |
+| Chữ ký MinHash 2.000 tin            | 1,9 s mỗi lượt             | 1 s lần đầu, 0 khi JD không đổi |
+| `cluster_jobs` (chữ ký có sẵn)      | ~60 s (ngoại suy ~30 µs/cặp) | 1,8 s                |
 
-Mỗi cặp khoảng 30 µs, nên chi phí tăng theo bình phương số tin (ngoại suy):
+Mỗi chữ ký trên cache 512 byte: khoảng 300 nghìn tin đang mở (mức L) cần ~150 MB cache; nên tách
+`CACHE_REDIS_URL` ở mức L (docs/DEPLOY.md).
 
-| Tin được nhận | Cặp       | `cluster_jobs` |
-| ------------- | --------- | -------------- |
-| 1.000         | 0,5 triệu | ~15 s          |
-| 1.400         | 1 triệu   | ~30 s          |
-| 2.000         | 2 triệu   | ~60 s          |
+### 13.2. Chưa làm
 
-`SOURCE_MAX_JOBS` (500) giới hạn số tin mỗi nguồn, nhưng doanh nghiệp có website và nhiều trang tuyển
-dụng thì số tin cộng dồn qua các nguồn.
-
-### 13.2. Vấn đề
-
-1. **Mã CPU chạy thẳng trên event loop.** `cluster_jobs`, `mark_reposts` và MinHash được gọi đồng bộ
-   trong coroutine, không qua `to_thread`. Một runner chạy nhiều job cùng lúc trên một event loop, nên
-   suốt đoạn này mọi job khác của runner đứng: không tải trang, không gia hạn lease. Watchdog của
-   runner thoát process khi event loop đứng quá `min(WATCHDOG_SECONDS, QUEUE_RECLAIM_SECONDS / 2)` =
-   30 s (mặc định). Doanh nghiệp có khoảng 1.400 tin được nhận trở lên làm runner tự thoát giữa lượt
-   đêm; mọi job đang chạy trên runner đó bị chạy lại, và lượt chạy lại của doanh nghiệp này gặp lại
-   đúng chỗ đó. `COMPANY_TIMEOUT_SECONDS` không cắt được, vì timeout của asyncio chỉ chạy khi event
-   loop được trả quyền.
-2. **Tính lại thứ không đổi.** Đêm nào cũng tính lại MinHash và so lại mọi cặp, kể cả tin có
-   `content_hash` không đổi và cặp đã biết là khác nhau từ đêm trước. Chữ ký MinHash của việc đã lưu
-   không được cất: ở poll, mỗi lần một việc lọt vào danh sách ứng viên là lại đọc JD, giải nén và tính
-   lại MinHash.
-3. **Bộ lọc tiêu đề lọc kém.** Tiêu đề chứa nhau được 100 điểm (mục 3.1), nên doanh nghiệp có nhiều
-   tiêu đề gần nhau kéo theo nhiều ứng viên: ở doanh nghiệp thứ hai, 5 cụm mới phải nạp JD của 84 việc.
-
-### 13.3. Hướng giảm (chưa làm)
-
-- Chạy phần CPU ngoài event loop: `asyncio.to_thread` (vẫn tranh GIL nhưng event loop còn được chạy)
-  hoặc process pool (tách hẳn).
-- Cất chữ ký MinHash theo `content_hash` ở Redis cache (dữ liệu mất được).
-- Tìm ứng viên bằng MinHash LSH (`datasketch.MinHashLSH`, cùng thư viện đang dùng) thay vì so mọi
-  cặp: gần tuyến tính.
-- Ban đêm chỉ gom lại tin mới / tin đổi nội dung; tin không đổi giữ cụm cũ.
+- Gom cụm tăng dần ban đêm (chỉ gom lại tin mới / đổi nội dung, tin không đổi giữ cụm cũ): sau băng LSH
+  và cache, phần còn lại tỉ lệ với số cặp ứng viên chứ không với n², chưa cần.

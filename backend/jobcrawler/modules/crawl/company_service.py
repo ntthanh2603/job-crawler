@@ -3,6 +3,7 @@ rồi ghi bộ khung (`crawl_plans`) và lịch poll / build kế tiếp (`compa
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import time
 from collections.abc import Collection
@@ -81,7 +82,7 @@ class PipelineOutcome:
 class ProcessedJobs:
     jobs: list[JobOut]  # job đã nhận (đã gộp)
     deferred: int = 0  # tin hoãn xác minh (LLM chưa kịp chấm)
-    new: int = 0  # tin lần đầu thấy
+    new: int = 0  # job lần đầu thấy (tin đăng lại gắn vào job cũ không tính)
     removed: int = 0  # job bị đóng (không còn thấy ở lượt đủ, hoặc tin vừa bị loại)
 
 
@@ -252,10 +253,17 @@ async def process_jobs(
         0.0, s.company_timeout_seconds - s.company_deadline_seconds - SAVE_MARGIN_SECONDS
     )
     board_names = set(boards.registry())
-    normalized = normalize.normalize_jobs(raws, now=now, is_board=board_names.__contains__)
+    # Chuẩn hoá và gom cụm là việc CPU (doanh nghiệp vài nghìn tin: hàng chục giây), chạy trong
+    # thread: trên event loop thì mọi job khác của runner đứng (không tải trang, không gia hạn
+    # lease) và watchdog dừng cả runner (docs/DEDUP.md mục 13).
+    normalized = await asyncio.to_thread(
+        normalize.normalize_jobs, raws, now=now, is_board=board_names.__contains__
+    )
     ctx = await company_context(res, company, website)
     sigs = dedup.Signatures()
-    kv = res.cache_kv  # cache câu trả lời LLM theo nội dung tin (Redis cache)
+    kv = res.cache_kv  # cache câu trả lời LLM, chữ ký JD theo nội dung tin (Redis cache)
+    # Chữ ký JD đã tính ở lượt trước: lượt đủ đêm chỉ tính lại tin đổi nội dung.
+    await sigs.load(kv, (job.jd_text for job in normalized))
     verdicts = await verify.verify_jobs(
         normalized,
         ctx,
@@ -271,7 +279,7 @@ async def process_jobs(
     )
     accepted = [job for job, v in zip(normalized, verdicts, strict=True) if v.accepted]
     deferred = sum(v.deferred for v in verdicts)
-    clusters = dedup.cluster_jobs(accepted, sigs=sigs)
+    clusters = await asyncio.to_thread(dedup.cluster_jobs, accepted, sigs=sigs)
     log.info("dedup.done", accepted=len(accepted), jobs=len(clusters))
     # LLM chỉ hỏi trường việc đã gộp còn `unknown`: giá trị rule của bất kỳ tin nào trong cụm đứng
     # trước đoán của LLM. Bản gộp là bản sao (cụm một tin: chính tin đó), tin giữ giá trị rule.
@@ -297,6 +305,8 @@ async def process_jobs(
             reused_postings=reused,
             is_board=board_names.__contains__,
             absent=absent,
+            signatures=sigs,
+            kv=kv,
         )
     return ProcessedJobs(jobs=saved.jobs, deferred=deferred, new=saved.new, removed=saved.removed)
 

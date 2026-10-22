@@ -7,7 +7,7 @@ Proxy pool, robots cache và HTTP cache chỉ phụ thuộc vào giao diện `Ke
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 from redis.asyncio import Redis
@@ -25,6 +25,7 @@ class KeyValueStore(Protocol):
     async def get(self, key: str) -> bytes | None: ...
     async def mget(self, keys: Sequence[str]) -> list[bytes | None]: ...
     async def set(self, key: str, value: Value, *, ttl: float | None = None) -> None: ...
+    async def mset(self, items: Mapping[str, Value], *, ttl: float | None = None) -> None: ...
     async def set_nx(self, key: str, value: Value, *, ttl: float | None = None) -> bool: ...
     async def delete(self, *keys: str) -> None: ...
     async def incrby(self, key: str, amount: int = 1) -> int: ...
@@ -52,6 +53,17 @@ class RedisKV:
         r: Any = self._redis
         px = max(1, int(ttl * 1000)) if ttl else None
         await r.set(self._k(key), _to_bytes(value), px=px)
+
+    async def mset(self, items: Mapping[str, Value], *, ttl: float | None = None) -> None:
+        """Nhiều khoá trong một lượt gửi (pipeline, không transaction)."""
+        if not items:
+            return
+        r: Any = self._redis
+        px = max(1, int(ttl * 1000)) if ttl else None
+        async with r.pipeline(transaction=False) as pipe:
+            for key, value in items.items():
+                pipe.set(self._k(key), _to_bytes(value), px=px)
+            await pipe.execute()
 
     async def set_nx(self, key: str, value: Value, *, ttl: float | None = None) -> bool:
         r: Any = self._redis
@@ -94,6 +106,10 @@ class MemoryKV:
 
     async def set(self, key: str, value: Value, *, ttl: float | None = None) -> None:
         self._data[key] = (_to_bytes(value), self._expiry(ttl))
+
+    async def mset(self, items: Mapping[str, Value], *, ttl: float | None = None) -> None:
+        for key, value in items.items():
+            self._data[key] = (_to_bytes(value), self._expiry(ttl))
 
     async def set_nx(self, key: str, value: Value, *, ttl: float | None = None) -> bool:
         if self._live(key) is not None:

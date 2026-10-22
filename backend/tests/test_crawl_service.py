@@ -3,7 +3,9 @@ trang tuyển dụng khi lượt poll `board` bị xếp trùng, LLM chỉ hỏi
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -14,7 +16,7 @@ import pytest
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import EmploymentType, JobLevel, RunTrigger, WorkMode
 from jobcrawler.modules.crawl import company_service, crawl_service, sla_service
-from jobcrawler.pipeline import normalize, store, verify
+from jobcrawler.pipeline import dedup, normalize, store, verify
 from jobcrawler.pipeline.normalize import NormalizedJob
 from jobcrawler.pipeline.verify import Verdict
 
@@ -221,3 +223,52 @@ async def test_llm_fills_merged_jobs_after_rule_values_of_every_posting(
     assert saved["is_board"]("topcv")
     assert not saved["is_board"]("careers")
     assert saved["absent"] == gone
+
+
+async def test_normalize_and_dedup_run_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chuẩn hoá và gom cụm của doanh nghiệp nhiều tin chạy trong thread: event loop của runner
+    không đứng (watchdog không dừng runner, job khác vẫn gia hạn lease)."""
+
+    def slow[**P, T](fn: Callable[P, T]) -> Callable[P, T]:
+        def run(*args: P.args, **kwargs: P.kwargs) -> T:
+            time.sleep(0.3)  # vài nghìn tin
+            return fn(*args, **kwargs)
+
+        return run
+
+    async def context(*_args: Any) -> object:
+        return object()
+
+    async def accept_all(jobs: list[NormalizedJob], *_args: Any, **_kwargs: Any) -> list[Verdict]:
+        return [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
+
+    async def classify(jobs: list[NormalizedJob], *_args: Any, **_kwargs: Any) -> int:
+        return 0
+
+    async def save(_session: Any, **kwargs: Any) -> store.SaveResult:
+        return store.SaveResult(jobs=[], postings=len(kwargs["jobs"]), removed=0)
+
+    monkeypatch.setattr(normalize, "normalize_jobs", slow(normalize.normalize_jobs))
+    monkeypatch.setattr(dedup, "cluster_jobs", slow(dedup.cluster_jobs))
+    monkeypatch.setattr(company_service, "company_context", context)
+    monkeypatch.setattr(verify, "verify_jobs", accept_all)
+    monkeypatch.setattr(normalize, "classify_unclear", classify)
+    monkeypatch.setattr(store, "save_company_jobs", save)
+    gaps: list[float] = []
+
+    async def ticker() -> None:
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    task = asyncio.create_task(ticker())
+    company: Any = SimpleNamespace(id=uuid4(), legal_name="ACME", brand_name=None, input_name=None)
+    done = await company_service.process_jobs(
+        resources(), company, [raw_job()], website=None, deadline=0.0, complete=True
+    )
+    task.cancel()
+    assert done.deferred == 0
+    assert max(gaps) < 0.2

@@ -11,12 +11,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from datasketch import MinHash
-from sqlalchemy import case, func, or_, select, tuple_, update
+from sqlalchemy import and_, case, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,16 +41,19 @@ from jobcrawler.pipeline.dedup import (
     TITLE_THRESHOLD,
     Cluster,
     ExistingJob,
+    Signatures,
     canonical_rank,
-    jd_minhash,
+    decode_signature,
     jd_similarity,
     job_fingerprint,
     merge,
     same_existing,
+    signature_cache_key,
     title_similarity,
 )
 from jobcrawler.pipeline.normalize import NormalizedJob, normalize_job
 from jobcrawler.pipeline.verify import EXPIRED, Verdict
+from jobcrawler.services.net.kv import KeyValueStore
 
 log = get_logger(__name__)
 
@@ -67,8 +70,10 @@ class _PostingRow:
 class SaveResult:
     jobs: list[JobOut]
     postings: int
-    removed: int  # job của doanh nghiệp không còn thấy (chỉ tính khi lượt chạy đủ nguồn)
-    new: int = 0  # tin lần đầu thấy ở lượt này
+    removed: int  # job của doanh nghiệp không còn thấy (chỉ tính khi lượt build / poll đủ nguồn)
+    # Job lần đầu thấy ở lượt này. Tin đăng lại với mã mới gắn vào job đã có không tính: đếm theo
+    # việc, không theo tin.
+    new: int = 0
 
 
 def cluster_key(job: NormalizedJob) -> str:
@@ -112,7 +117,8 @@ async def _upsert_posting(
         source=job.source, external_id=job.external_id, first_seen_at=now, **content, **verification
     )
     # Tin trên trang tuyển dụng do lượt index quản lý (nội dung, last_seen_at, trạng thái): ở đây
-    # chỉ ghi quyết định xác minh. Tin từ website doanh nghiệp: lượt chạy này là lần thấy mới nhất.
+    # chỉ ghi quyết định xác minh. Tin từ website doanh nghiệp: lượt build / poll này là lần thấy
+    # mới nhất.
     set_: dict[str, Any] = dict(verification)
     if not job.board:
         set_ |= content
@@ -324,42 +330,82 @@ async def _upsert_job(session: AsyncSession, values: dict[str, Any]) -> Job:
         return (await session.execute(statement(values | {"cluster_key": key}))).scalar_one()
 
 
-class _ExistingMatcher:
-    """Tìm job đã lưu (đang mở) của doanh nghiệp mà một cụm mới thực chất là nó. Mỗi job chỉ được
-    nhận một lần; `claimed` là các job đã gắn tin của lượt này."""
+# Tin đăng lại của job đã đóng (gỡ / hết hạn) trong chừng này ngày: mở lại job cũ.
+REOPEN_DAYS = 30
 
-    def __init__(self, session: AsyncSession, company_id: UUID, *, claimed: set[UUID]) -> None:
+
+def job_signature_key(fingerprint: str) -> str:
+    """Khoá chữ ký JD của một job đã lưu trên Redis cache (`Signatures.save`): dấu vân tay đổi khi
+    JD đổi, nên chữ ký theo dấu vân tay không bao giờ cũ."""
+    return f"job:{fingerprint}"
+
+
+class _ExistingMatcher:
+    """Tìm job đã lưu của doanh nghiệp mà một cụm mới thực chất là nó: job đang mở, không có thì
+    job đã đóng (gỡ / hết hạn) trong `REOPEN_DAYS` ngày — doanh nghiệp gỡ tin rồi đăng lại ở một
+    lượt sau: job cũ được mở lại (giữ `first_seen_at`), không thành việc mới. Mỗi job chỉ được
+    nhận một lần; `claimed` là các job đã gắn tin của lượt này.
+
+    Chữ ký JD của job ứng viên lấy từ Redis cache theo dấu vân tay (`job_signature_key`); chỉ job
+    chưa có trong cache mới phải đọc và giải nén JD rồi tính lại (`computed`, ghi cache sau)."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        company_id: UUID,
+        *,
+        claimed: set[UUID],
+        signatures: Signatures,
+        kv: KeyValueStore | None = None,
+        now: datetime,
+    ) -> None:
         self.session = session
         self.company_id = company_id
         self.claimed = claimed
+        self.signatures = signatures
+        self.kv = kv
+        self.computed: dict[str, MinHash] = {}
+        self.reopened = 0
         self._meta: list[Any] | None = None
         self._loaded: dict[UUID, tuple[ExistingJob, MinHash]] = {}
+        # Job đang mở, hoặc đóng chưa quá REOPEN_DAYS ngày.
+        self._open_or_recent = or_(
+            Job.status == JobStatus.ACTIVE.value,
+            and_(
+                Job.status.in_([JobStatus.REMOVED.value, JobStatus.EXPIRED.value]),
+                Job.updated_at >= now - timedelta(days=REOPEN_DAYS),
+            ),
+        )
+
+    def _take(self, job_id: UUID, key: str, status: str) -> tuple[UUID, str]:
+        self.claimed.add(job_id)
+        if status != JobStatus.ACTIVE.value:
+            self.reopened += 1
+        return job_id, key
 
     async def find(self, job: NormalizedJob, fp: str) -> tuple[UUID, str] | None:
         """(id, khoá cụm) của job đã lưu khớp `job`, hoặc None."""
-        exact = (
-            await self.session.execute(
-                select(Job.id, Job.cluster_key).where(
-                    Job.company_id == self.company_id,
-                    Job.status == JobStatus.ACTIVE.value,
-                    Job.fingerprint == fp,
-                )
-            )
-        ).first()
-        if exact is not None and exact.id not in self.claimed:
-            self.claimed.add(exact.id)
-            return exact.id, exact.cluster_key
+        exact = await self.session.execute(
+            select(Job.id, Job.cluster_key, Job.status)
+            .where(Job.company_id == self.company_id, Job.fingerprint == fp, self._open_or_recent)
+            .order_by((Job.status == JobStatus.ACTIVE.value).desc(), Job.updated_at.desc())
+        )
+        for row in exact:
+            if row.id not in self.claimed:
+                return self._take(row.id, row.cluster_key, row.status)
         if self._meta is None:
             self._meta = list(
                 await self.session.execute(
                     select(
                         Job.id,
                         Job.cluster_key,
+                        Job.status,
                         Job.title,
                         Job.title_normalized,
                         Job.canonical_source,
                         Job.locations,
-                    ).where(Job.company_id == self.company_id, Job.status == JobStatus.ACTIVE.value)
+                        Job.fingerprint,
+                    ).where(Job.company_id == self.company_id, self._open_or_recent)
                 )
             )
         candidates = [
@@ -371,33 +417,63 @@ class _ExistingMatcher:
         if not candidates:
             return None
         await self._load([m for m in candidates if m.id not in self._loaded])
-        signature = jd_minhash(job.jd_text)
-        best: tuple[float, ExistingJob] | None = None
+        signature = self.signatures.of_text(job.jd_text)
+        # Job đang mở trước job đã đóng; cùng nhóm thì JD giống nhất.
+        best: tuple[tuple[bool, float], Any] | None = None
         for m in candidates:
             existing, existing_signature = self._loaded[m.id]
             if not same_existing(job, existing, signature, existing_signature):
                 continue
-            score = jd_similarity(signature, existing_signature)
+            score = (
+                m.status == JobStatus.ACTIVE.value,
+                jd_similarity(signature, existing_signature),
+            )
             if best is None or score > best[0]:
-                best = (score, existing)
+                best = (score, m)
         if best is None:
             return None
-        self.claimed.add(best[1].id)
-        return best[1].id, best[1].cluster_key
+        return self._take(best[1].id, best[1].cluster_key, best[1].status)
+
+    async def _cached(self, metas: list[Any]) -> dict[UUID, MinHash]:
+        """Chữ ký trên Redis cache của các job ứng viên có dấu vân tay."""
+        with_fp = [m for m in metas if m.fingerprint]
+        if self.kv is None or not with_fp:
+            return {}
+        try:
+            raws = await self.kv.mget(
+                [signature_cache_key(job_signature_key(m.fingerprint)) for m in with_fp]
+            )
+        except Exception as exc:  # cache lỗi: đọc JD như cũ
+            log.warning("jobs.signature_cache_failed", error=str(exc))
+            return {}
+        return {
+            m.id: sig
+            for m, raw in zip(with_fp, raws, strict=True)
+            if raw and (sig := decode_signature(raw)) is not None
+        }
 
     async def _load(self, metas: list[Any]) -> None:
-        """Nội dung (giải nén) và MinHash của các job ứng viên — chỉ những job trùng tiêu đề."""
+        """MinHash của các job ứng viên — chỉ những job trùng tiêu đề: từ cache, không có thì đọc
+        nội dung (giải nén) và tính."""
         if not metas:
             return
-        rows = await self.session.execute(
-            select(Job.id, Job.description_md, Job.requirements_md).where(
-                Job.id.in_([m.id for m in metas])
+        cached = await self._cached(metas)
+        missing = [m.id for m in metas if m.id not in cached]
+        texts: dict[UUID, str] = {}
+        if missing:
+            rows = await self.session.execute(
+                select(Job.id, Job.description_md, Job.requirements_md).where(Job.id.in_(missing))
             )
-        )
-        texts = {row.id: row for row in rows}
+            texts = {
+                row.id: "\n\n".join(p for p in (row.description_md, row.requirements_md) if p)
+                for row in rows
+            }
         for m in metas:
-            text_row = texts[m.id]
-            jd = "\n\n".join(p for p in (text_row.description_md, text_row.requirements_md) if p)
+            signature = cached.get(m.id)
+            if signature is None:
+                signature = self.signatures.of_text(texts[m.id])
+                if m.fingerprint:
+                    self.computed[job_signature_key(m.fingerprint)] = signature
             locations = m.locations or []
             places = provinces.most_specific(
                 {u for loc in locations if (u := provinces.unit_of(loc.get("address_raw")))}
@@ -411,14 +487,13 @@ class _ExistingMatcher:
                 source=m.canonical_source,
                 places=places,
                 provinces=frozenset(p for loc in locations if (p := loc.get("province"))),
-                jd_text=jd,
             )
-            self._loaded[m.id] = (existing, jd_minhash(jd))
+            self._loaded[m.id] = (existing, signature)
 
 
 @dataclass(frozen=True, slots=True)
 class _Attached:
-    """Tin đang gắn với một job đã lưu mà lượt chạy (chưa đủ) không thấy."""
+    """Tin đang gắn với một job đã lưu mà lượt build / poll (chưa đủ) không thấy."""
 
     job: NormalizedJob
     row: _PostingRow
@@ -523,10 +598,12 @@ async def save_company_jobs(
     merged: Sequence[NormalizedJob] | None = None,
     is_board: Callable[[str], bool] | None = None,
     absent: Collection[tuple[str, str]] = (),
+    signatures: Signatures | None = None,
+    kv: KeyValueStore | None = None,
 ) -> SaveResult:
-    """Ghi tin + job của một lượt chạy (trong transaction của `session`).
+    """Ghi tin + job của một lượt build / poll (trong transaction của `session`).
 
-    `complete`: lượt chạy đủ mọi nguồn — job cũ không còn thấy được đánh `removed` (hoặc
+    `complete`: lượt build / poll đủ mọi nguồn — job cũ không còn thấy được đánh `removed` (hoặc
     `expired` nếu đã quá hạn nộp). Lượt `partial` không đụng tới job cũ.
 
     Tin hoãn xác minh (`Verdict.deferred`) không được ghi: tin và job cũ của nó giữ nguyên như
@@ -536,6 +613,9 @@ async def save_company_jobs(
     `fetched_at` để hết hạn dùng lại thì lượt sau tải lại.
 
     `merged`: bản gộp của từng cụm (đã được LLM điền trường mơ hồ); None thì gộp ở đây.
+
+    `signatures` / `kv`: chữ ký JD của lượt (dùng lại khi so với job đã lưu); chữ ký mới tính và
+    chữ ký của mọi job được ghi được lưu lên Redis cache `kv` cho lượt sau.
 
     Lượt chưa đủ (`complete=False`, có `is_board`) chỉ thấy một phần tin của doanh nghiệp: cụm ghi
     vào job đã lưu được gộp lại cùng các tin khác còn gắn với job đó (`_attached_postings`, trừ
@@ -586,8 +666,11 @@ async def save_company_jobs(
     merged_jobs = list(merged) if merged is not None else [merge(c) for c in clusters]
     fingerprints = [job_fingerprint(m) for m in merged_jobs]
     reused = 0
+    signatures = signatures or Signatures()
+    matcher = _ExistingMatcher(
+        session, company_id, claimed=set(previous), signatures=signatures, kv=kv, now=now
+    )
     if any(k is None for k in keys):
-        matcher = _ExistingMatcher(session, company_id, claimed=set(previous))
         for i, merged_job in enumerate(merged_jobs):
             if keys[i] is not None:
                 continue
@@ -649,6 +732,7 @@ async def save_company_jobs(
 
     out: list[JobOut] = []
     touched: set[UUID] = set()
+    created: set[UUID] = set()
     for cluster, full, merged_job, fp, key in zip(
         clusters, full_clusters, merged_jobs, fingerprints, keys, strict=True
     ):
@@ -674,6 +758,8 @@ async def save_company_jobs(
         }
         job_row = await _upsert_job(session, values)
         touched.add(job_row.id)
+        if job_row.first_seen_at == now:  # mọi tin của job đều mới thấy, job chưa có từ trước
+            created.add(job_row.id)
         await session.execute(
             update(JobPosting)
             .where(JobPosting.id.in_([r.id for r in rows]))
@@ -690,7 +776,7 @@ async def save_company_jobs(
         )
 
     # Job cũ không còn tin nào được nhận: cụm đã nhập vào cụm khác, tin vừa bị loại (hết hạn...),
-    # hoặc — khi lượt chạy đủ nguồn — không còn thấy tin nào.
+    # hoặc — khi lượt build / poll đủ nguồn — không còn thấy tin nào.
     gone = set(previous) | {r.job_id for r in rejected.values() if r.job_id is not None}
     conditions = [Job.company_id == company_id, Job.status == JobStatus.ACTIVE.value]
     if touched:
@@ -710,6 +796,15 @@ async def save_company_jobs(
     )
     removed = len((await session.execute(stale)).all())
     await refresh_active_jobs(session, company_id)
+    # Chữ ký JD theo dấu vân tay của mọi job vừa ghi: lượt sau so tin mới với job này khỏi đọc JD.
+    await signatures.save(
+        kv,
+        matcher.computed
+        | {
+            job_signature_key(fp): signatures.of_text(m.jd_text)
+            for m, fp in zip(merged_jobs, fingerprints, strict=True)
+        },
+    )
     log.info(
         "jobs.saved",
         postings=len(postings),
@@ -717,7 +812,7 @@ async def save_company_jobs(
         rejected=len(rejected),
         removed=removed,
         reused_existing=reused,
+        reopened=matcher.reopened,
         complete=complete,
     )
-    new = sum(row.first_seen_at == now for row in postings.values())
-    return SaveResult(jobs=out, postings=len(postings), removed=removed, new=new)
+    return SaveResult(jobs=out, postings=len(postings), removed=removed, new=len(created))

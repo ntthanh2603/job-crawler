@@ -297,7 +297,9 @@ async def build_company(
 class PollOutcome:
     company_id: UUID
     status: str  # ok | partial | failed | broken | skipped | no_plans
-    new: int = 0  # tin mới (mã chưa có ở lượt trước)
+    # Mã tin mới trên bộ khung (chưa có ở lượt trước): đo phát hiện tin mới nên đếm theo tin; số
+    # việc mới của lượt là `jobs_new` (`ProcessedJobs.new`).
+    new: int = 0
     gone: int = 0  # tin không còn trên nguồn đọc trọn
     closed: int = 0  # job bị đóng khi lưu
     saved: bool = False  # có ghi tin / job (lượt có thay đổi)

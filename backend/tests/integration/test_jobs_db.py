@@ -24,6 +24,7 @@ from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.pipeline import dedup, store
 from jobcrawler.pipeline.verify import Verdict
 from jobcrawler.services.fakes import FakeFetcher
+from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
 
@@ -375,7 +376,9 @@ async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
             board=False,
         )
 
-        async def save(jobs: list, *, complete: bool = False) -> store.SaveResult:
+        async def save(
+            jobs: list, *, complete: bool = False, now: datetime = NOW
+        ) -> store.SaveResult:
             verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
             async with res.sessionmaker.begin() as s:
                 return await store.save_company_jobs(
@@ -385,15 +388,17 @@ async def test_reposted_job_reuses_existing_job_and_duplicates_are_merged(
                     jobs=jobs,
                     verdicts=verdicts,
                     clusters=dedup.cluster_jobs(jobs),
-                    now=NOW,
+                    now=now,
                     complete=complete,
                 )
 
-        await save([first])
+        assert (await save([first])).new == 1
         [job] = await company_jobs(res, company_id)
         assert job.fingerprint
-        # Lượt sau chỉ còn bản đăng lại (mã mới), lượt partial: vẫn một job, cùng id.
-        await save([repost])
+        # Lượt sau chỉ còn bản đăng lại (mã mới), lượt partial: vẫn một job, cùng id — tin mới
+        # nhưng không phải việc mới.
+        again = await save([repost], now=NOW + timedelta(hours=1))
+        assert (again.postings, again.new) == (1, 0)
         rows = await company_jobs(res, company_id)
         assert [(r.id, r.status) for r in rows] == [(job.id, "active")]
         async with res.sessionmaker() as s:
@@ -584,3 +589,123 @@ async def test_deadline_and_monthly_salary_in_lists_counts_and_exports(
         finally:
             async with res.sessionmaker.begin() as s:
                 await s.execute(delete(Company).where(Company.id == company_id))
+
+
+async def test_existing_job_signature_comes_from_the_cache(
+    integration_settings: Settings,
+) -> None:
+    """So tin mới với job đã lưu: chữ ký JD của job lấy từ Redis cache theo dấu vân tay (lượt lưu
+    trước ghi), không đọc / giải nén JD đã lưu."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME sigcache {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+        first = normalized(raw_job(external_id=f"a-{suffix}"), board=False)
+        jd = raw_job().description or ""
+        repost = normalized(
+            raw_job(
+                external_id=f"b-{suffix}",
+                url=f"https://careers.acme.vn/jobs/b-{suffix}",
+                description=jd + "<p>Được đào tạo thêm.</p>",
+            ),
+            board=False,
+        )
+        kv = MemoryKV()
+
+        async def save(jobs: list) -> store.SaveResult:
+            verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
+            sigs = dedup.Signatures()
+            async with res.sessionmaker.begin() as s:
+                return await store.save_company_jobs(
+                    s,
+                    company_id=company_id,
+                    company_name="ACME",
+                    jobs=jobs,
+                    verdicts=verdicts,
+                    clusters=dedup.cluster_jobs(jobs, sigs=sigs),
+                    now=NOW,
+                    complete=False,
+                    signatures=sigs,
+                    kv=kv,
+                )
+
+        await save([first])
+        [job] = await company_jobs(res, company_id)
+        assert job.fingerprint
+        key = dedup.signature_cache_key(store.job_signature_key(job.fingerprint))
+        assert await kv.get(key) is not None
+        # JD đã lưu bị đổi thẳng trong DB (dấu vân tay giữ nguyên): nếu matcher đọc JD thì tin
+        # đăng lại không khớp nữa; khớp được nghĩa là chữ ký lấy từ cache.
+        async with res.sessionmaker.begin() as s:
+            await s.execute(
+                update(Job)
+                .where(Job.id == job.id)
+                .values(description_md="Lập trình backend Java Spring, thiết kế API REST.")
+            )
+        assert repost.jd_text != first.jd_text
+        await save([repost])
+        [again] = await company_jobs(res, company_id)
+        assert again.id == job.id
+
+
+async def test_repost_after_removal_reopens_the_job(integration_settings: Settings) -> None:
+    """Doanh nghiệp gỡ tin rồi đăng lại với mã mới ở lượt sau: mở lại việc cũ (giữ ngày thấy đầu
+    tiên, không tính là việc mới). Việc đã đóng quá REOPEN_DAYS ngày thì tin đăng lại là việc
+    mới."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME reopen {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+
+        def posting(code: str) -> Any:
+            return normalized(
+                raw_job(
+                    external_id=f"{code}-{suffix}",
+                    url=f"https://careers.acme.vn/jobs/{code}-{suffix}",
+                ),
+                board=False,
+            )
+
+        async def save(jobs: list, *, now: datetime) -> store.SaveResult:
+            verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs]
+            async with res.sessionmaker.begin() as s:
+                return await store.save_company_jobs(
+                    s,
+                    company_id=company_id,
+                    company_name="ACME",
+                    jobs=jobs,
+                    verdicts=verdicts,
+                    clusters=dedup.cluster_jobs(jobs),
+                    now=now,
+                    complete=True,
+                )
+
+        assert (await save([posting("a")], now=NOW)).new == 1
+        [job] = await company_jobs(res, company_id)
+        assert (await save([], now=NOW + timedelta(hours=1))).removed == 1
+
+        again = await save([posting("b")], now=NOW + timedelta(days=2))
+        assert again.new == 0
+        [reopened] = await company_jobs(res, company_id)
+        assert (reopened.id, reopened.status) == (job.id, "active")
+        assert reopened.first_seen_at == job.first_seen_at
+
+        # Đóng từ lâu: tin đăng lại là việc mới.
+        assert (await save([], now=NOW + timedelta(days=3))).removed == 1
+        async with res.sessionmaker.begin() as s:
+            await s.execute(
+                update(Job)
+                .where(Job.id == job.id)
+                .values(updated_at=NOW - timedelta(days=store.REOPEN_DAYS + 10))
+            )
+        later = await save([posting("c")], now=NOW + timedelta(days=4))
+        assert later.new == 1
+        rows = await company_jobs(res, company_id)
+        assert sorted(r.status for r in rows) == ["active", "removed"]
+        assert next(r for r in rows if r.status == "removed").id == job.id

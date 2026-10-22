@@ -32,9 +32,12 @@ from jobcrawler.common.urls import host_of, path_segments, registrable_domain
 from jobcrawler.pipeline import provinces
 from jobcrawler.pipeline.dedup import (
     Signatures,
+    band_pairs,
+    bands_exact,
     connected_groups,
     is_repost,
     jd_similarity,
+    jd_threshold_for,
     title_similarity,
 )
 from jobcrawler.pipeline.normalize import NormalizedJob
@@ -541,17 +544,22 @@ def mark_reposts(
             # Không biết nơi làm: tiêu đề chuẩn hoá đã bỏ phần trong ngoặc ("[VII.2026_Ba Đình] CV
             # khách hàng" của từng chi nhánh Vietcombank) nên so tiêu đề gốc, đòi gần như y hệt.
             return is_repost(x.title, y.title, jd_similarity(sigs(x), sigs(y)))
+        threshold = jd_threshold_for(x.title_normalized, y.title_normalized, SPAM_JD_THRESHOLD)
         return (
             title_similarity(x.title_normalized, y.title_normalized) >= 90
-            and jd_similarity(sigs(x), sigs(y)) >= SPAM_JD_THRESHOLD
+            and jd_similarity(sigs(x), sigs(y)) >= threshold
         )
 
     def newest(i: int) -> tuple[float, int]:
         posted = jobs[i].posted_at
         return (posted.timestamp() if posted else 0.0, len(jobs[i].jd_text))
 
+    # Đăng lại đòi JD ≥ 0,9 và cùng nguồn: chỉ so các cặp cùng nguồn trùng một băng LSH.
+    assert bands_exact(SPAM_JD_THRESHOLD)
+    kept = [jobs[i] for i in idx]
+    pairs = sorted(band_pairs([sigs(x) for x in kept], [x.source for x in kept]))
     rejected = 0
-    for group in connected_groups(len(idx), linked):
+    for group in connected_groups(len(idx), linked, pairs=pairs):
         if len(group) < 2:
             continue
         members = sorted((idx[g] for g in group), key=newest, reverse=True)
@@ -657,11 +665,17 @@ async def verify_jobs(
     khi không có LLM, hoãn (`Verdict.deferred`) khi có LLM mà không kịp. Câu trả lời của LLM được
     cache theo doanh nghiệp + nội dung tin (`kv`, 7 ngày)."""
     sigs = sigs or Signatures()
-    verdicts = [
-        check_rules(job, ctx, now=now, min_jd_chars=min_jd_chars, board_max_age=board_max_age)
-        for job in jobs
-    ]
-    mark_reposts(jobs, verdicts, sigs)
+
+    def rules() -> list[Verdict]:
+        checked = [
+            check_rules(job, ctx, now=now, min_jd_chars=min_jd_chars, board_max_age=board_max_age)
+            for job in jobs
+        ]
+        mark_reposts(jobs, checked, sigs)
+        return checked
+
+    # Luật + so đăng lại là việc CPU: chạy trong thread để event loop của runner không đứng.
+    verdicts = await asyncio.to_thread(rules)
 
     suspects = [i for i, v in enumerate(verdicts) if v.accepted and v.confidence < min_confidence]
     remaining = list(suspects)

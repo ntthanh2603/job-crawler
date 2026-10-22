@@ -25,15 +25,19 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
-from collections.abc import Callable, Sequence
+from array import array
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from functools import lru_cache
+from itertools import combinations
+from typing import Any, Final
 from uuid import UUID
 
-from datasketch import MinHash
+from datasketch import LeanMinHash, MinHash
 from rapidfuzz import fuzz
 
+from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import (
     EducationLevel,
     EmploymentType,
@@ -47,14 +51,23 @@ from jobcrawler.common.urls import normalize_url
 from jobcrawler.pipeline import provinces as province_names
 from jobcrawler.pipeline.categories import merge_categories
 from jobcrawler.pipeline.normalize import NormalizedJob
+from jobcrawler.services.net.kv import KeyValueStore
+
+log = get_logger(__name__)
 
 TITLE_THRESHOLD = 90.0
 JD_THRESHOLD = 0.8
 # Tin đăng lại (cùng nguồn, không rõ nơi làm): đòi gần như y hệt.
 REPOST_TITLE_THRESHOLD = 97.0
 REPOST_JD_THRESHOLD = 0.95
+# Một tiêu đề hẹp hơn tiêu đề kia (`narrower_title`): đòi JD gần như trùng.
+NARROWER_JD_THRESHOLD = 0.95
 SHINGLE = 3
 NUM_PERM = 128
+# Băng LSH để tìm cặp ứng viên (`band_pairs`): 32 băng × 4 hàm băm của chữ ký.
+LSH_BANDS = 32
+# Chữ ký JD trên Redis cache: lượt đủ đêm sau dùng lại; JD không còn gặp thì tự hết hạn.
+SIGNATURE_TTL = 3 * 86_400
 
 _METHOD_RANK = {
     ExtractionMethod.ATS_API: 0,
@@ -66,15 +79,43 @@ _METHOD_RANK = {
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+# Hàm hoán vị của MinHash sinh một lần cho mọi chữ ký (sinh lại mỗi tin tốn ~0,4 ms).
+_SCHEME: Final = "affine32"
+_TEMPLATE = MinHash(num_perm=NUM_PERM, scheme=_SCHEME)
+_CACHE_PREFIX = f"minhash:{SHINGLE}:{NUM_PERM}:{_SCHEME}:"
+
+
 def jd_minhash(text: str) -> MinHash:
     words = fold(text).split()
     if len(words) < SHINGLE:
         grams = {" ".join(words)} if words else set()
     else:
         grams = {" ".join(words[i : i + SHINGLE]) for i in range(len(words) - SHINGLE + 1)}
-    m = MinHash(num_perm=NUM_PERM)
+    m = MinHash(num_perm=NUM_PERM, permutations=_TEMPLATE.permutations, scheme=_SCHEME)
     m.update_batch([g.encode() for g in grams])
     return m
+
+
+def encode_signature(sig: MinHash) -> bytes:
+    return sig.hashvalues.tobytes()
+
+
+def decode_signature(raw: bytes) -> MinHash | None:
+    """Chữ ký đọc từ cache; sai kích thước (đổi tham số MinHash) thì None, tính lại."""
+    values = array("I")
+    if len(raw) != NUM_PERM * values.itemsize:
+        return None
+    values.frombytes(raw)
+    return LeanMinHash(seed=_TEMPLATE.seed, hashvalues=values, scheme=_SCHEME)
+
+
+def text_key(text: str) -> str:
+    return hashlib.sha1(text.encode()).hexdigest()
+
+
+def signature_cache_key(key: str) -> str:
+    """Khoá Redis cache của chữ ký: `text_key` của JD, hoặc `job:<dấu vân tay>` của job đã lưu."""
+    return _CACHE_PREFIX + key
 
 
 def jd_similarity(a: MinHash, b: MinHash) -> float:
@@ -110,6 +151,7 @@ def _ranks(folded: str) -> set[str]:
     return set(_NOT_RANK.sub(" ", folded).split()) & _RANK_TOKENS
 
 
+@lru_cache(maxsize=1 << 16)
 def rank_conflict(a: str, b: str) -> bool:
     """Hai tiêu đề khác nhau ở từ chỉ cấp bậc."""
     fa, fb = fold(a), fold(b)
@@ -118,10 +160,33 @@ def rank_conflict(a: str, b: str) -> bool:
     return any((f" {p} " in f" {fa} ") != (f" {p} " in f" {fb} ") for p in _RANK_PHRASES)
 
 
+# Một doanh nghiệp lặp lại vài chục tiêu đề trên hàng nghìn tin: nhớ kết quả theo cặp tiêu đề.
+@lru_cache(maxsize=1 << 16)
 def title_similarity(a: str, b: str) -> float:
     if not a or not b or rank_conflict(a, b):
         return 0.0
     return float(fuzz.token_set_ratio(a, b))
+
+
+# Từ đệm không đổi vị trí ("Nhân viên kinh doanh" = "Kinh doanh"): bỏ khi xét tiêu đề chứa nhau.
+_FILLER = re.compile(r"\b(?:nhan vien|chuyen vien|nv|cv|staff|officer|executive|specialist)\b")
+
+
+@lru_cache(maxsize=1 << 16)
+def narrower_title(a: str, b: str) -> bool:
+    """Từ của tiêu đề này nằm trọn trong tiêu đề kia, bên kia thêm từ chuyên môn ("Kế toán" /
+    "Kế toán tổng hợp", "Java Developer" / "Java Backend Developer"). `token_set_ratio` cho 100
+    nhưng thường là hai vị trí dùng chung mẫu JD, nên JD phải gần như trùng mới gộp."""
+    words_a = set(_FILLER.sub(" ", fold(a)).split())
+    words_b = set(_FILLER.sub(" ", fold(b)).split())
+    return bool(words_a and words_b) and (words_a < words_b or words_b < words_a)
+
+
+def jd_threshold_for(title_a: str, title_b: str, threshold: float = JD_THRESHOLD) -> float:
+    """Ngưỡng JD để hai tin (tiêu đề đã chuẩn hoá) là một việc."""
+    if narrower_title(title_a, title_b):
+        return max(threshold, NARROWER_JD_THRESHOLD)
+    return threshold
 
 
 def compatible_provinces(pa: set[str], pb: set[str]) -> bool:
@@ -187,16 +252,111 @@ def _apply_key(job: NormalizedJob) -> str | None:
 
 
 class Signatures:
-    """MinHash của JD, tính một lần cho mỗi tin."""
+    """MinHash của JD, tính một lần cho mỗi nội dung JD. `load` / `save` đọc sẵn / ghi lại chữ ký
+    trên Redis cache (dữ liệu mất được): lượt sau không tính lại JD không đổi. Gọi trong thread
+    được (gom cụm), nhưng không song song với `load` / `save`."""
 
     def __init__(self) -> None:
-        self._cache: dict[int, MinHash] = {}
+        self._sigs: dict[str, MinHash] = {}
+        self._fresh: dict[str, MinHash] = {}  # tính ở lượt này, chưa ghi cache
+        self._jobs: dict[int, MinHash] = {}  # theo tin (id), khỏi băm lại JD mỗi lần so
 
     def __call__(self, job: NormalizedJob) -> MinHash:
-        key = id(job)
-        if key not in self._cache:
-            self._cache[key] = jd_minhash(job.jd_text)
-        return self._cache[key]
+        sig = self._jobs.get(id(job))
+        if sig is None:
+            sig = self._jobs[id(job)] = self.of_text(job.jd_text)
+        return sig
+
+    def of_text(self, text: str) -> MinHash:
+        key = text_key(text)
+        sig = self._sigs.get(key)
+        if sig is None:
+            sig = self._sigs[key] = self._fresh[key] = jd_minhash(text)
+        return sig
+
+    async def load(self, kv: KeyValueStore | None, texts: Iterable[str]) -> int:
+        """Nạp chữ ký đã có trên cache của các JD `texts`; trả số chữ ký nạp được."""
+        if kv is None:
+            return 0
+        keys = [k for k in dict.fromkeys(map(text_key, texts)) if k not in self._sigs]
+        if not keys:
+            return 0
+        try:
+            raws = await kv.mget([signature_cache_key(k) for k in keys])
+        except Exception as exc:  # cache lỗi: tính lại, không làm hỏng lượt
+            log.warning("dedup.signatures_load_failed", error=str(exc))
+            return 0
+        found = 0
+        for key, raw in zip(keys, raws, strict=True):
+            if raw and (sig := decode_signature(raw)) is not None:
+                self._sigs[key] = sig
+                found += 1
+        return found
+
+    async def save(self, kv: KeyValueStore | None, extra: Mapping[str, MinHash] = {}) -> None:
+        """Ghi lên cache các chữ ký mới tính (và `extra`: khoá → chữ ký, vd. theo job đã lưu)."""
+        items = {signature_cache_key(k): encode_signature(s) for k, s in self._fresh.items()}
+        items |= {signature_cache_key(k): encode_signature(s) for k, s in extra.items()}
+        self._fresh.clear()
+        if kv is None or not items:
+            return
+        try:
+            await kv.mset(items, ttl=SIGNATURE_TTL)
+        except Exception as exc:
+            log.warning("dedup.signatures_save_failed", error=str(exc))
+
+
+def bands_exact(threshold: float) -> bool:
+    """Hai JD có Jaccard (ước lượng MinHash) ≥ `threshold` lệch nhau ở tối đa ⌊128·(1 − t)⌋ hàm
+    băm; ít hơn số băng thì có ít nhất một băng trùng trọn (chuồng bồ câu): `band_pairs` không bỏ
+    sót cặp nào mà so từng cặp thấy giống."""
+    return int(NUM_PERM * (1 - threshold) + 1e-9) < LSH_BANDS
+
+
+def band_pairs(
+    sigs: Sequence[MinHash], groups: Sequence[Hashable] | None = None
+) -> set[tuple[int, int]]:
+    """Cặp (i < j) có chữ ký trùng trọn ít nhất một băng LSH — gần tuyến tính thay vì so mọi cặp.
+    Chữ ký rỗng (JD rỗng) không ghép với gì. `groups`: chỉ ghép phần tử cùng nhóm (vd. nguồn)."""
+    same: dict[tuple[Hashable, bytes], list[int]] = {}
+    for i, sig in enumerate(sigs):
+        if not sig.is_empty():
+            group = groups[i] if groups is not None else None
+            same.setdefault((group, encode_signature(sig)), []).append(i)
+    reps = list(same.items())  # các chữ ký khác nhau, kèm phần tử có chữ ký đó (tăng dần)
+    pairs: set[tuple[int, int]] = set()
+    buckets: dict[tuple[Hashable, int, bytes], list[int]] = {}
+    for r, ((group, whole), members) in enumerate(reps):
+        pairs.update(combinations(members, 2))
+        step = len(whole) // LSH_BANDS
+        for b in range(LSH_BANDS):
+            buckets.setdefault((group, b, whole[b * step : (b + 1) * step]), []).append(r)
+    linked: set[tuple[int, int]] = set()
+    for members in buckets.values():
+        linked.update(combinations(members, 2))
+    for a, b in linked:
+        for i in reps[a][1]:
+            for j in reps[b][1]:
+                pairs.add((i, j) if i < j else (j, i))
+    return pairs
+
+
+def candidate_pairs(
+    jobs: Sequence[NormalizedJob], sigs: Signatures, *, jd_threshold: float = JD_THRESHOLD
+) -> list[tuple[int, int]] | None:
+    """Cặp tin có thể `same_job` (tăng dần, như vòng so mọi cặp): cùng mã tin, cùng nơi nộp, hoặc
+    trùng một băng LSH của JD. None: ngưỡng JD quá thấp để băng LSH chắc chắn đủ, so mọi cặp."""
+    if not bands_exact(min(jd_threshold, REPOST_JD_THRESHOLD)):
+        return None
+    pairs = band_pairs([sigs(job) for job in jobs])
+    same: dict[tuple[str, str], list[int]] = {}
+    for i, job in enumerate(jobs):
+        same.setdefault(("id", f"{job.source}:{job.external_id}"), []).append(i)
+        if (apply := _apply_key(job)) is not None:
+            same.setdefault(("apply", apply), []).append(i)
+    for members in same.values():
+        pairs.update(combinations(members, 2))
+    return sorted(pairs)
 
 
 def same_job(
@@ -218,7 +378,8 @@ def same_job(
     apply_a, apply_b = _apply_key(a), _apply_key(b)
     if apply_a and apply_a == apply_b:
         return True
-    return jd_similarity(sigs(a), sigs(b)) >= jd_threshold
+    threshold = jd_threshold_for(a.title_normalized, b.title_normalized, jd_threshold)
+    return jd_similarity(sigs(a), sigs(b)) >= threshold
 
 
 def is_repost(title_a: str, title_b: str, jd: float) -> bool:
@@ -242,7 +403,6 @@ class ExistingJob:
     source: str
     places: frozenset[str]
     provinces: frozenset[str]
-    jd_text: str
 
 
 def same_existing(
@@ -259,7 +419,7 @@ def same_existing(
             return False
     elif not compatible_provinces(job.provinces, set(existing.provinces)):
         return False
-    return jd >= JD_THRESHOLD
+    return jd >= jd_threshold_for(job.title_normalized, existing.title_normalized)
 
 
 def canonical_rank(job: NormalizedJob) -> tuple[int, int, int, float]:
@@ -285,9 +445,14 @@ def connected_groups(
     n: int,
     linked: Callable[[int, int], bool],
     can_join: Callable[[list[int], list[int]], bool] | None = None,
+    *,
+    pairs: Iterable[tuple[int, int]] | None = None,
 ) -> list[list[int]]:
     """Gom n phần tử theo quan hệ `linked` (union-find), giữ thứ tự. `can_join(nhóm a, nhóm b)`
-    chặn việc nối hai nhóm đã có (tránh gộp bắc cầu qua một phần tử "khớp với mọi thứ")."""
+    chặn việc nối hai nhóm đã có (tránh gộp bắc cầu qua một phần tử "khớp với mọi thứ").
+
+    `pairs`: chỉ xét các cặp (i < j) này, tăng dần (`linked` chắc chắn sai với mọi cặp khác);
+    None thì xét mọi cặp. Cùng thứ tự xét nên cùng kết quả."""
     parent = list(range(n))
     members = {i: [i] for i in range(n)}
 
@@ -297,15 +462,16 @@ def connected_groups(
             i = parent[i]
         return i
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            ri, rj = find(i), find(j)
-            if ri == rj or not linked(i, j):
-                continue
-            if can_join is not None and not can_join(members[ri], members[rj]):
-                continue
-            parent[rj] = ri
-            members[ri].extend(members.pop(rj))
+    if pairs is None:
+        pairs = ((i, j) for i in range(n) for j in range(i + 1, n))
+    for i, j in pairs:
+        ri, rj = find(i), find(j)
+        if ri == rj or not linked(i, j):
+            continue
+        if can_join is not None and not can_join(members[ri], members[rj]):
+            continue
+        parent[rj] = ri
+        members[ri].extend(members.pop(rj))
     return [sorted(g) for g in sorted(members.values(), key=min)]
 
 
@@ -316,7 +482,8 @@ def cluster_jobs(
     title_threshold: float = TITLE_THRESHOLD,
     jd_threshold: float = JD_THRESHOLD,
 ) -> list[Cluster]:
-    """Gom các tin (đã nhận, cùng doanh nghiệp) thành cụm; thứ tự cụm theo tin đầu tiên."""
+    """Gom các tin (đã nhận, cùng doanh nghiệp) thành cụm; thứ tự cụm theo tin đầu tiên. Chỉ so
+    các cặp ứng viên (`candidate_pairs`), không so mọi cặp."""
     sigs = sigs or Signatures()
 
     def provinces(group: list[int]) -> set[str]:
@@ -329,6 +496,7 @@ def cluster_jobs(
         ),
         # Tin không rõ địa điểm khớp được với mọi nơi: không để nó nối tin Hà Nội với tin Đà Nẵng.
         lambda a, b: compatible_provinces(provinces(a), provinces(b)),
+        pairs=candidate_pairs(jobs, sigs, jd_threshold=jd_threshold),
     )
     return [Cluster(sorted((jobs[i] for i in g), key=canonical_rank)) for g in groups]
 

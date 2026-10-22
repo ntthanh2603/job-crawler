@@ -461,7 +461,7 @@ class CompanyRun(Base):
     status: Mapped[str] = mapped_column(server_default=RunStatus.RUNNING.value)
     jobs_found: Mapped[int] = mapped_column(server_default=text("0"))
     jobs_accepted: Mapped[int] = mapped_column(server_default=text("0"))
-    # Tin mới thấy / việc bị đóng ở lượt này (so với lượt trước).
+    # Việc lần đầu thấy / việc bị đóng ở lượt này (so với lượt trước).
     jobs_new: Mapped[int] = mapped_column(server_default=text("0"))
     jobs_closed: Mapped[int] = mapped_column(server_default=text("0"))
     incomplete_sources: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
