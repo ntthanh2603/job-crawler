@@ -174,6 +174,10 @@ Ghi chú:
 
 ## 5. Theo dõi và tăng bản
 
+Các dấu hiệu chính được gửi thẳng tới webhook nếu đặt cảnh báo (trang Cài đặt → Cảnh báo,
+docs/OPERATIONS.md mục 8): P95 cửa sổ phát hiện, hàng đợi build còn việc sau khung build, worker mất
+kết nối, slot HTTP, lỗi LLM.
+
 | Dấu hiệu                                                                    | Làm gì                                                                  |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Hàng đợi poll có việc chờ thường xuyên (trang Hàng đợi: đang chạy = tối đa) | thêm worker (runner tự nhận thêm job theo slot worker); chạm trần 60 / process thì thêm `runner-poll` |

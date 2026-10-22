@@ -233,6 +233,12 @@ def _check_url(value: str | None) -> str | None:
     return value
 
 
+def _check_secret_url(value: SecretStr) -> SecretStr:
+    if _check_url(value.get_secret_value()) is None:
+        raise ValueError("Phải là URL bắt đầu bằng http:// hoặc https://")
+    return SecretStr(value.get_secret_value().strip())
+
+
 def _check_text(value: str | None) -> str | None:
     if value is None:
         return None
@@ -1262,6 +1268,72 @@ GROUPS: tuple[Group, ...] = (
         ),
     ),
     _group(
+        "alerts",
+        "Cảnh báo",
+        "Gửi tin tới webhook khi hệ thống chậm hoặc lỗi: lúc bắt đầu, nhắc lại khi còn lỗi và khi "
+        "đã ổn. Leader của scheduler kiểm định kỳ theo số đo đang có ở trang Tổng quan, Workers và "
+        "Hàng đợi.",
+        _s(
+            "alert_webhook_url",
+            "secret",
+            "Webhook nhận cảnh báo",
+            'URL nhận tin dạng {"text": ...} (Slack, Mattermost, Google Chat, Microsoft Teams); '
+            "Telegram: https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>. Để trống thì "
+            "tắt cảnh báo.",
+            check=_check_secret_url,
+            placeholder="https://hooks.slack.com/services/…",
+        ),
+        _s(
+            "alert_check_seconds",
+            "float",
+            "Chu kỳ kiểm",
+            "Kiểm các dấu hiệu sau mỗi chừng này giây.",
+            unit="giây",
+        ),
+        _s(
+            "alert_repeat_minutes",
+            "float",
+            "Nhắc lại sau",
+            "Lỗi còn kéo dài thì gửi nhắc lại sau chừng này phút. 0 là chỉ báo một lần.",
+            unit="phút",
+        ),
+        _s(
+            "alert_detection_p95_seconds",
+            "float",
+            "Ngưỡng độ trễ phát hiện (P95)",
+            "Trong khung poll, P95 cửa sổ phát hiện tin mới 30 phút gần nhất vượt ngưỡng này thì "
+            "báo. 0 là tắt.",
+            unit="giây",
+        ),
+        _s(
+            "alert_build_backlog",
+            "bool",
+            "Báo build còn tồn sau khung build",
+            "Trong 30 phút sau khi khung build kết thúc mà hàng đợi build còn việc chờ / đang chạy "
+            "thì báo (mỗi ngày một lần).",
+        ),
+        _s(
+            "alert_min_workers",
+            "int",
+            "Số worker tối thiểu",
+            "Số worker lấy trang còn kết nối ít hơn số này thì báo. 0 là tắt.",
+            unit="worker",
+        ),
+        _s(
+            "alert_http_slot_usage",
+            "float",
+            "Ngưỡng slot HTTP đang dùng",
+            "Tỉ lệ slot HTTP đang dùng trên mọi worker vượt ngưỡng này (0–1, vd. 0,7) thì báo: "
+            "cần thêm worker. 0 là tắt.",
+        ),
+        _s(
+            "alert_llm_error_rate",
+            "float",
+            "Ngưỡng tỉ lệ lỗi LLM",
+            "Tỉ lệ lời gọi LLM lỗi trong giờ gần nhất vượt ngưỡng này (0–1) thì báo. 0 là tắt.",
+        ),
+    ),
+    _group(
         "maintenance",
         "Bảo trì & lưu trữ",
         "Dọn dữ liệu cũ, tính sẵn số liệu trang tổng quan và nén các cột lớn bằng từ điển zstd.",
@@ -1553,6 +1625,17 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "kyc_min_confidence",
             "kyc_timeout_seconds",
             "kyc_max_sites",
+        ),
+    ),
+    "alerts": (
+        _sec("Kênh gửi", "alert_webhook_url", "alert_check_seconds", "alert_repeat_minutes"),
+        _sec(
+            "Ngưỡng",
+            "alert_detection_p95_seconds",
+            "alert_build_backlog",
+            "alert_min_workers",
+            "alert_http_slot_usage",
+            "alert_llm_error_rate",
         ),
     ),
     "maintenance": (

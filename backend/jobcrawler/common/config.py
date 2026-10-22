@@ -338,6 +338,18 @@ class Settings(BaseSettings):
     # Số dòng tối đa nén lại bằng từ điển mới mỗi lượt bảo trì.
     compression_recompress_rows: int = Field(default=50_000, ge=0)
 
+    # Cảnh báo chủ động (`modules/alerts/alert_service.py`): leader scheduler kiểm mỗi
+    # `alert_check_seconds` và gửi tới webhook. Không đặt webhook thì tắt; ngưỡng 0 tắt riêng loại
+    # cảnh báo đó.
+    alert_webhook_url: SecretStr | None = None
+    alert_check_seconds: float = Field(default=60, ge=10)
+    alert_repeat_minutes: float = Field(default=60, ge=0)  # 0: không nhắc lại khi còn lỗi
+    alert_detection_p95_seconds: float = Field(default=180, ge=0)
+    alert_build_backlog: bool = True
+    alert_min_workers: int = Field(default=1, ge=0)
+    alert_http_slot_usage: float = Field(default=0.7, ge=0, le=1)
+    alert_llm_error_rate: float = Field(default=0.2, ge=0, le=1)
+
     # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth_service.py`).
     # Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.
     ui_username: str = "admin"

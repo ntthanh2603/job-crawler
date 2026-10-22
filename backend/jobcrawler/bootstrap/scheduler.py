@@ -1,6 +1,7 @@
 """Scheduler: xếp build đêm và poll ngày (modules/crawl/schedule_service.py) mỗi
 SCHEDULER_TICK_SECONDS. Cùng nhịp đó, leader ghi các dòng nhật ký thao tác process không nối
-Postgres để lại trên Redis (gateway: `worker.joined`, `audit_service.flush_pending`) vào bảng.
+Postgres để lại trên Redis (gateway: `worker.joined`, `audit_service.flush_pending`) vào bảng, và
+mỗi ALERT_CHECK_SECONDS kiểm các dấu hiệu chậm / lỗi để gửi cảnh báo (`alert_service.check`).
 
 Chạy nhiều replica được: chỉ replica giữ khoá leader (lease trên Redis chính,
 `jobcrawler.services.redis.locks`, khoá `<prefix>:lock:scheduler`, hạn LEASE_SECONDS, gia hạn mỗi
@@ -31,6 +32,7 @@ from sqlalchemy import text
 from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.watchdog import Watchdog, start_watchdog
+from jobcrawler.modules.alerts import alert_service
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.modules.crawl import schedule_service
 from jobcrawler.services.redis.heartbeat import Heartbeat
@@ -44,6 +46,8 @@ STANDBY_SECONDS = 5.0
 # tối đa chừng này giây.
 LEASE_SECONDS = 30.0
 COMPONENT = "scheduler"
+# Một lượt kiểm cảnh báo không được giữ nhịp xếp lịch lâu hơn chừng này giây.
+ALERT_TIMEOUT_SECONDS = 15.0
 
 
 def leader_key(prefix: str) -> str:
@@ -64,6 +68,14 @@ async def _flush_audit(res: Resources) -> None:
         log.warning("scheduler.audit_flush_failed", error=f"{type(exc).__name__}: {exc}")
 
 
+async def _check_alerts(res: Resources) -> None:
+    """Một lượt kiểm cảnh báo; lỗi / quá giờ chỉ log, không làm hỏng nhịp xếp lịch."""
+    try:
+        await asyncio.wait_for(alert_service.check(res, datetime.now(UTC)), ALERT_TIMEOUT_SECONDS)
+    except Exception as exc:
+        log.warning("scheduler.alerts_failed", error=f"{type(exc).__name__}: {exc}")
+
+
 async def run_loop(
     res: Resources,
     stop: asyncio.Event,
@@ -76,6 +88,7 @@ async def run_loop(
     dog = watchdog or Watchdog(COMPONENT, max_stall=0)
     lease = RedisLease(res.redis, leader_key(s.redis_prefix), ttl=LEASE_SECONDS)
     leading = False
+    next_alerts = 0.0  # time.monotonic() của lượt kiểm cảnh báo kế tiếp
     try:
         while not stop.is_set():
             dog.loop_iteration()
@@ -100,6 +113,9 @@ async def run_loop(
                 else:
                     await beat.tick()
                 await _flush_audit(res)
+                if time.monotonic() >= next_alerts:
+                    next_alerts = time.monotonic() + res.settings.alert_check_seconds
+                    await _check_alerts(res)
                 wait = max(0.0, s.scheduler_tick_seconds - (time.monotonic() - started))
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), wait)

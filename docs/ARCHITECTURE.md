@@ -57,7 +57,7 @@ Mỗi thư mục là một service tự đủ (mã, lockfile, `Dockerfile`, `Tas
 | --------- | ---------------------- | ---------------------------------------------------------------------- |
 | api       | `jobcrawler api`       | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `frontend`)            |
 | gateway   | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc từ Redis Streams, nhận kết quả |
-| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis |
+| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis; leader kiểm và gửi cảnh báo |
 | runner    | `jobcrawler runner`    | chạy job của 3 hàng đợi (`--role poll\|build\|boards` để tách vai)     |
 
 Máy ≥ 4 CPU thì `serve` chạy mỗi vai runner một process: `runner-build` (máy ≥ 8 CPU:
@@ -519,6 +519,12 @@ của Redis.
   + lưu).
 - `/api/crawl/status`: P50 / P95 thời gian poll và cửa sổ phát hiện, độ tươi. `/api/workers`: worker,
   slot, việc xong / lỗi. Heartbeat Redis của scheduler / runner là healthcheck của `backend`.
+- **Cảnh báo chủ động** (`modules/alerts/alert_service.py`): leader scheduler mỗi
+  `ALERT_CHECK_SECONDS` đọc chính các số đo trên (P95 cửa sổ phát hiện 30 phút trong khung poll, hàng
+  đợi build sau khung build, số worker còn kết nối, slot HTTP đang dùng, tỉ lệ lỗi LLM giờ qua) và gửi
+  tin tới webhook (`ALERT_WEBHOOK_URL`, trang Cài đặt → Cảnh báo) khi bắt đầu lỗi, nhắc lại sau
+  `ALERT_REPEAT_MINUTES`, và khi đã ổn. Trạng thái từng loại trên Redis chính (`<prefix>:alerts:*`);
+  webhook gọi thẳng từ backend (`api_http`) như SERP.
 - **Test**: unit không gọi mạng (`FakeFetcher` với HTML / JSON chụp từ trang thật, `FakeChatClient`,
   gateway giả); tích hợp trên Postgres + Redis thật (`TEST_DATABASE_URL` tên kết thúc `_test`); hợp
   đồng API (`test_openapi.py`) và gRPC (`buf breaking`); Vitest cho giao diện; Playwright E2E chạy ở

@@ -48,6 +48,7 @@ def test_groups_in_order() -> None:
         "boards",
         "ai",
         "quality",
+        "alerts",
         "maintenance",
     ]
     assert all(g.title and g.description and g.items for g in a.GROUPS)
@@ -331,3 +332,13 @@ def test_mask_proxy_formats() -> None:
     assert a.mask_proxy("1.2.3.4:80") == "1.2.3.4:80"
     assert a.mask_proxy("1.2.3.4:80:user:pass") == "1.2.3.4:80:user:•••"
     assert a.mask_proxy("a:b:c") == "•••"
+
+
+def test_alert_webhook_is_a_secret_url() -> None:
+    spec = a.SPEC_BY_KEY["alert_webhook_url"]
+    assert (spec.kind, spec.group) == ("secret", "alerts")
+    assert "alert_webhook_url" in a.SENSITIVE
+    value = a.validate_value("alert_webhook_url", " https://hooks.slack.com/services/T/B/x ")
+    assert value.get_secret_value() == "https://hooks.slack.com/services/T/B/x"
+    with pytest.raises(ValueError, match="http"):
+        a.validate_value("alert_webhook_url", "hooks.slack.com/services/T/B/x")

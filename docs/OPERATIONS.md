@@ -166,6 +166,14 @@ Trang Cài đặt → **Proxy**.
 runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway quá 5 phút mới hỏng).
   Docker chỉ đánh dấu unhealthy; process treo thì watchdog cho nó thoát (mã 70) và
   `restart: unless-stopped` dựng lại.
+- **Cảnh báo**: đặt webhook ở trang Cài đặt → Cảnh báo (Slack / Mattermost / Google Chat / Teams:
+  URL incoming webhook; Telegram: `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`).
+  Leader scheduler kiểm mỗi phút: P95 độ trễ phát hiện 30 phút qua > 180 s (trong khung poll, từ 20
+  lượt poll), hàng đợi build còn việc trong 30 phút sau khung build, worker còn kết nối < số tối thiểu,
+  slot HTTP đang dùng > 70%, LLM lỗi > 20% giờ qua (từ 20 lời gọi). Mỗi loại báo một lần khi bắt đầu,
+  nhắc lại mỗi giờ khi còn, và báo "đã ổn"; ngưỡng 0 tắt riêng loại đó. Gửi lỗi (log
+  `alerts.send_failed`) thì lần kiểm sau gửi lại. Làm gì khi nhận: bảng "Dấu hiệu" ở docs/DEPLOY.md
+  mục 5.
 - Log: `docker compose logs <service>` (xoay 10 MB × 3); `LOG_FORMAT=json` cho máy đọc. Bảng `logs` giữ
   log của lượt chạy; production đặt `LOG_DB_LEVEL=WARNING`. Mỗi request API có `X-Request-Id`, lỗi 500
   trả `request_id` để tra log.

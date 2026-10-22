@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   BadgeCheck,
+  BellRing,
   Briefcase,
   CalendarClock,
   Compass,
@@ -73,6 +74,7 @@ const GROUP_ICON: Record<string, LucideIcon> = {
   boards: Briefcase,
   ai: Sparkles,
   quality: BadgeCheck,
+  alerts: BellRing,
   maintenance: Wrench,
 }
 
