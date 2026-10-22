@@ -202,6 +202,10 @@ class SourceSession:
     plan: PlanSpec = field(default_factory=PlanSpec)
     # poll: bộ khung không còn đúng (trang chính hỏng, không còn tin...) → build lại.
     broken: str | None = None
+    # poll: đã đọc xong trang danh sách / API / sitemap (chỉ còn trang chi tiết của tin mới).
+    listed: bool = False
+    # build tìm nguồn lại (người dùng bấm Build, build đêm): đọc trang mới, không dùng HTTP cache.
+    fresh: bool = False
 
     @property
     def polling(self) -> bool:

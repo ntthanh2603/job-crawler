@@ -29,8 +29,13 @@ _NOISE = (
     "[role=navigation]",
     "[role=banner]",
     "[role=contentinfo]",
-    "[aria-hidden=true]",
+    # Bản sao của slider (chữ lặp lại).
+    ".slick-cloned",
+    ".swiper-slide-duplicate",
 )
+# `aria-hidden`: icon, chữ chỉ để trang trí — nhưng cửa sổ bật lên / khối thu gọn / tab đang đóng
+# (JD từng vị trí trên trang danh sách) cũng mang nó: chỉ bỏ khối ít chữ hay toàn link.
+_HIDDEN_TEXT = 300
 _MAIN = ("main", "[role=main]", "article", "#main", "#content", ".content", ".main-content")
 # `<form>` còn ít chữ hơn mức này (sau khi bỏ nút, ô chọn...) là form nhập liệu (tìm kiếm, đăng
 # nhập, ứng tuyển): nhiễu. Form nhiều chữ hơn là khung trang: ASP.NET WebForms bọc cả trang trong
@@ -158,6 +163,11 @@ def main_node(tree: LexborHTMLParser) -> LexborNode | None:
     """
     for selector in _NOISE:
         for node in tree.css(selector):
+            node.decompose()
+    for node in tree.css("[aria-hidden=true]"):
+        text = len(node_text(node))
+        links = sum(len(node_text(a)) for a in node.css("a"))
+        if text < _HIDDEN_TEXT or links * 2 > text:  # menu ẩn (offcanvas): toàn link
             node.decompose()
     for node in tree.css("form"):
         if len(node_text(node)) < _FORM_TEXT:

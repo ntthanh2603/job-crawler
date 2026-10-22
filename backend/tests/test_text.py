@@ -82,6 +82,23 @@ def test_company_match_key_keeps_generic_names() -> None:
     )
 
 
+def test_legal_forms() -> None:
+    from jobcrawler.common.text import legal_forms, same_legal_entity_form
+
+    assert legal_forms("Ngân hàng TMCP Quân đội (MB)") == {"cp"}
+    assert legal_forms("Tổng Công ty Cổ phần Bảo Minh") == {"tct", "cp"}
+    assert legal_forms("ABC Co., Ltd") == {"tnhh"}
+    assert legal_forms("Bonbanh.com") == set()
+    assert not same_legal_entity_form(
+        "Công ty TNHH Hòa Phát", ["Công ty Cổ phần Tập đoàn Hòa Phát"]
+    )
+    assert not same_legal_entity_form(
+        "Công ty TNHH Thương mại Hà Nội Việt Nam", ["Tổng Công ty Thương mại Hà Nội (Hapro)"]
+    )
+    assert same_legal_entity_form("Sunhouse Group JSC", ["Công ty Cổ phần Tập đoàn Sunhouse"])
+    assert same_legal_entity_form("Sunhouse", ["Công ty Cổ phần Tập đoàn Sunhouse"])
+
+
 def test_distinctive_key() -> None:
     assert distinctive_key("kiotviet")
     assert distinctive_key("yakult")

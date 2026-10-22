@@ -72,6 +72,9 @@ class PlanSpec(BaseModel):
     llm_listing: bool = False
     # Link đã mở ở lượt build mà không phải tin: poll không mở lại.
     ignored: list[str] = Field(default_factory=list)
+    # Host của trang tin nhiều nhà tuyển dụng (sàn, chuyên trang việc làm của báo) gặp ở lượt
+    # build: link tin dẫn vào đó là tin của doanh nghiệp khác, poll không đọc.
+    boards: list[str] = Field(default_factory=list)
     # Mã tin chỉ tới được qua trang tin khác ("vị trí khác"): poll không thấy lại nên không coi
     # là đã gỡ; lượt build đêm (đọc đủ) mới đóng.
     indirect: list[str] = Field(default_factory=list)

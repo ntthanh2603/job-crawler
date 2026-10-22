@@ -19,10 +19,11 @@ from jobcrawler.common.schemas import CompanyIn, JobOut, JobStatus
 from jobcrawler.database.models import Company, Job, JobPosting
 from jobcrawler.modules.companies import companies_service
 from jobcrawler.modules.crawl.company_service import process_company
+from jobcrawler.modules.crawl.website_service import load_known_jobs
 from jobcrawler.modules.jobs import export_service, jobs_service
 from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.pipeline import dedup, store
-from jobcrawler.pipeline.verify import Verdict
+from jobcrawler.pipeline.verify import NOT_A_JOB, SPAM_REPOST, Verdict
 from jobcrawler.services.fakes import FakeFetcher
 from jobcrawler.services.net.kv import MemoryKV
 from jobcrawler.services.resources import Resources, open_resources
@@ -311,6 +312,50 @@ async def test_careers_details_are_reused_on_the_next_run(
         again = await posting()
         assert again.fetched_at == fetched_at  # mốc tải giữ nguyên: hết hạn dùng lại thì tải lại
         assert again.last_seen_at > fetched_at
+
+
+async def test_reposts_are_reused_but_other_rejections_are_fetched_again(
+    integration_settings: Settings,
+) -> None:
+    """Tin chỉ bị loại vì đăng lại có đủ nội dung: lượt sau dùng lại (không mở lại trang); tin bị
+    loại vì lý do khác thì lượt sau tải lại."""
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME reuse {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+        jobs = [
+            normalized(
+                raw_job(
+                    external_id=f"{name}-{suffix}",
+                    url=f"https://careers.acme.vn/jobs/{name}-{suffix}",
+                ),
+                board=False,
+            )
+            for name in ("kept", "repost", "not-a-job")
+        ]
+        repost = Verdict(accepted=True, confidence=0.9, reasons=["SOURCE_CAREERS"])
+        repost.reject(SPAM_REPOST, f"đăng lại của {jobs[0].url}")
+        not_job = Verdict(accepted=True, confidence=0.9, reasons=["SOURCE_CAREERS"])
+        not_job.reject(NOT_A_JOB)
+        verdicts = [Verdict(accepted=True, confidence=0.9, reasons=["TEST"]), repost, not_job]
+        async with res.sessionmaker.begin() as s:
+            await store.save_company_jobs(
+                s,
+                company_id=company_id,
+                company_name="ACME",
+                jobs=jobs,
+                verdicts=verdicts,
+                clusters=dedup.cluster_jobs(jobs[:1]),
+                now=NOW,
+                complete=True,
+            )
+        known = await load_known_jobs(res, company_id, now=NOW, max_age_days=3)
+        assert known.take(url=jobs[0].url) is not None
+        assert known.take(url=jobs[1].url) is not None
+        assert known.take(url=jobs[2].url) is None
 
 
 async def test_deferred_posting_keeps_its_job_open(integration_settings: Settings) -> None:

@@ -1211,8 +1211,8 @@ GROUPS: tuple[Group, ...] = (
             "verify_board_max_age_days",
             "float",
             "Tuổi tối đa của tin không có hạn nộp",
-            "Tin trên trang tuyển dụng không ghi hạn nộp, đăng quá chừng này ngày thì coi là hết "
-            "hạn.",
+            "Tin trên trang tuyển dụng / trang careers không ghi hạn nộp, đăng quá chừng này ngày "
+            "thì coi là hết hạn.",
             unit="ngày",
         ),
         _s(

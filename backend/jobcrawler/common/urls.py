@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 # Hậu tố hai cấp hay gặp. Không cần đủ như Public Suffix List: chỉ dùng để biết hai URL có
@@ -48,8 +49,12 @@ _MULTI_PART_SUFFIXES = frozenset(
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _TRACKING_PARAMS = ("utm_", "fbclid", "gclid", "mc_", "_hs", "ref_src")
+# Các hàm thuần dưới đây được gọi hàng trăm nghìn lần mỗi phút khi chấm link trên trang (một lượt
+# poll đọc vài trang, mỗi trang vài trăm link): nhớ kết quả thay vì tách URL lại.
+_CACHE = 1 << 16
 
 
+@lru_cache(maxsize=_CACHE)
 def host_of(url: str) -> str:
     return (urlsplit(url).hostname or "").lower()
 
@@ -58,6 +63,7 @@ def strip_www(host: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+@lru_cache(maxsize=_CACHE)
 def registrable_domain(host_or_url: str) -> str:
     """`careers.fpt.com.vn` → `fpt.com.vn`; `https://www.vng.com.vn/x` → `vng.com.vn`."""
     host = host_of(host_or_url) if "/" in host_or_url else host_or_url.lower().strip(".")
@@ -83,6 +89,7 @@ def parse_domain_input(value: str) -> str:
     return strip_www(host_of(value))
 
 
+@lru_cache(maxsize=_CACHE)
 def normalize_url(url: str, base: str | None = None) -> str | None:
     """URL tuyệt đối, bỏ fragment, cổng mặc định, tham số tracking. None nếu không phải http(s)."""
     url = url.strip()
@@ -110,7 +117,12 @@ def normalize_url(url: str, base: str | None = None) -> str | None:
 
 
 def path_segments(url: str) -> list[str]:
-    return [s for s in urlsplit(url).path.split("/") if s]
+    return list(_path_segments(url))
+
+
+@lru_cache(maxsize=_CACHE)
+def _path_segments(url: str) -> tuple[str, ...]:
+    return tuple(s for s in urlsplit(url).path.split("/") if s)
 
 
 def site_root(url: str) -> str:

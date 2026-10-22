@@ -3,9 +3,12 @@ lượt poll chỉ gọi API khi API có đủ mọi tin của trang, không th�
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from typing import Any
+
+import pytest
 
 from jobcrawler.common.schemas import RawJob
 from jobcrawler.modules.crawl.crawl_service import suspicious_drop
@@ -192,3 +195,168 @@ def test_known_jobs_match_listing_links_without_trailing_slash() -> None:
     assert known.take(url="https://www.misa.vn/tuyen-dung/5921/khac") is None
     root = KnownJobs.of_refs([("careers", "k2", "https://jobs.example.vn/")])
     assert root.take(url="https://jobs.example.vn") is not None
+
+
+def plain_listing(ids: list[int]) -> str:
+    links = "".join(f'<li><a href="{job_url(n)}">Kế toán tổng hợp {n}</a></li>' for n in ids)
+    return f"<html><body><main><h1>Tuyển dụng</h1><ul>{links}</ul></main></body></html>"
+
+
+async def test_poll_reads_one_language_copy_of_a_listing() -> None:
+    """Bộ khung ghi cả /jobs, /en/jobs, /ja/jobs (cùng các tin): lượt poll chỉ đọc bản đầu."""
+    fetcher = FakeFetcher()
+    for url in (LISTING, f"{SITE}/en/jobs", f"{SITE}/ja/jobs"):
+        fetcher.add(url, plain_listing([1, 2]))
+    for n in (1, 2):
+        fetcher.add(job_url(n), detail(n))
+    spec, jobs = await build(fetcher)
+    spec.listings = [LISTING, f"{SITE}/en/jobs", f"{SITE}/ja/jobs"]
+    fetcher.calls.clear()
+    await poll(fetcher, spec, jobs)
+    opened = [u for kind, u, _ in fetcher.calls]
+    assert LISTING in opened
+    assert f"{SITE}/en/jobs" not in opened
+    assert f"{SITE}/ja/jobs" not in opened
+
+
+async def test_poll_does_not_wait_long_for_an_overloaded_llm(monkeypatch: Any) -> None:
+    """Trang tin ít dấu hiệu JD cần LLM: LLM quá tải thì lượt poll bóc bằng rule (trang trông như
+    tin) thay vì chờ tới hết giờ cả lượt."""
+    from jobcrawler.sources import careers
+
+    monkeypatch.setattr(careers, "POLL_LLM_SECONDS", 0.05)
+    fetcher = FakeFetcher()
+    fetcher.add(LISTING, plain_listing([1]))
+    page = (
+        "<html><body><main><h1>Kế toán tổng hợp 2</h1><p>Mô tả công việc: lập báo cáo thuế.</p>"
+        "<p>Mức lương: 15 triệu. Liên hệ phòng nhân sự.</p></main></body></html>"
+    )
+    fetcher.add(job_url(1), detail(1))
+    fetcher.add(job_url(2), page)
+    spec, jobs = await build(fetcher)
+    fetcher.add(LISTING, plain_listing([1, 2]))
+    slow = LLMClient(FakeChatClient(['{"is_job_posting": true}'], delay=5), model="qwen-test")
+    s = session(fetcher, mode="poll", plan=spec, known=known(jobs))
+    s.llm = slow
+    polled = [job async for job in CareersSource(LISTING).jobs(s)]
+    new = [j for j in polled if j.url == job_url(2)]
+    assert len(new) == 1
+    assert new[0].method.value == "heuristic"
+    assert s.broken is None
+
+
+def test_poll_deadline_after_reading_the_listing_is_not_a_plan_failure() -> None:
+    from jobcrawler.common.schemas import FetchOutcome
+    from jobcrawler.database.models import CrawlPlan
+    from jobcrawler.modules.crawl.crawl_service import _check  # pyright: ignore[reportPrivateUsage]
+    from jobcrawler.pipeline.collect import SourceReport
+
+    plan = CrawlPlan(source="careers:x", job_keys=["a"], failures=2, spec={})
+    late = SourceReport("careers:x", "https://x.vn", outcome=FetchOutcome.TIMEOUT, listed=True)
+    late.keys = ["a", "b"]
+    check = _check(plan, late, max_failures=3)
+    assert check.ok
+    assert check.broken is None
+    assert check.new == {"b"}
+    assert not check.complete  # không đóng việc theo lượt chưa trọn
+    stuck = SourceReport("careers:x", "https://x.vn", outcome=FetchOutcome.TIMEOUT)
+    assert _check(plan, stuck, max_failures=3).broken is not None
+
+
+INTRO = (
+    "Chúng tôi luôn chào đón những ứng viên tài năng, nhiệt huyết và mong muốn phát triển cùng "
+    "công ty. Môi trường làm việc chuyên nghiệp, chế độ đãi ngộ cạnh tranh, nhiều cơ hội đào tạo "
+    "và thăng tiến. Hiện công ty chưa có vị trí tuyển dụng nào, vui lòng quay lại sau."
+)
+
+
+def static_page(extra: str = "") -> str:
+    return (
+        f'<html><body><h1>Tuyển dụng</h1><p>{INTRO}</p><a href="{SITE}/gioi-thieu">Giới thiệu</a>'
+        f"{extra}</body></html>"
+    )
+
+
+async def test_render_that_adds_nothing_is_not_kept_for_polls() -> None:
+    """Trang tĩnh hiện không có tin: lượt build vẫn thử mở bằng trình duyệt, nhưng DOM không thêm
+    gì nên bộ khung không ghi `rendered` và lượt poll chỉ đọc HTTP."""
+    fetcher = FakeFetcher()
+    fetcher.add(LISTING, static_page())
+    fetcher.add_rendered(LISTING, static_page('<div class="cookie">Đồng ý cookie</div>'))
+    spec, _ = await build(fetcher)
+    assert "render" in {kind for kind, _, _ in fetcher.calls}
+    assert spec.listings == [LISTING]
+    assert spec.rendered == []
+    fetcher.calls.clear()
+    await poll(fetcher, spec, [])
+    assert [kind for kind, _, _ in fetcher.calls] == ["fetch"]
+
+
+async def test_render_that_adds_text_or_links_is_kept() -> None:
+    from jobcrawler.sources.careers import Page, render_adds, scan_listing
+
+    http = scan_listing(Page(LISTING, static_page()))
+    links = "".join(f'<a href="{SITE}/p/{n}">Mục {n}</a>' for n in range(3))
+    assert render_adds(http, scan_listing(Page(LISTING, static_page(links), rendered=True)))
+    text = f"<p>{JD}</p><p>{JD}</p>"
+    assert render_adds(http, scan_listing(Page(LISTING, static_page(text), rendered=True)))
+    noise = f'<a href="{SITE}/p/1">Mục 1</a><p>Đồng ý cookie</p>'
+    assert not render_adds(http, scan_listing(Page(LISTING, static_page(noise), rendered=True)))
+
+
+async def test_poll_llm_call_past_the_limit_finishes_in_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lượt poll thôi chờ LLM sau POLL_LLM_SECONDS nhưng lời gọi chạy nốt (câu trả lời vào cache
+    cho lượt sau); lượt build thì chờ."""
+    from jobcrawler.sources import careers
+
+    monkeypatch.setattr(careers, "POLL_LLM_SECONDS", 0.01)
+    done: list[int] = []
+
+    async def slow() -> int:
+        await asyncio.sleep(0.05)
+        done.append(1)
+        return 1
+
+    with pytest.raises(TimeoutError):
+        await careers.poll_bounded(session(FakeFetcher(), mode="poll"), slow())
+    assert done == []
+    assert careers._FINISHING  # pyright: ignore[reportPrivateUsage]
+    await asyncio.sleep(0.1)
+    assert done == [1]
+    assert not careers._FINISHING  # pyright: ignore[reportPrivateUsage]
+    assert await careers.poll_bounded(session(FakeFetcher()), slow()) == 1
+
+
+async def test_job_board_pages_are_not_read_as_listings() -> None:
+    """Trang chính của nguồn là trang của sàn / chuyên trang việc làm (link tới hồ sơ nhiều nhà
+    tuyển dụng): lượt build báo `job_board_page` (không ghi bộ khung); lượt poll không mở trang trên
+    chính sàn, không mở link tin dẫn vào host sàn đã ghi (`PlanSpec.boards`)."""
+    import pytest
+
+    from jobcrawler.sources.base import SourceError
+    from jobcrawler.sources.careers import JOB_BOARD_PAGE
+
+    employers = "".join(
+        f'<a href="{SITE}/nha-tuyen-dung/cong-ty-{n}.html">Công ty TNHH Số {n}</a>'
+        for n in range(3)
+    )
+    fetcher = FakeFetcher()
+    fetcher.add(LISTING, rendered_dom([1, 2]).replace("</ul>", f"</ul>{employers}"))
+    for n in (1, 2):
+        fetcher.add(job_url(n), detail(n))
+    with pytest.raises(SourceError, match=JOB_BOARD_PAGE):
+        await build(fetcher)
+
+    board = "https://jobsgo.vn/viec-lam.html"
+    other = "https://vieclam.bao.vn/tim-viec-lam/ke-toan-tong-hop-77.html"
+    fetcher.add(LISTING, rendered_dom([1]).replace("</ul>", f'<li><a href="{other}">Kế toán</a>'))
+    spec = PlanSpec(listings=[board, LISTING], boards=["vieclam.bao.vn"], jobs=1)
+    s = session(fetcher, mode="poll", plan=spec)
+    fetcher.calls.clear()
+    polled = [job async for job in CareersSource(board).jobs(s)]
+    opened = [url for _, url, _ in fetcher.calls]
+    assert board not in opened
+    assert other not in opened
+    assert [j.url for j in polled] == [job_url(1)]

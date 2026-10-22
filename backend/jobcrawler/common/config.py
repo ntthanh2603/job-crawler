@@ -294,7 +294,8 @@ class Settings(BaseSettings):
     verify_min_confidence: float = Field(default=0.8, ge=0, le=1)
     # JD (mô tả + yêu cầu) ngắn hơn chừng này ký tự thì loại (EMPTY_JD).
     verify_min_jd_chars: int = Field(default=200, ge=0)
-    # Tin trên trang tuyển dụng không có hạn nộp, đăng quá chừng này ngày thì coi là hết hạn.
+    # Tin trên trang tuyển dụng / trang careers không có hạn nộp, đăng quá chừng này ngày thì coi
+    # là hết hạn.
     verify_board_max_age_days: float = Field(default=180, gt=0)
     # Số tin tối đa mỗi doanh nghiệp được hỏi LLM (chấm tin nghi ngờ / phân loại trường mơ hồ).
     verify_llm_max_jobs: int = Field(default=40, ge=0)

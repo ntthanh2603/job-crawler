@@ -355,7 +355,13 @@ def _check(plan: CrawlPlan, report: SourceReport | None, max_failures: int) -> _
     gone = previous - set(keys) if complete else set()
     error = report.error or (", ".join(report.truncated) if report.truncated else None)
     broken = report.broken
-    ok = report.outcome is FetchOutcome.OK and broken is None
+    ok = broken is None and (
+        report.outcome is FetchOutcome.OK
+        # Hết giờ khi đã đọc xong danh sách, chỉ còn mở trang chi tiết của tin mới (site chậm,
+        # LLM chậm): như nguồn bị cắt bớt — tin mới thấy ở lượt sau, không tính là bộ khung lỗi
+        # (ba lượt lỗi liền là build lại cả doanh nghiệp).
+        or (report.outcome is FetchOutcome.TIMEOUT and report.listed)
+    )
     suspect = None
     if complete and suspicious_drop(len(previous), len(gone)):
         # Không đóng việc theo lượt này; lặp lại đủ POLL_MAX_FAILURES lượt thì build lại để biết

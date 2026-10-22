@@ -366,7 +366,19 @@ _LISTING_TITLE = re.compile(
     r"(?: (?:dang cho ban|dang tuyen|dang mo|hien co|moi nhat|available|open))?$"
     r"|^(?:xem )?tat ca(?: (?:viec lam|vi tri|co hoi|cong viec))?$"
     r"|^(?:view )?all(?: open)? (?:jobs|roles|positions|openings)$"
+    # Trang nhóm nghề của site tuyển dụng tập đoàn: "Corporate Social Responsibility Jobs",
+    # "Sales jobs in Hanoi".
+    r"|^[a-z0-9 &/-]{3,60} jobs(?: (?:in|at) [a-z0-9 ,-]+)?$"
 )
+# Tin của doanh nghiệp khác đăng trên trang của doanh nghiệp (trang hợp tác doanh nghiệp của
+# trường đại học, trang tuyển dụng tập đoàn): "MITEK VIỆT NAM TUYỂN DỤNG NHÂN VIÊN",
+# `/tuyen-dung/cong-ty-tnhh-mitek-viet-nam-tuyen-dung-...`.
+_POSTER_IN_TITLE = re.compile(r"^(?P<name>[a-z0-9 &.-]{3,60}?) (?:tuyen dung|can tuyen|tuyen)\b")
+_POSTER_IN_SLUG = re.compile(
+    r"^(?P<name>cong ty (?:tnhh |co phan |cp )?(?:mtv )?[a-z0-9 ]{3,60}?) (?:tuyen dung|tuyen)\b"
+)
+_COMPANY_WORDS = re.compile(r"\b(cong ty|tnhh|co phan|jsc|ltd|corporation|tap doan|viet nam)\b")
+_LEGAL_WORDS = re.compile(r"\b(cong ty|tnhh|co phan|jsc|ltd|corporation|tap doan)\b")
 # Trang SEO / kết quả tìm / khẩu hiệu của site việc làm: "tìm việc làm ở Thanh Hóa",
 # "Tìm thấy 4 công việc Thiết kế", "… 39192 công việc đang chờ".
 _LISTING_SEO = re.compile(
@@ -408,6 +420,22 @@ def _agency(text: str) -> str | None:
 
 def _original(*parts: str | None, limit: int = 4000) -> str:
     return " ".join(unicodedata.normalize("NFC", p[:limit]).lower() for p in parts if p)
+
+
+def _other_poster(job: NormalizedJob, known: Sequence[str]) -> str | None:
+    """Tên doanh nghiệp khác ghi là bên tuyển ở đầu tiêu đề / slug URL ("<Công ty X> tuyển dụng
+    ..."), khi tên đó trông như tên doanh nghiệp và khác hẳn doanh nghiệp đang xét."""
+    segs = path_segments(job.url)
+    slug = fold(segs[-1].replace("-", " ")) if segs else ""
+    found: list[str] = []
+    for text, pattern in ((fold(job.title), _POSTER_IN_TITLE), (slug, _POSTER_IN_SLUG)):
+        m = pattern.match(text)
+        if m is None or not _COMPANY_WORDS.search(m["name"]):
+            continue
+        if employer_score(m["name"], known) < EMPLOYER_DIFFERENT:
+            found.append(m["name"])
+    # Tên có loại hình pháp lý ("cong ty tnhh mitek viet nam") là bằng chứng mạnh hơn.
+    return next((n for n in found if _LEGAL_WORDS.search(n)), found[0] if found else None)
 
 
 def _news_url(job: NormalizedJob) -> bool:
@@ -461,7 +489,8 @@ def check_rules(
     elif _EXPIRED_TEXT.search(head[:1500]):
         verdict.reject(EXPIRED, "trang ghi đã hết hạn")
     elif (
-        job.board
+        # Trang careers cũng hay để lại bài tuyển dụng cũ (2020–2023) trong mục tin tức.
+        (job.board or job.source == "careers")
         and job.expires_at is None
         and job.posted_at is not None
         and job.posted_at < now - board_max_age
@@ -495,6 +524,11 @@ def check_rules(
         verdict.concerns.append("tin không ghi nhà tuyển dụng")
     if not _apply_domain_ok(job, ctx):
         verdict.reject(EMPLOYER_MISMATCH, f"link ứng tuyển trỏ về {host_of(job.apply_url or '')}")
+    if (poster := _other_poster(job, known)) is not None:
+        if _LEGAL_WORDS.search(poster):
+            verdict.reject(EMPLOYER_MISMATCH, f"tin của doanh nghiệp khác: {poster}")
+        else:
+            verdict.concerns.append(f"có thể là tin của doanh nghiệp khác: {poster}")
 
     # AGENCY_POSTING. Nhà tuyển dụng trên tin là đơn vị cung ứng nhân sự (kể cả khi profile của
     # nó đã được map vào doanh nghiệp) — trừ khi chính doanh nghiệp là đơn vị đó.

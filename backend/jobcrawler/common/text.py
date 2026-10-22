@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 
 _NON_ALNUM = re.compile(r"[^0-9a-z]+")
 
@@ -54,7 +55,10 @@ _LEGAL_PHRASES: tuple[tuple[str, ...], ...] = tuple(
 
 
 def strip_accents(text: str) -> str:
-    """Bỏ dấu tiếng Việt: "Đà Nẵng" → "Da Nang"."""
+    """Bỏ dấu tiếng Việt: "Đà Nẵng" → "Da Nang". Gọi rất nhiều lần (mỗi đoạn URL, chữ trên link):
+    chuỗi ASCII trả luôn."""
+    if text.isascii():
+        return text
     text = text.replace("đ", "d").replace("Đ", "D")
     decomposed = unicodedata.normalize("NFKD", text)
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
@@ -104,6 +108,42 @@ def branch_of(name: str) -> str | None:
     """Phần chi nhánh của tên ("… - Chi nhánh Bắc Ninh" → "chi nhanh bac ninh"); None: không có."""
     m = _BRANCH.search(fold(_PARENS.sub(" ", name)))
     return m.group(0).strip() if m else None
+
+
+# Loại hình pháp lý ghi trong tên ("tct": tổng công ty, đi cùng được với "tnhh" / "cp").
+_LEGAL_FORMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("tct", ("tong cong ty",)),
+    (
+        "tnhh",
+        (
+            "tnhh",
+            "trach nhiem huu han",
+            "mtv",
+            "mot thanh vien",
+            "co ltd",
+            "company limited",
+            "llc",
+        ),
+    ),
+    ("cp", ("co phan", "cp", "ctcp", "tmcp", "nhtmcp", "jsc", "joint stock")),
+)
+
+
+def legal_forms(name: str) -> frozenset[str]:
+    """Loại hình pháp lý ghi trong tên (rỗng: tên không ghi)."""
+    text = f" {fold(_PARENS.sub(' ', name))} "
+    return frozenset(
+        form for form, phrases in _LEGAL_FORMS if any(f" {p} " in text for p in phrases)
+    )
+
+
+def same_legal_entity_form(name: str, others: Iterable[str]) -> bool:
+    """Hai tên không mâu thuẫn loại hình pháp lý: "Công ty TNHH Hòa Phát" khác pháp nhân với
+    "Công ty Cổ phần Tập đoàn Hòa Phát" dù cùng khoá tên. Một bên không ghi loại hình thì không
+    kết luận."""
+    mine = legal_forms(name)
+    theirs = frozenset().union(*(legal_forms(n) for n in others))
+    return not mine or not theirs or bool(mine & theirs)
 
 
 def distinctive_key(key: str, *, min_chars: int = 6) -> bool:

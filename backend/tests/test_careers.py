@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from jobcrawler.common.pages import Link
+from jobcrawler.common.pages import Link, main_node, node_text, parse
 from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.services.llm import LLMClient
@@ -21,12 +21,14 @@ from jobcrawler.sources.careers import (
     clean_card_text,
     detail_url,
     hub_page,
+    jd_block,
     jd_signals,
     job_links,
     labeled_fields,
     listing_links,
     pick_title,
     scan_listing,
+    self_places,
     slug_hint,
     split_markdown,
     url_shape,
@@ -104,6 +106,46 @@ def test_job_links_scoring() -> None:
     ]
 
 
+def test_job_posts_in_news_and_role_titled_cards() -> None:
+    """Bài tuyển dụng một vị trí trong mục tin tức, slug có cụm tuyển dụng ở giữa, và thẻ tin ở
+    gốc site chỉ có tên vị trí (≥ 3 thẻ cùng thư mục cha)."""
+    links = [
+        Link("https://a.vn/tin-tuc/tuyen-dung-brand-marketing.html", "Tuyển dụng Brand Marketing"),
+        Link("https://a.vn/thong-bao-tuyen-dung-quan-ly-nha-an/", "Thông báo tuyển quản lý"),
+        Link("https://a.vn/tin-tuc/tuyen-dung-thang-10", "Tin tuyển dụng tháng 10"),
+        Link("https://a.vn/gioi-thieu/quy-trinh-tuyen-dung-nhan-vien", "Quy trình tuyển dụng"),
+        Link("https://a.vn/chuyen-vien-ke-toan-nghiep-vu.html", "Chuyên viên kế toán nghiệp vụ"),
+        Link("https://a.vn/ky-su-cau-duong.html", "Kỹ sư cầu đường"),
+        Link("https://a.vn/senior-backend-engineer.html", "Senior Backend Engineer"),
+        Link("https://a.vn/le-hoi-nhan-vien-2025.html", "Lễ hội nhân viên 2025"),
+        Link("https://a.vn/tuyen-dung/page/2", "Trang 2"),
+    ]
+    found = {j.url for j in job_links(links, "https://a.vn/tuyen-dung")}
+    assert found == {
+        "https://a.vn/tin-tuc/tuyen-dung-brand-marketing.html",
+        "https://a.vn/thong-bao-tuyen-dung-quan-ly-nha-an/",
+        "https://a.vn/chuyen-vien-ke-toan-nghiep-vu.html",
+        "https://a.vn/ky-su-cau-duong.html",
+        "https://a.vn/senior-backend-engineer.html",
+    }
+
+
+def test_date_tails_are_not_job_ids_and_portals_are_followed() -> None:
+    related = [
+        JobLink(f"https://aih.com.vn/tin-tuc/hoi-thao-y-khoa-{d}", None)
+        for d in ("28072026", "15082026", "01092026", "20260915")
+    ]
+    assert not hub_page("https://aih.com.vn/tuyen-dung/dieu-duong", related)
+    links = [
+        Link("https://careers.mbbank.com.vn/", "Cơ hội nghề nghiệp"),
+        Link("https://mbbank.com.vn/tin-tuc", "Tin tức"),
+        Link("https://news.mbbank.com.vn/", "Báo chí"),
+    ]
+    assert listing_links(links, "https://mbbank.com.vn/tuyen-dung") == [
+        "https://careers.mbbank.com.vn/"
+    ]
+
+
 def test_recruitment_section_detail_links_are_jobs() -> None:
     """Viettel (DOM sau khi render): /recruitment-information/detail/<mã>."""
     base = "https://tuyendung.viettel.vn"
@@ -158,6 +200,56 @@ def test_repeated_job_cards_outside_a_jobs_path_are_jobs() -> None:
     assert job_links(cards[:3], f"{site}/") == []
 
 
+def _block_text(html: str) -> str:
+    return node_text(jd_block(main_node(parse(html)) or parse("<body></body>").body))  # pyright: ignore[reportArgumentType]
+
+
+def test_jd_block_is_the_smallest_block_with_every_section_heading() -> None:
+    body = "".join(
+        f"<p>Nội dung mục số {i}, mô tả chi tiết công việc hằng ngày.</p>" for i in range(8)
+    )
+    sections = (
+        f"<div class='jd'><h4>CHI TIẾT CÔNG VIỆC</h4>{body}<h4>YÊU CẦU CÔNG VIỆC:</h4>"
+        "<p>Tốt nghiệp đại học.</p><h4>Quyền lợi</h4><ul><li>Lương tháng 13.</li></ul></div>"
+    )
+    page = (
+        "<html><body><div class='menu'><a href='/'>Trang chủ</a></div>"
+        "<div class='head'><h3>Kế toán</h3><p>Mức lương: Thoả thuận</p></div>"
+        f"{sections}<div class='side'><h3>Tin liên quan</h3><a href='/x-12'>Thủ kho</a></div>"
+        "<div class='chat'>Chat với chúng tôi</div></body></html>"
+    )
+    text = _block_text(page)
+    assert text.startswith("CHI TIẾT CÔNG VIỆC")
+    assert text.endswith("Lương tháng 13.")
+    # Thanh tab "Mô tả | Yêu cầu | Quyền lợi" quá nhỏ: lấy khối cha chứa cả nội dung các tab.
+    tabs = (
+        "<html><body><div class='menu'>Trang chủ</div><div class='detail'><ul class='tabs'>"
+        "<li>Mô tả công việc</li><li>Yêu cầu</li><li>Quyền lợi</li></ul>"
+        f"<div class='panel'>{body}</div></div><div class='foot'>Liên hệ</div></body></html>"
+    )
+    assert _block_text(tabs).startswith("Mô tả công việc Yêu cầu Quyền lợi Nội dung mục số 0")
+    assert "Trang chủ" not in _block_text(tabs)
+    # Một loại mục, hoặc tiêu đề mục cả trong menu: giữ cả nội dung chính như cũ.
+    menu = page.replace("<a href='/'>Trang chủ</a>", "<ul><li>Quyền lợi</li></ul>")
+    assert "Chat với chúng tôi" in _block_text(menu)
+    single = "<html><body><h4>Yêu cầu</h4><p>Đại học</p><div>Chat</div></body></html>"
+    assert "Chat" in _block_text(single)
+
+
+def test_self_places_and_extra_labels() -> None:
+    page = "https://tuyendung.frt.vn/quan-7-ho-tro-he-thong-17239"
+    links = [
+        Link(page, "[Quận 7] Nhân Viên Hỗ Trợ Hệ Thống Hồ Chí Minh"),
+        Link("https://tuyendung.frt.vn/thu-kho-17300", "[Mê Linh] Thủ kho Hà Nội"),
+    ]
+    assert self_places(links, page) == ["Hồ Chí Minh"]
+    # Tin tuyển ở mọi nơi ("Tất cả" + vài tỉnh đầu của khối): không kê tỉnh.
+    everywhere = [Link(page, "Quản lý dự án Tất cả"), Link(page, "Quản lý dự án Hà Nội")]
+    assert self_places(everywhere, page) == []
+    md = "- Số lượng cần tuyển: **2**\n- Trình độ: Cao đẳng trở lên\n- Số lượng: 5"
+    assert labeled_fields(md) == {"openings": "2", "education": "Cao đẳng trở lên"}
+
+
 def test_url_shape() -> None:
     assert url_shape("https://tuyendung.frt.vn/chau-doc-tu-van-15719") == "tuyendung.frt.vn"
     assert url_shape("https://a.vn/Viec-Lam/Ke-Toan-123.html") == "a.vn/viec-lam"
@@ -183,6 +275,22 @@ def test_jd_signals_and_labeled_fields() -> None:
         "experience_raw": "2 năm",
     }
     assert jd_signals("# Tin tức\nCông ty vừa khai trương văn phòng mới.") == 0
+
+
+def test_labels_without_colon() -> None:
+    """Thanh thông tin của nhiều trang tin: nhãn một dòng, giá trị dòng sau, không có dấu ":"."""
+    md = (
+        "# Nhân viên Kinh doanh tại HCM\n\nĐịa điểm\n\nTân Bình, HCM\n\nMức lương\n\n"
+        "10-15 triệu VNĐ\n\nHạn nộp\n\n31 tháng 10, 2025\n\nLoại hình\n\nToàn thời gian\n\n"
+        "#### Required Education Level\nBachelor’s Degree\n\nKinh nghiệm\n\n## Mô tả công việc\n- x"
+    )
+    assert labeled_fields(md) == {
+        "location": "Tân Bình, HCM",
+        "salary_raw": "10-15 triệu VNĐ",
+        "expires_raw": "31 tháng 10, 2025",
+        "employment_type": "Toàn thời gian",
+        "education": "Bachelor’s Degree",
+    }
 
 
 # --- nguồn -----------------------------------------------------------------------------------
@@ -316,7 +424,8 @@ async def test_llm_decides_unclear_detail_page() -> None:
         "Thoả thuận",
         "hết tháng",
     )
-    assert len(chat.calls) == 2
+    # "Thông báo nghỉ lễ": không có dấu hiệu JD, tiêu đề không phải tên vị trí → không hỏi LLM.
+    assert len(chat.calls) == 1
 
     # Có cache: lượt sau trang không đổi thì không hỏi LLM lại.
     llm.cache = MemoryKV()
@@ -809,3 +918,122 @@ async def test_llm_listing_reads_long_pages_in_chunks() -> None:
     jobs = await run(CareersSource(url), session(fetcher, llm, max_rendered_pages=0))
     assert len(chat.calls) == 4  # ~28 nghìn ký tự → 5 đoạn, chỉ đọc 4
     assert [j.title for j in jobs] == [f"Vị trí số {i}" for i in range(4)]  # gộp trùng tên
+
+
+async def test_inline_positions_take_their_section_of_the_listing_page() -> None:
+    """Vị trí không có trang riêng: mô tả là phần của nó trên trang danh sách (mục, cửa sổ bật
+    lên ẩn bằng `aria-hidden`), hạn nộp lấy cả cột "Ngày hết hạn" của bảng tóm tắt."""
+    url = "https://a.vn/tuyen-dung"
+    duties = "<li>" + "Tư vấn tour nội địa cho khách hàng doanh nghiệp. " * 6 + "</li>"
+    page = (
+        "<html><body><main><h1>Tuyển dụng</h1>"
+        "<table><tr><th>Vị trí tuyển dụng</th><th>Số lượng</th><th>Ngày hết hạn</th></tr>"
+        '<tr><td><a href="#m1">Nhân viên sales tour</a></td><td>02</td><td>30/11/2026</td></tr>'
+        '<tr><td><a href="#m2">Nhân viên điều hành</a></td><td>01</td><td>15/06/2026</td></tr>'
+        "</table>"
+        '<div class="modal" id="m1" aria-hidden="true"><h3>Nhân viên sales tour</h3>'
+        f"<h4>Mô tả công việc</h4><ul>{duties}</ul><h4>Yêu cầu</h4><ul>{duties}</ul>"
+        "<p>Mức lương: 12 - 15 triệu</p></div>"
+        '<div class="modal" id="m2" aria-hidden="true"><h3>Nhân viên điều hành</h3>'
+        f"<h4>Mô tả công việc</h4><ul>{duties}</ul></div>"
+        "</main></body></html>"
+    )
+    fetcher = FakeFetcher()
+    fetcher.add(url, page)
+    llm, _ = fake_llm(
+        {
+            "is_job_listing": True,
+            "jobs": [{"title": "Nhân viên sales tour"}, {"title": "Nhân viên điều hành"}],
+            "listing_links": [],
+        }
+    )
+    jobs = {j.title: j for j in await run(CareersSource(url), session(fetcher, llm))}
+
+    sales = jobs["Nhân viên sales tour"]
+    assert sales.description is not None
+    assert "Tư vấn tour nội địa" in sales.description
+    assert "Nhân viên điều hành" not in sales.description
+    assert (sales.salary_raw, sales.expires_raw) == ("12 - 15 triệu", "30/11/2026")
+    assert sales.extra["openings"] == "02"
+    assert jobs["Nhân viên điều hành"].expires_raw == "15/06/2026"
+
+
+def test_inline_sections_prefer_the_occurrence_with_text() -> None:
+    from jobcrawler.sources.careers import inline_sections
+
+    markdown = (
+        "Vị trí đang tuyển:\n\n- Kế toán\n- Lập trình viên\n\n"
+        "## Kế toán\n\nLập báo cáo thuế hàng tháng.\n\n"
+        "## Lập trình viên\n\nPhát triển ứng dụng web.\n\n"
+        "## Việc làm liên quan\n\nNhân viên kho"
+    )
+    sections = inline_sections(markdown, ["Kế toán", "Lập trình viên"])
+    assert sections == {
+        "Kế toán": "Lập báo cáo thuế hàng tháng.",
+        "Lập trình viên": "Phát triển ứng dụng web.",
+    }
+
+
+def test_labeled_fields_numbering_links_and_several_deadlines() -> None:
+    markdown = (
+        "7. Hạn nhận hồ sơ: 30/10/2026\n"
+        "III. Mức lương: 15 triệu\n"
+        "Thời gian nhận hồ sơ: 01/11/2026 - 30/11/2026\n"
+        "[Kế toán kho\n\nHạn nộp: 01/01/2027](https://a.vn/tuyen-dung/ke-toan-kho)\n"
+        "## Việc làm liên quan\n"
+        "Địa điểm: Đà Nẵng\n"
+    )
+    fields = labeled_fields(markdown)
+    assert fields == {
+        "expires_raw": "30/10/2026; 01/11/2026 - 30/11/2026",
+        "salary_raw": "15 triệu",
+    }
+
+
+async def test_generic_page_title_falls_back_to_position_label() -> None:
+    from jobcrawler.sources.careers import generic_title
+
+    assert generic_title("THÔNG BÁO TUYỂN DỤNG", "https://cholimexfood.com.vn/tuyen-dung-10/")
+    assert generic_title("VietABank - Tuyển dụng", "https://tuyendung.vietabank.com.vn/vi/jobs/x")
+    assert generic_title("Tuyển dụng nhân sự tháng 10/2026", "https://a.vn/")
+    assert not generic_title("Nhân viên kinh doanh", "https://a.vn/")
+    assert not generic_title("Lao động phổ thông", "https://a.vn/")
+
+    listing = "https://a.vn/tuyen-dung"
+    url = "https://a.vn/tuyen-dung/thong-bao-tuyen-dung-10"
+    fetcher = FakeFetcher()
+    fetcher.add(listing, f'<a href="{url}">Thông báo tuyển dụng</a>')
+    fetcher.add(
+        url,
+        JD.format(title="THÔNG BÁO TUYỂN DỤNG").replace(
+            "<h2>Mô tả", "<p>Vị trí tuyển dụng: Kế toán tổng hợp</p><h2>Mô tả"
+        ),
+    )
+    [job] = await run(CareersSource(listing), session(fetcher, disabled_llm()))
+    assert job.title == "Kế toán tổng hợp"
+
+
+async def test_one_line_json_ld_description_uses_page_jd() -> None:
+    """JSON-LD chỉ ghi tóm tắt một dòng: mô tả là khối JD trong HTML."""
+    listing = "https://a.vn/careers"
+    url = "https://a.vn/careers/account-manager"
+    data = {
+        "@context": "https://schema.org",
+        "@type": "JobPosting",
+        "title": "Account Manager",
+        "description": "Join our sales team.",
+        "datePosted": "2026-10-01",
+        "hiringOrganization": {"@type": "Organization", "name": "A"},
+    }
+    page = JD.format(title="Account Manager").replace(
+        "<html>",
+        f'<html><head><script type="application/ld+json">{json.dumps(data)}</script></head>',
+    )
+    fetcher = FakeFetcher()
+    fetcher.add(listing, f'<a href="{url}">Account Manager</a>')
+    fetcher.add(url, page)
+    [job] = await run(CareersSource(listing), session(fetcher, disabled_llm()))
+    assert job.description_format == "markdown"
+    assert job.description is not None
+    assert "Phát triển tính năng mới" in job.description
+    assert "Lương tháng 13" in job.description

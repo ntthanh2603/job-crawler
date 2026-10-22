@@ -88,3 +88,21 @@ def test_spa_shell_detection() -> None:
     assert not looks_like_spa_shell(rendered)
     base = (FIXTURES / "base_vn" / "alljobs.html").read_text(encoding="utf-8")
     assert not looks_like_spa_shell(base)
+
+
+def test_hidden_blocks_with_content_are_kept() -> None:
+    """Cửa sổ bật lên / khối thu gọn mang `aria-hidden` (JD từng vị trí trên trang danh sách) được
+    giữ; icon và menu ẩn (toàn link) thì bỏ."""
+    jd = "Phụ trách kế toán tổng hợp, lập báo cáo thuế và báo cáo tài chính hằng tháng. " * 5
+    menu = "".join(f'<a href="/m{i}">Mục menu số {i} của trang</a>' for i in range(20))
+    html = f"""<html><body><main><h1>Tuyển dụng</h1>
+    <span aria-hidden="true">★</span>
+    <div class="modal" aria-hidden="true"><h3>Kế toán tổng hợp</h3><p>{jd}</p></div>
+    <div class="offcanvas" aria-hidden="true">{menu}</div>
+    <div class="slick-slide slick-cloned"><p>{jd}</p></div>
+    </main></body></html>"""
+    md = main_markdown(html)
+    assert "### Kế toán tổng hợp" in md
+    assert md.count("Phụ trách kế toán") == 5  # bản sao của slider bị bỏ
+    assert "★" not in md
+    assert "Mục menu" not in md

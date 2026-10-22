@@ -49,6 +49,7 @@ class SourceReport:
     keys: list[str] = field(default_factory=list)  # mã các tin nguồn trả về (theo thứ tự)
     plan: PlanSpec | None = None  # build: bộ khung ghi được; poll: bộ khung đã đi theo
     broken: str | None = None  # poll: bộ khung không còn đúng
+    listed: bool = False  # poll: đã đọc xong danh sách tin trước khi dừng
 
     @property
     def complete(self) -> bool:
@@ -109,6 +110,7 @@ async def _run_source(
             report.duration_ms = int((clock() - started) * 1000)
             report.truncated = list(session.truncated)
             report.broken = session.broken
+            report.listed = session.listed
             report.plan = session.plan
             if not session.polling:
                 session.plan.jobs = report.jobs

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import time
@@ -79,6 +80,8 @@ def test_clean_careers_job_is_accepted_with_reasons() -> None:
             {"expires_at": None, "url": "https://worklink.vn/tuyen-dung-ke-toan-update-11-2019/"},
             verify.EXPIRED,
         ),
+        # Bài tuyển dụng cũ còn nằm trên trang careers, không ghi hạn nộp.
+        ({"expires_at": None, "posted_at": NOW - timedelta(days=400)}, verify.EXPIRED),
         ({"apply_url": "https://tuyendung-gap.xyz/apply"}, verify.EMPLOYER_MISMATCH),
         (
             {"description": JD + "<p>Khách hàng của chúng tôi là tập đoàn FDI.</p>"},
@@ -405,3 +408,49 @@ def test_old_recruitment_date_in_title_or_url_is_expired() -> None:
     assert in_url.code == verify.EXPIRED
     recent = rules({"title": f"Kế toán đợt {NOW.month}/{NOW.year}", "expires_at": None})
     assert recent.code is None
+
+
+def test_jobs_of_other_companies_and_category_pages() -> None:
+    """Trang hợp tác doanh nghiệp của trường đại học đăng tin của công ty khác; trang nhóm nghề
+    của site tuyển dụng tập đoàn."""
+    hutech = CompanyContext(company_id=UUID(int=9), name="HUTECH", names=["HUTECH"])
+    other = normalized(
+        raw_job(
+            title="MITEK VIỆT NAM TUYỂN DỤNG NHÂN VIÊN",
+            url="https://hoptacdn.hutech.edu.vn/tuyen-dung/cong-ty-tnhh-mitek-viet-nam-tuyen-dung-nhan-vien",
+            company_name=None,
+        )
+    )
+    assert check_rules(other, hutech, now=NOW).code == verify.EMPLOYER_MISMATCH
+    own = normalized(raw_job(title="HUTECH tuyển dụng giảng viên", company_name=None))
+    assert check_rules(own, hutech, now=NOW).code is None
+    category = normalized(raw_job(title="Corporate Social Responsibility Jobs"))
+    assert check_rules(category, ACME, now=NOW).code == verify.NOT_A_JOB
+
+
+async def test_rules_run_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Luật + so đăng lại là việc CPU (doanh nghiệp vài nghìn tin: hàng chục giây): chạy trong
+    thread để event loop của runner vẫn tải trang, gia hạn lease cho các job khác."""
+    real = verify.mark_reposts
+
+    def slow(*args: Any) -> int:
+        time.sleep(0.3)
+        return real(*args)
+
+    monkeypatch.setattr(verify, "mark_reposts", slow)
+    gaps: list[float] = []
+
+    async def ticker() -> None:
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.01)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    task = asyncio.create_task(ticker())
+    verdicts = await verify_jobs([normalized(raw_job())], ACME, no_llm(), now=NOW, until=0)
+    task.cancel()
+    assert verdicts[0].accepted
+    assert gaps
+    assert max(gaps) < 0.2

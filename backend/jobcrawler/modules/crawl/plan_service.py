@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -15,12 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import FetchOutcome, PlanStatus
 from jobcrawler.database.models import CrawlPlan
+from jobcrawler.pipeline import store
 from jobcrawler.pipeline.collect import SourceReport
 from jobcrawler.sources import ats
 from jobcrawler.sources.ats.ref import AtsRef
 from jobcrawler.sources.base import Source
+from jobcrawler.sources.boards import registry as board_registry
+from jobcrawler.sources.careers import JOB_BOARD_PAGE, CareersSource, job_board_host
 from jobcrawler.sources.careers import KIND as CAREERS
-from jobcrawler.sources.careers import CareersSource
 from jobcrawler.sources.plan import PlanSpec, load_spec
 
 log = get_logger(__name__)
@@ -70,6 +72,11 @@ def allocate_pages(
     return alloc
 
 
+def job_board_source(report: SourceReport) -> bool:
+    """Nguồn careers hoá ra là trang tin nhiều nhà tuyển dụng (`careers.JOB_BOARD_PAGE`)."""
+    return (report.error or "").startswith(JOB_BOARD_PAGE)
+
+
 def built_plans(
     reports: Sequence[SourceReport],
     ats_refs: Sequence[AtsRef] = (),
@@ -86,6 +93,8 @@ def built_plans(
         kind = kind_of(report.name)
         if report.plan is None or (kind != CAREERS and report.name not in refs):
             continue
+        if job_board_source(report):
+            continue  # không phải nguồn của doanh nghiệp: không ghi bộ khung
         spec = report.plan
         if report.name in refs:
             spec.ats = refs[report.name].model_dump(mode="json")
@@ -122,9 +131,11 @@ async def save_built_plans(
     run_id: UUID,
     now: datetime,
     retire_missing: bool,
+    job_boards: Collection[str] = (),
 ) -> int:
     """Ghi bộ khung của lượt build; nguồn không còn thấy thì `retired` (chỉ khi lượt build tìm
-    nguồn trọn vẹn). Trả số nguồn đang dùng được."""
+    nguồn trọn vẹn). `job_boards`: nguồn careers lượt này thấy là trang của sàn (bỏ luôn). Trả số
+    nguồn đang dùng được."""
     for plan in plans:
         values = {
             "kind": plan.kind,
@@ -155,7 +166,50 @@ async def save_built_plans(
             )
             .values(status=PlanStatus.RETIRED.value, last_error="lượt build không còn thấy nguồn")
         )
+    await _retire_job_board_plans(session, company_id, plans, job_boards, now=now)
     return sum(p.ok for p in plans)
+
+
+async def _retire_job_board_plans(
+    session: AsyncSession,
+    company_id: UUID,
+    plans: Sequence[BuiltPlan],
+    job_boards: Collection[str],
+    *,
+    now: datetime,
+) -> None:
+    """Nguồn careers trên chính sàn tuyển dụng (ghi từ trước khi có luật `job_board_host`) hay
+    lượt build vừa thấy là trang tin nhiều nhà tuyển dụng (`job_boards`): bỏ dù lượt tìm nguồn
+    chưa trọn (site của công ty sở hữu sàn rất lớn, hay hết giờ), và gỡ các tin nó đã ghi — đó là
+    tin của doanh nghiệp khác đăng trên sàn."""
+    rows = await session.execute(
+        select(
+            CrawlPlan.id, CrawlPlan.source, CrawlPlan.kind, CrawlPlan.url, CrawlPlan.job_keys
+        ).where(
+            CrawlPlan.company_id == company_id,
+            CrawlPlan.kind == CAREERS,
+            CrawlPlan.source.not_in([p.source for p in plans] or [""]),
+            CrawlPlan.status != PlanStatus.RETIRED.value,
+        )
+    )
+    stale = [row for row in rows if row.source in job_boards or job_board_host(row.url)]
+    if not stale:
+        return
+    await session.execute(
+        update(CrawlPlan)
+        .where(CrawlPlan.id.in_([row.id for row in stale]))
+        .values(status=PlanStatus.RETIRED.value, last_error="trang của sàn tuyển dụng")
+    )
+    present = {(p.kind, key) for p in plans for key in p.keys}
+    closed = await store.close_postings(
+        session,
+        company_id,
+        {(row.kind, key) for row in stale for key in row.job_keys or []} - present,
+        present=present,
+        boards=set(board_registry()),
+        now=now,
+    )
+    log.info("plans.job_board_retired", plans=len(stale), closed=closed)
 
 
 async def active_plans(session: AsyncSession, company_id: UUID) -> list[CrawlPlan]:

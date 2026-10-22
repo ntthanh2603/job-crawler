@@ -13,6 +13,9 @@ class ListedJob(BaseModel):
         default=None, description="Số thứ tự link tới trang chi tiết của vị trí, nếu có"
     )
     location: str | None = Field(default=None, description="Địa điểm ghi cạnh vị trí, nếu có")
+    deadline: str | None = Field(
+        default=None, description="Hạn nộp hồ sơ ghi cạnh vị trí (chép nguyên văn), nếu có"
+    )
 
 
 class JobListing(BaseModel):
@@ -30,7 +33,7 @@ class JobListing(BaseModel):
 
 PROMPT = Prompt(
     name="job_listing",
-    version="2026-10-17.1",
+    version="2026-10-21.1",
     system=(
         "Bạn bóc danh sách vị trí tuyển dụng từ một trang web. Chỉ liệt kê vị trí thật sự có "
         "trên trang, chép đúng tên; không bịa vị trí hay link. Link chỉ được chọn theo số thứ "

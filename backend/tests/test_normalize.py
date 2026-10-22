@@ -105,6 +105,18 @@ def test_normalize_locations_splits_province_lists(
     assert [(loc.province, loc.address_raw) for loc in locations] == expected
 
 
+def test_address_without_province_takes_the_one_named_in_the_title() -> None:
+    address = "678 Tower, 67 Hoàng Văn Thái, Quận 7"
+    [loc] = normalize.normalize_locations([address], "[Quận 7 - Hồ Chí Minh] Thực tập sinh")
+    assert (loc.province, loc.address_raw) == ("Hồ Chí Minh", address)
+    # Tiêu đề nêu hai tỉnh: không đoán.
+    [loc] = normalize.normalize_locations([address], "Kế toán - Hà Nội / Hồ Chí Minh")
+    assert loc.province is None
+    # Địa chỉ đã có tỉnh: giữ tỉnh của địa chỉ.
+    [loc] = normalize.normalize_locations(["Phường Vĩnh Phúc, Hà Nội"], "[Hồ Chí Minh] Kế toán")
+    assert loc.province == "Hà Nội"
+
+
 def test_normalize_jobs_keeps_one_copy_per_posting() -> None:
     short = raw_job(description="<p>Làm kế toán</p>")
     full = raw_job()  # cùng (nguồn, mã tin), JD đầy đủ hơn
@@ -243,6 +255,27 @@ def test_normalize_job_takes_salary_from_body_only_when_missing() -> None:
     structured = normalized(raw_job(description=body, salary_raw="20 - 25 triệu"))
     assert structured.salary is not None
     assert structured.salary.min == 20e6
+
+
+def test_page_context_fills_salary_experience_and_education_only_when_missing() -> None:
+    """Chữ ngoài phần mô tả (cột tóm tắt của trang tin, `extra.page_context`) chỉ dùng bù."""
+    context = (
+        "• Thời gian làm việc: thứ 2 - thứ 6\n• Mức lương upto $2000\n"
+        "Kinh nghiệm\n3 năm kinh nghiệm DevOps\nTốt nghiệp đại học chuyên ngành CNTT"
+    )
+    plain = "<h2>Mô tả công việc</h2><p>Vận hành hạ tầng.</p>"
+    job = normalized(raw_job(description=plain, salary_raw=None, extra={"page_context": context}))
+    assert job.salary is not None
+    assert (job.salary.max, job.salary.currency) == (2000, "USD")
+    assert job.experience_years is not None
+    assert job.experience_years.min == 3
+    assert job.education is EducationLevel.BACHELOR
+    assert "Mức lương" not in job.description_md
+    own = normalized(
+        raw_job(description=plain, salary_raw="10 - 15 triệu", extra={"page_context": context})
+    )
+    assert own.salary is not None
+    assert own.salary.min == 10e6
 
 
 # --- kinh nghiệm, ngày ----------------------------------------------------------------------------
@@ -702,6 +735,21 @@ def test_split_sections() -> None:
     assert req == "- Kỹ năng B"
     assert ben == "- C"
     assert split_sections("Chỉ có một đoạn") == ("Chỉ có một đoạn", None, None)
+
+
+def test_split_sections_tab_bar_keeps_content_in_first_tab() -> None:
+    """Thanh tab "Khái quát | Yêu cầu | Chế độ đãi ngộ" rồi nội dung tab đang mở: không dồn cả JD
+    vào mục quyền lợi (tab cuối)."""
+    md = "Khái quát\n\nYêu cầu\n\nChế độ đãi ngộ\n\n- Quản lý kho hàng\n- Lập báo cáo tồn kho"
+    desc, req, ben = split_sections(md)
+    assert "Quản lý kho hàng" in desc
+    assert (req, ben) == (None, None)
+
+
+def test_placeholder_dates_are_ignored() -> None:
+    assert parse_date("01-01-1970", now=NOW, end_of_day=True) is None
+    assert parse_date("0001-01-01", now=NOW) is None
+    assert parse_date("30/11/2026", now=NOW, end_of_day=True) is not None
 
 
 @pytest.mark.parametrize(

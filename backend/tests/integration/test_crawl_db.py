@@ -568,3 +568,115 @@ async def test_partial_run_merges_with_the_jobs_other_postings(
                 select(func.count()).select_from(Job).where(Job.company_id == company_id)
             )
         assert count == 1
+
+
+async def test_build_retires_careers_plan_on_a_job_board(integration_settings: Settings) -> None:
+    """Bộ khung careers ghi từ trước trên chính sàn tuyển dụng (jobsgo.vn): lượt build bỏ nó dù
+    lượt tìm nguồn chưa trọn (`retire_missing=False`) và gỡ tin nó đã ghi (tin của doanh nghiệp
+    khác); bộ khung của trang tuyển dụng thật vẫn giữ."""
+    from jobcrawler.modules.crawl import plan_service
+    from jobcrawler.sources.plan import PlanSpec
+
+    async with open_resources(integration_settings, db_logs=False) as res:
+        async with res.sessionmaker.begin() as s:
+            company = Company(input_name=f"ACME board plan {uuid4().hex[:6]}")
+            s.add(company)
+            await s.flush()
+            company_id = company.id
+        suffix = uuid4().hex[:8]
+        other = normalized(
+            raw_job(
+                external_id=f"b-{suffix}",
+                url=f"https://jobsgo.vn/viec-lam/x-{suffix}.html",
+                title="Nhân viên kinh doanh",
+                company_name="Công ty TNHH Khác",
+            ),
+            board=False,
+        )
+        own = normalized(
+            raw_job(external_id=f"c-{suffix}", url=f"https://acme.vn/tuyen-dung/c-{suffix}"),
+            board=False,
+        )
+        jobs = [other, own]
+        async with res.sessionmaker.begin() as s:
+            await store.save_company_jobs(
+                s,
+                company_id=company_id,
+                company_name="ACME",
+                jobs=jobs,
+                verdicts=[Verdict(accepted=True, confidence=0.9, reasons=["TEST"]) for _ in jobs],
+                clusters=dedup.cluster_jobs(jobs),
+                now=NOW,
+                complete=True,
+                is_board=frozenset().__contains__,
+                absent=set(),
+            )
+            s.add(
+                CrawlPlan(
+                    company_id=company_id,
+                    source="careers:jobsgo.vn",
+                    kind="careers",
+                    url="https://jobsgo.vn/viec-lam.html",
+                    spec={},
+                    job_keys=[other.external_id],
+                    status=PlanStatus.ACTIVE.value,
+                    built_at=NOW,
+                )
+            )
+            s.add(
+                CrawlPlan(
+                    company_id=company_id,
+                    source="careers:vieclam.bao.vn",
+                    kind="careers",
+                    url="https://vieclam.bao.vn/",
+                    spec={},
+                    job_keys=[],
+                    status=PlanStatus.ACTIVE.value,
+                    built_at=NOW,
+                )
+            )
+        legit = plan_service.BuiltPlan(
+            source="careers:acme.vn",
+            kind="careers",
+            url="https://acme.vn/tuyen-dung",
+            spec=PlanSpec(listings=["https://acme.vn/tuyen-dung"]),
+            keys=[own.external_id],
+            ok=True,
+        )
+        async with res.sessionmaker.begin() as s:
+            usable = await plan_service.save_built_plans(
+                s,
+                company_id,
+                [legit],
+                run_id=uuid4(),
+                now=NOW,
+                retire_missing=False,
+                job_boards=["careers:vieclam.bao.vn"],  # lượt build thấy là trang sàn
+            )
+        assert usable == 1
+        async with res.sessionmaker() as s:
+            statuses: dict[str, str] = dict(
+                (
+                    await s.execute(
+                        select(CrawlPlan.source, CrawlPlan.status).where(
+                            CrawlPlan.company_id == company_id
+                        )
+                    )
+                ).all()
+            )
+            titles: dict[str, str] = dict(
+                (
+                    await s.execute(
+                        select(JobPosting.external_id, Job.status)
+                        .join(Job, Job.id == JobPosting.job_id)
+                        .where(JobPosting.company_id == company_id)
+                    )
+                ).all()
+            )
+        assert statuses == {
+            "careers:jobsgo.vn": PlanStatus.RETIRED.value,
+            "careers:vieclam.bao.vn": PlanStatus.RETIRED.value,
+            "careers:acme.vn": PlanStatus.ACTIVE.value,
+        }
+        assert titles[own.external_id] == JobStatus.ACTIVE.value
+        assert titles[other.external_id] != JobStatus.ACTIVE.value

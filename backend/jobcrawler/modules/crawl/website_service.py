@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import JobStatus, RawJob
@@ -17,6 +17,7 @@ from jobcrawler.common.urls import parse_domain_input
 from jobcrawler.database.models import JobPosting
 from jobcrawler.pipeline.collect import CollectResult, collect
 from jobcrawler.pipeline.discovery import DiscoveryResult, discover, sources_for
+from jobcrawler.pipeline.verify import SPAM_REPOST
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import Fetcher
 from jobcrawler.services.net.kv import KeyValueStore
@@ -36,7 +37,10 @@ async def load_known_jobs(
     res: Resources, company_id: UUID, *, now: datetime, max_age_days: float
 ) -> KnownJobs:
     """Tin website/ATS của doanh nghiệp đã tải chi tiết trong `max_age_days` ngày, còn mở và đã
-    được nhận: nguồn dùng lại thay vì mở lại trang chi tiết."""
+    được nhận: nguồn dùng lại thay vì mở lại trang chi tiết. Tin chỉ bị loại vì đăng lại
+    (`SPAM_REPOST`: cùng tiêu đề, JD với một tin khác) cũng dùng lại: nội dung đã đủ, lượt sau
+    xác minh lại cùng các tin kia. Mở lại chúng mỗi lượt thì site đăng một vị trí cho từng cửa
+    hàng (tuyendung.frt.vn) hết phần trang chi tiết trước khi tới tin chưa tải."""
     if max_age_days <= 0:
         return KnownJobs()
     async with res.sessionmaker() as session:
@@ -45,7 +49,12 @@ async def load_known_jobs(
                 JobPosting.company_id == company_id,
                 JobPosting.source.not_in(list(boards.registry())),
                 JobPosting.status == JobStatus.ACTIVE.value,
-                JobPosting.accepted.is_(True),
+                or_(
+                    JobPosting.accepted.is_(True),
+                    func.array_to_string(JobPosting.verification_reasons, " ").contains(
+                        f"{SPAM_REPOST}:"
+                    ),
+                ),
                 JobPosting.fetched_at >= now - timedelta(days=max_age_days),
                 or_(JobPosting.expires_at.is_(None), JobPosting.expires_at > now),
             )

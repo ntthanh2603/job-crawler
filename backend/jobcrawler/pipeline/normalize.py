@@ -183,9 +183,13 @@ _CUTOFF_HEADINGS = (
     "viec lam lien quan",
     "viec lam tuong tu",
     "tin tuyen dung lien quan",
+    "tin lien quan",
+    "thong tin tham khao",
     "co the ban quan tam",
     "cac vi tri khac",
     "vi tri tuyen dung khac",
+    "tuyen dung khac",
+    "tin tuyen dung khac",
     "viec lam khac",
     "similar jobs",
     "related jobs",
@@ -198,6 +202,14 @@ _CUTOFF_HEADINGS = (
 
 def _plain_line(line: str) -> str:
     return fold(_MD_MARKS.sub(" ", _MD_LINK.sub(r"\1", line)))
+
+
+def cutoff_heading(line: str) -> bool:
+    """Dòng mở đầu phần khác của trang ("Việc làm liên quan", "Tin liên quan"): cắt từ đây."""
+    plain = _plain_line(line)
+    return len(line) <= 60 and any(
+        plain == h or plain.startswith(h + " ") for h in _CUTOFF_HEADINGS
+    )
 
 
 # Gạch đầu dòng viết liền chữ: "-Khi trở thành..." (không phải "-5%"). "*Tham gia BHXH" do
@@ -318,11 +330,9 @@ def to_markdown(text: str | None, fmt: str = "html", base_url: str | None = None
         if _TABLE_RULE.match(line):
             out.append(line)
             continue
-        plain = _plain_line(line)
-        if len(line) <= 60 and any(
-            plain == h or plain.startswith(h + " ") for h in _CUTOFF_HEADINGS
-        ):
+        if cutoff_heading(line):
             break
+        plain = _plain_line(line)
         if plain in _BOILERPLATE_LINES or (not plain and not line.startswith("-")):
             continue
         if line in ("-", "- "):
@@ -336,7 +346,9 @@ def to_markdown(text: str | None, fmt: str = "html", base_url: str | None = None
 
 # --- tách mục JD ----------------------------------------------------------------------------------
 
-_SECTION_KEYS: dict[str, tuple[str, ...]] = {
+# Tiêu đề các mục chính của JD (mô tả / yêu cầu / quyền lợi): dùng để tách mục ở đây và để tìm
+# khối mô tả trên trang tin (`sources/careers.jd_block`).
+JD_SECTION_KEYS: dict[str, tuple[str, ...]] = {
     "requirements": (
         "yeu cau",
         "tieu chuan",
@@ -384,43 +396,71 @@ _SECTION_KEYS: dict[str, tuple[str, ...]] = {
         "about the role",
         "the role",
         "your role",
-        # Mục khác của JD: để trong phần mô tả.
-        "dia diem lam viec",
-        "thoi gian lam viec",
-        "cach thuc ung tuyen",
-        "ho so bao gom",
-        "thong tin lien he",
-        "how to apply",
-        "about us",
-        "ve chung toi",
-        "gioi thieu cong ty",
     ),
+}
+# Mục khác của JD: để trong phần mô tả.
+_OTHER_SECTION_KEYS = (
+    "khai quat",
+    "khai quat cong viec",
+    "tong quan cong viec",
+    "dia diem lam viec",
+    "thoi gian lam viec",
+    "cach thuc ung tuyen",
+    "ho so bao gom",
+    "thong tin lien he",
+    "how to apply",
+    "about us",
+    "ve chung toi",
+    "gioi thieu cong ty",
+)
+_SECTION_KEYS: dict[str, tuple[str, ...]] = {
+    **JD_SECTION_KEYS,
+    "description": (*JD_SECTION_KEYS["description"], *_OTHER_SECTION_KEYS),
 }
 
 
-def _section_of(line: str) -> str | None:
+def _match_section(line: str, table: dict[str, tuple[str, ...]]) -> str | None:
     if len(line) > 80:
         return None
     plain = _plain_line(line.rstrip(":： "))
     if not plain or len(plain.split()) > 7:
         return None
-    for section, keys in _SECTION_KEYS.items():
+    for section, keys in table.items():
         if any(plain == k or plain.startswith(k + " ") for k in keys):
             return section
     return None
 
 
+def _section_of(line: str) -> str | None:
+    return _match_section(line, _SECTION_KEYS)
+
+
+def jd_section(heading: str) -> str | None:
+    """Mục chính của JD mà một dòng tiêu đề mở ra ("YÊU CẦU CÔNG VIỆC:" → "requirements");
+    None nếu không phải tiêu đề mục chính (kể cả "Thông tin liên hệ", "Về chúng tôi")."""
+    return _match_section(heading, JD_SECTION_KEYS)
+
+
 def split_sections(md: str) -> tuple[str, str | None, str | None]:
     """Một khối JD có tiêu đề mục ("Mô tả công việc", "Yêu cầu", "Quyền lợi") → (mô tả, yêu cầu,
-    quyền lợi). Không nhận ra mục yêu cầu/quyền lợi thì giữ nguyên ở mô tả."""
+    quyền lợi). Không nhận ra mục yêu cầu/quyền lợi thì giữ nguyên ở mô tả.
+
+    Nhiều tiêu đề mục liền nhau không có nội dung xen giữa là thanh tab ("Khái quát | Yêu cầu |
+    Chế độ đãi ngộ"): phần sau thuộc mục của tab đầu (tab đang mở), không phải tab cuối."""
     parts: dict[str, list[str]] = {"description": [], "requirements": [], "benefits": []}
     current = "description"
-    for line in md.split("\n"):
-        section = _section_of(line) if line.strip() else None
+    lines = md.split("\n")
+    sections = [_section_of(line) if line.strip() else None for line in lines]
+    previous: str | None = None  # mục của tiêu đề ngay trước (bỏ qua dòng trống)
+    for line, section in zip(lines, sections, strict=True):
         if section is not None:
-            current = section
+            if previous is None:
+                current = section
+            previous = section
             if section != "description":
                 continue  # tiêu đề mục đã thành tên trường
+        elif line.strip():
+            previous = None
         parts[current].append(line)
     req = _tidy(parts["requirements"])
     ben = _tidy(parts["benefits"])
@@ -1261,13 +1301,15 @@ def parse_education(
     return min(levels, key=_EDUCATION_ORDER.index)
 
 
-def classify_education(raw: RawJob, requirements: str | None, description: str) -> EducationLevel:
+def classify_education(
+    raw: RawJob, requirements: str | None, description: str, context: str | None = None
+) -> EducationLevel:
     """Học vấn: trường học vấn của nguồn, "yêu cầu" ngắn (chỉ ghi trình độ), rồi câu "tốt nghiệp
-    …" trong phần yêu cầu / mô tả."""
+    …" trong phần yêu cầu / mô tả / chữ ngoài phần mô tả của trang."""
     level = education_of_fields(raw)
     if level is not EducationLevel.UNKNOWN:
         return level
-    for text in (requirements, description):
+    for text in (requirements, description, context):
         level = parse_education(text, require_context=True)
         if level is not EducationLevel.UNKNOWN:
             return level
@@ -1578,6 +1620,7 @@ _MONTHS = {
     )
     for m in names
 }
+_MIN_YEAR = 2000
 _EN_DATE = re.compile(
     r"(?:(?P<d1>\d{1,2})\s+(?P<m1>[a-z]{3,9})\.?,?\s+(?P<y1>\d{4}))"
     r"|(?:(?P<m2>[a-z]{3,9})\.?\s+(?P<d2>\d{1,2})(?:st|nd|rd|th)?,?\s+(?P<y2>\d{4}))"
@@ -1597,6 +1640,8 @@ def _day(d: date, *, end_of_day: bool) -> datetime:
 
 
 def _safe_date(y: int, m: int, d: int) -> date | None:
+    if y < _MIN_YEAR:
+        return None
     try:
         return date(y, m, d)
     except ValueError:
@@ -1610,7 +1655,13 @@ def _ymd_swapped(m: re.Match[str]) -> tuple[int, int, int]:
 
 def parse_date(raw: str | None, *, now: datetime, end_of_day: bool = False) -> datetime | None:
     """Ngày thô → UTC. Hiểu ISO/RFC (qua `parse_datetime`), "30/11/2025" (ngày trước tháng),
-    "30 tháng 11 năm 2025", "Nov 30, 2025", "2 ngày trước", "hôm qua", "Còn 15 ngày"."""
+    "30 tháng 11 năm 2025", "Nov 30, 2025", "2 ngày trước", "hôm qua", "Còn 15 ngày". Ngày giữ
+    chỗ của trang chưa nhập ngày ("01-01-1970", "0001-01-01") coi như không ghi."""
+    found = _parse_date(raw, now=now, end_of_day=end_of_day)
+    return found if found is None or found.year >= _MIN_YEAR else None
+
+
+def _parse_date(raw: str | None, *, now: datetime, end_of_day: bool) -> datetime | None:
     if not raw or not raw.strip():
         return None
     text = raw.strip()
@@ -1676,7 +1727,8 @@ def clean_skills(skills: Iterable[str], title: str) -> list[str]:
 def normalize_locations(raw: Sequence[str], title: str) -> list[Location]:
     """Mỗi địa điểm thô → (tỉnh/thành mới, địa chỉ gốc). Địa điểm chỉ là danh sách tỉnh/thành
     ("Hà Nội, Hồ Chí Minh") → mỗi tỉnh/thành một địa điểm. Nguồn không ghi địa điểm thì lấy tỉnh
-    nêu trong tiêu đề ("... - Đồng Nai", "HN/HCM")."""
+    nêu trong tiêu đề ("... - Đồng Nai", "HN/HCM"); địa chỉ không nêu tỉnh ("67 Hoàng Văn Thái,
+    Quận 7") mà tiêu đề nêu đúng một tỉnh ("[Quận 7 - Hồ Chí Minh] ...") thì lấy tỉnh đó."""
     out: list[Location] = []
     seen: set[tuple[str | None, str | None]] = set()
     for value in raw:
@@ -1689,8 +1741,12 @@ def normalize_locations(raw: Sequence[str], title: str) -> list[Location]:
             if key not in seen:
                 seen.add(key)
                 out.append(Location(province=key[0], address_raw=part))
+    named = provinces.find_provinces(title)
     if not out:
-        out = [Location(province=p) for p in provinces.find_provinces(title)]
+        return [Location(province=p) for p in named]
+    if len(named) == 1:
+        fill = {"province": named[0]}
+        out = [loc if loc.province else loc.model_copy(update=fill) for loc in out]
     return out
 
 
@@ -1716,8 +1772,13 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
     level = classify_level(raw.level, title, raw.extra.get("occupational_category"))
     if level is JobLevel.UNKNOWN and employment is EmploymentType.INTERNSHIP:
         level = JobLevel.INTERN
-    experience = parse_experience(raw.experience_raw) or parse_experience(
-        requirements or description, require_context=True
+    # Chữ trên trang tin ngoài phần mô tả (thanh thông tin, cột tóm tắt; `sources/careers`): chỉ
+    # dùng bù lương / kinh nghiệm / học vấn khi các mục của tin không ghi.
+    context = clean_text_field(raw.extra.get("page_context"), "markdown", raw.url) or None
+    experience = (
+        parse_experience(raw.experience_raw)
+        or parse_experience(requirements or description, require_context=True)
+        or parse_experience(context, require_context=True)
     )
     salary = parse_salary(
         raw.salary_raw,
@@ -1727,7 +1788,7 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
         period=raw.salary_period,
     )
     if salary is None:  # trang careers hay ghi lương trong nội dung tin
-        salary = salary_in_text(description, benefits, requirements)
+        salary = salary_in_text(description, benefits, requirements, context)
     return NormalizedJob(
         raw=raw,
         board=board,
@@ -1740,7 +1801,7 @@ def normalize_job(raw: RawJob, *, now: datetime, board: bool = False) -> Normali
         employment_type=employment,
         work_mode=classify_work_mode(raw.work_mode, title, location_texts),
         categories=classify_job_categories(raw, title),
-        education=classify_education(raw, requirements, description),
+        education=classify_education(raw, requirements, description, context),
         openings=parse_openings(raw.extra.get("openings")),
         locations=locations,
         salary=salary,

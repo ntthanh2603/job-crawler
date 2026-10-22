@@ -76,6 +76,8 @@ class PipelineOutcome:
     plans: list[plan_service.BuiltPlan] = field(default_factory=list)
     # Tìm nguồn trên website trọn vẹn: nguồn cũ không còn thấy mới được bỏ khỏi bộ khung.
     retire_missing: bool = False
+    # Nguồn careers hoá ra là trang của sàn tuyển dụng: bỏ khỏi bộ khung dù tìm nguồn chưa trọn.
+    job_boards: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -380,8 +382,14 @@ async def _run_pipeline(
             res, None, deadline=deadline, records=records, extra_sources=board
         )
     incomplete += found.incomplete_sources
-    # Nguồn lỗi/bị chặn (không phải hết giờ) cũng khiến lượt chạy không đủ để coi job cũ đã gỡ.
-    failed = [r.name for r in found.collected.reports if r.outcome is not FetchOutcome.OK]
+    # Nguồn lỗi/bị chặn (không phải hết giờ) cũng khiến lượt build không đủ để coi job cũ đã gỡ.
+    # Trang của sàn tuyển dụng không phải lỗi: nguồn đó không phải của doanh nghiệp.
+    job_boards = [r.name for r in found.collected.reports if plan_service.job_board_source(r)]
+    failed = [
+        r.name
+        for r in found.collected.reports
+        if r.outcome is not FetchOutcome.OK and r.name not in job_boards
+    ]
     processed = await process_jobs(
         res,
         state.company,
@@ -410,6 +418,7 @@ async def _run_pipeline(
             min_pages=res.settings.plan_min_pages,
         ),
         retire_missing=discovery is not None and discovery.error is None,
+        job_boards=job_boards,
     )
 
 
@@ -474,6 +483,7 @@ async def save_build_schedule(
             run_id=run_id,
             now=now,
             retire_missing=outcome.retire_missing,
+            job_boards=outcome.job_boards,
         )
         ready = usable > 0
         values |= {

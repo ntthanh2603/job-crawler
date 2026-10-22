@@ -76,7 +76,16 @@ _REQUIREMENTS = ("requirement", "qualification", "yeucau")
 _BENEFITS = ("benefit", "welfare", "perk", "quyenloi", "phucloi")
 _LOCATION = ("location", "address", "city", "province", "region", "workplace", "diadiem", "area")
 _SALARY = ("salary", "luong", "compensation")
-_DEADLINE = ("endtime", "deadline", "expire", "closingdate", "validthrough", "hannop", "enddate")
+_DEADLINE = (
+    "endtime",
+    "deadline",
+    "expire",
+    "closingdate",
+    "validthrough",
+    "hannop",
+    "enddate",
+    "todate",
+)
 _POSTED = ("postingtime", "postedat", "publishedat", "approvedon", "createdat", "createddate")
 _EMPLOYMENT = ("employment", "workingtype", "worktype", "contracttype", "typeofwork", "hinhthuc")
 _ORG = ("department", "team", "jobfield", "jobfamily", "level", "seniority", "capbac", "openings")

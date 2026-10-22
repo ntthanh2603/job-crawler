@@ -56,23 +56,39 @@ def hub() -> str:
     return f"<html><body>{MENU}<h2>FPT Shop</h2>{cards}</body></html>"
 
 
-def detail(title: str) -> str:
+def detail(slug: str, title: str) -> str:
+    """Trang tin như tuyendung.frt.vn: không có `main` / `article`; menu, cột giới thiệu công ty,
+    khối "Tin Liên Quan" (có cả chính tin này kèm nơi làm), chân trang, khung chat nằm cạnh mô
+    tả; mô tả nằm trong form "Ứng tuyển", bảng liên hệ có tên người."""
     duties = "".join(
         f"<p>• Nhiệm vụ {i}: tư vấn sản phẩm, bán hàng, chăm sóc khách hàng tại cửa hàng.</p>"
         for i in range(8)
     )
     return f"""<html><head><meta property="og:title" content="{title}"></head><body>{MENU}
     <form action="/Applicant/Apply" method="post"><input type="hidden" name="t" value="x">
-      <div class="vacancies">Vị Trí Tuyển Dụng</div><h3>{title.upper()}</h3>
-      <ul><li>Số lượng cần tuyển: <strong>2</strong></li>
+      <div class="main--content--head"><div class="vacancies">Vị Trí Tuyển Dụng</div>
+        <h3>{title.upper()}</h3></div>
+      <div class="main--content--subhead"><ul><li>Số lượng cần tuyển: <strong>2</strong></li>
         <li>Loại hình công việc: <strong>Toàn thời gian</strong></li>
         <li>Mức lương: <strong><strong>lương thỏa thuận</strong></strong></li>
-        <li><p style="display : inline">Hạn nộp hồ sơ:</p><strong> 02-11-2026</strong></li></ul>
-      <h4>CHI TIẾT CÔNG VIỆC</h4>{duties}
-      <h4>YÊU CẦU CÔNG VIỆC</h4><p>• Tốt nghiệp trung cấp trở lên, giao tiếp tốt.</p>
-      <h4>QUYỀN LỢI</h4><ul><li>Thưởng theo doanh số, BHXH đầy đủ.</li></ul>
-      <button type="submit">Ứng tuyển</button>
-    </form></body></html>"""
+        <li><p style="display : inline">Hạn nộp hồ sơ:</p><strong> 02-11-2026</strong></li>
+      </ul></div>
+      <div class="main--content--body"><h4>CHI TIẾT CÔNG VIỆC</h4>{duties}
+        <h4>YÊU CẦU CÔNG VIỆC</h4><p>• Tốt nghiệp trung cấp trở lên, giao tiếp tốt.</p>
+        <h4>QUYỀN LỢI</h4><ul><li>Thưởng theo doanh số, BHXH đầy đủ.</li></ul>
+        <h4>THÔNG TIN THAM KHẢO</h4><ul><li>Tìm hiểu về FPT Retail <a href="/gioi-thieu">tại
+          đây</a></li></ul></div>
+      <div class="main--content--foot"><h3>THÔNG TIN LIÊN HỆ</h3><table><tr>
+        <td>Thông tin liên hệ:</td><td>Nguyễn Thị Hoa</td></tr></table>
+        <button type="submit">Ứng tuyển</button></div>
+    </form>
+    <div class="main--right"><h3>Công Ty Cổ Phần Bán Lẻ Kỹ Thuật Số FPT</h3>
+      <p>FPT Retail được thành lập từ năm 2012, sở hữu chuỗi FPT Shop và FPT Long Châu.</p>
+      <h3>Tin Liên Quan</h3><ul><li><a href="/{slug}"><b>{title}</b><br>
+        <span>Hồ Chí Minh</span></a></li></ul></div>
+    <div class="nav-footer">VỀ FPT RETAIL <a href="/gioi-thieu">Giới thiệu chung</a></div>
+    <div class="chat">Chat với FPT Shop · Tuyển dụng FPT Retail đang trả lời...</div>
+    </body></html>"""
 
 
 def urlset(*entries: tuple[str, str | None]) -> str:
@@ -110,7 +126,7 @@ def frt(jobs: dict[str, str] | None = None) -> FakeFetcher:
     fetcher.add(HUB, hub())
     fetcher.add(f"{SITE}/sitemap.xml", sitemap(jobs), content_type="text/xml; charset=utf-8")
     for slug, title in {**jobs, "ha-noi-thu-ngan-10021": "Thu ngân"}.items():
-        fetcher.add(f"{SITE}/{slug}", detail(title))
+        fetcher.add(f"{SITE}/{slug}", detail(slug, title))
     return fetcher
 
 
@@ -139,7 +155,17 @@ async def test_build_reads_cards_hubs_and_sitemap() -> None:
     job = next(j for j in jobs if j.url.endswith("-11517"))
     assert job.method is ExtractionMethod.HEURISTIC
     assert job.title == "[Quận 12 - Hồ Chí Minh] Dược Sĩ Bán Thuốc"
-    assert "Nhiệm vụ 7" in (job.description or "")
+    description = job.description or ""
+    assert description.startswith("#### CHI TIẾT CÔNG VIỆC")
+    assert "Nhiệm vụ 7" in description
+    assert "#### QUYỀN LỢI" in description
+    # Không lấy menu, phần đầu tin, bảng liên hệ, cột bên, tin liên quan, chân trang, chat.
+    for noise in ("TRANG CHỦ", "Vị Trí Tuyển Dụng", "Nguyễn", "2012", "Tin Liên Quan", "VỀ FPT"):
+        assert noise not in description
+    assert "Chat với" not in description
+    # Trang không ghi địa điểm: lấy từ thẻ "Tin Liên Quan" của chính tin.
+    assert job.locations == ["Hồ Chí Minh"]
+    assert job.extra["openings"] == "2"
     assert job.salary_raw == "lương thỏa thuận"
     assert job.expires_raw == "02-11-2026"
     assert job.employment_type == "Toàn thời gian"
