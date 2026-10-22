@@ -111,13 +111,14 @@ flowchart LR
 10 doanh nghiệp thật (Shopee, VNG, VNPAY, MISA, ACB, KiotViet, Vinamilk, Base.vn, GHN, Katalon; 961
 việc, 1–10 trang mỗi nguồn):
 
-| Đại lượng               | Số đo                                                                    |
-| ----------------------- | ------------------------------------------------------------------------ |
-| Request mỗi lượt poll   | 1–10, trung bình **6,5**                                                 |
-| Thời gian một lượt poll | 0,3–12 s, trung bình **7,3 s** (chủ yếu chờ rate limit 1 req/s / domain) |
-| CPU backend mỗi lượt    | trung bình **~140 ms** (lớn nhất ~0,5 s: 10 trang API)                   |
-| Tin mới, T = 150 s      | 16/16 trong ≤ 180 s: trung vị 43 s, **P95 119 s**                        |
-| Một lượt build          | ~76 s, ~130 request (LLM chạy được)                                      |
+| Đại lượng                         | Số đo                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| Request mỗi lượt poll             | 1–10, trung bình **6,5**                                                          |
+| Thời gian một lượt poll           | 0,3–12 s, trung bình **7,3 s** (chủ yếu chờ rate limit 1 req/s / domain)          |
+| CPU backend mỗi lượt              | trung bình **~140 ms** (lớn nhất ~0,5 s: 10 trang API)                            |
+| Tin mới, T = 150 s                | 16/16 trong ≤ 180 s: trung vị 43 s, **P95 119 s**                                 |
+| Một lượt build                    | ~76 s, ~130 request (LLM chạy được)                                               |
+| Tin mới → webhook đối tác (22/10) | 14/14 trong ≤ 180 s: trung vị 79 s, **P95 150 s** (site giả, docs/INTEGRATION.md) |
 
 300 site giả (T = 30 s để dồn tải): 7,8 lượt poll / giây không lỗi; gateway ~6 ms CPU / request;
 worker ~10–20 ms CPU / request; Redis ~50 lệnh mỗi lượt poll / request; Postgres ~10 ms CPU mỗi lượt.

@@ -158,3 +158,11 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
     phải đổi metadata sang `RegisterResponse.worker_token` sau khi đăng ký.
 17. **Khoá phân tán dùng `locks.RedisLease`** (scheduler leader, bảo trì), không dùng khoá advisory
     theo phiên Postgres mới (hỏng sau PgBouncer chế độ transaction).
+18. **Đổi `jobs` ở đâu cũng phải phát sự kiện** (`store.emit_job_events`, cùng transaction): hệ
+    thống ngoài nhận việc làm qua outbox `job_events` (docs/ARCHITECTURE.md mục 12). Ghi đè nội
+    dung job từ chỗ mới (bảo trì, gộp…) thì phát `updated` và đặt `content_hash = NULL`; đóng thì
+    `closed`; xoá dòng thì `deleted`. Không phát thì đối tác không bao giờ thấy thay đổi đó.
+19. **API tích hợp (`/api/integration/v1`) chỉ nhận khoá API** (`modules/integration/key_service.py`,
+    mọi chế độ đăng nhập); test gọi nó tạo client + khoá (`/api/api-clients/...`) rồi gửi
+    `Authorization: Bearer jca_…`. Giao diện không có hàm orval cho các đường này; hợp đồng cho đối
+    tác là docs/INTEGRATION.md — đổi API thì sửa cùng file đó.
