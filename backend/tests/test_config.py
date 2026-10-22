@@ -16,7 +16,9 @@ def test_defaults_match_compose() -> None:
     assert s.database_url.startswith("postgresql+asyncpg://")
     assert ":15432/" in s.database_url
     assert s.redis_url == "redis://127.0.0.1:16379/0"
-    assert (s.runner_build_concurrency, s.runner_poll_concurrency) == (0, 0)  # 0 = tự tính theo máy
+    # Số tối đa mỗi process; dưới mức đó runner đi theo worker đang kết nối.
+    assert (s.runner_build_concurrency, s.runner_poll_concurrency) == (25, 60)
+    assert s.llm_requests_per_minute == 60
     assert s.queue_names == ("jobcrawler-build", "jobcrawler-poll", "jobcrawler-boards")
     assert (s.build_window, s.poll_window, s.poll_interval_seconds) == (
         "00:00-06:00",
@@ -181,3 +183,13 @@ def test_auth_mode_and_cache_redis_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CACHE_REDIS_URL", "redis://cache:6379/0")
     s = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
     assert (s.auth_mode, s.effective_cache_redis_url) == ("proxy", "redis://cache:6379/0")
+
+
+def test_build_deadline_leaves_time_to_save() -> None:
+    """Lượt build luôn chừa thời gian lưu trước timeout cứng: lượt bị huỷ thì mất hết tin."""
+    from jobcrawler.modules.crawl.company_service import build_deadline
+
+    s = Settings(_env_file=None, company_deadline_seconds=165, company_timeout_seconds=180)  # pyright: ignore[reportCallIssue]
+    assert build_deadline(s, 0.0) == 150.0
+    quick = Settings(_env_file=None, company_deadline_seconds=2, company_timeout_seconds=4)  # pyright: ignore[reportCallIssue]
+    assert build_deadline(quick, 10.0) == 12.0

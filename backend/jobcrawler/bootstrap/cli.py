@@ -507,6 +507,13 @@ def runner(
             help="Vai chạy (lặp được): build, poll, boards. Mặc định cả ba trong một process.",
         ),
     ] = None,
+    processes: Annotated[
+        int,
+        typer.Option(
+            min=1,
+            help="Số process cùng chạy các vai này: số job song song tự tính chia đều cho chúng.",
+        ),
+    ] = 1,
 ) -> None:
     """Chạy job trong hàng đợi: `build` (lượt đủ, ghi bộ khung + cron bảo trì), `poll` (lượt nhẹ
     theo bộ khung), `boards` (index trang tuyển dụng). Cần gateway + worker lấy trang."""
@@ -517,7 +524,7 @@ def runner(
     if unknown:
         typer.secho(f"Vai không hợp lệ: {', '.join(unknown)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
-    _run(run_runner(get_settings(), roles))  # pyright: ignore[reportArgumentType]
+    _run(run_runner(get_settings(), roles, processes=processes))  # pyright: ignore[reportArgumentType]
 
 
 @app.command()

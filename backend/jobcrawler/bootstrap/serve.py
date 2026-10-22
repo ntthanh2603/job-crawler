@@ -1,6 +1,8 @@
-"""`jobcrawler serve`: cả backend trong một container — chạy migration rồi bốn process con `api`,
-`gateway`, `scheduler`, `runner` (đủ ba vai). Mỗi process con có event loop và watchdog riêng:
-runner bận parse HTML không làm chậm API.
+"""`jobcrawler serve`: cả backend trong một container — chạy migration rồi các process con `api`,
+`gateway`, `scheduler` và runner: máy ≥ 4 CPU thì tách vai — `runner-build` (máy ≥ 8 CPU:
+`runner-build-1..n`, một process mỗi 4 CPU, tối đa 4), `runner-boards`, `runner-poll-1..n` (ít nhất
+hai) — máy nhỏ hơn thì một `runner` đủ ba vai. Mỗi process con có event loop và watchdog riêng:
+runner bận parse HTML không làm chậm API, build không làm chậm poll.
 
 Process con nào thoát thì dừng các process còn lại và thoát theo mã của nó (0 → 1), để Docker
 (`restart: unless-stopped`) dựng lại cả container. SIGTERM / Ctrl+C: gửi SIGTERM cho các process
@@ -24,6 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 from typing import Any, Protocol
 
+from jobcrawler.common import sysres
 from jobcrawler.common.logging import get_logger
 from jobcrawler.modules.settings import app_settings_service
 
@@ -36,15 +39,35 @@ WATCH_SECONDS = 2.0
 ALIVE_TTL_SECONDS = 15
 
 
-def child_commands(host: str, port: int) -> dict[str, list[str]]:
-    """Lệnh của từng process con (cùng trình thông dịch, cùng biến môi trường)."""
+def child_commands(host: str, port: int, *, cpus: int | None = None) -> dict[str, list[str]]:
+    """Lệnh của từng process con (cùng trình thông dịch, cùng biến môi trường).
+
+    Runner là Python một luồng: một process chạy cả build, poll và index trang tuyển dụng thì phần
+    parse HTML / markdown của hàng trăm lượt build / poll dùng hết một nhân, mọi lần chờ mạng chậm
+    theo (lượt poll 60 s mà phần lấy trang chỉ cần vài giây). Máy đủ CPU thì tách: process build
+    và process poll theo `sysres.runner_processes` (cùng đọc một hàng đợi), một process index trang
+    tuyển dụng."""
     cli = [sys.executable, "-m", "jobcrawler.bootstrap.cli"]
-    return {
+    commands = {
         "api": [*cli, "api", "--host", host, "--port", str(port)],
         "gateway": [*cli, "gateway"],
         "scheduler": [*cli, "scheduler"],
-        "runner": [*cli, "runner"],
     }
+    builds, polls = sysres.runner_processes(cpus if cpus is not None else sysres.cpu_count())
+    if not builds:
+        commands["runner"] = [*cli, "runner"]
+        return commands
+    if builds == 1:
+        commands["runner-build"] = [*cli, "runner", "--role", "build"]
+    else:
+        for i in range(1, builds + 1):
+            build = ["runner", "--role", "build", "--processes", str(builds)]
+            commands[f"runner-build-{i}"] = [*cli, *build]
+    commands["runner-boards"] = [*cli, "runner", "--role", "boards"]
+    for i in range(1, polls + 1):
+        poll = ["runner", "--role", "poll", "--processes", str(polls)]
+        commands[f"runner-poll-{i}"] = [*cli, *poll]
+    return commands
 
 
 class Watch(Protocol):

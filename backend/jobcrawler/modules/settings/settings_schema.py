@@ -73,7 +73,8 @@ class SettingItemOut(ApiOut):
     secret: bool
     is_set: bool | None  # chỉ với bí mật
     env_is_set: bool | None
-    # Cài đặt mà 0 = tự tính theo máy: giá trị tự động đó (trên máy chạy backend); null = không có.
+    # Số đang chạy lúc này trên cả máy chạy backend (vd. lượt build song song theo worker đang kết
+    # nối, không quá cài đặt); null = không có.
     auto_value: int | None
 
 

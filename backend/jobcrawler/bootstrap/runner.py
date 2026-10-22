@@ -39,6 +39,8 @@ from jobcrawler.common.schemas import RunTrigger
 from jobcrawler.common.watchdog import start_watchdog
 from jobcrawler.modules.boards import boards_service
 from jobcrawler.modules.crawl import crawl_service
+from jobcrawler.modules.gateway import registry_service
+from jobcrawler.modules.gateway.registry_service import Keys
 from jobcrawler.modules.maintenance import maintenance_service
 from jobcrawler.modules.overview import overview_service
 from jobcrawler.services.redis.heartbeat import Heartbeat, runner_component
@@ -214,14 +216,35 @@ def queue_name(settings: Settings, role: Role) -> str:
     return {"build": build, "poll": poll, "boards": boards_}[role]
 
 
-def concurrency(settings: Settings, role: Role) -> int:
-    """Số job song song của vai: cài đặt, 0 = tự tính theo máy (`jobcrawler.common.sysres`)."""
-    value = {
+def _setting(settings: Settings, role: Role) -> int:
+    return {
         "build": settings.runner_build_concurrency,
         "poll": settings.runner_poll_concurrency,
         "boards": settings.runner_board_concurrency,
     }[role]
-    return value or sysres.auto_concurrency(role)
+
+
+def concurrency(settings: Settings, role: Role, *, processes: int = 1) -> int:
+    """Số job song song của vai trong một process lúc bắt đầu (chưa biết worker nào): theo máy
+    (`jobcrawler.common.sysres`) chia đều cho `processes` process cùng chạy vai đó, không quá cài
+    đặt. Vai build / poll sau đó đi theo số worker đang kết nối (`live_concurrency`)."""
+    return sysres.scaled_concurrency(
+        role, slots=0, limit=_setting(settings, role), processes=processes
+    )
+
+
+# Runner đọc lại tổng slot của worker đang kết nối sau chừng này giây.
+RESIZE_SECONDS = 15.0
+
+
+async def live_concurrency(res: Resources, role: Role, *, processes: int = 1) -> int:
+    """Số job song song của vai trong một process lúc này: theo tổng slot HTTP của worker đang kết
+    nối (`sysres.scaled_concurrency`) — thêm worker là nhận thêm job, như open-asm (thông lượng là
+    tổng năng lực của các worker) — không quá cài đặt (RUNNER_*_CONCURRENCY)."""
+    slots = await registry_service.live_http_slots(res.redis, Keys(res.settings.redis_prefix))
+    return sysres.scaled_concurrency(
+        role, slots=slots, limit=_setting(res.settings, role), processes=processes
+    )
 
 
 FUNCTIONS: dict[Role, list[Any]] = {
@@ -240,11 +263,11 @@ def stall_limit(settings: Settings) -> float:
     return min(settings.watchdog_seconds, settings.queue_reclaim_seconds / 2)
 
 
-def build_worker(settings: Settings, role: Role) -> StreamWorker:
+def build_worker(settings: Settings, role: Role, *, processes: int = 1) -> StreamWorker:
     worker = StreamWorker(
         make_queue(settings, queue_name(settings, role)),
         functions=FUNCTIONS[role],
-        concurrency=concurrency(settings, role),
+        concurrency=concurrency(settings, role, processes=processes),
         cron_jobs=cron_jobs(settings, role),
         # Job bị huỷ (timeout cứng, runner dừng) còn chừng này giây để ghi `company_runs`.
         cancellation_hard_deadline_s=CANCEL_GRACE_SECONDS,
@@ -255,18 +278,24 @@ def build_worker(settings: Settings, role: Role) -> StreamWorker:
     return worker
 
 
-async def run_runner(settings: Settings, roles: Sequence[Role] = ROLES) -> None:
-    """Chạy các vai `roles` trong một process, dùng chung một `Resources`. Dừng bằng SIGTERM /
+async def run_runner(
+    settings: Settings, roles: Sequence[Role] = ROLES, *, processes: int = 1
+) -> None:
+    """Chạy các vai `roles` trong một process, dùng chung một `Resources`; `processes`: số process
+    cùng chạy các vai này (`jobcrawler serve` chạy nhiều process poll). Dừng bằng SIGTERM /
     Ctrl+C: job đang chạy được làm nốt (hoặc xếp lại) rồi thoát."""
     roles = list(dict.fromkeys(roles))
     async with open_resources(settings) as res:
         # Heartbeat health: chỉ ghi khi vòng lặp của mọi vai đều đang quay.
         beat = Heartbeat(res.redis, res.settings.redis_prefix, runner_component(roles), parts=roles)
         # Số job cùng lúc và lịch cron theo cài đặt hiện hành (kể cả giá trị sửa ở trang Cài đặt).
-        workers = [build_worker(res.settings, role) for role in roles]
+        workers = [build_worker(res.settings, role, processes=processes) for role in roles]
         for role, worker in zip(roles, workers, strict=True):
             worker.context["resources"] = res
             worker.on_loop = partial(beat.tick, role)
+            if role != "boards":
+                worker.resize = partial(live_concurrency, res, role, processes=processes)
+                worker.resize_seconds = RESIZE_SECONDS
             await worker.queue.connect()
         log.info(
             "runner.start",

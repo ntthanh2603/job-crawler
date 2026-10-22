@@ -49,7 +49,7 @@ Mỗi thư mục là một service tự đủ (mã, lockfile, `Dockerfile`, `Tas
 | ---------- | ------------------ | ----------------------------------------------------------------------------------------------- |
 | `postgres` |                    | dữ liệu                                                                                         |
 | `redis`    |                    | hàng đợi, việc lấy trang, khoá, rate limit, số đo, phiên bản cài đặt, cache (AOF, `noeviction`) |
-| `backend`  | `jobcrawler serve` | migration rồi 4 process con dưới đây; một process thoát → container thoát, Docker dựng lại      |
+| `backend`  | `jobcrawler serve` | migration rồi các process con dưới đây; một process thoát → container thoát, Docker dựng lại    |
 | `frontend` | nginx              | bản build React; `/api/` chuyển tới `backend`                                                   |
 | `worker`   | `jobworker run`    | nhận việc qua gRPC, tải bằng curl_cffi / Chromium qua proxy, trả kết quả                        |
 
@@ -59,6 +59,13 @@ Mỗi thư mục là một service tự đủ (mã, lockfile, `Dockerfile`, `Tas
 | gateway   | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc từ Redis Streams, nhận kết quả |
 | scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis |
 | runner    | `jobcrawler runner`    | chạy job của 3 hàng đợi (`--role poll\|build\|boards` để tách vai)     |
+
+Máy ≥ 4 CPU thì `serve` chạy mỗi vai runner một process: `runner-build` (máy ≥ 8 CPU:
+`runner-build-1..n`, một process mỗi 4 CPU, tối đa 4), `runner-boards` và `runner-poll-1..n` (ít nhất
+hai) cùng đọc hàng đợi của vai đó; máy nhỏ hơn thì một `runner` đủ ba vai. Runner là Python một
+luồng: một process cho cả ba vai thì phần parse HTML / markdown của build và hàng trăm lượt poll
+dùng hết một nhân, mọi lần chờ mạng chậm theo (10/2026: lấy một trang 0,7 s nhưng trong lượt poll
+thành 7,5 s, lượt poll chạm hạn 60 s, hàng đợi poll tồn hơn 2 phút).
 
 Mỗi process có event loop và watchdog riêng (vòng lặp đứng quá `WATCHDOG_SECONDS` → thoát mã 70).
 Cài đặt = `backend/.env` (chỉ kết nối, bí mật hạ tầng, gateway, đăng nhập, log) + bảng `app_settings`
@@ -99,7 +106,10 @@ Chiều gọi: `bootstrap/` → `modules/` → `services/` → `common/`; `modul
 
 Mỗi doanh nghiệp một lượt trong `BUILD_WINDOW` (00:00–06:00, `CRAWL_TIMEZONE`), rải đều theo pha
 cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì build ngay, bất kể giờ. Deadline mềm
-`COMPANY_DEADLINE_SECONDS` (165 s), timeout cứng 180 s; lượt chưa xong tự xếp lượt nối tiếp (≤ 2).
+`COMPANY_DEADLINE_SECONDS` (165 s) nhưng luôn chừa 30 s (tối đa 1/6 timeout) trước timeout cứng
+180 s để lưu — mặc định thu thập và LLM dừng ở 150 s; lúc tải cao lưu một doanh nghiệp mất tới ~20 s,
+lượt chạm timeout cứng bị huỷ và mất hết tin. Phân loại thêm trường bằng LLM dùng tối đa 20 s mỗi
+lượt. Lượt chưa xong tự xếp lượt nối tiếp (≤ 2).
 
 1. **KYC** (`pipeline/kyc.py`): còn hạn thì dùng lại; không thì SERP + website (chân trang, JSON-LD)
    → LLM chọn kèm trích đoạn → rule kiểm lại. Kết quả `verified` / `ambiguous` / `not_found`.
@@ -400,9 +410,17 @@ job bảo đảm mỗi doanh nghiệp chỉ một build và một poll đang ch�
 - **Runner đứng tự thoát trước khi bị thu hồi**: watchdog của runner dùng min(`WATCHDOG_SECONDS`,
   `QUEUE_RECLAIM_SECONDS` / 2).
 
-Số job song song mỗi runner
-(`RUNNER_*_CONCURRENCY`, 0 = tự tính: poll 12 / CPU trong [20, 100], build 2,5 / CPU và ≤ 2 / GiB
-trong [4, 20], trang tuyển dụng 1 / CPU trong [2, 8]).
+Số job song song mỗi runner **đi theo năng lực worker**, trong mức tối đa `RUNNER_*_CONCURRENCY`
+mỗi process (mặc định 25 build / 60 poll / 4 trang tuyển dụng — số thật, không có 0 = tự tính),
+như open-asm (thông lượng = tổng năng lực các worker đang kết nối): runner chỉ điều phối, việc lấy
+trang nằm ở worker, nên mỗi `RESIZE_SECONDS` (15 s) runner đọc tổng slot HTTP của worker còn sống
+(`registry_service.live_http_slots`) và đặt lại số job (`StreamWorker.resize`,
+`sysres.scaled_concurrency`): 0,35 lượt build / 0,7 lượt poll mỗi slot (một lượt giữ trung bình ~1
+request đang chạy ở worker), không dưới mức theo máy (poll 12 / CPU trong [20, 100], build 2,5 / CPU
+và ≤ 2 / GiB trong [4, 20] — cũng là mức khi chưa có worker), không quá `RUNNER_*_CONCURRENCY` mỗi
+process và 4 build / GiB RAM. Thêm worker là runner nhận thêm job ngay; bớt worker thì job đang chạy
+làm nốt, nhận ít đi. Trang tuyển dụng chỉ theo máy (1 / CPU, tối thiểu 2), không quá cài đặt. Trang
+Cài đặt hiện cạnh mỗi ô số đang chạy lúc này trên cả máy.
 
 ## 9. Dữ liệu (`database/`)
 
@@ -489,7 +507,9 @@ của Redis.
 ## 11. Quan sát và kiểm thử
 
 - Log structlog có ngữ cảnh (`request_id`, `run_id`, `company`, `source`), che bí mật trước khi ghi;
-  `poll.done` mỗi lượt (request, mới / gỡ, cửa sổ phát hiện).
+  `poll.done` mỗi lượt (request, mới / gỡ, cửa sổ phát hiện; thời gian từng phần: `lock_ms` khoá,
+  `load_ms` khoá + đọc DB trước khi lấy trang, `collect_ms` lấy trang, phần còn lại của `ms` là xử lý
+  + lưu).
 - `/api/crawl/status`: P50 / P95 thời gian poll và cửa sổ phát hiện, độ tươi. `/api/workers`: worker,
   slot, việc xong / lỗi. Heartbeat Redis của scheduler / runner là healthcheck của `backend`.
 - **Test**: unit không gọi mạng (`FakeFetcher` với HTML / JSON chụp từ trang thật, `FakeChatClient`,

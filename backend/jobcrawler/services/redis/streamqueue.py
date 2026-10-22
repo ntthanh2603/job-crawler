@@ -591,8 +591,9 @@ Hook = Callable[[Any], Awaitable[None]]  # nhận `ctx` của worker
 
 
 class StreamWorker:
-    """Chạy job từ một `StreamQueue`: tối đa `concurrency` job cùng lúc, timeout cứng mỗi job,
-    chạy lại theo `retries`, cron, báo sống và thu hồi job của worker chết."""
+    """Chạy job từ một `StreamQueue`: tối đa `concurrency` job cùng lúc (đổi được lúc chạy qua
+    `resize`), timeout cứng mỗi job, chạy lại theo `retries`, cron, báo sống và thu hồi job của
+    worker chết."""
 
     SIGNALS = (signal.SIGINT, signal.SIGTERM) if os.name != "nt" else ()
 
@@ -611,9 +612,15 @@ class StreamWorker:
         tz: tzinfo = UTC,
         on_loop: Callable[[], Awaitable[Any]] | None = None,
         on_iteration: Callable[[], None] | None = None,
+        resize: Callable[[], Awaitable[int]] | None = None,
+        resize_seconds: float = 15.0,
     ) -> None:
         self.queue = queue
         self.concurrency = concurrency
+        # Số job song song đổi theo thời gian (vd. theo số worker lấy trang đang kết nối): gọi mỗi
+        # `resize_seconds`, ngay từ lúc bắt đầu.
+        self.resize = resize
+        self.resize_seconds = resize_seconds
         self.cron_jobs = list(cron_jobs)
         self.functions: dict[str, Callable[..., Awaitable[Any]]] = {}
         for f in functions:
@@ -663,6 +670,8 @@ class StreamWorker:
             asyncio.create_task(self._every(1.0, self._schedule)),
             asyncio.create_task(self._every(self.queue.reclaim_seconds / 4, self._reclaim)),
         ]
+        if self.resize is not None:
+            upkeep.append(asyncio.create_task(self._every(self.resize_seconds, self._resize)))
         try:
             await self._fetch()
         finally:
@@ -843,6 +852,20 @@ class StreamWorker:
                 scheduled=next_at,
                 **(cj.kwargs or {}),
             )
+
+    async def _resize(self) -> None:
+        """Đặt lại số job song song theo `resize`: tăng thì nhận thêm job ngay; giảm thì job đang
+        chạy làm nốt, chỉ nhận thêm khi số job đang chạy xuống dưới mức mới."""
+        if self.resize is None:
+            return
+        value = max(1, int(await self.resize()))
+        if value == self.concurrency:
+            return
+        log.info(
+            "queue.resized", queue=self.queue.name, concurrency=value, previous=self.concurrency
+        )
+        self.concurrency = value
+        self._slot.set()  # vòng nhận việc đang chờ slot thì xét lại ngay
 
     async def _reclaim(self) -> None:
         outcome = await self.queue.reclaim(self.id)

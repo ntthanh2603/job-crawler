@@ -55,11 +55,40 @@ def _supervisor(procs: dict[str, FakeProc], **kw: object) -> Supervisor:
 
 
 def test_child_commands() -> None:
-    cmds = child_commands("0.0.0.0", 8000)
+    cmds = child_commands("0.0.0.0", 8000, cpus=2)
     assert list(cmds) == ["api", "gateway", "scheduler", "runner"]
     assert cmds["api"][:3] == [sys.executable, "-m", "jobcrawler.bootstrap.cli"]
     assert cmds["api"][3:] == ["api", "--host", "0.0.0.0", "--port", "8000"]
     assert cmds["runner"][3:] == ["runner"]
+
+
+def test_runner_roles_get_their_own_processes_on_bigger_machines() -> None:
+    """Runner một luồng: build / index trang tuyển dụng / poll mỗi vai một process để phần parse
+    HTML của lượt build không làm chậm lượt poll."""
+    cmds = child_commands("0.0.0.0", 8000, cpus=4)
+    assert list(cmds) == [
+        "api",
+        "gateway",
+        "scheduler",
+        "runner-build",
+        "runner-boards",
+        "runner-poll-1",
+        "runner-poll-2",
+    ]
+    assert cmds["runner-build"][3:] == ["runner", "--role", "build"]
+    assert cmds["runner-poll-2"][3:] == ["runner", "--role", "poll", "--processes", "2"]
+
+
+def test_more_cpus_run_more_build_and_poll_processes() -> None:
+    """Nhiều worker cho nhiều lượt chạy cùng lúc: mỗi 4 CPU thêm một process build và một process
+    poll (tối đa 4 mỗi vai), để phần parse không dồn vào một core."""
+    cmds = child_commands("0.0.0.0", 8000, cpus=12)
+    builds = [k for k in cmds if k.startswith("runner-build")]
+    polls = [k for k in cmds if k.startswith("runner-poll")]
+    assert builds == ["runner-build-1", "runner-build-2", "runner-build-3"]
+    assert polls == ["runner-poll-1", "runner-poll-2", "runner-poll-3"]
+    assert cmds["runner-build-2"][3:] == ["runner", "--role", "build", "--processes", "3"]
+    assert len([k for k in child_commands("0.0.0.0", 8000, cpus=64) if "build" in k]) == 4
 
 
 def test_child_exit_stops_the_others() -> None:

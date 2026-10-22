@@ -170,7 +170,7 @@ services:
       start_period: 60s
       start_interval: 5s
     deploy:
-      replicas: 1
+      replicas: 3
     # SIGTERM: worker thôi nhận việc và làm nốt tối đa WORKER_SHUTDOWN_GRACE_SECONDS (30) giây;
     # mặc định Docker chỉ chờ 10 giây rồi SIGKILL.
     stop_grace_period: 40s

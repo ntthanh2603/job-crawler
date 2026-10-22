@@ -111,7 +111,44 @@ async def check(
     host: str | None = None,
     now: float | None = None,
 ) -> tuple[bool, str]:
-    """(khoẻ?, lý do ngắn) của heartbeat `component` trên máy / container này."""
+    """(khoẻ?, lý do ngắn) của heartbeat `component` trên máy / container này.
+
+    `runner`: mọi vai (build, poll, boards) đều có process còn heartbeat mới — một process đủ ba
+    vai, hay mỗi vai một process (`jobcrawler serve` trên máy ≥ 4 CPU)."""
+    if component == "runner":
+        return await _check_runner_roles(redis, prefix, max_age=max_age, host=host, now=now)
+    return await _check_one(redis, prefix, component, max_age=max_age, host=host, now=now)
+
+
+async def _check_runner_roles(
+    redis: Any, prefix: str, *, max_age: float, host: str | None, now: float | None
+) -> tuple[bool, str]:
+    results = {
+        c: await _check_one(redis, prefix, c, max_age=max_age, host=host, now=now)
+        for c in components()
+        if c.startswith("runner")
+    }
+    alive = [c for c, (ok, _) in results.items() if ok]
+    covered = {
+        role
+        for c in alive
+        for role in (RUNNER_ROLES if c == "runner" else c.removeprefix("runner-").split("-"))
+    }
+    missing = [r for r in RUNNER_ROLES if r not in covered]
+    if not missing:
+        return True, f"ok runner ({', '.join(alive)})"
+    return False, f"không có runner còn chạy vai {', '.join(missing)}: " + results["runner"][1]
+
+
+async def _check_one(
+    redis: Any,
+    prefix: str,
+    component: str,
+    *,
+    max_age: float,
+    host: str | None,
+    now: float | None,
+) -> tuple[bool, str]:
     key = heartbeat_key(prefix, component, host)
     raw = await redis.get(key)
     if raw is None:

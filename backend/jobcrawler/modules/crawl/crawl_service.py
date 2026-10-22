@@ -228,7 +228,7 @@ async def build_company(
     (trừ khi `continue_partial=False`)."""
     s = res.settings
     # Timeout cứng của job tính từ lúc job bắt đầu: thời gian chờ khoá trừ vào hạn của lượt build.
-    deadline = time.monotonic() + s.company_deadline_seconds
+    deadline = company_service.build_deadline(s, time.monotonic())
     async with res.sessionmaker() as session:
         company = await session.get(Company, company_id)
     if company is None:
@@ -537,6 +537,7 @@ async def _poll(
 ) -> PollOutcome:
     """`board`: đọc thêm tin của doanh nghiệp trên các trang tuyển dụng (index vừa thấy tin mới)."""
     s = res.settings
+    t_locked = time.monotonic()
     outcome = PollOutcome(company_id=company_id, status="ok")
     async with res.sessionmaker() as session:
         company = await session.get(Company, company_id)
@@ -573,6 +574,7 @@ async def _poll(
     known = KnownJobs.of_refs(await _posting_refs(res, company_id, kinds))
     records: list[FetchRecord] = []
     deadline = t0 + s.poll_deadline_seconds
+    t_collect = time.monotonic()
     collected = await collect(
         sources,
         fetcher=res.http,
@@ -584,6 +586,7 @@ async def _poll(
         mode="poll",
         plans=specs,
     )
+    t_collected = time.monotonic()
     reports = {r.name: r for r in collected.reports}
     checks = [_check(plan, reports.get(plan.source), s.poll_max_failures) for plan in plans]
     outcome.new = sum(len(c.new) for c in checks)
@@ -760,6 +763,10 @@ async def _poll(
         fetches=len(records),
         window_s=round(window, 1) if window is not None else None,
         ms=int((time.monotonic() - t0) * 1000),
+        # Khoá / khoá + đọc DB trước khi lấy trang / lấy trang; còn lại là xử lý + lưu.
+        lock_ms=int((t_locked - t0) * 1000),
+        load_ms=int((t_collect - t0) * 1000),
+        collect_ms=int((t_collected - t_collect) * 1000),
     )
     return outcome
 

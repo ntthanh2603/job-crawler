@@ -85,11 +85,11 @@ class Settings(BaseSettings):
     board_queue_name: str = "jobcrawler-boards"
     # Job của runner không còn báo sống chừng này giây thì runner khác thu hồi và chạy lại.
     queue_reclaim_seconds: float = Field(default=60, ge=5)
-    # Mỗi process runner chạy cùng lúc tối đa chừng này job mỗi loại; 0 = tự tính theo CPU / RAM của
-    # máy (`jobcrawler.common.sysres`, như open-asm).
-    runner_build_concurrency: int = Field(default=0, ge=0)
-    runner_poll_concurrency: int = Field(default=0, ge=0)
-    runner_board_concurrency: int = Field(default=0, ge=0)
+    # Mỗi process runner chạy cùng lúc tối đa chừng này job mỗi loại; dưới mức đó build / poll đi
+    # theo tổng slot của worker đang kết nối, trang tuyển dụng theo CPU (`common.sysres`).
+    runner_build_concurrency: int = Field(default=25, ge=1)
+    runner_poll_concurrency: int = Field(default=60, ge=1)
+    runner_board_concurrency: int = Field(default=4, ge=1)
 
     # LLM: vLLM self-host (OpenAI-compatible). Để trống thì mọi bước dùng LLM bị tắt.
     llm_base_url: str | None = None

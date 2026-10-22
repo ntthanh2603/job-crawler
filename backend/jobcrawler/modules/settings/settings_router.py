@@ -7,7 +7,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from jobcrawler.common import sysres
 from jobcrawler.common.api import actor_of, res_of, settings_of
+from jobcrawler.common.config import Settings
+from jobcrawler.modules.gateway.registry_service import Keys, live_http_slots
 from jobcrawler.modules.settings import app_settings_service
 from jobcrawler.modules.settings.settings_schema import (
     SettingsImportedOut,
@@ -19,6 +22,25 @@ from jobcrawler.modules.settings.settings_schema import (
 router = APIRouter(prefix="/api", tags=["settings"])
 
 
+async def _runner_auto(request: Request, effective: Settings) -> dict[str, int]:
+    """Số lượt build / poll / index trang tuyển dụng đang chạy song song lúc này trên cả máy (mọi
+    process runner của `jobcrawler serve`): theo tổng slot HTTP của worker đang kết nối, không quá
+    cài đặt mỗi process (`sysres.scaled_concurrency`)."""
+    res = res_of(request)
+    slots = await live_http_slots(res.redis, Keys(settings_of(request).redis_prefix))
+    builds, polls = sysres.runner_processes()
+    out: dict[str, int] = {}
+    roles: tuple[tuple[str, sysres.Role, int, int], ...] = (
+        ("runner_build_concurrency", "build", builds, effective.runner_build_concurrency),
+        ("runner_poll_concurrency", "poll", polls, effective.runner_poll_concurrency),
+        ("runner_board_concurrency", "boards", 1, effective.runner_board_concurrency),
+    )
+    for key, role, processes, limit in roles:
+        n = max(1, processes)
+        out[key] = sysres.scaled_concurrency(role, slots=slots, limit=limit, processes=n) * n
+    return out
+
+
 async def _settings_page(request: Request) -> SettingsPageOut:
     res, base = res_of(request), settings_of(request)
     prefix = base.redis_prefix
@@ -28,7 +50,9 @@ async def _settings_page(request: Request) -> SettingsPageOut:
     return SettingsPageOut.model_validate(
         {
             "version": await app_settings_service.settings_version(res.redis, prefix),
-            "groups": app_settings_service.describe(base, overrides, effective),
+            "groups": app_settings_service.describe(
+                base, overrides, effective, auto=await _runner_auto(request, effective)
+            ),
             "env_keys": sorted(app_settings_service.env_overrides(base, overrides)),
             "auto_restart": restart.auto,
             "restart_pending": restart.pending,

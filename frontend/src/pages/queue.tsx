@@ -83,7 +83,7 @@ function Counts({ q }: { q: QueueStats }) {
     {
       label: "Đang chạy / tối đa",
       value: q.capacity ? `${num(q.active)} / ${num(q.capacity)}` : num(q.active),
-      hint: "Tối đa = tổng số job chạy cùng lúc của các runner (tự tính theo CPU / RAM của máy nếu để 0)",
+      hint: "Tối đa = tổng số job chạy cùng lúc của các runner (theo worker đang kết nối, không quá cài đặt)",
       tone: q.capacity && q.active >= q.capacity && q.queued > 0 ? "warn" : undefined,
     },
     { label: "Đang chờ", value: num(q.queued) },

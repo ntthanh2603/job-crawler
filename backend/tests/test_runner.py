@@ -21,12 +21,12 @@ from jobcrawler.services.redis.streamqueue import StreamWorker
 
 def test_build_role_runs_builds_maintenance_and_overview(clean_env: None) -> None:
     settings = Settings(
-        runner_build_concurrency=7, maintenance_cron="5 * * * *", overview_cron="*/3 * * * *"
+        runner_build_concurrency=3, maintenance_cron="5 * * * *", overview_cron="*/3 * * * *"
     )
     w = runner.build_worker(settings, "build")
     assert isinstance(w, StreamWorker)
     assert set(w.functions) == {"build_company", "maintenance_cron", "overview_cron"}
-    assert (w.queue.name, w.concurrency) == ("jobcrawler-build", 7)
+    assert (w.queue.name, w.concurrency) == ("jobcrawler-build", 3)  # dưới mức theo máy (≥ 4)
     maintenance, overview = w.cron_jobs
     assert (maintenance.cron, maintenance.function) == ("5 * * * *", runner.maintenance_cron)
     assert (overview.cron, overview.function) == ("*/3 * * * *", runner.overview_cron)
@@ -35,9 +35,9 @@ def test_build_role_runs_builds_maintenance_and_overview(clean_env: None) -> Non
 
 
 def test_poll_role_has_own_queue_and_no_cron(clean_env: None) -> None:
-    w = runner.build_worker(Settings(runner_poll_concurrency=64), "poll")
+    w = runner.build_worker(Settings(runner_poll_concurrency=16), "poll")
     assert set(w.functions) == {"poll_company"}
-    assert (w.queue.name, w.concurrency, w.cron_jobs) == ("jobcrawler-poll", 64, [])
+    assert (w.queue.name, w.concurrency, w.cron_jobs) == ("jobcrawler-poll", 16, [])
 
 
 def test_board_role_runs_full_index_at_night_and_tail_by_day(clean_env: None) -> None:
@@ -46,7 +46,7 @@ def test_board_role_runs_full_index_at_night_and_tail_by_day(clean_env: None) ->
         board_tail_cron="*/2 6-23 * * *",
         board_index_budget_seconds=600,
         board_tail_budget_seconds=90,
-        runner_board_concurrency=3,
+        runner_board_concurrency=2,
     )
     w = runner.build_worker(settings, "boards")
     assert set(w.functions) == {
@@ -55,7 +55,7 @@ def test_board_role_runs_full_index_at_night_and_tail_by_day(clean_env: None) ->
         "index_boards_cron",
         "tail_boards_cron",
     }
-    assert (w.queue.name, w.concurrency) == ("jobcrawler-boards", 3)
+    assert (w.queue.name, w.concurrency) == ("jobcrawler-boards", 2)
     full, tail = w.cron_jobs
     assert (full.cron, full.function) == ("30 0 * * *", runner.index_boards_cron)
     assert (tail.cron, tail.function) == ("*/2 6-23 * * *", runner.tail_boards_cron)

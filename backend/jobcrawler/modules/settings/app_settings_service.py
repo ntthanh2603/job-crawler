@@ -39,7 +39,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from jobcrawler.common import sysres
 from jobcrawler.common.config import Settings, parse_window
 from jobcrawler.common.logging import get_logger
 from jobcrawler.database.models import AppSetting
@@ -504,27 +503,30 @@ GROUPS: tuple[Group, ...] = (
         _s(
             "runner_build_concurrency",
             "int",
-            "Job build song song",
-            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt build. 0 = tự tính theo CPU / "
-            "RAM của máy (2,5 mỗi CPU, không quá 2 mỗi GiB RAM, trong 4–20).",
+            "Job build song song tối đa",
+            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt build. Dưới mức này runner đi "
+            "theo worker lấy trang đang kết nối (0,35 lượt mỗi slot HTTP, tính lại mỗi 15 giây: "
+            "thêm worker là build được nhiều doanh nghiệp cùng lúc hơn), không dưới mức theo CPU / "
+            "RAM của máy, không quá 4 mỗi GiB RAM.",
             unit="job",
             live=False,
         ),
         _s(
             "runner_poll_concurrency",
             "int",
-            "Job poll song song",
-            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt poll. 0 = tự tính theo máy "
-            "(12 mỗi CPU, trong 20–100).",
+            "Job poll song song tối đa",
+            "Mỗi process runner chạy cùng lúc tối đa chừng này lượt poll. Dưới mức này runner đi "
+            "theo worker lấy trang đang kết nối (0,7 lượt mỗi slot HTTP, tính lại mỗi 15 giây), "
+            "không dưới mức theo máy (12 mỗi CPU, trong 20–100).",
             unit="job",
             live=False,
         ),
         _s(
             "runner_board_concurrency",
             "int",
-            "Job index trang tuyển dụng song song",
-            "Mỗi process runner index cùng lúc tối đa chừng này trang tuyển dụng. 0 = tự tính theo "
-            "máy (1 mỗi CPU, trong 2–8).",
+            "Job index trang tuyển dụng song song tối đa",
+            "Mỗi process runner index cùng lúc tối đa chừng này trang tuyển dụng; máy ít CPU thì "
+            "chạy ít hơn (1 mỗi CPU, tối thiểu 2).",
             unit="job",
             live=False,
         ),
@@ -1608,13 +1610,6 @@ GROUPS = tuple(replace(group, sections=_SECTIONS.get(group.key, ())) for group i
 
 SPECS: list[SettingSpec] = [spec for group in GROUPS for spec in group.items]
 SPEC_BY_KEY: dict[str, SettingSpec] = {spec.key: spec for spec in SPECS}
-# Cài đặt mà 0 = tự tính theo máy: giá trị tự động trên máy đang chạy API (cùng container với
-# runner khi chạy `jobcrawler serve`), để trang Cài đặt hiện cho người sửa biết.
-AUTO_VALUES: dict[str, Callable[[], int]] = {
-    "runner_build_concurrency": lambda: sysres.auto_concurrency("build"),
-    "runner_poll_concurrency": lambda: sysres.auto_concurrency("poll"),
-    "runner_board_concurrency": lambda: sysres.auto_concurrency("boards"),
-}
 # Lưu trong bảng ở dạng mã hoá (`secretbox`): bí mật và danh sách proxy (có mật khẩu).
 SENSITIVE: frozenset[str] = frozenset(
     {spec.key for spec in SPECS if spec.kind == "secret"} | {"proxies"}
@@ -2182,10 +2177,14 @@ def _display(spec: SettingSpec, value: Any) -> Any:
 
 
 def describe(
-    base: Settings, overrides: Mapping[str, Any], effective: Settings
+    base: Settings,
+    overrides: Mapping[str, Any],
+    effective: Settings,
+    auto: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Danh mục theo nhóm kèm giá trị hiệu lực, mặc định, giá trị từ biến môi trường và nguồn
-    (`default` | `env` | `ui`) của từng cài đặt, cho trang Cài đặt."""
+    (`default` | `env` | `ui`) của từng cài đặt, cho trang Cài đặt. `auto`: giá trị đang chạy lúc
+    này (vd. số lượt build / poll theo worker đang kết nối, không quá cài đặt)."""
     out: list[dict[str, Any]] = []
     for group in GROUPS:
         items: list[dict[str, Any]] = []
@@ -2220,7 +2219,7 @@ def describe(
                     "secret": secret,
                     "is_set": _secret_set(spec, getattr(effective, key)) if secret else None,
                     "env_is_set": _secret_set(spec, getattr(base, key)) if secret else None,
-                    "auto_value": AUTO_VALUES[key]() if key in AUTO_VALUES else None,
+                    "auto_value": (auto or {}).get(key),
                 }
             )
         out.append(

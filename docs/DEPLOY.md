@@ -176,12 +176,12 @@ Ghi chú:
 
 | Dấu hiệu                                                                    | Làm gì                                                                  |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Hàng đợi poll có việc chờ thường xuyên (trang Hàng đợi: đang chạy = tối đa) | thêm `runner-poll` hoặc tăng `RUNNER_POLL_CONCURRENCY` khi CPU còn      |
+| Hàng đợi poll có việc chờ thường xuyên (trang Hàng đợi: đang chạy = tối đa) | thêm worker (runner tự nhận thêm job theo slot worker); chạm trần 60 / process thì thêm `runner-poll` |
 | CPU runner-poll > 70%                                                       | thêm bản; hoặc giảm `PLAN_MAX_PAGES`                                    |
 | Trang Workers: slot HTTP đang dùng > 70% tổng                               | thêm máy worker                                                         |
 | P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng                | worker quá tải hoặc proxy chậm: thêm worker, đổi proxy                  |
 | P95 cửa sổ phát hiện > 180 s nhưng hàng đợi rỗng                            | lượt poll dài: giảm `POLL_INTERVAL_SECONDS` (120) hoặc `PLAN_MAX_PAGES` |
-| Hàng đợi build còn việc lúc 06:00                                           | thêm `runner-build`, máy render; kiểm tra LLM; nới `BUILD_WINDOW`       |
+| Hàng đợi build còn việc lúc 06:00                                           | thêm worker / máy render (runner tự nhận thêm build theo slot worker); chạm "Job build song song tối đa" (mặc định 25 / process) thì tăng nó hoặc thêm `runner-build`; kiểm tra LLM (`LLM_CLUSTER_CONCURRENCY` cả cụm, lỗi "chờ lượt LLM chung"); nới `BUILD_WINDOW` |
 | Postgres CPU > 70% / chờ khoá                                               | PgBouncer, máy lớn hơn, bản sao đọc cho `api`                           |
 | Redis CPU > 70%                                                             | tách cache (`CACHE_REDIS_URL`), máy CPU nhanh hơn                       |
 

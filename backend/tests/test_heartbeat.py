@@ -121,6 +121,26 @@ async def test_check(stored: str | None, now: float, ok: bool, reason: str) -> N
     assert reason in result[1]
 
 
+@pytest.mark.parametrize(
+    ("components", "ok"),
+    [
+        (["runner"], True),  # một process đủ ba vai
+        (["runner-build", "runner-poll", "runner-boards"], True),  # mỗi vai một process
+        (["runner-build-poll", "runner-boards"], True),
+        (["runner-build", "runner-boards"], False),  # không còn process poll
+        ([], False),
+    ],
+)
+async def test_runner_check_covers_every_role(components: list[str], ok: bool) -> None:
+    redis = FakeRedis()
+    for c in components:
+        redis.values[f"{PREFIX}:health:{c}:h"] = "999.0"
+    result = await check(redis, PREFIX, "runner", host="h", now=1000.0)
+    assert result[0] is ok, result[1]
+    if not ok and components:
+        assert "poll" in result[1]
+
+
 # --- StreamWorker gọi on_loop từ vòng lặp nhận việc --------------------------------------------
 
 
@@ -250,3 +270,35 @@ def test_health_cli_several_components(fake_redis: FakeRedis) -> None:
     both = runner.invoke(app, ["health", "scheduler", "runner"])
     assert both.exit_code == 0, both.output
     assert "ok runner" in both.output
+
+
+async def test_resize_changes_how_many_jobs_the_loop_asks_for() -> None:
+    """Số job song song đổi lúc chạy (runner theo tổng slot của worker đang kết nối): tăng thì
+    vòng nhận việc xin thêm job ngay, không phải khởi động lại."""
+
+    class CountingQueue(IdleQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.counts: list[int] = []
+
+        async def read(self, consumer: str, count: int, block_ms: int) -> list[Any]:
+            self.counts.append(count)
+            return await super().read(consumer, count, block_ms)
+
+    sizes = iter([3, 7])
+
+    async def resize() -> int:
+        return next(sizes)
+
+    queue = CountingQueue()
+    worker = StreamWorker(queue, functions=[], concurrency=1, resize=resize)  # pyright: ignore[reportArgumentType]
+    await worker._resize()
+    assert worker.concurrency == 3
+    task = asyncio.create_task(worker._fetch())
+    await asyncio.sleep(0.05)
+    await worker._resize()
+    await asyncio.sleep(0.05)
+    worker.stop()
+    await asyncio.wait_for(task, 2)
+    assert queue.counts[0] == 3
+    assert queue.counts[-1] == 7

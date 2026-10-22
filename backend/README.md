@@ -1,8 +1,8 @@
 # jobcrawler (backend)
 
 Service backend của jobcrawler: gói Python `jobcrawler`, một image Docker. Container `backend` chạy
-`jobcrawler serve` (migration rồi bốn process api, gateway, scheduler, runner); từng vai vẫn chạy
-riêng được bằng lệnh của nó. Không có Chromium / curl_cffi: mọi request tới website đi qua **worker** lấy trang (`../worker`)
+`jobcrawler serve` (migration rồi các process api, gateway, scheduler và runner — máy ≥ 4 CPU thì
+mỗi vai runner một process: build, boards, hai poll); từng vai vẫn chạy riêng được bằng lệnh của nó. Không có Chromium / curl_cffi: mọi request tới website đi qua **worker** lấy trang (`../worker`)
 qua gateway gRPC. Giao diện React là service riêng (`../frontend`, nginx) gọi API này qua `/api`.
 
 | Lệnh                                  | Vai                                                                    |

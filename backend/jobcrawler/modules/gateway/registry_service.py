@@ -296,6 +296,16 @@ async def live_capacity(redis: Redis, keys: Keys) -> dict[str, dict[str, int]]:
     return out
 
 
+async def live_http_slots(redis: Redis, keys: Keys) -> int:
+    """Tổng slot HTTP của mọi worker còn sống (mọi pool): năng lực lấy trang lúc này, runner tính
+    số lượt build / poll song song theo số này (`sysres.scaled_concurrency`)."""
+    alive = await redis.zrangebyscore(keys.workers, await redis_now_ms(redis), "+inf")
+    if not alive:
+        return 0
+    raws = await redis.mget([keys.worker(_text(w)) for w in alive])
+    return sum(int(json.loads(raw).get("http_slots") or 0) for raw in raws if raw is not None)
+
+
 async def expired_workers(redis: Redis, keys: Keys) -> list[str]:
     """Worker quá hạn báo sống nhưng chưa bị prune (`dispatch.release_expired_worker`)."""
     now = await redis_now_ms(redis)

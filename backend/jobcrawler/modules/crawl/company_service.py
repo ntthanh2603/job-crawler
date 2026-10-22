@@ -16,6 +16,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import (
     CompanyEntity,
@@ -56,10 +57,22 @@ KYC_SOURCE = "kyc"
 # Có tin hoãn xác minh (LLM chưa kịp chấm) trong lượt build / poll.
 VERIFY_SOURCE = "verify"
 # Phần cuối trước timeout cứng của job dành cho việc lưu (không chạy LLM nữa). Đủ rộng để DB chậm
-# lúc tải cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed, không lưu được gì): chạy cả
-# danh sách (30 doanh nghiệp song song) thì lưu một doanh nghiệp có thể mất hơn 8 giây. Tin LLM chưa
-# kịp chấm được hoãn sang lượt sau nên dừng LLM sớm không làm mất tin.
-SAVE_MARGIN_SECONDS = 20.0
+# lúc tải cao vẫn không chạm timeout cứng (lượt build bị huỷ = failed, không lưu được gì): chạy cả
+# danh sách (20 build song song, 10/2026) thì lưu một doanh nghiệp mất tới ~20 giây, cộng vài giây
+# chờ trước khi lượt bắt đầu. Tin LLM chưa kịp chấm được hoãn sang lượt sau nên dừng LLM sớm không
+# làm mất tin.
+SAVE_MARGIN_SECONDS = 30.0
+# Phân loại thêm trường bằng LLM (chỉ điền trường còn `unknown`) dùng tối đa chừng này giây mỗi
+# lượt: LLM quá tải thì nó chờ lâu nhất (ưu tiên thấp nhất) mà không đổi việc nhận hay loại tin.
+ENRICH_SECONDS = 20.0
+
+
+def build_deadline(settings: Settings, start: float) -> float:
+    """Mốc dừng thu thập của lượt build: COMPANY_DEADLINE_SECONDS nhưng luôn chừa
+    SAVE_MARGIN_SECONDS (không quá 1/6 timeout cứng) trước timeout cứng của job để lưu."""
+    timeout = settings.company_timeout_seconds
+    margin = min(SAVE_MARGIN_SECONDS, timeout / 6)
+    return start + min(settings.company_deadline_seconds, timeout - margin)
 
 
 @dataclass(slots=True)
@@ -289,7 +302,7 @@ async def process_jobs(
     await normalize.classify_unclear(
         merged,
         res.llm,
-        until=until,
+        until=min(until, time.monotonic() + ENRICH_SECONDS),
         max_jobs=s.normalize_llm_max_jobs,
         kv=kv,
     )
@@ -585,7 +598,7 @@ async def process_company(
     started_at = datetime.now(UTC)
     t0 = time.monotonic()
     if deadline is None:
-        deadline = t0 + res.settings.company_deadline_seconds
+        deadline = build_deadline(res.settings, t0)
 
     with structlog.contextvars.bound_contextvars(run_id=str(run_id), company=company_in.name):
         async with res.sessionmaker.begin() as session:

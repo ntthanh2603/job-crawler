@@ -114,11 +114,12 @@ function NumberField({ item, value, onChange, id, invalid }: FieldProps) {
       </div>
       {/* Giới hạn hiện khi rê chuột và trong thông báo lỗi; dưới ô chỉ đổi đơn vị cho dễ đọc. */}
       {extra && <Hint>= {extra}</Hint>}
-      {/* 0 = tự tính theo máy (như open-asm): cho biết máy này đang tính ra bao nhiêu. */}
+      {/* Số đang chạy lúc này trên cả máy (vd. lượt build theo worker đang kết nối, không quá cài
+          đặt mỗi process). */}
       {item.auto_value !== null && (
         <Hint>
-          {valid && n === 0 ? "Tự động" : "0 = tự động"} theo CPU / RAM · máy này: {num(item.auto_value)}
-          {item.unit ? ` ${item.unit}` : ""}
+          Lúc này: {num(item.auto_value)}
+          {item.unit ? ` ${item.unit}` : ""} trên cả máy
         </Hint>
       )}
     </div>

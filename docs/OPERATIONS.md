@@ -64,7 +64,7 @@ Trang **Tổng quan** → "Độ trễ phát hiện tin mới":
 
 | Dấu hiệu                                                     | Nguyên nhân thường gặp                                    | Làm gì                                                       |
 | ------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------ |
-| Hàng đợi poll có việc **chờ**                                | thiếu slot runner poll                                    | tăng `RUNNER_POLL_CONCURRENCY` / thêm runner                 |
+| Hàng đợi poll có việc **chờ**                                | thiếu slot runner poll                                    | thêm worker; chạm "Job poll song song tối đa" thì tăng nó    |
 | Trang Workers: slot HTTP đang dùng sát tổng                  | thiếu worker                                              | thêm worker                                                  |
 | P95 thời gian một lượt poll tăng, request lỗi / quá giờ tăng | proxy chậm / bị chặn                                      | đổi proxy, thêm proxy                                        |
 | P95 > 180 s mà hàng đợi rỗng                                 | lượt poll dài (rate limit 1 req/s / domain × nhiều trang) | giảm `PLAN_MAX_PAGES` hoặc `POLL_INTERVAL_SECONDS` (vd. 120) |
