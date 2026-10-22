@@ -94,6 +94,7 @@ async def web(integration_settings: Settings) -> AsyncIterator[Web]:
                     title_normalized="ky su",
                     company_name=f"Công ty Audit {tag}",
                     description_md="Mô tả",
+                    apply_url=f"https://audit.vn/jobs/{tag}",
                     canonical_source="careers:audit.vn",
                     confidence=0.9,
                 )

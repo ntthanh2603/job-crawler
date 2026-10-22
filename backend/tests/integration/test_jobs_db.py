@@ -537,6 +537,7 @@ async def test_deadline_and_monthly_salary_in_lists_counts_and_exports(
                 "company_name": company.input_name,
                 "title_normalized": "x",
                 "description_md": "JD",
+                "apply_url": "https://x.vn/jobs/1",
                 "canonical_source": "careers:x.vn",
                 "confidence": 0.9,
             }
