@@ -2,7 +2,8 @@
 
 Thu thập tin tuyển dụng đang mở cho ~10.000 doanh nghiệp (chủ yếu tại Việt Nam) từ trang careers,
 ATS và các trang tuyển dụng; xác minh, chuẩn hoá, gộp trùng, lưu PostgreSQL. Mục tiêu: tin mới của
-một doanh nghiệp được thấy trong **3 phút ở P95** (ban ngày).
+một doanh nghiệp được thấy trong **3 phút ở P95** (cả ngày lẫn đêm) và đẩy sang hệ thống ngoài
+qua API tích hợp / webhook ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 
 ![Trang Tổng quan: số việc, doanh nghiệp, lượt chạy và độ trễ phát hiện tin mới](docs/images/overview.png)
 
@@ -33,7 +34,7 @@ flowchart LR
 ```
 
 1. **scheduler** xếp job vào hàng đợi Redis: **build** ban đêm (00:00–06:00, mỗi doanh nghiệp một
-   lần) và **poll** ban ngày (06:00–24:00, mỗi doanh nghiệp 150 giây một lần).
+   lần) và **poll** cả ngày (00:00–24:00, mỗi doanh nghiệp 150 giây một lần).
 2. **runner** chạy pipeline KYC → tìm nguồn → thu thập → chuẩn hoá → xác minh → gộp → lưu. Build
    đọc đủ site và ghi **bộ khung** (3–10 trang / API cần theo dõi); poll chỉ đọc theo bộ khung, mở
    trang của tin mới, bộ khung hỏng thì build lại ngay.

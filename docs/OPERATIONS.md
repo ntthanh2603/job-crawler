@@ -30,7 +30,7 @@ task down
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Doanh nghiệp mới (thêm tay / nạp CSV) | build ngay, bất kể giờ                                                                                      |
 | Đêm `BUILD_WINDOW` 00:00–06:00        | build mỗi doanh nghiệp một lần: đọc đủ site, dựng lại bộ khung, đóng việc đã gỡ                             |
-| Ngày `POLL_WINDOW` 06:00–24:00        | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới                                                   |
+| Cả ngày `POLL_WINDOW` 00:00–24:00     | poll mỗi 150 s ± 10 s theo bộ khung, chỉ mở trang tin mới (đêm chạy song song build)                        |
 | Poll lỗi (bộ khung hỏng)              | build lại ngay; vẫn hỏng thì thử lại sau 2 giờ (`REBUILD_ON_ERROR` tắt: chờ build đêm, nguồn khác vẫn poll) |
 | Trang tuyển dụng có tin mới           | poll ngay doanh nghiệp có profile đó (đang có lượt poll thì lượt đó đọc tin)                                |
 
@@ -58,9 +58,10 @@ Trang **Tổng quan** → "Độ trễ phát hiện tin mới":
 - **Cửa sổ phát hiện** P95 phải ≤ 180 s. Bình thường ≈ 0,95 × 150 + 10–20 ≈ 155–165 s.
 - **Độ tươi**: tuổi lượt poll đủ gần nhất của từng doanh nghiệp; "quá hạn" > 0 là có doanh nghiệp
   chưa được poll kịp.
-- Chỉ tính trong khung poll. Tin đăng 00:00–06:00 được thấy ở lượt build đêm của doanh nghiệp hoặc
-  lượt poll đầu lúc 06:00. Muốn ≤ 3 phút cả đêm: đặt `POLL_WINDOW` 00:00–24:00 và thêm năng lực cho
-  cả poll lẫn build ban đêm (DEPLOY.md).
+- Chỉ tính trong khung poll — mặc định cả ngày (`POLL_WINDOW` 00:00–24:00), nên ban đêm cần năng lực
+  cho cả poll lẫn build (DEPLOY.md mục 4). Lượt poll trùng lúc doanh nghiệp đang build thì bỏ (một lần
+  mỗi đêm, cửa sổ của lượt sau dài thêm ~1–2 phút). Thu hẹp khung thì tin đăng ngoài khung chỉ được
+  thấy ở lượt build đêm hoặc lượt poll đầu của khung.
 
 | Dấu hiệu                                                     | Nguyên nhân thường gặp                                    | Làm gì                                                       |
 | ------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------------------------ |

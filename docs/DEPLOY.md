@@ -3,8 +3,8 @@
 Chạy ở đâu, bao nhiêu bản, và tính lại thế nào khi số liệu thật khác. Kiến trúc:
 [ARCHITECTURE.md](ARCHITECTURE.md); vận hành: [OPERATIONS.md](OPERATIONS.md).
 
-Ràng buộc mọi mức đều phải giữ: **tin mới thấy trong ≤ 3 phút ở P95** (ban ngày), bộ khung ≤ 10
-trang mỗi doanh nghiệp, build lại mọi doanh nghiệp trong 6 giờ đêm.
+Ràng buộc mọi mức đều phải giữ: **tin mới thấy trong ≤ 3 phút ở P95** (24/7: poll cả đêm, song
+song build), bộ khung ≤ 10 trang mỗi doanh nghiệp, build lại mọi doanh nghiệp trong 6 giờ đêm.
 
 ## 1. Triển khai
 
@@ -133,7 +133,7 @@ khi tính dư), `c` = CPU một lượt (0,14 s).
 | Lượt poll / giây                      | N / T                                                         |
 | Lượt poll cùng lúc (slot runner poll) | N / T × d                                                     |
 | CPU runner poll                       | N / T × c                                                     |
-| Request / giây ban ngày               | N / T × F                                                     |
+| Request poll / giây (cả ngày)         | N / T × F                                                     |
 | Slot worker HTTP                      | request / giây × 0,7 s × 1,5 (dư)                             |
 | CPU gateway                           | request / giây × 6 ms                                         |
 | Lệnh Redis / giây                     | 50 × (lượt poll + request) / giây                             |
@@ -166,13 +166,14 @@ Ghi chú:
 
 - Bảng tính dè dặt theo 10 doanh nghiệp lớn; doanh nghiệp nhỏ ít trang hơn nên rẻ hơn. Đo lại ở mức
   hiện tại (mục 6) rồi nhân theo tỉ lệ trước khi lên mức sau.
-- Ban ngày tải nằm ở poll; ban đêm ở build (poll tắt): request build ban đêm ~N / 21.600 × 130 (mức L:
-  ~60 / giây) nhưng tốn render và LLM. LLM (vLLM Qwen) theo GPU: ban ngày xác minh tin mới, ban đêm
+- Poll chạy cả ngày (`POLL_WINDOW` 00:00–24:00); ban đêm cộng thêm build: request build ~N / 21.600 ×
+  130 (mức L: ~60 / giây, ~10–15% tải poll) nhưng tốn render và LLM. LLM (vLLM Qwen) theo GPU: ban ngày xác minh tin mới, ban đêm
   KYC + tìm trang careers + xác minh — đặt `LLM_REQUESTS_PER_MINUTE` và `LLM_CLUSTER_CONCURRENCY`
   (số lời gọi đồng thời của cả cụm, lời gọi vượt mức xếp hàng chờ) theo năng lực; LLM chậm làm build
   kéo dài.
-- Muốn P95 ≤ 3 phút cả đêm (`POLL_WINDOW` 00:00–24:00): năng lực ban đêm = poll (như ban ngày) + build;
-  thêm `runner-build` và máy render, giữ nguyên số máy HTTP (+ ~15%).
+- Năng lực ban đêm = poll (như ban ngày) + build: cột "Build cùng lúc" là `runner-build` / máy render
+  cần thêm ngoài phần poll, máy HTTP dư ~15%. Thu hẹp `POLL_WINDOW` (vd. 06:00–24:00) thì bỏ được phần
+  dư đó nhưng tin đăng ban đêm chỉ thấy ở lượt build hoặc lượt poll đầu buổi sáng.
 - Trang tuyển dụng (`runner --role boards`): 1–2 bản ở mọi mức; trang chặn IP cần pool worker có proxy
   dân cư (`FETCH_ROUTES`).
 

@@ -22,7 +22,7 @@ def test_defaults_match_compose() -> None:
     assert s.queue_names == ("jobcrawler-build", "jobcrawler-poll", "jobcrawler-boards")
     assert (s.build_window, s.poll_window, s.poll_interval_seconds) == (
         "00:00-06:00",
-        "06:00-24:00",
+        "00:00-24:00",
         150,
     )
     assert s.gateway_port == 50051

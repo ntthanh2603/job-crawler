@@ -8,7 +8,7 @@ Postgres, và giải thích lý do của từng lựa chọn. Chi tiết từng 
 ## Ý chính
 
 - **Có hai loại lượt.** _Build_ chạy ban đêm, đọc đủ cả site nên đắt, và ghi lại **bộ khung**.
-  _Poll_ chạy ban ngày, mỗi 150 s, chỉ đọc theo bộ khung nên rẻ.
+  _Poll_ chạy cả ngày (kể cả lúc build đêm), mỗi 150 s, chỉ đọc theo bộ khung nên rẻ.
 - **Bộ khung ghi "đi tới đâu", không ghi "bóc thế nào".** Nó gồm URL các trang danh sách, các API
   và cách phân trang của chúng, cùng mã các tin đã thấy. Bộ khung không chứa xpath, selector hay HTML.
 - **Dữ liệu được bóc bằng rule chung cho mọi site**, chạy lại ở mỗi lượt. LLM chỉ là bước cuối khi
@@ -64,7 +64,7 @@ có tin (lúc build không có tin nào) được thấy ở lượt build đêm
 
 |                              | Build                                                    | Poll                                                       |
 | ---------------------------- | -------------------------------------------------------- | ---------------------------------------------------------- |
-| Khung giờ (`CRAWL_TIMEZONE`) | 00:00–06:00 (`BUILD_WINDOW`)                             | 06:00–24:00 (`POLL_WINDOW`)                                |
+| Khung giờ (`CRAWL_TIMEZONE`) | 00:00–06:00 (`BUILD_WINDOW`)                             | 00:00–24:00 (`POLL_WINDOW`)                                |
 | Nhịp                         | mỗi đêm một lượt, rải đều theo pha cố định (hash của id) | mỗi 150 s ± 10 s                                           |
 | Chạy ngay, ngoài nhịp thường | doanh nghiệp mới; bộ khung hỏng                          | trang tuyển dụng vừa có tin mới của doanh nghiệp (`board`) |
 | Người dùng bấm               | "Build…" / "Build ngay" (trang Doanh nghiệp), "Build lại bộ khung" (một doanh nghiệp) | "Poll ngay" (trang một doanh nghiệp)                        |
@@ -321,7 +321,7 @@ nguồn của nó trong `job_postings`.
 **Đóng việc:** chỉ xảy ra khi một lượt đọc trọn nguồn mà không còn thấy tin. Khi đó tin chuyển
 `removed`, và việc được đóng nếu không còn bản tin nào khác đang mở.
 
-## 8. Poll ngày
+## 8. Poll
 
 Điểm vào: `crawl_service.poll_company` → `sources/careers.py: _poll`.
 

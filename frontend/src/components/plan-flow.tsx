@@ -56,7 +56,7 @@ function windowText(value: string) {
 
 const BANDS = {
   build: { className: "bg-neutral-tone/22 text-neutral-ink", icon: Moon, label: "Build đêm" },
-  poll: { className: "bg-info/18 text-info-ink", icon: Sun, label: "Poll ngày" },
+  poll: { className: "bg-info/18 text-info-ink", icon: Sun, label: "Poll" },
 } as const
 
 /** Thanh 24 giờ (giờ CRAWL_TIMEZONE): khung build đêm, khung poll ngày, bây giờ và lượt build gần nhất. */
@@ -140,7 +140,7 @@ export function CrawlDay({
         <span className="inline-flex items-center gap-1.5">
           <span className="size-2.5 rounded-sm bg-info/40" aria-hidden />
           <span>
-            <span className="font-medium text-foreground">Poll ngày {windowText(w.poll)}</span>: mỗi {interval}, chỉ theo bộ khung
+            <span className="font-medium text-foreground">Poll {windowText(w.poll)}</span>: mỗi {interval}, chỉ theo bộ khung
           </span>
         </span>
         {built !== null && (

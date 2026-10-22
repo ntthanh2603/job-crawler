@@ -131,13 +131,15 @@ class Settings(BaseSettings):
     # --- Lịch thu thập ---------------------------------------------------------------------------
     # Ban đêm (BUILD_WINDOW) mỗi doanh nghiệp được build lại một lần, rải đều trong khung: KYC (nếu
     # hết hạn), tìm nguồn, đọc đủ danh sách + chi tiết, rồi ghi "bộ khung" (`crawl_plans`: trang
-    # danh sách, API, trang danh mục của từng nguồn). Ban ngày (POLL_WINDOW) chỉ poll đúng các
-    # trang/API trong bộ khung mỗi POLL_INTERVAL_SECONDS, tải chi tiết tin mới; poll lỗi (trang
-    # chính hỏng, cấu trúc đổi, lỗi tạm lặp lại POLL_MAX_FAILURES lần) thì build lại ngay.
-    # Khung giờ dạng "HH:MM-HH:MM" theo CRAWL_TIMEZONE; khung qua nửa đêm được ("22:00-05:00").
+    # danh sách, API, trang danh mục của từng nguồn). Trong POLL_WINDOW (mặc định cả ngày, kể cả
+    # lúc build đêm: P95 ≤ 3 phút 24/7 cho hệ thống ngoài) chỉ poll đúng các trang/API trong bộ
+    # khung mỗi POLL_INTERVAL_SECONDS, tải chi tiết tin mới; poll lỗi (trang chính hỏng, cấu trúc
+    # đổi, lỗi tạm lặp lại POLL_MAX_FAILURES lần) thì build lại ngay. Lượt poll của doanh nghiệp
+    # đang build thì bỏ (khoá doanh nghiệp). Khung giờ dạng "HH:MM-HH:MM" theo CRAWL_TIMEZONE;
+    # khung qua nửa đêm được ("22:00-05:00").
     crawl_timezone: str = "Asia/Ho_Chi_Minh"
     build_window: str = "00:00-06:00"
-    poll_window: str = "06:00-24:00"
+    poll_window: str = "00:00-24:00"
     # P95 độ trễ phát hiện tin mới ≈ chu kỳ poll + thời gian một lượt poll (mục tiêu ≤ 3 phút).
     poll_interval_seconds: float = Field(default=150, ge=10)
     # Lệch ngẫu nhiên ± chừng này giây để các doanh nghiệp không dồn vào cùng một giây.

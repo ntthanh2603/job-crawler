@@ -11,9 +11,9 @@ các nguồn — trong PostgreSQL, xem / export qua giao diện web.
 
 | Yêu cầu                                                 | Cách đạt                                                                                                                            |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Tin mới thấy trong **≤ 3 phút ở P95** (ban ngày)        | poll mỗi doanh nghiệp mỗi 150 s; một lượt poll ≤ ~20 s → cửa sổ phát hiện ≤ ~170 s                                                  |
+| Tin mới thấy trong **≤ 3 phút ở P95** (24/7)            | poll mỗi doanh nghiệp mỗi 150 s; một lượt poll ≤ ~20 s → cửa sổ phát hiện ≤ ~170 s                                                  |
 | **Đêm**: dựng bộ khung mỗi doanh nghiệp, **3–10 trang** | build 00:00–06:00 đọc đủ site, ghi các trang / API cần theo dõi, chia ≤ 10 trang / doanh nghiệp, mỗi nguồn ≥ 3 trang khi site có đủ |
-| **Ngày**: chỉ gọi theo bộ khung, lỗi mới build lại      | poll 06:00–24:00 chỉ đọc trang / API trong bộ khung, mở trang chi tiết của tin mới; bộ khung hỏng → build lại ngay                  |
+| **Poll**: chỉ gọi theo bộ khung, lỗi mới build lại      | poll 00:00–24:00 chỉ đọc trang / API trong bộ khung, mở trang chi tiết của tin mới; bộ khung hỏng → build lại ngay                  |
 | **Proxy**: worker tải danh sách về, xoay dần            | gateway gửi danh sách proxy chung xuống worker; worker giữ một proxy mỗi domain 10 phút rồi chuyển proxy kế tiếp                    |
 
 Ba loại nguồn:
@@ -199,11 +199,13 @@ sitemap + số trang API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday:
 thứ tự: mỗi nguồn tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho
 nguồn careers (site thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
 
-## 4. Poll ngày (`modules/crawl/crawl_service.poll_company`)
+## 4. Poll (`modules/crawl/crawl_service.poll_company`)
 
-Trong `POLL_WINDOW` (06:00–24:00), mỗi doanh nghiệp mỗi `POLL_INTERVAL_SECONDS` (150 s) ±
-`POLL_JITTER_SECONDS` (10 s). Ngoài khung không poll: tin đăng ban đêm được lượt build đêm hoặc lượt
-poll đầu tiên lúc 06:00 thấy.
+Trong `POLL_WINDOW` (mặc định 00:00–24:00: P95 ≤ 3 phút cả đêm, cho hệ thống ngoài), mỗi doanh
+nghiệp mỗi `POLL_INTERVAL_SECONDS` (150 s) ± `POLL_JITTER_SECONDS` (10 s); ban đêm poll chạy song
+song build, lượt poll của doanh nghiệp đang build thì bỏ (khoá doanh nghiệp, một lượt mỗi đêm). Thu
+hẹp khung (vd. 06:00–24:00) thì ngoài khung không poll: tin đăng ban đêm được lượt build đêm hoặc
+lượt poll đầu tiên của khung thấy.
 
 1. Nạp bộ khung các nguồn `active` và (nguồn, mã, URL) các tin đã lưu — không đọc nội dung tin.
 2. Mỗi nguồn đọc tối đa `pages` trang: **API trước** (gọi thẳng bằng HTTP, không mở trình duyệt),
