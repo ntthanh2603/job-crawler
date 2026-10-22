@@ -39,6 +39,31 @@ def test_parse_spec_columns() -> None:
     assert report.errors == report.warnings == []
 
 
+def test_parse_integration_columns() -> None:
+    """CSV của hệ thống ngoài: mã bên ngoài, trang tuyển dụng, cột theo dõi; trùng theo mã (hai
+    mã cùng tên / MST vẫn là hai dòng)."""
+    report = parse_companies_csv(
+        "external_id,name,tax_code,website,careers_url,note,active\n"
+        "C-001,VNG,0303490096,vng.com.vn,https://career.vng.com.vn,,\n"
+        "C-002,VNG,0303490096,,,chi nhánh,0\n"
+        "C-001,VNG lặp,,,,,\n"
+        "có dấu cách,ACB,,,,,\n"
+        "C-003,MISA,,,không phải url,,không\n"
+    )
+    assert [(r.external_id, r.active) for r in report.rows] == [
+        ("C-001", True),
+        ("C-002", False),
+        ("C-003", False),
+    ]
+    assert report.rows[0].company.careers_url == "https://career.vng.com.vn"
+    assert report.rows[2].company.careers_url is None
+    assert report.duplicates == 1
+    assert report.errors == [
+        "dòng 5: mã 'có dấu cách' không hợp lệ (chữ, số, . _ : @ -; ≤ 128 ký tự)"
+    ]
+    assert report.warnings == ["dòng 6: careers_url 'không phải url' không hợp lệ, bỏ qua"]
+
+
 def test_parse_excel_vietnamese_headers_and_semicolons() -> None:
     report = parse_companies_csv(
         "Tên doanh nghiệp;MST;Website;Ghi chú\n"

@@ -237,6 +237,7 @@ async def build_company(
         name=company.input_name,
         tax_code=company.tax_code,
         website=company.input_website,
+        careers_url=company.input_careers_url,
         note=company.note,
     )
     # Build đêm và build lại khi bộ khung hỏng: tìm nguồn lại từ đầu. Lượt build tiếp dùng cache

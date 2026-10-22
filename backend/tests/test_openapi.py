@@ -23,6 +23,8 @@ from jobcrawler.modules.crawl import sla_service
 from jobcrawler.modules.crawl.crawl_schema import FreshnessOut, PollStatsOut
 from jobcrawler.modules.evaluate import evaluate_service
 from jobcrawler.modules.evaluate.evaluate_schema import CompanyEvalOut, SourceEvalOut
+from jobcrawler.modules.integration import refs_service
+from jobcrawler.modules.integration.integration_schema import CompanyUpsertOut
 from jobcrawler.modules.jobs.jobs_schema import SourceReviewOut
 from jobcrawler.modules.overview import stats_service
 from jobcrawler.modules.overview.overview_schema import (
@@ -119,6 +121,10 @@ def test_response_fields_are_required(spec: dict) -> None:
         "SettingsUpdate",
         "Body_post_import",
         "Body_post_eval",
+        "CompanyUpsertIn",
+        "CompanyBatchItemIn",
+        "ApiClientIn",
+        "ApiClientUpdateIn",
     }
     fastapi_errors = {"HTTPValidationError", "ValidationError"}
     optional = {
@@ -151,6 +157,7 @@ MIRRORS: list[tuple[type[BaseModel], type, set[str]]] = [
     (LLMStatsOut, llm_metrics.LLMStats, set()),
     (LLMPromptStatsOut, llm_metrics.LLMPromptStats, set()),
     (LLMHourOut, llm_metrics.LLMHour, set()),
+    (CompanyUpsertOut, refs_service.RefResult, set()),
 ]
 
 

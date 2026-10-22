@@ -18,6 +18,7 @@ from jobcrawler.modules.companies.companies_schema import (
     CompanyCreateIn,
     CompanyDetailOut,
     CompanyItem,
+    CompanyRefOut,
     EnqueueIn,
     EnqueuePreviewOut,
     EnqueueResultOut,
@@ -65,6 +66,7 @@ async def get_company(request: Request, company_id: UUID) -> CompanyDetailOut:
     return CompanyDetailOut(
         company=CompanyEntity.model_validate(c),
         input_website=c.input_website,
+        input_careers_url=c.input_careers_url,
         note=c.note,
         created_at=c.created_at,
         kyc_evidence=c.kyc_evidence,
@@ -83,6 +85,15 @@ async def get_company(request: Request, company_id: UUID) -> CompanyDetailOut:
                 indexed_at=p.indexed_at,
             )
             for p in d.profiles
+        ],
+        refs=[
+            CompanyRefOut(
+                client_id=r.client_id,
+                client_name=r.client_name,
+                external_id=r.external_id,
+                active=r.active,
+            )
+            for r in d.refs
         ],
         active_jobs=d.active_jobs,
         inactive_jobs=d.inactive_jobs,
@@ -136,6 +147,7 @@ async def post_company(request: Request, body: CompanyCreateIn) -> CompanyCreate
             body.name,
             tax_code=body.tax_code,
             website=body.website,
+            careers_url=body.careers_url,
             note=body.note,
             enqueue=body.enqueue,
         )

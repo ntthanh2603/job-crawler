@@ -30,6 +30,85 @@ export type AliasOut = {
   kind: string | null;
 };
 
+export type ApiKeyOut = {
+  created_at: string;
+  created_by: string | null;
+  id: string;
+  last_used_at: string | null;
+  prefix: string;
+  revoked_at: string | null;
+};
+
+export type ApiClientDetailOut = {
+  active_keys: number;
+  all_companies: boolean;
+  companies: number;
+  created_at: string;
+  created_by: string | null;
+  id: string;
+  include_description: boolean;
+  keys: ApiKeyOut[];
+  last_used_at: string | null;
+  name: string;
+  scopes: string[];
+};
+
+export type ApiClientInScopesItem = typeof ApiClientInScopesItem[keyof typeof ApiClientInScopesItem];
+
+
+export const ApiClientInScopesItem = {
+  'companies:write': 'companies:write',
+  'jobs:read': 'jobs:read',
+} as const;
+
+export type ApiClientIn = {
+  /** Đọc mọi việc làm (không chỉ doanh nghiệp đã đẩy) */
+  all_companies?: boolean;
+  /** Gửi kèm mô tả / yêu cầu / quyền lợi */
+  include_description?: boolean;
+  /**
+     * Tên hệ thống ngoài
+     * @minLength 1
+     * @maxLength 100
+     */
+  name: string;
+  /** companies:write: đẩy doanh nghiệp; jobs:read: đọc việc làm / feed */
+  scopes?: ApiClientInScopesItem[];
+};
+
+export type ApiClientOut = {
+  active_keys: number;
+  all_companies: boolean;
+  companies: number;
+  created_at: string;
+  created_by: string | null;
+  id: string;
+  include_description: boolean;
+  last_used_at: string | null;
+  name: string;
+  scopes: string[];
+};
+
+/**
+ * Chỉ trường có mặt được đổi.
+ */
+export type ApiClientUpdateIn = {
+  all_companies?: boolean | null;
+  include_description?: boolean | null;
+  name?: string | null;
+  scopes?: ('companies:write' | 'jobs:read')[] | null;
+};
+
+/**
+ * Khoá chỉ hiện một lần: hệ thống ngoài gửi `Authorization: Bearer <key>`.
+ */
+export type ApiKeyCreatedOut = {
+  created_at: string;
+  id: string;
+  key: string;
+  prefix: string;
+};
+
 export type AuditEventOutChanges = { [key: string]: unknown } | null;
 
 export type AuditEventOutMetadata = { [key: string]: unknown } | null;
@@ -134,6 +213,11 @@ export type BodyPostImport = {
   file: Blob | File;
 };
 
+export type BodyPostIntegrationCompaniesImport = {
+  /** CSV UTF-8: external_id, name, tax_code, website, careers_url, note, active */
+  file: Blob;
+};
+
 export type ChartTotalsOut = {
   active_jobs: number;
   companies: number;
@@ -197,6 +281,71 @@ export type ChartsOut = {
   salary_bands: [string, number][];
   top_companies: TopCompanyOut[];
   totals: ChartTotalsOut;
+};
+
+export type CompanyBatchItemIn = {
+  /** false: ngừng thu thập (khi mọi mã của doanh nghiệp đều tắt) */
+  active?: boolean;
+  /** Trang tuyển dụng hoặc bảng ATS (nếu biết): tìm nguồn thử trước */
+  careers_url?: string | null;
+  /**
+     * Mã doanh nghiệp bên hệ thống ngoài: chữ, số, `. _ : @ -`, ≤ 128 ký tự.
+     * @minLength 1
+     * @maxLength 128
+     */
+  external_id: string;
+  /**
+     * Tên doanh nghiệp
+     * @minLength 1
+     * @maxLength 300
+     */
+  name: string;
+  note?: string | null;
+  /** Mã số thuế (10 số, chi nhánh thêm -3 số) */
+  tax_code?: string | null;
+  /** Website / domain */
+  website?: string | null;
+};
+
+export type CompanyBatchIn = {
+  /**
+     * @minItems 1
+     * @maxItems 1000
+     */
+  items: CompanyBatchItemIn[];
+};
+
+export type CompanyUpsertOutResult = typeof CompanyUpsertOutResult[keyof typeof CompanyUpsertOutResult];
+
+
+export const CompanyUpsertOutResult = {
+  created: 'created',
+  linked: 'linked',
+  updated: 'updated',
+  unchanged: 'unchanged',
+  error: 'error',
+} as const;
+
+/**
+ * Kết quả một doanh nghiệp: `created` (doanh nghiệp mới), `linked` (gắn mã vào doanh nghiệp
+ * đã có sẵn), `updated` / `unchanged` (mã đã có), `error` (không ghi, xem `error`).
+ */
+export type CompanyUpsertOut = {
+  active: boolean;
+  company_id: string | null;
+  error: string | null;
+  external_id: string;
+  result: CompanyUpsertOutResult;
+  warnings: string[];
+};
+
+export type CompanyBatchOut = {
+  created: number;
+  errors: number;
+  linked: number;
+  results: CompanyUpsertOut[];
+  unchanged: number;
+  updated: number;
 };
 
 /**
@@ -339,6 +488,8 @@ export type CompanyCrawlOut = {
 };
 
 export type CompanyCreateIn = {
+  /** Trang tuyển dụng / bảng ATS biết sẵn (tìm nguồn thử trước). */
+  careers_url?: string | null;
   /** Đưa vào hàng đợi build ngay. */
   enqueue?: boolean;
   /**
@@ -401,6 +552,16 @@ export type ProfileOut = {
   website: string | null;
 };
 
+/**
+ * Mã của doanh nghiệp bên một hệ thống ngoài (trang Tích hợp).
+ */
+export type CompanyRefOut = {
+  active: boolean;
+  client_id: string;
+  client_name: string;
+  external_id: string;
+};
+
 export type CompanyDetailOut = {
   active_jobs: number;
   aliases: AliasOut[];
@@ -408,10 +569,12 @@ export type CompanyDetailOut = {
   created_at: string;
   failed_pages: FailedPageItem[];
   inactive_jobs: number;
+  input_careers_url: string | null;
   input_website: string | null;
   kyc_evidence: unknown;
   note: string | null;
   profiles: ProfileOut[];
+  refs: CompanyRefOut[];
   rejected_total: number;
   runs_total: number;
 };
@@ -429,6 +592,22 @@ export type CompanyEvalOut = {
   run_status: string | null;
 };
 
+/**
+ * Nạp CSV: kết quả từng dòng hợp lệ, cộng lỗi / cảnh báo theo dòng của file.
+ */
+export type CompanyImportOut = {
+  created: number;
+  csv_errors: string[];
+  csv_warnings: string[];
+  duplicates: number;
+  errors: number;
+  linked: number;
+  results: CompanyUpsertOut[];
+  rows: number;
+  unchanged: number;
+  updated: number;
+};
+
 export type CompanyItem = {
   active_jobs: number;
   company: CompanyEntity;
@@ -437,6 +616,28 @@ export type CompanyItem = {
   last_incomplete: string[];
   last_started: string | null;
   last_status: string | null;
+};
+
+/**
+ * Một doanh nghiệp của hệ thống ngoài (như một dòng CSV). MST / website / trang tuyển dụng sai
+ * định dạng thì bỏ trường đó (cảnh báo trong kết quả), không từ chối cả doanh nghiệp.
+ */
+export type CompanyUpsertIn = {
+  /** false: ngừng thu thập (khi mọi mã của doanh nghiệp đều tắt) */
+  active?: boolean;
+  /** Trang tuyển dụng hoặc bảng ATS (nếu biết): tìm nguồn thử trước */
+  careers_url?: string | null;
+  /**
+     * Tên doanh nghiệp
+     * @minLength 1
+     * @maxLength 300
+     */
+  name: string;
+  note?: string | null;
+  /** Mã số thuế (10 số, chi nhánh thêm -3 số) */
+  tax_code?: string | null;
+  /** Website / domain */
+  website?: string | null;
 };
 
 /**
@@ -635,10 +836,48 @@ export type ImportOutcomeOut = {
   warnings: string[];
 };
 
-export type JobHtml = {
-  benefits: string;
-  description: string;
-  requirements: string;
+export type IntegrationCompanyOutCrawlState = typeof IntegrationCompanyOutCrawlState[keyof typeof IntegrationCompanyOutCrawlState] | null;
+
+
+export const IntegrationCompanyOutCrawlState = {
+  new: 'new',
+  ready: 'ready',
+  no_sources: 'no_sources',
+  broken: 'broken',
+  paused: 'paused',
+} as const;
+
+export type IntegrationCompanyOutKycStatus = typeof IntegrationCompanyOutKycStatus[keyof typeof IntegrationCompanyOutKycStatus] | null;
+
+
+export const IntegrationCompanyOutKycStatus = {
+  verified: 'verified',
+  ambiguous: 'ambiguous',
+  not_found: 'not_found',
+} as const;
+
+/**
+ * Trạng thái thu thập của một doanh nghiệp theo mã bên ngoài.
+ */
+export type IntegrationCompanyOut = {
+  active: boolean;
+  active_jobs: number;
+  careers_url: string | null;
+  company_id: string;
+  crawl_state: IntegrationCompanyOutCrawlState;
+  external_id: string;
+  kyc_status: IntegrationCompanyOutKycStatus;
+  last_build_at: string | null;
+  last_error: string | null;
+  last_poll_ok_at: string | null;
+  legal_name: string | null;
+  linked_at: string;
+  name: string;
+  next_poll_at: string | null;
+  primary_domain: string | null;
+  sources: number;
+  tax_code: string | null;
+  website: string | null;
 };
 
 export type JobLevel = typeof JobLevel[keyof typeof JobLevel];
@@ -697,6 +936,93 @@ export const WorkMode = {
   remote: 'remote',
   unknown: 'unknown',
 } as const;
+
+/**
+ * Việc làm như `JobOut`, kèm id dòng `jobs` (khoá để bên nhận upsert) và mã doanh nghiệp bên
+ * ngoài của client. `status` đã tính hết hạn theo `expires_at`. Client tắt mô tả thì
+ * `description_md` rỗng, `requirements_md` / `benefits_md` null.
+ */
+export type IntegrationJobOut = {
+  apply_url: string | null;
+  benefits_md: string | null;
+  canonical_source: string;
+  categories: string[];
+  company_external_ids: string[];
+  company_id: string;
+  company_name: string;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  confidence: number;
+  description_md: string;
+  education: EducationLevel;
+  employment_type: EmploymentType;
+  experience_years: ExperienceYears | null;
+  expires_at: string | null;
+  first_seen_at: string;
+  id: string;
+  last_seen_at: string;
+  level: JobLevel;
+  locations: Location[];
+  openings: number | null;
+  posted_at: string | null;
+  requirements_md: string | null;
+  salary: Salary | null;
+  skills: string[];
+  source_urls: string[];
+  status: JobStatus;
+  title: string;
+  title_normalized: string;
+  updated_at: string;
+  verification_reasons: string[];
+  work_mode: WorkMode;
+};
+
+/**
+ * Loại sự kiện việc làm (`job_events`, modules/integration/feed_service.py).
+ */
+export type JobEventType = typeof JobEventType[keyof typeof JobEventType];
+
+
+export const JobEventType = {
+  created: 'created',
+  updated: 'updated',
+  closed: 'closed',
+  reopened: 'reopened',
+  deleted: 'deleted',
+} as const;
+
+/**
+ * Một sự kiện: việc `job_id` vừa được tạo / đổi / đóng / mở lại / xoá. `job` là trạng thái
+ * hiện tại của việc lúc đọc (không phải lúc xảy ra) — bên nhận upsert theo `job.id`; null khi
+ * việc đã bị xoá.
+ */
+export type JobEventOut = {
+  company_id: string;
+  job: IntegrationJobOut | null;
+  job_id: string;
+  occurred_at: string;
+  seq: number;
+  type: JobEventType;
+};
+
+/**
+ * Một trang feed thay đổi. Gọi tiếp với `cursor=next_cursor`; `has_more=false` thì đã tới
+ * `head` (seq mới nhất), lượt sau có thể chờ (`wait`).
+ */
+export type JobChangesOut = {
+  events: JobEventOut[];
+  has_more: boolean;
+  head: string;
+  next_cursor: string;
+};
+
+export type JobHtml = {
+  benefits: string;
+  description: string;
+  requirements: string;
+};
 
 /**
  * `JobOut` kèm id dòng `jobs` và kết quả kiểm tay (để giao diện/API dẫn link).
@@ -762,6 +1088,16 @@ export type JobDetailOut = {
   job: JobItem;
   postings: PostingOut[];
   review: ReviewOut | null;
+};
+
+/**
+ * Một trang snapshot việc làm (theo id tăng dần). `next_cursor` null: hết. `feed_cursor` chỉ
+ * có ở trang đầu: đọc feed thay đổi từ mốc này sau khi lấy hết snapshot.
+ */
+export type JobSnapshotOut = {
+  data: IntegrationJobOut[];
+  feed_cursor: string | null;
+  next_cursor: string | null;
 };
 
 /**
@@ -1229,6 +1565,16 @@ export type OverviewOut = {
   stats: StatsOut;
 };
 
+export type PageOutApiClientOut = {
+  data: ApiClientOut[];
+  exact: boolean;
+  hasNextPage: boolean;
+  limit: number;
+  page: number;
+  pageCount: number;
+  total: number;
+};
+
 export type PageOutBoardRunOut = {
   data: BoardRunOut[];
   exact: boolean;
@@ -1251,6 +1597,16 @@ export type PageOutCompanyItem = {
 
 export type PageOutFetchOut = {
   data: FetchOut[];
+  exact: boolean;
+  hasNextPage: boolean;
+  limit: number;
+  page: number;
+  pageCount: number;
+  total: number;
+};
+
+export type PageOutIntegrationCompanyOut = {
+  data: IntegrationCompanyOut[];
   exact: boolean;
   hasNextPage: boolean;
   limit: number;
@@ -1416,6 +1772,23 @@ export type RecentReview = {
   title: string;
 };
 
+export type RefreshOutKind = typeof RefreshOutKind[keyof typeof RefreshOutKind];
+
+
+export const RefreshOutKind = {
+  poll: 'poll',
+  build: 'build',
+} as const;
+
+/**
+ * `poll` (đọc lại bộ khung) hoặc `build` (chưa có bộ khung dùng được); `queued=false`: đã có
+ * lượt đang chờ / chạy, hoặc vừa gọi trong `REFRESH_SECONDS` giây.
+ */
+export type RefreshOut = {
+  kind: RefreshOutKind;
+  queued: boolean;
+};
+
 export type ReviewIn = {
   correct: boolean;
   note?: string | null;
@@ -1564,6 +1937,36 @@ export type SortOrder = typeof SortOrder[keyof typeof SortOrder];
 export const SortOrder = {
   ASC: 'ASC',
   DESC: 'DESC',
+} as const;
+
+export type GetApiClientsParams = {
+/**
+ * Tìm kiếm (cột tìm tuỳ endpoint)
+ */
+search?: string;
+/**
+ * Trang, từ 1 (quá trang cuối thì trả trang cuối)
+ * @minimum 1
+ */
+page?: number;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * Chiều sắp xếp theo `sortBy`
+ */
+sortOrder?: SortOrder;
+sortBy?: GetApiClientsSortBy;
+};
+
+export type GetApiClientsSortBy = typeof GetApiClientsSortBy[keyof typeof GetApiClientsSortBy];
+
+
+export const GetApiClientsSortBy = {
+  created_at: 'created_at',
+  name: 'name',
 } as const;
 
 export type GetAuditParams = {
@@ -1997,6 +2400,534 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+/**
+ * Các hệ thống ngoài dùng API tích hợp.
+ * @summary Get Api Clients
+ */
+export const getApiClients = (
+    params?: GetApiClientsParams,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<PageOutApiClientOut>(
+      {url: `/api/api-clients`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+
+export const getGetApiClientsQueryKey = (params?: GetApiClientsParams,) => {
+    return [
+    `/api/api-clients`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetApiClientsQueryOptions = <TData = Awaited<ReturnType<typeof getApiClients>>, TError = HTTPValidationError>(params?: GetApiClientsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApiClientsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiClients>>> = ({ signal }) => getApiClients(params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetApiClientsQueryResult = NonNullable<Awaited<ReturnType<typeof getApiClients>>>
+export type GetApiClientsQueryError = HTTPValidationError
+
+
+export function useGetApiClients<TData = Awaited<ReturnType<typeof getApiClients>>, TError = HTTPValidationError>(
+ params: undefined |  GetApiClientsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiClients>>,
+          TError,
+          Awaited<ReturnType<typeof getApiClients>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiClients<TData = Awaited<ReturnType<typeof getApiClients>>, TError = HTTPValidationError>(
+ params?: GetApiClientsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiClients>>,
+          TError,
+          Awaited<ReturnType<typeof getApiClients>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiClients<TData = Awaited<ReturnType<typeof getApiClients>>, TError = HTTPValidationError>(
+ params?: GetApiClientsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Api Clients
+ */
+
+export function useGetApiClients<TData = Awaited<ReturnType<typeof getApiClients>>, TError = HTTPValidationError>(
+ params?: GetApiClientsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClients>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetApiClientsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * @summary Post Api Client
+ */
+export const postApiClient = (
+    apiClientIn: ApiClientIn,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ApiClientDetailOut>(
+      {url: `/api/api-clients`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: apiClientIn, signal
+    },
+      );
+    }
+
+
+
+
+export const getPostApiClientMutationKey = () => ['postApiClient'] as const;
+
+export const getPostApiClientMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClient>>, TError,PostApiClientMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof postApiClient>>, TError,PostApiClientMutationVariables, TContext> => {
+
+const mutationKey = getPostApiClientMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiClient>>, PostApiClientMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  postApiClient(data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiClientMutationResult = NonNullable<Awaited<ReturnType<typeof postApiClient>>>
+    export type PostApiClientMutationBody = ApiClientIn
+    export type PostApiClientMutationError = HTTPValidationError
+    export type PostApiClientMutationVariables = {data: ApiClientIn}
+
+    /**
+ * @summary Post Api Client
+ */
+export const usePostApiClient = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClient>>, TError,PostApiClientMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiClient>>,
+        TError,
+        PostApiClientMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiClientMutationOptions(options), queryClient);
+    }
+
+/**
+ * Xoá hệ thống cùng mọi khoá và mã doanh nghiệp của nó; doanh nghiệp và việc làm vẫn giữ.
+ * @summary Delete Api Client
+ */
+export const deleteApiClient = (
+    clientId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<OkOut>(
+      {url: `/api/api-clients/${clientId}`, method: 'DELETE', signal
+    },
+      );
+    }
+
+
+
+
+export const getDeleteApiClientMutationKey = () => ['deleteApiClient'] as const;
+
+export const getDeleteApiClientMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiClient>>, TError,DeleteApiClientMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApiClient>>, TError,DeleteApiClientMutationVariables, TContext> => {
+
+const mutationKey = getDeleteApiClientMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiClient>>, DeleteApiClientMutationVariables> = (props) => {
+          const {clientId} = props ?? {};
+
+          return  deleteApiClient(clientId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteApiClientMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiClient>>>
+
+    export type DeleteApiClientMutationError = HTTPValidationError
+    export type DeleteApiClientMutationVariables = {clientId: string}
+
+    /**
+ * @summary Delete Api Client
+ */
+export const useDeleteApiClient = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiClient>>, TError,DeleteApiClientMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteApiClient>>,
+        TError,
+        DeleteApiClientMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteApiClientMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary Get Api Client
+ */
+export const getApiClient = (
+    clientId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ApiClientDetailOut>(
+      {url: `/api/api-clients/${clientId}`, method: 'GET', signal
+    },
+      );
+    }
+
+
+
+
+export const getGetApiClientQueryKey = (clientId: string,) => {
+    return [
+    `/api/api-clients/${clientId}`
+    ] as const;
+    }
+
+
+export const getGetApiClientQueryOptions = <TData = Awaited<ReturnType<typeof getApiClient>>, TError = HTTPValidationError>(clientId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetApiClientQueryKey(clientId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getApiClient>>> = ({ signal }) => getApiClient(clientId, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: clientId !== null && clientId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetApiClientQueryResult = NonNullable<Awaited<ReturnType<typeof getApiClient>>>
+export type GetApiClientQueryError = HTTPValidationError
+
+
+export function useGetApiClient<TData = Awaited<ReturnType<typeof getApiClient>>, TError = HTTPValidationError>(
+ clientId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiClient>>,
+          TError,
+          Awaited<ReturnType<typeof getApiClient>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiClient<TData = Awaited<ReturnType<typeof getApiClient>>, TError = HTTPValidationError>(
+ clientId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getApiClient>>,
+          TError,
+          Awaited<ReturnType<typeof getApiClient>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetApiClient<TData = Awaited<ReturnType<typeof getApiClient>>, TError = HTTPValidationError>(
+ clientId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Api Client
+ */
+
+export function useGetApiClient<TData = Awaited<ReturnType<typeof getApiClient>>, TError = HTTPValidationError>(
+ clientId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getApiClient>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetApiClientQueryOptions(clientId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+/**
+ * @summary Patch Api Client
+ */
+export const patchApiClient = (
+    clientId: string,
+    apiClientUpdateIn: ApiClientUpdateIn,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ApiClientDetailOut>(
+      {url: `/api/api-clients/${clientId}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: apiClientUpdateIn, signal
+    },
+      );
+    }
+
+
+
+
+export const getPatchApiClientMutationKey = () => ['patchApiClient'] as const;
+
+export const getPatchApiClientMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiClient>>, TError,PatchApiClientMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof patchApiClient>>, TError,PatchApiClientMutationVariables, TContext> => {
+
+const mutationKey = getPatchApiClientMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof patchApiClient>>, PatchApiClientMutationVariables> = (props) => {
+          const {clientId,data} = props ?? {};
+
+          return  patchApiClient(clientId,data,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PatchApiClientMutationResult = NonNullable<Awaited<ReturnType<typeof patchApiClient>>>
+    export type PatchApiClientMutationBody = ApiClientUpdateIn
+    export type PatchApiClientMutationError = HTTPValidationError
+    export type PatchApiClientMutationVariables = {clientId: string;data: ApiClientUpdateIn}
+
+    /**
+ * @summary Patch Api Client
+ */
+export const usePatchApiClient = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchApiClient>>, TError,PatchApiClientMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof patchApiClient>>,
+        TError,
+        PatchApiClientMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPatchApiClientMutationOptions(options), queryClient);
+    }
+
+/**
+ * Khoá mới (chỉ hiện một lần). Khoá cũ vẫn dùng được tới khi thu hồi: đổi khoá không gián
+ * đoạn.
+ * @summary Post Api Client Key
+ */
+export const postApiClientKey = (
+    clientId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<ApiKeyCreatedOut>(
+      {url: `/api/api-clients/${clientId}/keys`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getPostApiClientKeyMutationKey = () => ['postApiClientKey'] as const;
+
+export const getPostApiClientKeyMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientKey>>, TError,PostApiClientKeyMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof postApiClientKey>>, TError,PostApiClientKeyMutationVariables, TContext> => {
+
+const mutationKey = getPostApiClientKeyMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiClientKey>>, PostApiClientKeyMutationVariables> = (props) => {
+          const {clientId} = props ?? {};
+
+          return  postApiClientKey(clientId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiClientKeyMutationResult = NonNullable<Awaited<ReturnType<typeof postApiClientKey>>>
+
+    export type PostApiClientKeyMutationError = HTTPValidationError
+    export type PostApiClientKeyMutationVariables = {clientId: string}
+
+    /**
+ * @summary Post Api Client Key
+ */
+export const usePostApiClientKey = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientKey>>, TError,PostApiClientKeyMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiClientKey>>,
+        TError,
+        PostApiClientKeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiClientKeyMutationOptions(options), queryClient);
+    }
+
+/**
+ * Thu hồi khoá: hệ thống ngoài nhận 401 với khoá này (process API khác sau ≤ 10 s).
+ * @summary Delete Api Client Key
+ */
+export const deleteApiClientKey = (
+    clientId: string,
+    keyId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<OkOut>(
+      {url: `/api/api-clients/${clientId}/keys/${keyId}`, method: 'DELETE', signal
+    },
+      );
+    }
+
+
+
+
+export const getDeleteApiClientKeyMutationKey = () => ['deleteApiClientKey'] as const;
+
+export const getDeleteApiClientKeyMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiClientKey>>, TError,DeleteApiClientKeyMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof deleteApiClientKey>>, TError,DeleteApiClientKeyMutationVariables, TContext> => {
+
+const mutationKey = getDeleteApiClientKeyMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteApiClientKey>>, DeleteApiClientKeyMutationVariables> = (props) => {
+          const {clientId,keyId} = props ?? {};
+
+          return  deleteApiClientKey(clientId,keyId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteApiClientKeyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteApiClientKey>>>
+
+    export type DeleteApiClientKeyMutationError = HTTPValidationError
+    export type DeleteApiClientKeyMutationVariables = {clientId: string;keyId: string}
+
+    /**
+ * @summary Delete Api Client Key
+ */
+export const useDeleteApiClientKey = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteApiClientKey>>, TError,DeleteApiClientKeyMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteApiClientKey>>,
+        TError,
+        DeleteApiClientKeyMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteApiClientKeyMutationOptions(options), queryClient);
+    }
 
 /**
  * Nhật ký thao tác của người vận hành, mới nhất trước. `next` = id dòng cuối (truyền vào

@@ -221,6 +221,11 @@ tải'`) sau khi đo.
   LLM / SERP.
 - Giao diện: `UI_PASSWORD` + `JWT_SECRET` (một người vận hành) hoặc SSO qua proxy (nhiều người);
   `REAL_IP_FROM` khi sau load balancer. Postgres / Redis không mở ra Internet.
+- API tích hợp (`/api/integration/v1`, hệ thống ngoài): đi qua cùng cổng `frontend`, xác thực bằng
+  khoá API của chính backend; chỉ mở qua HTTPS. Có proxy SSO (oauth2-proxy) trước `frontend` thì cho
+  đường này đi thẳng (`--skip-auth-route=^/api/integration/`), không thì hệ thống ngoài bị chặn ở
+  trang đăng nhập SSO. Muốn chặt hơn: chỉ cho IP của bên kia vào `/api/integration/` ở load
+  balancer.
 - File compose production chứa bí mật: chỉ cho quản trị viên đọc, không commit hoặc gửi công khai.
   Khoá LLM / SERP và proxy chung lưu mã hoá bằng `ENCRYPTION_KEYS` — đặt và sao lưu khoá riêng, không
   cùng bản dump.

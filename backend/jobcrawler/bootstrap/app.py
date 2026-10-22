@@ -7,8 +7,9 @@ diện chỉ đưa job vào queue.
 
 Middleware, từ ngoài vào: `RequestIdMiddleware` (request id, log truy cập, lỗi chưa xử lý thành 500)
 → `GuardMiddleware` (đăng nhập: header của proxy SSO hoặc JWT do `POST /api/auth/login` cấp, chặn
-CSRF) → FastAPI. Đoán mật khẩu bị chặn ở chính endpoint đăng nhập (`LoginThrottle`). Mọi lỗi trả về
-cùng dạng JSON `{"detail": ...}` như `HTTPException` của FastAPI.
+CSRF; API tích hợp `/api/integration/v1` chỉ nhận khoá API) → FastAPI. Đoán mật khẩu bị chặn ở
+chính endpoint đăng nhập (`LoginThrottle`). Mọi lỗi trả về cùng dạng JSON `{"detail": ...}` như
+`HTTPException` của FastAPI.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from jobcrawler.common.config import Settings, get_settings
 from jobcrawler.common.logging import configure_logging, get_logger
 from jobcrawler.common.watchdog import start_watchdog
 from jobcrawler.database.ids import uuid7
+from jobcrawler.modules.api_clients import api_clients_router as api_clients_api
 from jobcrawler.modules.audit import audit_router as audit_api
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.modules.auth import auth_router as auth_api
@@ -46,6 +48,8 @@ from jobcrawler.modules.companies import companies_router as companies_api
 from jobcrawler.modules.crawl import crawl_router as crawl_api
 from jobcrawler.modules.evaluate import evaluate_router as evaluate_api
 from jobcrawler.modules.gateway import gateway_router as workers_api
+from jobcrawler.modules.integration import integration_router as integration_api
+from jobcrawler.modules.integration import key_service
 from jobcrawler.modules.jobs import jobs_router as jobs_api
 from jobcrawler.modules.live import live_router, live_service
 from jobcrawler.modules.maintenance import maintenance_router as maintenance_api
@@ -77,6 +81,8 @@ ROUTERS = (
     settings_api.router,
     proxies_api.router,
     workers_api.router,
+    api_clients_api.router,
+    integration_api.router,
     live_router.router,
 )
 
@@ -104,6 +110,16 @@ OPENAPI_TAGS: list[dict[str, str]] = [
         "description": "Worker lấy trang: danh sách, khoá tham gia, dừng nhận việc",
     },
     {"name": "proxies", "description": "Proxy chung: trạng thái xoay vòng, kiểm tra qua worker"},
+    {
+        "name": "api-clients",
+        "description": "Hệ thống ngoài dùng API tích hợp: tạo, khoá API, phạm vi đọc (trang Tích"
+        " hợp)",
+    },
+    {
+        "name": "integration",
+        "description": "API cho hệ thống ngoài (khoá API `jca_…`): đẩy doanh nghiệp, việc làm, feed"
+        " thay đổi",
+    },
     {"name": "settings", "description": "Cài đặt sửa ở giao diện (đè biến môi trường / .env)"},
     {"name": "audit", "description": "Nhật ký thao tác"},
     {"name": "maintenance", "description": "Chạy bảo trì ngay"},
@@ -118,6 +134,7 @@ PUBLIC_PATHS = ("/healthz", "/api/auth/login", "/api/auth/logout")
 MAX_PROXY_USER_CHARS = 256
 _UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 BEARER_CHALLENGE = 'Bearer realm="jobcrawler"'
+INTEGRATION_CHALLENGE = 'Bearer realm="jobcrawler-integration"'
 
 REQUEST_ID_HEADER = "X-Request-Id"
 # Log truy cập chỉ cho API: /healthz (healthcheck vài giây một lần) là nhiễu.
@@ -312,6 +329,18 @@ def _client_ip(scope: Scope) -> str:
     return client[0] if client else "unknown"
 
 
+INTEGRATION_PREFIX = "/api/integration/"
+
+
+def _api_key(headers: Headers) -> str | None:
+    """Khoá API trong `Authorization: Bearer jca_…` hoặc `X-API-Key` (không phải JWT)."""
+    scheme, _, value = headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer" and value.strip().startswith(key_service.KEY_PREFIX):
+        return value.strip()
+    value = headers.get("x-api-key", "").strip()
+    return value or None
+
+
 class GuardMiddleware:
     """Đăng nhập và chặn request ghi từ site khác (CSRF: trình duyệt tự gửi kèm cookie phiên).
 
@@ -329,6 +358,12 @@ class GuardMiddleware:
       nhập).
     - `none`: không hỏi đăng nhập, người dùng là `username`.
 
+    Riêng `/api/integration/v1/*` (hệ thống ngoài, mọi chế độ): chỉ nhận khoá API
+    (`Authorization: Bearer jca_…` hoặc `X-API-Key`, `modules/integration/key_service.py`); bỏ qua
+    cookie / header SSO, không kiểm cùng site (không có cookie nên không bị CSRF). Khoá sai / thu
+    hồi → 401, IP gửi khoá sai nhiều lần hoặc khoá vượt giới hạn request mỗi phút → 429. Khoá API
+    gửi tới đường khác → 401. Client ở `request.state.api_client`, người dùng `api:<tên client>`.
+
     Người dùng đã đăng nhập ở `request.state.user` (và `actor` trong contextvars của structlog để
     log của request kèm theo; nhật ký thao tác ghi đúng người).
     """
@@ -339,6 +374,7 @@ class GuardMiddleware:
         *,
         username: str,
         token_auth: Callable[[], TokenAuth | None] | None = None,
+        api_keys: Callable[[], key_service.ApiKeyAuth | None] | None = None,
         redis: Callable[[], AuthRedis | None] | None = None,
         prefix: str = "jc",
         proxy_user_header: str | None = None,
@@ -347,6 +383,7 @@ class GuardMiddleware:
         self.app = app
         self.username = username
         self.token_auth = token_auth
+        self.api_keys = api_keys or (lambda: None)
         self.redis = redis or (lambda: None)
         self.prefix = prefix
         self.proxy_user_header = (proxy_user_header or "").strip() or None
@@ -394,6 +431,13 @@ class GuardMiddleware:
         if scope["path"] in PUBLIC_PATHS:
             await self.app(scope, receive, send)
             return
+        api_key = _api_key(headers)
+        if scope["path"].startswith(INTEGRATION_PREFIX):
+            await self._integration(scope, receive, send, api_key)
+            return
+        if api_key is not None:
+            await json_error(401, "Khoá API chỉ dùng cho /api/integration/v1")(scope, receive, send)
+            return
         if self.proxy_user_header is not None:
             user = self._proxy_user(headers)
             if user is None:
@@ -414,6 +458,36 @@ class GuardMiddleware:
         else:
             user = self.username
         await self._pass(scope, receive, send, headers, user)
+
+    async def _integration(
+        self, scope: Scope, receive: Receive, send: Send, api_key: str | None
+    ) -> None:
+        """Request của hệ thống ngoài: khoá API hợp lệ, chưa vượt giới hạn."""
+        auth = self.api_keys()
+        if auth is None:
+            await json_error(503, "API tích hợp chưa sẵn sàng")(scope, receive, send)
+            return
+        ip = _client_ip(scope)
+        if blocked := await auth.blocked(ip):
+            retry = {"Retry-After": str(blocked)}
+            await json_error(429, "Sai khoá API quá nhiều lần", retry)(scope, receive, send)
+            return
+        principal = await auth.verify(api_key) if api_key else None
+        if principal is None:
+            if api_key:
+                await auth.failed(ip)
+            challenge = {"WWW-Authenticate": INTEGRATION_CHALLENGE}
+            await json_error(401, "Cần khoá API hợp lệ", challenge)(scope, receive, send)
+            return
+        if wait := await auth.rate_limited(principal.key_id):
+            retry = {"Retry-After": str(wait)}
+            await json_error(429, "Vượt giới hạn request mỗi phút", retry)(scope, receive, send)
+            return
+        state = scope.setdefault("state", {})
+        state["api_client"] = principal
+        state["user"] = principal.actor
+        structlog.contextvars.bind_contextvars(actor=principal.actor)
+        await self.app(scope, receive, send)
 
     async def _pass(
         self, scope: Scope, receive: Receive, send: Send, headers: Headers, user: str
@@ -472,6 +546,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             elif settings.auth_mode == "none":
                 log.warning("ui.no_password", reason="chưa đặt UI_PASSWORD: không hỏi đăng nhập")
+            app.state.api_keys = key_service.ApiKeyAuth(res)
             # Cập nhật trực tiếp (`GET /api/events`): task đọc chung của từng chủ đề.
             app.state.live = live_service.LiveHub(live_service.resource_loader(res, settings))
             # Event loop đứng quá WATCHDOG_SECONDS (mọi request treo) thì process thoát (mã 70) để
@@ -504,15 +579,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Chặn đoán mật khẩu ở `POST /api/auth/login`; khoá ký JWT có sau khi lifespan đọc Redis.
     app.state.throttle = LoginThrottle(redis, prefix=settings.redis_prefix)
     app.state.token_auth = None
+    app.state.api_keys = None  # `key_service.ApiKeyAuth`, có sau khi lifespan mở tài nguyên
     app.state.live = None  # `live_service.LiveHub`, có sau khi lifespan mở tài nguyên
 
     def token_auth() -> auth_service.TokenAuth | None:
         return app.state.token_auth
 
+    def api_keys() -> key_service.ApiKeyAuth | None:
+        return app.state.api_keys
+
     app.add_middleware(
         GuardMiddleware,
         username=settings.ui_username,
         token_auth=token_auth if settings.auth_mode == "jwt" else None,
+        api_keys=api_keys,
         redis=redis,
         prefix=settings.redis_prefix,
         proxy_user_header=settings.auth_proxy_user_header,

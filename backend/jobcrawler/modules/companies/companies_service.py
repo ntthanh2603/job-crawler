@@ -21,8 +21,10 @@ from jobcrawler.common.pagination import GetManyQuery, Page, capped_count, order
 from jobcrawler.common.schemas import CompanyIn
 from jobcrawler.common.text import normalize_company_name
 from jobcrawler.database.models import (
+    ApiClient,
     Company,
     CompanyAlias,
+    CompanyRef,
     CompanyRun,
     FailedPage,
     Job,
@@ -126,10 +128,19 @@ async def list_companies(session: AsyncSession, f: CompanyListQuery) -> Page[Com
 
 
 @dataclass(slots=True)
+class CompanyRefRow:
+    client_id: UUID
+    client_name: str
+    external_id: str
+    active: bool
+
+
+@dataclass(slots=True)
 class CompanyDetail:
     company: Company
     aliases: list[CompanyAlias]
     profiles: list[SourceProfile]
+    refs: list[CompanyRefRow]
     # Số việc đang mở / không còn mở (đếm có giới hạn) theo cùng định nghĩa với `company_jobs`.
     active_jobs: int
     inactive_jobs: int
@@ -178,6 +189,16 @@ async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDeta
             .limit(100)
         )
     )
+    refs = [
+        CompanyRefRow(r.client_id, r.name, r.external_id, r.active)
+        for r in await session.execute(
+            select(CompanyRef.client_id, ApiClient.name, CompanyRef.external_id, CompanyRef.active)
+            .join(ApiClient, ApiClient.id == CompanyRef.client_id)
+            .where(CompanyRef.company_id == company_id)
+            .order_by(ApiClient.name, CompanyRef.external_id)
+            .limit(100)
+        )
+    ]
     now = datetime.now(UTC)
     jobs = select(Job.id).where(Job.company_id == company_id)
     active, _ = await capped_count(session, jobs.where(open_jobs(now)))
@@ -197,6 +218,7 @@ async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDeta
     )
     return CompanyDetail(
         company=company,
+        refs=refs,
         aliases=aliases,
         profiles=profiles,
         active_jobs=active,
@@ -379,6 +401,7 @@ async def create_company(
     *,
     tax_code: str | None = None,
     website: str | None = None,
+    careers_url: str | None = None,
     note: str | None = None,
     enqueue: bool = False,
 ) -> CreateOutcome:
@@ -392,8 +415,11 @@ async def create_company(
     site, web_warning = batch_service.clean_website(website)
     if web_warning:
         raise CompanyInputError(f"Website {(website or '').strip()!r} không hợp lệ")
+    careers, careers_warning = batch_service.clean_website(careers_url)
+    if careers_warning:
+        raise CompanyInputError(f"Trang tuyển dụng {(careers_url or '').strip()!r} không hợp lệ")
     try:
-        company = CompanyIn(name=name, tax_code=tax, website=site, note=note)
+        company = CompanyIn(name=name, tax_code=tax, website=site, careers_url=careers, note=note)
     except ValidationError:
         raise CompanyInputError("Chưa nhập tên doanh nghiệp") from None
     if len(normalize_company_name(company.name)) < 2:

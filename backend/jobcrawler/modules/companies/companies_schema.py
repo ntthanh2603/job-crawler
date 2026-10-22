@@ -39,14 +39,25 @@ class ProfileOut(ApiOut):
     indexed_at: datetime | None
 
 
+class CompanyRefOut(ApiOut):
+    """Mã của doanh nghiệp bên một hệ thống ngoài (trang Tích hợp)."""
+
+    client_id: UUID
+    client_name: str
+    external_id: str
+    active: bool
+
+
 class CompanyDetailOut(ApiOut):
     company: CompanyEntity
     input_website: str | None
+    input_careers_url: str | None
     note: str | None
     created_at: datetime
     kyc_evidence: Any
     aliases: list[AliasOut]
     profiles: list[ProfileOut]
+    refs: list[CompanyRefOut]
     # Số đếm cho các tab; danh sách lấy theo trang ở /companies/{id}/jobs|runs|rejected.
     active_jobs: int
     inactive_jobs: int
@@ -71,6 +82,9 @@ class CompanyCreateIn(BaseModel):
     name: str = Field(min_length=1, description="Tên doanh nghiệp (như cột `name` của CSV).")
     tax_code: str | None = None
     website: str | None = None
+    careers_url: str | None = Field(
+        default=None, description="Trang tuyển dụng / bảng ATS biết sẵn (tìm nguồn thử trước)."
+    )
     note: str | None = None
     enqueue: bool = Field(default=False, description="Đưa vào hàng đợi build ngay.")
 

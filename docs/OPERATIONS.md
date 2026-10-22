@@ -149,11 +149,15 @@ Trang Cài đặt → **Proxy**.
   lại `backend` (mã hoá lại), rồi mới bỏ khoá cũ.
 - Bí mật dạng file: mount `/run/secrets/<tên biến viết thường>` (`gateway_token`, `ui_password`…), service
   tự đọc (`SECRETS_DIR`); biến môi trường vẫn được ưu tiên.
+- **Hệ thống ngoài** (API tích hợp, mục 11): không dùng tài khoản giao diện mà khoá API riêng tạo ở
+  trang Tích hợp (hiện một lần). Lộ khoá: tạo khoá mới, đưa cho bên kia, thu hồi khoá cũ (hết dùng
+  sau ≤ 10 s).
 
 ## 7. Doanh nghiệp và dữ liệu mẫu
 
 - Trang **Doanh nghiệp**: "Thêm doanh nghiệp" (nhập tay; MST / website sai thì báo lỗi) hoặc "Nạp danh
-  sách" (CSV cột `name`, `tax_code`, `website`, `note`; dòng sai bị bỏ). Không tạo trùng: cùng MST,
+  sách" (CSV cột `name`, `tax_code`, `website`, `careers_url`, `note`; dòng sai bị bỏ; file có cột
+  `external_id` thì chọn hệ thống ngoài để gắn mã, mục 11). Không tạo trùng: cùng MST,
   hoặc cùng tên không mâu thuẫn MST / website → chỉ bổ sung trường trống. Nạp mỗi lô 500 dòng một
   transaction; lô đụng deadlock với lượt KYC đang chạy được chạy lại (tối đa 3 lần, log
   `import.deadlock_retry`).
@@ -247,3 +251,25 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
 
 - **Test tích hợp chập chờn trên Windows** (`WinError 64`): chạy lại file đó. Các bộ test tích hợp dùng
   chung DB `jobcrawler_test`: không chạy song song.
+
+## 11. Tích hợp hệ thống đối tác
+
+Hướng dẫn cho đội bên kia (định dạng CSV, API, webhook, đồng bộ): [INTEGRATION.md](INTEGRATION.md).
+Phía vận hành:
+
+1. Trang **Tích hợp** → "Thêm hệ thống": tên, quyền (đẩy doanh nghiệp / đọc việc làm), chỉ việc làm
+   của doanh nghiệp đã đẩy (mặc định) hay mọi việc làm, có gửi mô tả không.
+2. "Tạo khoá": chép khoá (chỉ hiện một lần) gửi bên kia qua kênh bí mật. Đổi khoá: tạo khoá mới,
+   bên kia chuyển sang, rồi thu hồi khoá cũ.
+3. Bên kia đẩy doanh nghiệp (API hoặc CSV). Doanh nghiệp mới được build ngay (mọi giờ): 10k doanh
+   nghiệp lần đầu mất vài giờ theo số build song song (DEPLOY.md mục 4) — nạp theo đợt 1–2 nghìn.
+   Theo dõi ở trang Doanh nghiệp / Hàng đợi; trạng thái từng mã cũng có ở
+   `GET /api/integration/v1/companies`.
+
+| Dấu hiệu                                 | Nguyên nhân / làm gì                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------- |
+| Bên kia nhận 401                         | khoá sai / đã thu hồi; khoá API gửi tới đường không phải `/api/integration`     |
+| 429 `Vượt giới hạn request mỗi phút`     | tăng "Giới hạn request mỗi khoá" (Cài đặt → Tích hợp) hoặc bên kia gọi thưa hơn |
+| 410 `resync_required`                    | cursor cũ hơn `JOB_EVENTS_RETENTION_DAYS`: bên kia đồng bộ lại từ snapshot      |
+| Doanh nghiệp `paused`                    | mọi mã của nó `active=false`; bên kia đẩy lại `active=true` để bật              |
+| Feed không có sự kiện mới dù có việc mới | relay không chạy: kiểm process `scheduler` (log `relay.leader`, `relay.error`)  |

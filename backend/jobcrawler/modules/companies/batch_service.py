@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -29,13 +29,20 @@ from jobcrawler.services.resources import Resources
 
 log = get_logger(__name__)
 
-# Tên cột chấp nhận (so sau khi viết thường, bỏ dấu).
+# Tên cột chấp nhận (so sau khi viết thường, bỏ dấu). `external_id` / `active` chỉ dùng khi nạp
+# cho một hệ thống ngoài (modules/integration/refs_service.py); nạp thường bỏ qua.
 _HEADERS = {
+    "external_id": ("external_id", "external id", "ma doanh nghiep", "company_id", "company id"),
     "name": ("name", "ten", "ten doanh nghiep", "ten cong ty", "company", "company name"),
     "tax_code": ("tax_code", "tax code", "taxcode", "mst", "ma so thue"),
     "website": ("website", "web", "domain", "url"),
+    "careers_url": ("careers_url", "careers url", "careers", "trang tuyen dung", "tuyen dung"),
     "note": ("note", "notes", "ghi chu"),
+    "active": ("active", "theo doi"),
 }
+# Mã doanh nghiệp bên ngoài: dùng trong đường dẫn API nên chỉ chữ, số và `. _ : @ -`.
+EXTERNAL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$"
+_FALSE = frozenset({"0", "false", "no", "n", "khong", "tat", "off"})
 IMPORT_CHUNK = 500
 # Lần thử lại một lô import bị Postgres huỷ vì deadlock (SQLSTATE 40P01) với lượt build.
 IMPORT_DEADLOCK_RETRIES = 3
@@ -53,6 +60,8 @@ class CsvFormatError(ValueError):
 class CsvRow:
     line: int
     company: CompanyIn
+    external_id: str | None = None
+    active: bool = True
 
 
 @dataclass(slots=True)
@@ -88,7 +97,7 @@ def clean_tax_code(value: str | None) -> tuple[str | None, str | None]:
     return tax, None
 
 
-def clean_website(value: str | None) -> tuple[str | None, str | None]:
+def clean_website(value: str | None, *, label: str = "website") -> tuple[str | None, str | None]:
     if not value or not value.strip():
         return None, None
     value = value.strip()
@@ -97,13 +106,20 @@ def clean_website(value: str | None) -> tuple[str | None, str | None]:
     except ValueError:
         host = ""
     if " " in value or "." not in host:
-        return None, f"website {value!r} không hợp lệ, bỏ qua"
+        return None, f"{label} {value!r} không hợp lệ, bỏ qua"
     return value, None
 
 
+def parse_active(value: str | None) -> bool:
+    """Cột `active`: trống / có = theo dõi; `0`, `false`, `no`, `không`... = ngừng."""
+    folded = strip_accents(value or "").strip().lower()
+    return folded not in _FALSE
+
+
 def parse_companies_csv(content: str) -> CsvReport:
-    """Đọc `companies.csv`: cột `name` (bắt buộc), `tax_code`, `website`, `note`; dấu phân
-    cách `,` `;` hoặc tab; dòng trùng (cùng tên chuẩn hoá + MST) chỉ lấy dòng đầu."""
+    """Đọc `companies.csv`: cột `name` (bắt buộc), `tax_code`, `website`, `careers_url`, `note`
+    (và `external_id`, `active` khi nạp cho hệ thống ngoài); dấu phân cách `,` `;` hoặc tab. Dòng
+    trùng chỉ lấy dòng đầu: cùng `external_id`, hoặc (không có mã) cùng tên chuẩn hoá + MST."""
     report = CsvReport()
     sample = content[:8192]
     try:
@@ -122,11 +138,22 @@ def parse_companies_csv(content: str) -> CsvReport:
         if not any(c.strip() for c in cells):
             continue
         values = {key: cells[i] for i, key in columns.items() if i < len(cells)}
+        external_id = (values.get("external_id") or "").strip() or None
+        if external_id is not None and not re.fullmatch(EXTERNAL_ID_PATTERN, external_id):
+            report.errors.append(
+                f"dòng {line}: mã {external_id!r} không hợp lệ (chữ, số, . _ : @ -; ≤ 128 ký tự)"
+            )
+            continue
         tax, tax_warning = clean_tax_code(values.get("tax_code"))
         website, web_warning = clean_website(values.get("website"))
+        careers, careers_warning = clean_website(values.get("careers_url"), label="careers_url")
         try:
             company = CompanyIn(
-                name=values.get("name", ""), tax_code=tax, website=website, note=values.get("note")
+                name=values.get("name", ""),
+                tax_code=tax,
+                website=website,
+                careers_url=careers,
+                note=values.get("note"),
             )
         except ValidationError:
             report.errors.append(f"dòng {line}: thiếu tên doanh nghiệp")
@@ -135,12 +162,22 @@ def parse_companies_csv(content: str) -> CsvReport:
         if len(norm) < 2:
             report.errors.append(f"dòng {line}: tên {company.name!r} quá ngắn")
             continue
-        report.warnings += [f"dòng {line}: {w}" for w in (tax_warning, web_warning) if w]
-        if (norm, tax) in seen:
+        warnings = (tax_warning, web_warning, careers_warning)
+        report.warnings += [f"dòng {line}: {w}" for w in warnings if w]
+        # Có mã bên ngoài: trùng theo mã (hai mã khác nhau có thể cùng một doanh nghiệp).
+        key = ("external_id:", external_id) if external_id is not None else (norm, tax)
+        if key in seen:
             report.duplicates += 1
             continue
-        seen.add((norm, tax))
-        report.rows.append(CsvRow(line=line, company=company))
+        seen.add(key)
+        report.rows.append(
+            CsvRow(
+                line=line,
+                company=company,
+                external_id=external_id,
+                active=parse_active(values.get("active")),
+            )
+        )
     return report
 
 
@@ -162,6 +199,9 @@ def is_deadlock(exc: DBAPIError) -> bool:
     return getattr(exc.orig, "sqlstate", None) == DEADLOCK
 
 
+RowOutcome = Literal["created", "updated", "unchanged"]
+
+
 @dataclass(slots=True)
 class ImportResult:
     created: int = 0
@@ -169,6 +209,8 @@ class ImportResult:
     unchanged: int = 0
     # Id doanh nghiệp theo thứ tự dòng trong file (không trùng).
     company_ids: list[UUID] = field(default_factory=list)
+    # Từng dòng đầu vào, cùng thứ tự: (doanh nghiệp, tạo mới / cập nhật / không đổi).
+    rows: list[tuple[UUID, RowOutcome]] = field(default_factory=list)
 
     def add(self, other: ImportResult) -> None:
         self.created += other.created
@@ -176,6 +218,7 @@ class ImportResult:
         self.unchanged += other.unchanged
         seen = set(self.company_ids)
         self.company_ids += [cid for cid in other.company_ids if cid not in seen]
+        self.rows += other.rows
 
 
 def _pick(candidates: Iterable[Company], company_in: CompanyIn) -> Company | None:
@@ -189,6 +232,21 @@ def _pick(candidates: Iterable[Company], company_in: CompanyIn) -> Company | Non
         )
     )
     return ok[0] if ok else None
+
+
+def apply_input(company: Company, row: CompanyIn) -> bool:
+    """Ghi website / trang tuyển dụng / ghi chú của `row` vào doanh nghiệp đã có (trường có giá trị
+    mới đè giá trị cũ), MST chỉ khi còn trống. Trả có đổi gì không."""
+    changed = False
+    if row.website and company.input_website != row.website:
+        company.input_website, changed = row.website, True
+    if row.careers_url and company.input_careers_url != row.careers_url:
+        company.input_careers_url, changed = row.careers_url, True
+    if row.note and company.note != row.note:
+        company.note, changed = row.note, True
+    if row.tax_code and not company.tax_code:
+        company.tax_code, changed = row.tax_code, True
+    return changed
 
 
 async def _import_chunk(
@@ -221,30 +279,30 @@ async def _import_chunk(
         company = (by_tax.get(row.tax_code) if row.tax_code else None) or _pick(
             by_name.get(norm, []), row
         )
+        outcome: RowOutcome
         if company is None:
             company = Company(
                 input_name=row.name,
                 tax_code=row.tax_code,
                 input_website=row.website,
+                input_careers_url=row.careers_url,
                 note=row.note,
             )
             session.add(company)
             await session.flush()
             result.created += 1
+            outcome = "created"
             by_name.setdefault(norm, []).append(company)
             if row.tax_code:
                 by_tax[row.tax_code] = company
         else:
-            changed = False
-            if row.website and company.input_website != row.website:
-                company.input_website, changed = row.website, True
-            if row.note and company.note != row.note:
-                company.note, changed = row.note, True
-            if row.tax_code and not company.tax_code:
-                company.tax_code, changed = row.tax_code, True
+            changed = apply_input(company, row)
+            if row.tax_code and company.tax_code == row.tax_code:
                 by_tax[row.tax_code] = company
             result.updated += changed
             result.unchanged += not changed
+            outcome = "updated" if changed else "unchanged"
+        result.rows.append((company.id, outcome))
         await session.execute(
             pg_insert(CompanyAlias)
             .values(kyc.alias_rows(company.id, row.name, "input"))

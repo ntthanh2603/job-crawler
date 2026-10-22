@@ -45,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.logging import get_logger
 from jobcrawler.database.ids import uuid7
-from jobcrawler.database.models import AuditEvent, Company, Job
+from jobcrawler.database.models import ApiClient, AuditEvent, Company, Job
 
 log = get_logger(__name__)
 
@@ -77,6 +77,14 @@ WORKER_UNDRAIN = "worker.undrain"
 WORKER_JOIN_KEY = "worker.join_key"
 WORKER_JOIN_KEY_REVOKE = "worker.join_key_revoke"
 WORKER_JOINED = "worker.joined"
+API_CLIENT_CREATE = "api_client.create"
+API_CLIENT_UPDATE = "api_client.update"
+API_CLIENT_DELETE = "api_client.delete"
+API_KEY_CREATE = "api_key.create"
+API_KEY_REVOKE = "api_key.revoke"
+# Hệ thống ngoài gọi API tích hợp (người thao tác `api:<tên client>`).
+INTEGRATION_COMPANIES = "integration.companies"
+INTEGRATION_REFRESH = "integration.refresh"
 
 ACTIONS: tuple[str, ...] = (
     AUTH_LOGIN,
@@ -102,6 +110,13 @@ ACTIONS: tuple[str, ...] = (
     WORKER_JOIN_KEY,
     WORKER_JOIN_KEY_REVOKE,
     WORKER_JOINED,
+    API_CLIENT_CREATE,
+    API_CLIENT_UPDATE,
+    API_CLIENT_DELETE,
+    API_KEY_CREATE,
+    API_KEY_REVOKE,
+    INTEGRATION_COMPANIES,
+    INTEGRATION_REFRESH,
 )
 
 # Danh sách id trong `metadata` giữ tối đa chừng này phần tử (kèm tổng số), không ghi cả lô.
@@ -407,8 +422,9 @@ async def list_events(
 
 async def resource_labels(session: AsyncSession, events: Iterable[AuditEvent]) -> dict[str, str]:
     """Tên hiện của đối tượng theo `resource_id` (doanh nghiệp: tên thương hiệu / pháp lý / tên
-    nhập; việc làm: "tiêu đề · doanh nghiệp"). Đối tượng đã xoá hoặc loại khác thì không có."""
-    ids: dict[str, set[UUID]] = {"company": set(), "job": set()}
+    nhập; việc làm: "tiêu đề · doanh nghiệp"; hệ thống ngoài: tên). Đối tượng đã xoá hoặc loại
+    khác thì không có."""
+    ids: dict[str, set[UUID]] = {"company": set(), "job": set(), "api_client": set()}
     for e in events:
         if e.resource_type in ids and e.resource_id:
             try:
@@ -431,4 +447,9 @@ async def resource_labels(session: AsyncSession, events: Iterable[AuditEvent]) -
         out |= {
             str(jid): f"{title} · {company}" if company else title for jid, title, company in rows
         }
+    if ids["api_client"]:
+        rows = await session.execute(
+            select(ApiClient.id, ApiClient.name).where(ApiClient.id.in_(ids["api_client"]))
+        )
+        out |= {str(cid): name for cid, name in rows}
     return out

@@ -340,8 +340,10 @@ async def _run_pipeline(
     incomplete = [KYC_SOURCE] if step.incomplete else []
     ok = RunStatus.AMBIGUOUS if step.status is KycStatus.AMBIGUOUS else RunStatus.OK
     # Website người dùng đưa (có thể là URL bảng ATS) luôn được thu; không có thì chỉ dùng domain
-    # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào).
+    # KYC khớp mạnh (đã xác minh, hoặc trang ghi đúng MST đầu vào). Trang tuyển dụng biết sẵn
+    # (`careers_url`) là điểm bắt đầu tìm nguồn; website vẫn là của doanh nghiệp (KYC, lưu tin).
     website = company_in.website or step.website
+    entry = company_in.careers_url or website
 
     # Profile trên các trang tuyển dụng đã map khi index; trang nào chưa có thì tìm bằng SERP
     # `site:`. KYC mơ hồ thì chỉ dùng profile khớp mạnh (cùng MST hoặc cùng website); không tìm
@@ -370,12 +372,12 @@ async def _run_pipeline(
         now=datetime.now(UTC),
         max_age_days=res.settings.job_reuse_days,
     )
-    if website:
+    if entry:
         # Profile trên trang tuyển dụng được thu thập ngay, song song với bước tìm nguồn trên
         # website (không phải chờ discovery).
         found = await website_service.jobs_for_website(
             res,
-            website,
+            entry,
             deadline=deadline,
             refresh=refresh_discovery,
             records=records,

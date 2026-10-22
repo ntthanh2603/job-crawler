@@ -1354,6 +1354,14 @@ GROUPS: tuple[Group, ...] = (
             "webhook. Nhịp ngắn thì việc làm mới tới hệ thống ngoài sớm hơn.",
             unit="giây",
         ),
+        _s(
+            "integration_rate_per_minute",
+            "int",
+            "Giới hạn request mỗi khoá",
+            "Mỗi khoá API được gọi tối đa chừng này request mỗi phút; quá thì nhận 429 kèm "
+            "Retry-After. 0 là không giới hạn.",
+            unit="request / phút",
+        ),
     ),
     _group(
         "maintenance",
@@ -1660,7 +1668,10 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "alert_llm_error_rate",
         ),
     ),
-    "integration": (_sec("Feed sự kiện", "relay_interval_seconds", "job_events_retention_days"),),
+    "integration": (
+        _sec("API", "integration_rate_per_minute"),
+        _sec("Feed sự kiện", "relay_interval_seconds", "job_events_retention_days"),
+    ),
     "maintenance": (
         _sec("Lịch", "maintenance_cron", "overview_cron"),
         _sec(

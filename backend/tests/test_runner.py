@@ -101,7 +101,13 @@ class FakeSession:
         return None
 
     async def get(self, _model: Any, _id: Any) -> Any:
-        return SimpleNamespace(input_name="ACME", tax_code=None, input_website="acme.vn", note=None)
+        return SimpleNamespace(
+            input_name="ACME",
+            tax_code=None,
+            input_website="acme.vn",
+            input_careers_url=None,
+            note=None,
+        )
 
 
 @pytest.mark.parametrize(

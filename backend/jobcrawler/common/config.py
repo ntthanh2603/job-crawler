@@ -355,6 +355,8 @@ class Settings(BaseSettings):
     job_events_retention_days: float = Field(default=14, gt=0)
     # Nhịp relay (process scheduler): gán seq cho sự kiện mới, giao webhook.
     relay_interval_seconds: float = Field(default=1.0, ge=0.2, le=30)
+    # Số request tối đa mỗi phút của một khoá API tích hợp (0: không giới hạn).
+    integration_rate_per_minute: int = Field(default=600, ge=0)
 
     # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth_service.py`).
     # Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.

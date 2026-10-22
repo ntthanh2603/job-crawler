@@ -162,6 +162,8 @@ class CompanyIn(BaseModel):
     name: str = Field(min_length=1)
     tax_code: str | None = None
     website: str | None = None
+    # Trang tuyển dụng / bảng ATS biết sẵn: lượt tìm nguồn thử trước (website vẫn dùng cho KYC).
+    careers_url: str | None = None
     note: str | None = None
 
     @field_validator("name", mode="before")
@@ -169,7 +171,7 @@ class CompanyIn(BaseModel):
     def _strip_name(cls, value: Any) -> Any:
         return " ".join(value.split()) if isinstance(value, str) else value
 
-    @field_validator("tax_code", "website", "note", mode="before")
+    @field_validator("tax_code", "website", "careers_url", "note", mode="before")
     @classmethod
     def _optional(cls, value: Any) -> Any:
         return _blank_to_none(value)

@@ -546,7 +546,8 @@ của Redis.
 - **Đăng nhập** (`modules/auth/auth_service.py`): đặt `UI_PASSWORD` → trang `/login`, JWT HS256 trong cookie
   httpOnly `jc_token` (hoặc `Authorization: Bearer`); đăng xuất thu hồi trên Redis; sai 20 lần / IP
   / 5 phút → 429. SSO: proxy (vd. oauth2-proxy) gửi `X-Forwarded-User`, đặt
-  `AUTH_PROXY_USER_HEADER`.
+  `AUTH_PROXY_USER_HEADER`. Riêng `/api/integration/v1/*` (hệ thống ngoài) chỉ nhận khoá API, ở
+  mọi chế độ (mục 12).
 - **Hợp đồng có kiểu**: mỗi endpoint trả một mô hình `...Out`; `backend/openapi.json` là bản commit
   của spec; orval sinh `frontend/src/lib/gen/queries.ts` (hàm, hook React Query, kiểu). `task api` làm
   cả hai; lệch thì test đỏ.
@@ -609,12 +610,12 @@ Hệ thống ngoài (backend của đối tác) đẩy doanh nghiệp vào và n
 **Sự kiện việc làm (outbox `job_events`)**. Mọi chỗ đổi `jobs` ghi một dòng sự kiện trong cùng
 transaction (`store.emit_job_events`; lượt mất khoá bị rollback thì sự kiện mất cùng):
 
-| Đường ghi                                                       | Sự kiện                                                                  |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `store.save_company_jobs` (build / poll)                        | `created` (job chưa có), `reopened` (job đã đóng), `updated` (hash đổi)  |
-| đóng job không còn thấy, `store.close_postings`                 | `closed`                                                                 |
-| `kyc.merge_companies`                                           | `updated` (job chuyển doanh nghiệp), `deleted` (job trùng bị xoá cùng)   |
-| bảo trì: gộp job trùng / làm sạch lại / phân loại lại           | `closed` / `updated`                                                     |
+| Đường ghi                                             | Sự kiện                                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| `store.save_company_jobs` (build / poll)              | `created` (job chưa có), `reopened` (job đã đóng), `updated` (hash đổi) |
+| đóng job không còn thấy, `store.close_postings`       | `closed`                                                                |
+| `kyc.merge_companies`                                 | `updated` (job chuyển doanh nghiệp), `deleted` (job trùng bị xoá cùng)  |
+| bảo trì: gộp job trùng / làm sạch lại / phân loại lại | `closed` / `updated`                                                    |
 
 `jobs.content_hash` (`store.content_hash`) gồm các trường nội dung (tiêu đề, phân loại, nơi làm,
 lương, kinh nghiệm, ba phần mô tả, kỹ năng, link ứng tuyển, ngày hạn nộp), không gồm mốc thấy, độ
@@ -638,3 +639,38 @@ tiến tới cuối đoạn đã quét. Snapshot theo id tăng dần (keyset, kh
 `JOB_EVENTS_RETENTION_DAYS` (14 ngày; chỉ dòng đã có seq, một đoạn liên tục) và ghi `pruned`:
 cursor < `pruned` hoặc > `last` (DB khôi phục) → `ResyncRequired` (HTTP 410, đồng bộ lại bằng
 snapshot).
+
+**Client và khoá** (`api_clients`, `api_keys`, trang Tích hợp → `/api/api-clients`, đăng nhập giao
+diện): mỗi hệ thống ngoài một client (scope `companies:write` / `jobs:read`, `all_companies`,
+`include_description`), nhiều khoá (đổi khoá không gián đoạn: tạo khoá mới, chuyển, thu hồi khoá
+cũ). Khoá `jca_` + 256 bit ngẫu nhiên, hiện một lần, bảng chỉ giữ sha256 + 8 ký tự đầu.
+`GuardMiddleware` → `key_service.ApiKeyAuth`: đường `/api/integration/v1/*` chỉ nhận
+`Authorization: Bearer jca_…` (hoặc `X-API-Key`), bỏ qua cookie / header SSO và không kiểm cùng
+site (không có cookie nên không bị CSRF); khoá API ở đường khác → 401. Tra digest có cache trong
+process 10 s (thu hồi / đổi phạm vi có hiệu lực ngay ở process xử lý thao tác, process API khác sau
+≤ 10 s), `last_used_at` ghi tối đa mỗi phút; `INTEGRATION_RATE_PER_MINUTE` (600) request mỗi phút
+mỗi khoá (Redis chính, cửa sổ phút) → 429 + `Retry-After`; IP gửi khoá sai 30 lần / 5 phút → 429.
+Người thao tác trong log / nhật ký là `api:<tên client>`.
+
+**API** (`integration_router.py`, `/api/integration/v1`, spec riêng `GET …/openapi.json`):
+
+| Đường                                        | Việc                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------ |
+| `PUT /companies/{external_id}`               | tạo / cập nhật một doanh nghiệp (idempotent)                             |
+| `POST /companies/batch`                      | ≤ 1.000 doanh nghiệp, kết quả từng mục theo thứ tự                       |
+| `POST /companies/import`                     | CSV `external_id,name,tax_code,website,careers_url,note,active` ≤ 20 MB  |
+| `GET /companies`, `GET /companies/{id}`      | mã đã đẩy + trạng thái thu thập (KYC, lịch, số nguồn, việc đang mở)      |
+| `POST /companies/{external_id}/refresh`      | poll ngay (có bộ khung) / build (chưa có), một lần mỗi phút              |
+| `GET /companies/{external_id}/jobs`, `/jobs` | snapshot việc làm (keyset theo id, `feed_cursor` ở trang đầu)            |
+| `GET /jobs/changes?cursor&limit&wait`        | feed thay đổi, long-poll ≤ 25 s (chờ head trên Redis, không giữ session) |
+
+Đẩy doanh nghiệp (`refs_service.upsert`, lô 500 một transaction, khoá `ref:<client>:<mã>` trước
+khoá tên / MST): mã đã có → cập nhật doanh nghiệp đang gắn (website / trang tuyển dụng / ghi chú
+đè, MST chỉ điền khi trống và không thuộc doanh nghiệp khác, lệch thì cảnh báo); website / trang
+tuyển dụng đổi → build tìm nguồn lại. Mã mới → đúng đường nạp CSV (khớp MST rồi tên chuẩn hoá) rồi
+gắn mã: `created` hoặc `linked`. Trường sai định dạng bị bỏ kèm cảnh báo, không từ chối cả doanh
+nghiệp. Mọi mã của một doanh nghiệp `active=false` → lịch `paused`; bật lại → `new`.
+`companies.input_careers_url` là điểm bắt đầu tìm nguồn (`company_service._run_pipeline`), website
+vẫn dùng cho KYC và lưu tin. Danh sách việc làm của API này dùng keyset (không `GetManyQuery` /
+`PageOut`): offset + đếm không đi hết bảng 1 triệu dòng. Giao diện không sinh hàm cho các đường này
+(orval bỏ `/api/integration/`).

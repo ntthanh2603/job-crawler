@@ -27,9 +27,24 @@ export const withoutEventStreams: InputTransformerFn = (spec) => {
   return spec
 }
 
+/**
+ * Bỏ API cho hệ thống ngoài (`/api/integration/v1/...`): chỉ gọi được bằng khoá API, giao diện không
+ * dùng. Mô hình của chúng chỉ còn khi giao diện có dùng ở chỗ khác.
+ */
+export const withoutIntegrationApi: InputTransformerFn = (spec) => {
+  const paths = spec.paths ?? {}
+  for (const path of Object.keys(paths)) {
+    if (path.startsWith("/api/integration/")) delete paths[path]
+  }
+  return spec
+}
+
 export default defineConfig({
   api: {
-    input: { target: OPENAPI_SPEC, override: { transformer: withoutEventStreams } },
+    input: {
+      target: OPENAPI_SPEC,
+      override: { transformer: async (spec) => withoutIntegrationApi(await withoutEventStreams(spec)) },
+    },
     output: {
       target: "src/lib/gen/queries.ts",
       clean: true,

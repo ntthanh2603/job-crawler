@@ -26,6 +26,364 @@
         "title": "AliasOut",
         "type": "object"
       },
+      "ApiClientDetailOut": {
+        "properties": {
+          "active_keys": {
+            "title": "Active Keys",
+            "type": "integer"
+          },
+          "all_companies": {
+            "title": "All Companies",
+            "type": "boolean"
+          },
+          "companies": {
+            "title": "Companies",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "include_description": {
+            "title": "Include Description",
+            "type": "boolean"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyOut"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "all_companies",
+          "include_description",
+          "companies",
+          "active_keys",
+          "last_used_at",
+          "created_by",
+          "created_at",
+          "keys"
+        ],
+        "title": "ApiClientDetailOut",
+        "type": "object"
+      },
+      "ApiClientIn": {
+        "properties": {
+          "all_companies": {
+            "default": false,
+            "description": "Đọc mọi việc làm (không chỉ doanh nghiệp đã đẩy)",
+            "title": "All Companies",
+            "type": "boolean"
+          },
+          "include_description": {
+            "default": true,
+            "description": "Gửi kèm mô tả / yêu cầu / quyền lợi",
+            "title": "Include Description",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Tên hệ thống ngoài",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "companies:write: đẩy doanh nghiệp; jobs:read: đọc việc làm / feed",
+            "items": {
+              "enum": [
+                "companies:write",
+                "jobs:read"
+              ],
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ApiClientIn",
+        "type": "object"
+      },
+      "ApiClientOut": {
+        "properties": {
+          "active_keys": {
+            "title": "Active Keys",
+            "type": "integer"
+          },
+          "all_companies": {
+            "title": "All Companies",
+            "type": "boolean"
+          },
+          "companies": {
+            "title": "Companies",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "include_description": {
+            "title": "Include Description",
+            "type": "boolean"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "all_companies",
+          "include_description",
+          "companies",
+          "active_keys",
+          "last_used_at",
+          "created_by",
+          "created_at"
+        ],
+        "title": "ApiClientOut",
+        "type": "object"
+      },
+      "ApiClientUpdateIn": {
+        "description": "Chỉ trường có mặt được đổi.",
+        "properties": {
+          "all_companies": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "All Companies"
+          },
+          "include_description": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "companies:write",
+                    "jobs:read"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes"
+          }
+        },
+        "title": "ApiClientUpdateIn",
+        "type": "object"
+      },
+      "ApiKeyCreatedOut": {
+        "description": "Khoá chỉ hiện một lần: hệ thống ngoài gửi `Authorization: Bearer <key>`.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "prefix",
+          "key",
+          "created_at"
+        ],
+        "title": "ApiKeyCreatedOut",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "prefix",
+          "created_by",
+          "created_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "title": "ApiKeyOut",
+        "type": "object"
+      },
       "AuditEventOut": {
         "properties": {
           "action": {
@@ -521,6 +879,21 @@
         "title": "Body_post_import",
         "type": "object"
       },
+      "Body_post_integration_companies_import": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "CSV UTF-8: external_id, name, tax_code, website, careers_url, note, active",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_integration_companies_import",
+        "type": "object"
+      },
       "ChartTotalsOut": {
         "properties": {
           "active_jobs": {
@@ -715,6 +1088,146 @@
         "title": "ChartsOut",
         "type": "object"
       },
+      "CompanyBatchIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyBatchItemIn"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CompanyBatchIn",
+        "type": "object"
+      },
+      "CompanyBatchItemIn": {
+        "properties": {
+          "active": {
+            "default": true,
+            "description": "false: ngừng thu thập (khi mọi mã của doanh nghiệp đều tắt)",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "careers_url": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trang tuyển dụng hoặc bảng ATS (nếu biết): tìm nguồn thử trước",
+            "title": "Careers Url"
+          },
+          "external_id": {
+            "description": "Mã doanh nghiệp bên hệ thống ngoài: chữ, số, `. _ : @ -`, ≤ 128 ký tự.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tên doanh nghiệp",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mã số thuế (10 số, chi nhánh thêm -3 số)",
+            "title": "Tax Code"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Website / domain",
+            "title": "Website"
+          }
+        },
+        "required": [
+          "name",
+          "external_id"
+        ],
+        "title": "CompanyBatchItemIn",
+        "type": "object"
+      },
+      "CompanyBatchOut": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "linked": {
+            "title": "Linked",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyUpsertOut"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "created",
+          "linked",
+          "updated",
+          "unchanged",
+          "errors"
+        ],
+        "title": "CompanyBatchOut",
+        "type": "object"
+      },
       "CompanyCrawlOut": {
         "properties": {
           "limits": {
@@ -757,6 +1270,18 @@
       },
       "CompanyCreateIn": {
         "properties": {
+          "careers_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trang tuyển dụng / bảng ATS biết sẵn (tìm nguồn thử trước).",
+            "title": "Careers Url"
+          },
           "enqueue": {
             "default": false,
             "description": "Đưa vào hàng đợi build ngay.",
@@ -880,6 +1405,17 @@
             "title": "Inactive Jobs",
             "type": "integer"
           },
+          "input_careers_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Careers Url"
+          },
           "input_website": {
             "anyOf": [
               {
@@ -912,6 +1448,13 @@
             "title": "Profiles",
             "type": "array"
           },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyRefOut"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
           "rejected_total": {
             "title": "Rejected Total",
             "type": "integer"
@@ -924,11 +1467,13 @@
         "required": [
           "company",
           "input_website",
+          "input_careers_url",
           "note",
           "created_at",
           "kyc_evidence",
           "aliases",
           "profiles",
+          "refs",
           "active_jobs",
           "inactive_jobs",
           "runs_total",
@@ -1158,6 +1703,74 @@
         "title": "CompanyEvalOut",
         "type": "object"
       },
+      "CompanyImportOut": {
+        "description": "Nạp CSV: kết quả từng dòng hợp lệ, cộng lỗi / cảnh báo theo dòng của file.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "csv_errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Csv Errors",
+            "type": "array"
+          },
+          "csv_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Csv Warnings",
+            "type": "array"
+          },
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "linked": {
+            "title": "Linked",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyUpsertOut"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "unchanged": {
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "results",
+          "created",
+          "linked",
+          "updated",
+          "unchanged",
+          "errors",
+          "rows",
+          "duplicates",
+          "csv_errors",
+          "csv_warnings"
+        ],
+        "title": "CompanyImportOut",
+        "type": "object"
+      },
       "CompanyItem": {
         "properties": {
           "active_jobs": {
@@ -1230,6 +1843,174 @@
           "active_jobs"
         ],
         "title": "CompanyItem",
+        "type": "object"
+      },
+      "CompanyRefOut": {
+        "description": "Mã của doanh nghiệp bên một hệ thống ngoài (trang Tích hợp).",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "client_id": {
+            "format": "uuid",
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "external_id",
+          "active"
+        ],
+        "title": "CompanyRefOut",
+        "type": "object"
+      },
+      "CompanyUpsertIn": {
+        "description": "Một doanh nghiệp của hệ thống ngoài (như một dòng CSV). MST / website / trang tuyển dụng sai\nđịnh dạng thì bỏ trường đó (cảnh báo trong kết quả), không từ chối cả doanh nghiệp.",
+        "properties": {
+          "active": {
+            "default": true,
+            "description": "false: ngừng thu thập (khi mọi mã của doanh nghiệp đều tắt)",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "careers_url": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trang tuyển dụng hoặc bảng ATS (nếu biết): tìm nguồn thử trước",
+            "title": "Careers Url"
+          },
+          "name": {
+            "description": "Tên doanh nghiệp",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mã số thuế (10 số, chi nhánh thêm -3 số)",
+            "title": "Tax Code"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Website / domain",
+            "title": "Website"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CompanyUpsertIn",
+        "type": "object"
+      },
+      "CompanyUpsertOut": {
+        "description": "Kết quả một doanh nghiệp: `created` (doanh nghiệp mới), `linked` (gắn mã vào doanh nghiệp\nđã có sẵn), `updated` / `unchanged` (mã đã có), `error` (không ghi, xem `error`).",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "company_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "created",
+              "linked",
+              "updated",
+              "unchanged",
+              "error"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "external_id",
+          "result",
+          "company_id",
+          "active",
+          "warnings",
+          "error"
+        ],
+        "title": "CompanyUpsertOut",
         "type": "object"
       },
       "CrawlStatusOut": {
@@ -1933,6 +2714,471 @@
         "title": "ImportOutcomeOut",
         "type": "object"
       },
+      "IntegrationCompanyOut": {
+        "description": "Trạng thái thu thập của một doanh nghiệp theo mã bên ngoài.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "active_jobs": {
+            "title": "Active Jobs",
+            "type": "integer"
+          },
+          "careers_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Careers Url"
+          },
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "crawl_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new",
+                  "ready",
+                  "no_sources",
+                  "broken",
+                  "paused"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crawl State"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "kyc_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "verified",
+                  "ambiguous",
+                  "not_found"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kyc Status"
+          },
+          "last_build_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Build At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_poll_ok_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Poll Ok At"
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
+          "linked_at": {
+            "format": "date-time",
+            "title": "Linked At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Poll At"
+          },
+          "primary_domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Domain"
+          },
+          "sources": {
+            "title": "Sources",
+            "type": "integer"
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Code"
+          },
+          "website": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Website"
+          }
+        },
+        "required": [
+          "external_id",
+          "active",
+          "company_id",
+          "name",
+          "legal_name",
+          "tax_code",
+          "website",
+          "careers_url",
+          "primary_domain",
+          "kyc_status",
+          "crawl_state",
+          "sources",
+          "active_jobs",
+          "last_build_at",
+          "last_poll_ok_at",
+          "next_poll_at",
+          "last_error",
+          "linked_at"
+        ],
+        "title": "IntegrationCompanyOut",
+        "type": "object"
+      },
+      "IntegrationJobOut": {
+        "description": "Việc làm như `JobOut`, kèm id dòng `jobs` (khoá để bên nhận upsert) và mã doanh nghiệp bên\nngoài của client. `status` đã tính hết hạn theo `expires_at`. Client tắt mô tả thì\n`description_md` rỗng, `requirements_md` / `benefits_md` null.",
+        "properties": {
+          "apply_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Url"
+          },
+          "benefits_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benefits Md"
+          },
+          "canonical_source": {
+            "title": "Canonical Source",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "company_external_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Company External Ids",
+            "type": "array"
+          },
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "description_md": {
+            "title": "Description Md",
+            "type": "string"
+          },
+          "education": {
+            "$ref": "#/components/schemas/EducationLevel",
+            "default": "unknown"
+          },
+          "employment_type": {
+            "$ref": "#/components/schemas/EmploymentType",
+            "default": "unknown"
+          },
+          "experience_years": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExperienceYears"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "first_seen_at": {
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/JobLevel",
+            "default": "unknown"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "title": "Locations",
+            "type": "array"
+          },
+          "openings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openings"
+          },
+          "posted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted At"
+          },
+          "requirements_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirements Md"
+          },
+          "salary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Salary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Urls",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "default": "active"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_normalized": {
+            "title": "Title Normalized",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verification_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Verification Reasons",
+            "type": "array"
+          },
+          "work_mode": {
+            "$ref": "#/components/schemas/WorkMode",
+            "default": "unknown"
+          }
+        },
+        "required": [
+          "title",
+          "title_normalized",
+          "company_id",
+          "company_name",
+          "level",
+          "employment_type",
+          "work_mode",
+          "categories",
+          "education",
+          "openings",
+          "locations",
+          "salary",
+          "experience_years",
+          "description_md",
+          "requirements_md",
+          "benefits_md",
+          "skills",
+          "posted_at",
+          "expires_at",
+          "apply_url",
+          "source_urls",
+          "canonical_source",
+          "status",
+          "confidence",
+          "verification_reasons",
+          "first_seen_at",
+          "last_seen_at",
+          "id",
+          "company_external_ids",
+          "updated_at"
+        ],
+        "title": "IntegrationJobOut",
+        "type": "object"
+      },
+      "JobChangesOut": {
+        "description": "Một trang feed thay đổi. Gọi tiếp với `cursor=next_cursor`; `has_more=false` thì đã tới\n`head` (seq mới nhất), lượt sau có thể chờ (`wait`).",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/JobEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "head": {
+            "title": "Head",
+            "type": "string"
+          },
+          "next_cursor": {
+            "title": "Next Cursor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "next_cursor",
+          "has_more",
+          "head"
+        ],
+        "title": "JobChangesOut",
+        "type": "object"
+      },
       "JobDetailOut": {
         "properties": {
           "html": {
@@ -1967,6 +3213,65 @@
         ],
         "title": "JobDetailOut",
         "type": "object"
+      },
+      "JobEventOut": {
+        "description": "Một sự kiện: việc `job_id` vừa được tạo / đổi / đóng / mở lại / xoá. `job` là trạng thái\nhiện tại của việc lúc đọc (không phải lúc xảy ra) — bên nhận upsert theo `job.id`; null khi\nviệc đã bị xoá.",
+        "properties": {
+          "company_id": {
+            "format": "uuid",
+            "title": "Company Id",
+            "type": "string"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/JobEventType"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "occurred_at",
+          "job_id",
+          "company_id",
+          "job"
+        ],
+        "title": "JobEventOut",
+        "type": "object"
+      },
+      "JobEventType": {
+        "description": "Loại sự kiện việc làm (`job_events`, modules/integration/feed_service.py).",
+        "enum": [
+          "created",
+          "updated",
+          "closed",
+          "reopened",
+          "deleted"
+        ],
+        "title": "JobEventType",
+        "type": "string"
       },
       "JobHtml": {
         "properties": {
@@ -2243,6 +3548,47 @@
         ],
         "title": "JobLevel",
         "type": "string"
+      },
+      "JobSnapshotOut": {
+        "description": "Một trang snapshot việc làm (theo id tăng dần). `next_cursor` null: hết. `feed_cursor` chỉ\ncó ở trang đầu: đọc feed thay đổi từ mốc này sau khi lấy hết snapshot.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationJobOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "feed_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feed Cursor"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "feed_cursor"
+        ],
+        "title": "JobSnapshotOut",
+        "type": "object"
       },
       "JobStatus": {
         "enum": [
@@ -3009,6 +4355,53 @@
         "title": "OverviewOut",
         "type": "object"
       },
+      "PageOut_ApiClientOut_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ApiClientOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pageCount": {
+            "title": "Pagecount",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "limit",
+          "pageCount",
+          "hasNextPage",
+          "exact"
+        ],
+        "title": "PageOut[ApiClientOut]",
+        "type": "object"
+      },
       "PageOut_BoardRunOut_": {
         "properties": {
           "data": {
@@ -3148,6 +4541,53 @@
           "exact"
         ],
         "title": "PageOut[FetchOut]",
+        "type": "object"
+      },
+      "PageOut_IntegrationCompanyOut_": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationCompanyOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "exact": {
+            "default": true,
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "hasNextPage": {
+            "title": "Hasnextpage",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "pageCount": {
+            "title": "Pagecount",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "limit",
+          "pageCount",
+          "hasNextPage",
+          "exact"
+        ],
+        "title": "PageOut[IntegrationCompanyOut]",
         "type": "object"
       },
       "PageOut_JobItem_": {
@@ -4839,6 +6279,29 @@
           "company_name"
         ],
         "title": "RecentRunOut",
+        "type": "object"
+      },
+      "RefreshOut": {
+        "description": "`poll` (đọc lại bộ khung) hoặc `build` (chưa có bộ khung dùng được); `queued=false`: đã có\nlượt đang chờ / chạy, hoặc vừa gọi trong `REFRESH_SECONDS` giây.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "poll",
+              "build"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "queued"
+        ],
+        "title": "RefreshOut",
         "type": "object"
       },
       "ReviewIn": {
@@ -6935,6 +8398,375 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/api-clients": {
+      "get": {
+        "description": "Các hệ thống ngoài dùng API tích hợp.",
+        "operationId": "get_api_clients",
+        "parameters": [
+          {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "created_at",
+              "enum": [
+                "created_at",
+                "name"
+              ],
+              "title": "Sortby",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_ApiClientOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Api Clients",
+        "tags": [
+          "api-clients"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_client",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiClientIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiClientDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Api Client",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
+    "/api/api-clients/{client_id}": {
+      "delete": {
+        "description": "Xoá hệ thống cùng mọi khoá và mã doanh nghiệp của nó; doanh nghiệp và việc làm vẫn giữ.",
+        "operationId": "delete_api_client",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Api Client",
+        "tags": [
+          "api-clients"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_client",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiClientDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Api Client",
+        "tags": [
+          "api-clients"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_client",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiClientUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiClientDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Api Client",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
+    "/api/api-clients/{client_id}/keys": {
+      "post": {
+        "description": "Khoá mới (chỉ hiện một lần). Khoá cũ vẫn dùng được tới khi thu hồi: đổi khoá không gián\nđoạn.",
+        "operationId": "post_api_client_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Api Client Key",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
+    "/api/api-clients/{client_id}/keys/{key_id}": {
+      "delete": {
+        "description": "Thu hồi khoá: hệ thống ngoài nhận 401 với khoá này (process API khác sau ≤ 10 s).",
+        "operationId": "delete_api_client_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Api Client Key",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
     "/api/audit": {
       "get": {
         "description": "Nhật ký thao tác của người vận hành, mới nhất trước. `next` = id dòng cuối (truyền vào\n`before` để lấy trang sau), `null` khi đã hết.",
@@ -8557,6 +10389,623 @@
         ]
       }
     },
+    "/api/integration/v1/companies": {
+      "get": {
+        "description": "Doanh nghiệp đã đẩy vào, kèm trạng thái thu thập.",
+        "operationId": "get_integration_companies",
+        "parameters": [
+          {
+            "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Tìm kiếm (cột tìm tuỳ endpoint)",
+              "title": "Search",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Trang, từ 1 (quá trang cuối thì trả trang cuối)",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Số dòng mỗi trang (1–100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Số dòng mỗi trang (1–100)",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Chiều sắp xếp theo `sortBy`",
+            "in": "query",
+            "name": "sortOrder",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortOrder",
+              "default": "DESC",
+              "description": "Chiều sắp xếp theo `sortBy`"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortBy",
+            "required": false,
+            "schema": {
+              "default": "linked_at",
+              "enum": [
+                "linked_at",
+                "external_id"
+              ],
+              "title": "Sortby",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Chỉ mã đang / đã ngừng theo dõi",
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Chỉ mã đang / đã ngừng theo dõi",
+              "title": "Active"
+            }
+          },
+          {
+            "description": "Lọc theo lịch thu thập",
+            "in": "query",
+            "name": "crawl_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ScheduleState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Lọc theo lịch thu thập",
+              "title": "Crawl State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOut_IntegrationCompanyOut_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Companies",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/companies/batch": {
+      "post": {
+        "description": "Tối đa 1000 doanh nghiệp mỗi lần, kết quả từng mục theo đúng thứ tự (mục lỗi không chặn mục\nkhác). Mã lặp lại trong lô: mục sau thắng.",
+        "operationId": "post_integration_companies_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyBatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyBatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Integration Companies Batch",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/companies/import": {
+      "post": {
+        "description": "Nạp file CSV (≤ 20 MB). Dòng hỏng được liệt kê ở `csv_errors`, không chặn dòng khác.",
+        "operationId": "post_integration_companies_import",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_integration_companies_import"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Integration Companies Import",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/companies/{external_id}": {
+      "get": {
+        "description": "Trạng thái thu thập của một doanh nghiệp: KYC, lịch (new / ready / no_sources / broken /\npaused), số nguồn đang poll, số việc đang mở, lần build / poll gần nhất.",
+        "operationId": "get_integration_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationCompanyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Company",
+        "tags": [
+          "integration"
+        ]
+      },
+      "put": {
+        "description": "Tạo / cập nhật một doanh nghiệp theo mã bên ngoài (idempotent). Doanh nghiệp mới được build\nngay; website / trang tuyển dụng đổi thì build tìm nguồn lại.",
+        "operationId": "put_integration_company",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyUpsertIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyUpsertOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Integration Company",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/companies/{external_id}/jobs": {
+      "get": {
+        "description": "Việc làm của một doanh nghiệp (`active`: đang mở, chưa quá hạn nộp; `all`: mọi trạng thái),\ntheo id tăng dần.",
+        "operationId": "get_integration_company_jobs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "enum": [
+                "active",
+                "all"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` của trang trước",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` của trang trước",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Company Jobs",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/companies/{external_id}/refresh": {
+      "post": {
+        "description": "Thu thập ngay một doanh nghiệp (poll nếu đã có bộ khung, không thì build). Tối đa một lần\nmỗi phút mỗi doanh nghiệp; doanh nghiệp đã tắt (`paused`) thì không chạy.",
+        "operationId": "post_integration_company_refresh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Integration Company Refresh",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/jobs": {
+      "get": {
+        "description": "Snapshot việc làm của client (mọi doanh nghiệp đã đẩy, hoặc các mã `external_id`), theo id\ntăng dần. Trang đầu có `feed_cursor`: lấy hết snapshot rồi đọc `/jobs/changes` từ mốc đó.",
+        "operationId": "get_integration_jobs",
+        "parameters": [
+          {
+            "description": "Lọc theo mã doanh nghiệp (lặp lại)",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "Lọc theo mã doanh nghiệp (lặp lại)",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "External Id",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "enum": [
+                "active",
+                "all"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`next_cursor` của trang trước",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` của trang trước",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshotOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Jobs",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
+    "/api/integration/v1/jobs/changes": {
+      "get": {
+        "description": "Feed thay đổi việc làm (created / updated / closed / reopened / deleted) sau `cursor`, theo\nseq tăng dần, kèm trạng thái hiện tại của việc. Giao ít nhất một lần: khử trùng theo `seq`,\nupsert theo `job.id`. Lưu `next_cursor` sau khi đã xử lý xong trang.",
+        "operationId": "get_integration_job_changes",
+        "parameters": [
+          {
+            "description": "`next_cursor` lần trước (hoặc `feed_cursor` của snapshot)",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` lần trước (hoặc `feed_cursor` của snapshot)",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Long-poll: chờ tối đa N giây nếu chưa có",
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Long-poll: chờ tối đa N giây nếu chưa có",
+              "maximum": 25,
+              "minimum": 0,
+              "title": "Wait",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobChangesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "410": {
+            "description": "`resync_required`: cursor đã bị dọn (hoặc DB được khôi phục), đồng bộ lại từ snapshot `GET /jobs`"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Integration Job Changes",
+        "tags": [
+          "integration"
+        ]
+      }
+    },
     "/api/jobs": {
       "get": {
         "description": "Việc làm theo bộ lọc, một trang (`search` trong tiêu đề / tên doanh nghiệp).",
@@ -10175,6 +12624,14 @@
     {
       "description": "Proxy chung: trạng thái xoay vòng, kiểm tra qua worker",
       "name": "proxies"
+    },
+    {
+      "description": "Hệ thống ngoài dùng API tích hợp: tạo, khoá API, phạm vi đọc (trang Tích hợp)",
+      "name": "api-clients"
+    },
+    {
+      "description": "API cho hệ thống ngoài (khoá API `jca_…`): đẩy doanh nghiệp, việc làm, feed thay đổi",
+      "name": "integration"
     },
     {
       "description": "Cài đặt sửa ở giao diện (đè biến môi trường / .env)",
