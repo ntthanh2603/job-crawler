@@ -43,6 +43,12 @@ RETRY_STATUSES = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524})
 ROBOTS_UNREACHABLE = "robots_unreachable"
 _META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?\s*([a-zA-Z0-9_\-]+)""", re.IGNORECASE)
 _HEADER_CHARSET = re.compile(r"charset=([^\s;]+)", re.IGNORECASE)
+# Tên miền không phân giải được (curl lỗi 6, aiodns/getaddrinfo): subdomain đoán mò
+# (careers./tuyendung./jobs.) không tồn tại, domain đã chết — thử lại chỉ tốn vài giây mỗi lần.
+_DNS_FAILURE = re.compile(
+    r"DNSError|Could not resolve host|curl: \(6\)|Name or service not known|getaddrinfo failed",
+    re.IGNORECASE,
+)
 
 
 # --- tầng truyền tải ---------------------------------------------------------------------------
@@ -79,6 +85,11 @@ class TransportError(Exception):
     def proxy_fault(self) -> bool:
         """Lỗi có khả năng do proxy (để tính vào sức khoẻ proxy)."""
         return self.kind in ("proxy", "connect")
+
+    @property
+    def permanent(self) -> bool:
+        """Lỗi thử lại không đổi được kết quả (tên miền không tồn tại)."""
+        return self.kind == "connect" and _DNS_FAILURE.search(str(self)) is not None
 
 
 class Transport(Protocol):
@@ -512,7 +523,7 @@ class HttpClient:
                 log.debug(
                     "source.fetch", url=url, source=source, error=last.error, attempt=attempt + 1
                 )
-                if attempt + 1 < max_attempts:
+                if attempt + 1 < max_attempts and not exc.permanent:
                     delay = self._backoff(attempt)
                     log.info("http.retry", url=url, reason=exc.kind, delay=round(delay, 2))
                     await self._sleep(delay)

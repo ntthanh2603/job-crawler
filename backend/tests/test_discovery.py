@@ -13,7 +13,7 @@ from jobcrawler.pipeline.discovery import (
     discover,
     sources_for,
 )
-from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
+from jobcrawler.services.fakes import FakeChatClient, FakeFetcher, fetch_result
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.net.kv import MemoryKV
@@ -51,6 +51,24 @@ def test_careers_score() -> None:
     )
     assert not brand_careers_site("https://momo.vn/careers", site)  # cùng site
     assert not brand_careers_site("https://careers.other.vn/", site)
+    # Cùng thương hiệu, khác đuôi domain / tên rút gọn / ghép vào tên host.
+    assert brand_careers_site("https://job.matbao.com/", "https://www.matbao.net/")
+    assert brand_careers_site("https://tuyendung.ivy.com.vn/", "https://ivymoda.com/")
+    assert brand_careers_site("https://careersdecathlonvn.com/", "https://decathlon.vn/")
+    assert brand_careers_site("https://bvbank.talent.vn/", "https://bvbank.net.vn/")
+    assert not brand_careers_site("https://job.other.com/", "https://www.matbao.net/")
+    # Mục tuyển dụng trong mục tin tức / blog; bài viết trong mục tin tức thì không.
+    assert careers_score("https://www.momo.vn/tin-tuc/tuyen-dung", "", site) == 2
+    assert careers_score("https://www.momo.vn/tin-tuc/tin-tuyen-dung-2", "", site) == 2
+    assert careers_score("https://www.momo.vn/category/tuyen-dung/", "", site) == 2
+    assert (
+        careers_score("https://www.momo.vn/tin-tuc/chi-tiet/momo-tuyen-dung-ke-toan", "", site) == 0
+    )
+    # Link ra domain khác chỉ ghi "Tuyển dụng" (trang tuyển dụng của tập đoàn): đáng mở; trang
+    # tuyển dụng chung và mạng xã hội thì không.
+    assert careers_score("https://tuyendung.frt.vn/", "Tuyển dụng", site) == 2
+    assert careers_score("https://tuyendung.frt.vn/", "Về FRT", site) == 0
+    assert careers_score("https://www.facebook.com/momo.careers", "Tuyển dụng", site) == 0
 
 
 async def test_base_vn_from_homepage_and_cache() -> None:
@@ -206,11 +224,12 @@ async def test_llm_picks_among_candidates() -> None:
     fetcher.add(
         "https://acme.vn/",
         '<a href="/ve-chung-toi/van-hoa-tuyen-dung">Văn hoá tuyển dụng</a>'
-        '<a href="/careers">Careers</a>',
+        '<a href="/careers">Careers</a><a href="/gia-nhap">Gia nhập</a>'
+        '<a href="/doi-ngu">Join us</a>',
     )
     fetcher.add("https://acme.vn/careers", LISTING)
-    # Theo điểm: 0 = /careers, 1 = /ve-chung-toi/van-hoa-tuyen-dung. LLM chọn 0 (và một số
-    # ngoài danh sách, bị bỏ) → trang 1 không được mở.
+    # Theo điểm: 0 = /careers, 1 = /ve-chung-toi/van-hoa-tuyen-dung... (hơn MAX_EVALUATE ứng
+    # viên). LLM chọn 0 (và một số ngoài danh sách, bị bỏ) → trang 1 không được mở.
     chat = FakeChatClient([json.dumps({"choices": [0, 7], "reason": "trang danh sách"})])
     result = await discover(
         session(fetcher, LLMClient(chat, model="qwen-test")), MemoryKV(), "acme.vn"
@@ -275,6 +294,90 @@ async def test_subdomain_is_probed_before_common_paths() -> None:
     assert result.careers_pages == ["https://tuyendung.acme.vn/"]
     opened = [url for _, url, _ in fetcher.calls]
     assert "https://acme.vn/jobs" not in opened
+
+
+async def test_soft_404_and_redirect_home_are_not_careers_pages() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add(
+        "https://acme.vn/",
+        '<a href="/tuyen-dung">Tuyển dụng</a><a href="/careers">Careers</a>',
+    )
+    # Trang lỗi trả mã 200, vẫn có menu và link tin của site.
+    fetcher.add(
+        "https://acme.vn/tuyen-dung",
+        "<html><head><title>Không tìm thấy trang</title></head><body>" + LISTING + "</body></html>",
+    )
+    fetcher.add("https://acme.vn/careers", LISTING, final_url="https://acme.vn/")
+    result = await discover(session(fetcher), MemoryKV(), "acme.vn")
+    assert not result.careers_pages
+
+
+async def test_few_candidates_are_all_opened_without_llm() -> None:
+    fetcher = FakeFetcher()
+    fetcher.add(
+        "https://acme.vn/",
+        '<a href="/ve-chung-toi/van-hoa-tuyen-dung">Văn hoá tuyển dụng</a>'
+        '<a href="/careers">Careers</a>',
+    )
+    fetcher.add("https://acme.vn/careers", LISTING)
+    chat = FakeChatClient([json.dumps({"choices": [1], "reason": "x"})])
+    result = await discover(
+        session(fetcher, LLMClient(chat, model="qwen-test")), MemoryKV(), "acme.vn"
+    )
+    assert result.careers_pages == ["https://acme.vn/careers"]
+    assert chat.calls == []
+
+
+async def test_blocked_homepage_still_probes_subdomains() -> None:
+    """WAF chặn trang chủ (và một subdomain đoán) nhưng trang tuyển dụng ở subdomain riêng mở
+    được."""
+    fetcher = FakeFetcher()
+    for url in ("https://shop.vn/", "https://www.shop.vn/", "https://careers.shop.vn/"):
+        fetcher.add(url, status=403, outcome=FetchOutcome.BLOCKED)
+    fetcher.add("https://tuyendung.shop.vn/", LISTING)
+    result = await discover(session(fetcher), MemoryKV(), "shop.vn")
+    assert result.method == "subdomain"
+    assert result.careers_pages == ["https://tuyendung.shop.vn/"]
+
+
+async def test_wildcard_dns_subdomains_are_skipped() -> None:
+    """Mọi subdomain trả cùng một trang (DNS wildcard): không mở từng cái như trang tuyển dụng."""
+
+    class Wildcard(FakeFetcher):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            host = url.split("/")[2]
+            if host.endswith(".acme.vn") and host != "www.acme.vn":
+                self.calls.append(("fetch", url, kwargs))
+                return fetch_result(url, '<h1>Outlook Web App</h1><a href="/jobs/x-12">Jobs</a>')
+            return await super().fetch(url, **kwargs)
+
+    fetcher = Wildcard()
+    fetcher.add("https://acme.vn/", "<html><body>Trang chủ</body></html>")
+    result = await discover(session(fetcher), MemoryKV(), "acme.vn")
+    assert not result.found
+    # Mỗi subdomain chỉ được thử một lần (không mở tiếp để xác nhận).
+    opened = [url for _, url, _ in fetcher.calls]
+    assert opened.count("https://careers.acme.vn/") == 1
+    assert opened.count("https://tuyendung.acme.vn/") == 1
+
+
+async def test_http_only_site_and_sitemap_from_robots() -> None:
+    """Site chỉ có http: sitemap / đường dẫn đoán theo scheme của trang chủ; sitemap khai trong
+    robots.txt; mục tuyển dụng nằm trong mục tin tức."""
+    fetcher = FakeFetcher()
+    fetcher.add("http://acme.vn/", "<html><body>Trang chủ</body></html>")
+    fetcher.add(
+        "http://acme.vn/robots.txt", "User-agent: *\nSitemap: http://acme.vn/sitemap.ashx\n"
+    )
+    fetcher.add(
+        "http://acme.vn/sitemap.ashx",
+        "<urlset><url><loc>http://acme.vn/tin-tuc/tin-tuyen-dung-2</loc></url></urlset>",
+        content_type="application/xml",
+    )
+    fetcher.add("http://acme.vn/tin-tuc/tin-tuyen-dung-2", LISTING)
+    result = await discover(session(fetcher), MemoryKV(), "acme.vn")
+    assert result.method == "sitemap"
+    assert result.careers_pages == ["http://acme.vn/tin-tuc/tin-tuyen-dung-2"]
 
 
 async def test_timeout_keeps_unconfirmed_careers_page() -> None:
@@ -344,3 +447,63 @@ async def test_input_origin_with_port_is_kept() -> None:
     result = await discover(session(fetcher), MemoryKV(), "http://jobs.local:8765/")
     assert result.homepage == "http://jobs.local:8765/"
     assert result.careers_pages == ["http://jobs.local:8765/tuyen-dung"]
+
+
+def test_job_board_hosts() -> None:
+    from jobcrawler.sources.boards import registry
+    from jobcrawler.sources.careers import JOB_BOARDS, job_board_host
+
+    assert job_board_host("https://www.topcv.vn/viec-lam")
+    assert job_board_host("https://itviec.com/companies/naver-vietnam")
+    assert not job_board_host("https://tuyendung.topcv.vn/")  # trang riêng của công ty sàn
+    assert not job_board_host("https://www.fpt.com/tuyen-dung")
+    # Mọi sàn có adapter đều là sàn với discovery.
+    assert {strip(a.home) for a in registry().values()} <= JOB_BOARDS
+
+
+def strip(url: str) -> str:
+    from jobcrawler.common.urls import host_of, strip_www
+
+    return strip_www(host_of(url))
+
+
+def employer_links(names: list[str], segment: str = "nha-tuyen-dung") -> str:
+    return "".join(
+        f'<a href="/vi/{segment}/{n.lower().replace(" ", "-")}.html">{n}</a>' for n in names
+    )
+
+
+def test_multi_employer_page() -> None:
+    from jobcrawler.common.pages import extract_links, parse
+    from jobcrawler.sources.careers import multi_employer_page
+
+    def links(body: str) -> Any:
+        return extract_links(parse(f"<html><body>{body}</body></html>"), "https://vieclam.x.vn/")
+
+    board = employer_links(["Công ty TNHH A", "CÔNG TY CỔ PHẦN B", "Công ty CP C", "Đại học D"])
+    assert multi_employer_page(links(board))
+    # Một nhà tuyển dụng nhắc nhiều lần, trang giới thiệu công ty, công ty con trên site tập đoàn.
+    assert not multi_employer_page(links(employer_links(["Công ty TNHH A"] * 4)))
+    about = employer_links(["Giới thiệu", "Lịch sử", "Ban lãnh đạo", "Tin tức"], "company")
+    assert not multi_employer_page(links(about))
+    members = ["Công ty CP X1", "Công ty CP X2", "Công ty CP X3"]
+    group = employer_links(members, "cong-ty-thanh-vien")
+    assert not multi_employer_page(links(group))
+
+
+async def test_job_board_pages_are_not_careers_pages() -> None:
+    from jobcrawler.pipeline.discovery import DiscoveryResult
+
+    fetcher = FakeFetcher()
+    fetcher.add(
+        "https://baoxyz.vn/",
+        '<a href="https://vieclam.baoxyz.vn/">Việc làm</a><a href="/tuyen-dung">Tuyển dụng</a>',
+    )
+    board = employer_links(["Công ty TNHH A", "Công ty CP B", "Công ty TNHH C"])
+    fetcher.add("https://vieclam.baoxyz.vn/", f"<html><body>{board}{LISTING[12:]}")
+    fetcher.add("https://baoxyz.vn/tuyen-dung", LISTING)
+    result = await discover(session(fetcher), MemoryKV(), "baoxyz.vn")
+    assert result.careers_pages == ["https://baoxyz.vn/tuyen-dung"]
+    # Kết quả cache từ trước: trang trên chính sàn tuyển dụng không thành nguồn.
+    cached = DiscoveryResult(domain="jobsgo.vn", careers_pages=["https://jobsgo.vn/viec-lam.html"])
+    assert sources_for(cached) == []

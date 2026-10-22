@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
@@ -32,16 +34,21 @@ from jobcrawler.common.urls import (
     strip_www,
 )
 from jobcrawler.prompts import careers_pick
+from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.net.kv import KeyValueStore
 from jobcrawler.sources import ats
 from jobcrawler.sources.ats.ref import AtsRef
 from jobcrawler.sources.base import Source, SourceError, SourceSession
+from jobcrawler.sources.boards.base import is_social_host
 from jobcrawler.sources.careers import (
+    JOB_BOARDS,
     STOP_SEGMENTS,
     CareersSource,
     Page,
     fetch_page,
+    job_board_host,
     listing_links,
+    multi_employer_page,
     scan_with_render,
 )
 
@@ -56,6 +63,8 @@ MAX_SITEMAPS = 3
 MAX_LLM_CANDIDATES = 20
 # URL đoán (đường dẫn phổ biến, subdomain): đa số không tồn tại, không thử lại, chờ ngắn.
 GUESS_TIMEOUT = 8.0
+# LLM chọn link careers quá lâu (LLM quá tải) thì chọn theo điểm: không để bước này ăn hết giờ.
+CHOOSE_TIMEOUT = 10.0
 
 COMMON_PATHS = (
     "/careers",
@@ -69,7 +78,7 @@ COMMON_PATHS = (
     "/tuyen-dung.html",
     "/careers.html",
 )
-SUBDOMAINS = ("careers", "tuyendung", "jobs")
+SUBDOMAINS = ("careers", "tuyendung", "jobs", "career", "vieclam", "recruitment", "job")
 
 _CAREERS_TEXT = re.compile(
     r"\b(tuyen dung|co hoi nghe nghiep|co hoi viec lam|co hoi lam viec|viec lam|nghe nghiep|"
@@ -96,12 +105,48 @@ _CAREERS_SEGMENTS = frozenset(
         "vacancies",
     }
 )
-_CAREERS_HOSTS = ("careers.", "career.", "jobs.", "tuyendung.", "recruit.", "hr.")
+_CAREERS_HOSTS = (
+    "careers.",
+    "career.",
+    "jobs.",
+    "job.",
+    "tuyendung.",
+    "vieclam.",
+    "recruit.",
+    "talent.",
+    "hr.",
+)
+# Chữ trong tên host của trang tuyển dụng đặt ở domain riêng (momo.careers, job.matbao.com,
+# tuyendungeximbank.com, bvbank.talent.vn).
+_CAREERS_HOST_WORDS = (
+    "career",
+    "tuyendung",
+    "tuyen-dung",
+    "job",
+    "recruit",
+    "vieclam",
+    "talent",
+    "nhansu",
+)
+# Mục tuyển dụng nằm trong mục tin tức / blog ("/tin-tuc/tin-tuyen-dung-2", "/category/tuyen-dung").
+_CAREERS_POSTS = frozenset({"tin-tuyen-dung", "thong-tin-tuyen-dung", "thong-bao-tuyen-dung"})
+# Chữ trên link chỉ là tên mục tuyển dụng: link ra domain khác vẫn đáng mở (trang tuyển dụng của
+# tập đoàn mẹ, hệ thống tuyển dụng thuê ngoài) — trừ mạng xã hội và trang tuyển dụng chung.
+_CAREERS_LABEL = re.compile(
+    r"^(tuyen dung|tuyen dung nhan su|thong tin tuyen dung|co hoi nghe nghiep|co hoi viec lam|"
+    r"viec lam|careers?|jobs|join us|recruitment|we.?re hiring)$"
+)
 # Đoạn cuối của URL tin chi tiết: id số, hoặc slug kết thúc bằng id (`ke-toan-12`, `sales_29675`).
 _DETAIL_SLUG = re.compile(r"^\d+$|[a-z].*[-_]\d+$")
 # Bị chuyển tới trang lỗi có đường dẫn riêng (soft 404): /vi-VN/Error-404, /not-found.
 _ERROR_PAGE = re.compile(r"/(error|404|not-?found|page-not-found|khong-tim-thay)\b", re.I)
+# Tiêu đề của trang lỗi trả mã 200 (đã bỏ dấu, viết thường).
+_ERROR_TITLE = re.compile(
+    r"\b(404|page not found|not found|nothing found|khong tim thay( trang)?|"
+    r"trang khong ton tai|thong bao loi|da xay ra loi)\b"
+)
 _LOC = re.compile(r"<loc>\s*(?:<!\[CDATA\[)?\s*([^<\]\s]+)", re.IGNORECASE)
+_ROBOTS_SITEMAP = re.compile(r"^\s*sitemap:\s*(\S+)", re.IGNORECASE | re.MULTILINE)
 
 
 class DiscoveryResult(BaseModel):
@@ -145,29 +190,50 @@ def brand_of(site: str) -> str | None:
 
 def brand_careers_site(url: str, site: str) -> bool:
     """Trang tuyển dụng đặt ở domain riêng mang tên thương hiệu: momo.careers,
-    haravan-careers.myharavan.com, vngcareers.com..."""
+    haravan-careers.myharavan.com, vngcareers.com, job.matbao.com (site matbao.net),
+    tuyendung.ivy.com.vn (site ivymoda.com), careersdecathlonvn.com..."""
     brand = brand_of(site)
     host = host_of(url)
     if brand is None or same_site(url, site):
         return False
-    tokens = re.split(r"[.-]", host)
-    has_brand = brand in tokens or any(t.startswith(brand) and len(t) > len(brand) for t in tokens)
-    careers_word = any(k in host for k in ("career", "tuyendung", "tuyen-dung", "jobs", "recruit"))
-    return has_brand and careers_word
+    tokens = [t for t in re.split(r"[.-]", host) if len(t) >= 3 and t not in ("www", "com")]
+    has_brand = any(brand in t or brand.startswith(t) for t in tokens)
+    return has_brand and any(k in host for k in _CAREERS_HOST_WORDS)
+
+
+def careers_segment(segment: str) -> bool:
+    """Đoạn đường dẫn là mục tuyển dụng (`tuyen-dung`, `careers`, `tin-tuyen-dung-2`)."""
+    base = re.sub(r"-\d{1,2}$", "", segment)  # bản trùng tên của WordPress, không phải năm
+    return base in _CAREERS_SEGMENTS or base in _CAREERS_POSTS
+
+
+def _offsite_careers(url: str, text: str) -> bool:
+    """Link ra domain khác mà chữ chỉ là tên mục tuyển dụng ("Tuyển dụng" → tuyendung.frt.vn)."""
+    domain = registrable_domain(host_of(url))
+    return (
+        bool(_CAREERS_LABEL.match(_plain(text)))
+        and domain not in JOB_BOARDS
+        and not is_social_host(domain)
+    )
 
 
 def careers_score(url: str, text: str, site: str) -> int:
     """Mức độ link trông như trang tuyển dụng của chính site (0 = không phải)."""
     brand_site = brand_careers_site(url, site)
     if not same_site(url, site) and not brand_site:
-        return 0
+        # Domain khác không mang tên thương hiệu: chỉ khi chữ trên link đúng là "Tuyển dụng"
+        # (evaluate vẫn phải thấy tin mới nhận).
+        return 2 if _offsite_careers(url, text) else 0
     segs = _segments(url)
-    if any(s in STOP_SEGMENTS for s in segs):
+    stops = [i for i, s in enumerate(segs) if s in STOP_SEGMENTS]
+    # Mục tuyển dụng trong mục tin tức / blog vẫn là trang tuyển dụng ("/tin-tuc/tuyen-dung",
+    # "/category/tuyen-dung", "/about-us/careers"); bài viết trong mục tin tức thì không.
+    if stops and not any(careers_segment(s) for s in segs[stops[-1] + 1 :]):
         return 0
     score = 0
     if _CAREERS_TEXT.search(_plain(text)):
         score += 3
-    if any(s in _CAREERS_SEGMENTS for s in segs):
+    if any(careers_segment(s) for s in segs):
         score += 2
     host = host_of(url)
     if (host.startswith(_CAREERS_HOSTS) and host != host_of(site)) or brand_site:
@@ -265,6 +331,7 @@ class _Discovery:
         self.site = f"https://{domain}/"
         self.evaluated: set[str] = set()
         self.unconfirmed: list[str] = []
+        self.blocked: str | None = None  # lý do trang chủ bị chặn
 
     def step(self, text: str) -> None:
         self.result.steps.append(text)
@@ -294,7 +361,12 @@ class _Discovery:
             urls.insert(0, self.origin)
         ordered = await self._first_ok(urls)
         for url in ordered:
-            page = await fetch_page(self.s, url)
+            try:
+                page = await fetch_page(self.s, url)
+            except SourceError as exc:  # WAF chặn: vẫn thử bản khác, rồi subdomain
+                self.step(f"{url} → {exc}")
+                self.blocked = f"{exc.outcome}: {exc}"
+                continue
             if page is not None:
                 self.result.homepage = page.url
                 # Trang chủ chuyển sang domain khác (vd. brand.com → brand.com.vn): dùng domain mới.
@@ -326,14 +398,22 @@ class _Discovery:
     async def choose(self, candidates: list[Candidate]) -> list[Candidate]:
         """LLM chọn trong danh sách khi có nhiều ứng viên; không có LLM thì theo điểm."""
         candidates = candidates[:MAX_LLM_CANDIDATES]
-        if len(candidates) <= 1 or not self.s.llm.enabled:
+        # Ít ứng viên thì mở hết, không cần LLM chọn.
+        if len(candidates) <= MAX_EVALUATE or not self.s.llm.enabled:
             return candidates[:MAX_EVALUATE]
-        pick = await self.s.llm.structured(
-            careers_pick.PROMPT,
-            careers_pick.CareersPick,
-            site=self.site,
-            links="\n".join(f"{i}. {c.text or '-'} — {c.url}" for i, c in enumerate(candidates)),
-        )
+        try:
+            async with asyncio.timeout(CHOOSE_TIMEOUT):
+                pick = await self.s.llm.structured(
+                    careers_pick.PROMPT,
+                    careers_pick.CareersPick,
+                    site=self.site,
+                    links="\n".join(
+                        f"{i}. {c.text or '-'} — {c.url}" for i, c in enumerate(candidates)
+                    ),
+                )
+        except TimeoutError:
+            self.step("LLM chọn quá lâu: chọn theo điểm")
+            return candidates[:MAX_EVALUATE]
         if pick.value is None:
             return candidates[:MAX_EVALUATE]
         chosen = [
@@ -351,7 +431,14 @@ class _Discovery:
         if url in self.evaluated or len(self.result.careers_pages) >= MAX_CAREERS_PAGES:
             return False
         self.evaluated.add(url)
-        scan = await scan_with_render(self.s, url, required=False, render=render)
+        if job_board_host(url):
+            self.step(f"{url} → trang của sàn tuyển dụng")
+            return False
+        try:
+            scan = await scan_with_render(self.s, url, required=False, render=render)
+        except SourceError as exc:  # trang ứng viên bị chặn: thử ứng viên khác
+            self.step(f"{url} → {exc}")
+            return False
         if scan is None:
             self.step(f"{url} → không mở được")
             return False
@@ -361,6 +448,21 @@ class _Discovery:
         self.evaluated.add(final_url)
         if _ERROR_PAGE.search(final_url):
             self.step(f"{url} → trang lỗi {final_url}")
+            return False
+        if job_board_host(final_url) or multi_employer_page(links):
+            self.step(f"{url} → trang tin của nhiều nhà tuyển dụng (sàn)")
+            return False
+        tree = parse(html)
+        title = _plain(node_text(tree.css_first("h1")) or node_text(tree.css_first("title")))
+        page_title = _plain(node_text(tree.css_first("title")))
+        if _ERROR_TITLE.search(f"{page_title} {title}"):
+            # Trang lỗi trả mã 200 (soft 404) vẫn có menu / link tin của site.
+            self.step(f"{url} → trang lỗi ({page_title or title})")
+            return False
+        home = self.result.homepage
+        redirected = final_url != url and not path_segments(final_url)
+        if redirected and home and host_of(final_url) == host_of(home):
+            self.step(f"{url} → chuyển về trang chủ")
             return False
         if self.add_ats(ats.detect(html, final_url)):
             self.step(f"{final_url}: nhúng ATS")
@@ -373,8 +475,6 @@ class _Discovery:
                 f"{final_url}{how}: {len(scan.job_links)} link tin, {len(scan.jobs)} JobPosting"
             )
             return True
-        tree = parse(html)
-        title = _plain(node_text(tree.css_first("h1")) or node_text(tree.css_first("title")))
         careers_like = _CAREERS_TEXT.search(title) or any(
             s in _CAREERS_SEGMENTS for s in _segments(final_url)
         )
@@ -392,16 +492,41 @@ class _Discovery:
                 return True
         return False
 
+    def root(self) -> str:
+        """Gốc site theo trang chủ đã mở (giữ `http://` của site chỉ có http)."""
+        parts = urlsplit(self.site)
+        return f"{parts.scheme or 'https'}://{parts.netloc or host_of(self.site)}"
+
+    async def _guess(self, url: str, **kwargs: Any) -> FetchResult | None:
+        """Mở URL đoán. Bị chặn (WAF chặn `sitemap.xml`, một subdomain) thì bỏ qua URL đó, không
+        dừng cả bước tìm nguồn."""
+        try:
+            return await self.s.fetch(url, **kwargs)
+        except SourceError as exc:
+            self.step(f"{url} → {exc}")
+            return None
+
+    async def robots_sitemaps(self) -> list[str]:
+        """Sitemap khai trong robots.txt (`sitemap.ashx`, `sitemap-index.xml`...)."""
+        result = await self._guess(f"{self.root()}/robots.txt", check_robots=False)
+        if result is None or not result.ok:
+            return []
+        return [m.group(1) for m in _ROBOTS_SITEMAP.finditer(result.text)][:MAX_SITEMAPS]
+
     async def sitemap(self) -> list[Candidate]:
-        root = f"https://{host_of(self.site)}"
+        root = self.root()
         found: dict[str, Candidate] = {}
-        queue = [f"{root}/sitemap.xml", f"{root}/sitemap_index.xml"]
+        queue = list(
+            dict.fromkeys(
+                [*await self.robots_sitemaps(), f"{root}/sitemap.xml", f"{root}/sitemap_index.xml"]
+            )
+        )
         fetched = 0
         while queue and fetched < MAX_SITEMAPS:
             url = queue.pop(0)
             fetched += 1
-            result = await self.s.fetch(url)
-            if not result.ok:
+            result = await self._guess(url)
+            if result is None or not result.ok:
                 continue
             locs = sitemap_locations(result.text)
             if "<sitemapindex" in result.text[:2000].lower():
@@ -417,7 +542,7 @@ class _Discovery:
                 segs = path_segments(loc)
                 # URL tin chi tiết (/tuyen-dung/ke-toan-123) → trang danh sách cha.
                 for i, seg in enumerate(segs):
-                    if strip_accents(seg).lower().removesuffix(".html") in _CAREERS_SEGMENTS:
+                    if careers_segment(strip_accents(seg).lower().removesuffix(".html")):
                         parent = normalize_url("/" + "/".join(segs[: i + 1]), loc) or loc
                         found.setdefault(parent, Candidate(parent, "", score + 1))
                         break
@@ -426,15 +551,15 @@ class _Discovery:
         return sorted(found.values(), key=lambda c: (-c.score, len(c.url)))
 
     async def probe_common_paths(self) -> bool:
-        root = f"https://{host_of(self.site)}"
-        home = await self.s.fetch(self.site)  # đã có trong HTTP cache
-        home_print = _fingerprint(home.text) if home.ok else None
+        root = self.root()
+        home = await self._guess(self.site)  # đã có trong HTTP cache
+        home_print = _fingerprint(home.text) if home is not None and home.ok else None
         for path in COMMON_PATHS:
             candidate = Candidate(f"{root}{path}", "", 2)
-            result = await self.s.fetch(candidate.url, timeout=GUESS_TIMEOUT, retries=0)
+            result = await self._guess(candidate.url, timeout=GUESS_TIMEOUT, retries=0)
             # Đường dẫn không tồn tại thường bị chuyển về trang chủ, hoặc (SPA) trả nguyên khung
             # HTML của trang chủ với mã 200: soft 404, bỏ qua.
-            if not result.ok or not path_segments(result.final_url):
+            if result is None or not result.ok or not path_segments(result.final_url):
                 continue
             if home_print is not None and _fingerprint(result.text) == home_print:
                 self.step(f"{candidate.url}: giống trang chủ (soft 404)")
@@ -445,12 +570,25 @@ class _Discovery:
 
     async def probe_subdomains(self) -> bool:
         base = registrable_domain(host_of(self.site))
+        scheme = urlsplit(self.site).scheme or "https"
+        # DNS wildcard: mọi subdomain đều trả cùng một trang (trang chủ, trang đăng nhập email,
+        # trang mặc định của máy chủ) — thử một tên ngẫu nhiên trước để nhận ra.
+        wildcard = await self._guess(
+            f"{scheme}://jc{secrets.token_hex(4)}.{base}/", timeout=GUESS_TIMEOUT, retries=0
+        )
+        wild_print = _fingerprint(wildcard.text) if wildcard is not None and wildcard.ok else None
         for sub in SUBDOMAINS:
-            url = f"https://{sub}.{base}/"
+            url = f"{scheme}://{sub}.{base}/"
             # Subdomain không tồn tại (lỗi DNS/kết nối): bỏ qua ngay, không thử lại.
-            probe = await self.s.fetch(url, timeout=GUESS_TIMEOUT, retries=0)
-            if probe.status is None:
+            probe = await self._guess(url, timeout=GUESS_TIMEOUT, retries=0)
+            if probe is None or probe.status is None:
                 continue
+            if wild_print is not None and _fingerprint(probe.text) == wild_print:
+                continue
+            final = host_of(probe.final_url)
+            redirected_home = final != host_of(url) and final == host_of(self.site)
+            if redirected_home and not path_segments(probe.final_url):
+                continue  # chuyển về trang chủ
             if await self.evaluate(Candidate(url, "", 2), hop=1):
                 return True
         return False
@@ -463,7 +601,12 @@ class _Discovery:
             return r
         home = await self.homepage()
         if home is None:
-            r.error = "không mở được trang chủ"
+            # Trang chủ bị WAF chặn / không phản hồi nhưng trang tuyển dụng ở subdomain riêng
+            # (tuyendung.<domain>) thường vẫn mở được.
+            if await self.probe_subdomains():
+                r.method = "subdomain"
+                return r
+            r.error = self.blocked or "không mở được trang chủ"
             return r
         links = extract_links(parse(home.html), home.url)
         candidates = careers_candidates(links, home.url)
@@ -573,6 +716,8 @@ def sources_for(result: DiscoveryResult) -> list[Source]:
     sources: list[Source] = [s for ref in result.ats if (s := ats.source_for(ref)) is not None]
     seen = {s.name for s in sources}
     for url in result.careers_pages:
+        if job_board_host(url):  # kết quả cache từ trước khi có luật này
+            continue
         source = CareersSource(url)
         if source.name not in seen:
             seen.add(source.name)

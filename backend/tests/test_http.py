@@ -218,6 +218,22 @@ async def test_timeouts_retry_then_report_timeout(clock: FakeClock) -> None:
     assert not (await rig.client.fetch(url, use_cache=False)).ok
 
 
+async def test_unresolvable_host_is_not_retried(clock: FakeClock) -> None:
+    """Subdomain đoán mò không tồn tại: lỗi DNS không thử lại (cả khi đọc robots.txt)."""
+    url = "https://careers.nosuch.test/"
+    error = TErr(
+        "connect",
+        "DNSError: Failed to perform, curl: (6) Could not resolve host: careers.nosuch.test",
+    )
+    rig = make(clock, {url: error, "https://careers.nosuch.test/robots.txt": error})
+    result = await rig.client.fetch(url)
+    assert result.outcome is FetchOutcome.ROBOTS_DISALLOWED
+    assert rig.backoffs == []
+    result = await rig.client.fetch(url, check_robots=False)
+    assert (result.outcome, result.attempts) == (FetchOutcome.ERROR, 1)
+    assert rig.backoffs == []
+
+
 async def test_retries_can_be_turned_off_per_request(clock: FakeClock) -> None:
     url = f"{SITE}/a"
     rig = make(clock, {url: TErr("timeout", "operation timed out")})
