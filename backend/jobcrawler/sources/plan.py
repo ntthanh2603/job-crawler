@@ -3,8 +3,8 @@
 Lượt build (ban đêm) đi đủ đường: tìm nguồn trên website, đọc mọi trang danh sách, mở trình duyệt
 khi cần, bắt API danh sách tin của trang SPA, mở trang chi tiết. Nó ghi lại những gì cần để lấy
 lại danh sách tin mà không phải dò lại: trang danh sách (kể cả trang sau, trang danh mục dẫn tới
-tin), trang nào phải mở bằng trình duyệt, API nào trả danh sách tin (cách phân trang), link nào đã
-mở mà không phải tin.
+tin), trang nào phải mở bằng trình duyệt, API nào trả danh sách tin (cách phân trang), sitemap nào
+có link tin, link nào đã mở mà không phải tin.
 
 Lượt poll (ban ngày) chỉ đọc đúng các trang / API đó (API gọi thẳng bằng HTTP, không mở trình
 duyệt), so tập tin với lượt trước và chỉ mở trang chi tiết của tin mới. Không đọc được trang chính
@@ -43,6 +43,16 @@ class ApiSpec(BaseModel):
     listing: str | None = None  # trang danh sách đã gọi API này
 
 
+class SitemapSpec(BaseModel):
+    """Sitemap của site careers có link tin (`careers.sitemap_links`): đủ tin khi trang danh sách
+    chỉ hiện một phần (phần còn lại nạp bằng XHR / cuộn vô hạn)."""
+
+    url: str
+    # Khuôn URL tin (`careers.url_shape`: host + thư mục cha) học từ link tin trên trang danh
+    # sách: chỉ lấy URL cùng khuôn (sitemap còn có trang giới thiệu, tin tức...).
+    shapes: list[str] = Field(default_factory=list)
+
+
 class PlanSpec(BaseModel):
     """Bộ khung một nguồn. Trường rỗng = không dùng."""
 
@@ -56,6 +66,7 @@ class PlanSpec(BaseModel):
     # Trang (đã mở bằng trình duyệt) mà mọi tin đều có trong các API bắt được: poll chỉ gọi API.
     api_only: list[str] = Field(default_factory=list)
     apis: list[ApiSpec] = Field(default_factory=list)
+    sitemaps: list[SitemapSpec] = Field(default_factory=list)
     # Danh sách chỉ đọc được bằng LLM (trang không có cấu trúc): poll hỏi lại LLM khi trang đổi
     # (câu trả lời cache theo nội dung).
     llm_listing: bool = False
@@ -93,6 +104,10 @@ class PlanSpec(BaseModel):
         if all((a.url, a.method, a.key, a.paged) != same for a in self.apis):
             self.apis.append(api)
 
+    def add_sitemap(self, sitemap: SitemapSpec) -> None:
+        if all(s.url != sitemap.url for s in self.sitemaps):
+            self.sitemaps.append(sitemap)
+
     def add_names(self, names: dict[tuple[str, str], str], *, limit: int = 2000) -> None:
         have = {(k, i) for k, i, _ in self.names}
         for (kind, item_id), name in names.items():
@@ -110,12 +125,12 @@ class PlanSpec(BaseModel):
 
     def demand(self) -> int:
         """Số trang một lượt poll cần để đọc trọn nguồn: trang danh sách + danh mục (bỏ trang SPA
-        mà API thay được) + các trang API (theo tổng số tin / cỡ trang bắt được ở lượt build).
-        Bảng tin ATS tính một trang (Workday phân trang 20 tin)."""
+        mà API thay được) + sitemap + các trang API (theo tổng số tin / cỡ trang bắt được ở lượt
+        build). Bảng tin ATS tính một trang (Workday phân trang 20 tin)."""
         if self.ats is not None:
             per_page = 20 if self.ats.get("kind") == "workday" else 0
             return max(1, ceil(self.jobs / per_page)) if per_page else 1
-        pages = len((set(self.listings) | set(self.hubs)) - set(self.api_only))
+        pages = len((set(self.listings) | set(self.hubs)) - set(self.api_only)) + len(self.sitemaps)
         for api in self.apis:
             total = ceil(api.total / api.size) if api.paged and api.total and api.size else 1
             pages += max(0, total - 1) if api.embedded else total

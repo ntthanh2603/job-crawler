@@ -20,15 +20,10 @@ from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import FetchResult
 from jobcrawler.sources import boards
 from jobcrawler.sources.base import SourceSession
-from jobcrawler.sources.boards.base import (
-    BoardAdapter,
-    BoardEntry,
-    ListingState,
-    SitemapBoard,
-    parse_sitemap,
-)
+from jobcrawler.sources.boards.base import BoardAdapter, BoardEntry, ListingState, SitemapBoard
 from jobcrawler.sources.boards.vietnamworks import API as VNW_API
 from jobcrawler.sources.boards.vietnamworks import find_object, flight_payload
+from jobcrawler.sources.sitemaps import parse_sitemap
 
 FIXTURES = Path(__file__).parent / "fixtures" / "boards"
 REGISTRY = boards.registry()

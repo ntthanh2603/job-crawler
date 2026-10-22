@@ -24,7 +24,7 @@ function plan(values: Partial<CrawlPlan> = {}): CrawlPlan {
     last_poll: "unchanged",
     readable: true,
     ats: null,
-    listings: [{ url: LIST, hub: false, rendered: false, api_only: false }],
+    listings: [{ url: LIST, hub: false, sitemap: false, rendered: false, api_only: false }],
     listings_total: 1,
     apis: [],
     apis_total: 0,
@@ -116,6 +116,7 @@ describe("thứ tự đọc", () => {
     const pages = Array.from({ length: 7 }, (_, i) => ({
       url: `${LIST}?page=${i + 1}`,
       hub: i === 6,
+      sitemap: false,
       rendered: i === 0,
       api_only: false,
     }))
@@ -142,5 +143,14 @@ describe("thứ tự đọc", () => {
     fireEvent.click(screen.getByRole("button", { name: "Xem cả 8 mục" }))
     expect(rows()).toHaveLength(8)
     expect(rows()[7].textContent).toContain("Danh mục")
+  })
+
+  it("sitemap đọc trước trang danh sách", () => {
+    const sitemap = { url: `${LIST}/sitemap.xml`, hub: false, sitemap: true, rendered: false, api_only: false }
+    render(<PlanReads plan={plan({ listings: [sitemap, ...plan().listings], listings_total: 2 })} />)
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem")
+    expect(rows[0].textContent).toContain("Sitemap")
+    expect(rows[0].textContent).toContain("cùng dạng URL với tin")
+    expect(rows[1].textContent).toContain("Trang danh sách")
   })
 })

@@ -877,7 +877,9 @@ def plan_view(plan: CrawlPlan) -> PlanOut:
     loaded = _spec(plan.spec)
     spec = loaded or PlanSpec()
     listings, rendered, api_only = set(spec.listings), set(spec.rendered), set(spec.api_only)
-    urls = list(dict.fromkeys([*spec.listings, *spec.hubs]))
+    sitemaps = [s.url for s in spec.sitemaps]
+    # Theo thứ tự lượt poll đọc: sitemap (sau API), rồi trang danh sách / danh mục.
+    urls = list(dict.fromkeys([*sitemaps, *spec.listings, *spec.hubs]))
     return PlanOut(
         id=plan.id,
         source=plan.source,
@@ -896,7 +898,8 @@ def plan_view(plan: CrawlPlan) -> PlanOut:
         listings=[
             PlanPageOut(
                 url=url,
-                hub=url not in listings,
+                hub=url not in listings and url not in sitemaps,
+                sitemap=url in sitemaps,
                 rendered=url in rendered,
                 api_only=url in api_only,
             )

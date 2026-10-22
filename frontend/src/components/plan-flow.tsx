@@ -363,8 +363,15 @@ export function apiText(a: PlanApi) {
   return parts.join(" · ")
 }
 
+/** Nhãn loại của một trang trong bộ khung. */
+export function pageKind(p: PlanPage) {
+  if (p.sitemap) return "Sitemap"
+  return p.hub ? "Danh mục" : "Trang"
+}
+
 /** Vai trò của một trang trong bộ khung và cách lượt poll mở nó. */
 export function pageText(p: PlanPage) {
+  if (p.sitemap) return "Sitemap của site · lấy link cùng dạng URL với tin trên trang danh sách"
   const parts = [p.hub ? "Trang danh mục dẫn tới tin" : "Trang danh sách"]
   if (p.api_only) parts.push("API trả tin thì bỏ qua trang này")
   else if (p.rendered) parts.push("HTTP trước, HTML trống mới mở trình duyệt")
@@ -400,7 +407,7 @@ export function PlanReads({ plan }: { plan: CrawlPlan }) {
     })),
     ...plan.listings.map((p) => ({
       key: `page-${p.url}`,
-      kind: <Kind>{p.hub ? "Danh mục" : "Trang"}</Kind>,
+      kind: <Kind>{pageKind(p)}</Kind>,
       url: p.url,
       text: pageText(p),
       dim: p.api_only,

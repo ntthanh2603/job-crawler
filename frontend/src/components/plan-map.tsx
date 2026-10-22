@@ -4,7 +4,7 @@ import { ArrowDown, Globe, Layers } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { ExternalLink, Tag } from "@/components/common"
-import { apiText, Kind, pageText } from "@/components/plan-flow"
+import { apiText, Kind, pageKind, pageText } from "@/components/plan-flow"
 import { num, shortUrl, sourceLabel } from "@/lib/format"
 import type { CrawlPlan } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -54,7 +54,7 @@ export function planTree(plan: CrawlPlan): PlanTree {
   const byKey = new Map<string, PageGroup>()
   const byUrl = new Map<string, PageGroup>()
   for (const page of plan.listings) {
-    const key = `${page.hub ? "hub" : "list"} ${pageGroupKey(page.url)}`
+    const key = `${page.sitemap ? "sitemap" : page.hub ? "hub" : "list"} ${pageGroupKey(page.url)}`
     let group = byKey.get(key)
     if (group) group.more.push(page)
     else {
@@ -140,7 +140,7 @@ function PageNode({ group }: { group: PageGroup }) {
   return (
     <>
       <Node
-        kind={<Kind>{page.hub ? "Danh mục" : "Trang"}</Kind>}
+        kind={<Kind>{pageKind(page)}</Kind>}
         url={page.url}
         text={pageText(page)}
         dim={page.api_only}

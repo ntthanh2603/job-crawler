@@ -8,7 +8,7 @@ import { pageGroupKey, pageLabel, PlanMap, planTree } from "./plan-map"
 const SITE = "https://about.acme.vn"
 
 function page(url: string, values: Partial<CrawlPlan["listings"][number]> = {}) {
-  return { url, hub: false, rendered: false, api_only: false, ...values }
+  return { url, hub: false, sitemap: false, rendered: false, api_only: false, ...values }
 }
 
 function api(url: string, listing: string | null, values: Partial<CrawlPlan["apis"][number]> = {}) {

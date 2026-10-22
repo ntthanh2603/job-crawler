@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import email.utils
-import gzip
 import re
 import unicodedata
 from abc import ABC, abstractmethod
@@ -46,17 +45,14 @@ from jobcrawler.common.schemas import FetchOutcome, RawJob
 from jobcrawler.common.text import normalize_company_name
 from jobcrawler.common.urls import host_of, normalize_url, same_site
 from jobcrawler.sources import jsonld
-from jobcrawler.sources.base import SourceError, SourceSession, parse_datetime, text_or_none
+from jobcrawler.sources.base import SourceError, SourceSession, text_or_none
+from jobcrawler.sources.sitemaps import parse_sitemap, sitemap_body
 
 log = get_logger(__name__)
 
 _SOCIAL = re.compile(
     r"(facebook|fb|linkedin|youtube|tiktok|instagram|twitter|x|zalo)\.(com|me|vn)$"
 )
-_URL_BLOCK = re.compile(r"<url>(.*?)</url>", re.S | re.I)
-_SITEMAP_BLOCK = re.compile(r"<sitemap>(.*?)</sitemap>", re.S | re.I)
-_LOC = re.compile(r"<loc>\s*(?:<!\[CDATA\[)?\s*(.*?)\s*(?:\]\]>)?\s*</loc>", re.S | re.I)
-_LASTMOD = re.compile(r"<lastmod>\s*(.*?)\s*</lastmod>", re.S | re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,31 +187,6 @@ def website_url(value: Any) -> str | None:
         return None
     url = normalize_url(text if "://" in text else f"https://{text}")
     return url if url and "." in host_of(url) else None
-
-
-def sitemap_body(content: bytes) -> str | None:
-    """Nội dung sitemap (giải nén `.xml.gz` nếu cần). None: file nén hỏng — sitemap lỗi chứ
-    không phải sitemap rỗng (không thì danh sách thiếu mà vẫn được coi là đọc đủ)."""
-    if content[:2] == b"\x1f\x8b":
-        try:
-            content = gzip.decompress(content)
-        except (OSError, EOFError):
-            return None
-    return content.decode("utf-8", errors="replace")
-
-
-def parse_sitemap(text: str) -> tuple[bool, list[tuple[str, datetime | None]]]:
-    """(là sitemap index?, [(loc, lastmod)])."""
-    is_index = "<sitemapindex" in text[:2000].lower()
-    blocks = _SITEMAP_BLOCK.findall(text) if is_index else _URL_BLOCK.findall(text)
-    found: list[tuple[str, datetime | None]] = []
-    for block in blocks:
-        if (loc := _LOC.search(block)) is None:
-            continue
-        lastmod = _LASTMOD.search(block)
-        url = loc.group(1).replace("&amp;", "&").strip()
-        found.append((url, parse_datetime(lastmod.group(1)) if lastmod else None))
-    return is_index, found
 
 
 def org_nodes(html: str, url: str) -> list[dict[str, Any]]:

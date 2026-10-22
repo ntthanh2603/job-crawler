@@ -29,6 +29,8 @@ from jobcrawler.sources.careers import (
     scan_listing,
     slug_hint,
     split_markdown,
+    url_shape,
+    url_shapes,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "careers"
@@ -128,6 +130,45 @@ def test_listing_root_page_does_not_treat_every_link_as_child() -> None:
     ]
 
 
+def test_repeated_job_cards_outside_a_jobs_path_are_jobs() -> None:
+    """tuyendung.frt.vn: thẻ tin là link `/<slug>-<mã>` ở gốc site (chữ trong `title`), không có
+    từ khoá tuyển dụng trong đường dẫn. Từ 3 thẻ cùng khuôn trở lên mới tính."""
+    site = "https://tuyendung.frt.vn"
+    cards = [
+        Link(f"{site}/quan-12-ho-chi-minh-duoc-si-ban-thuoc-11517", "[Quận 12] Dược Sĩ Bán Thuốc"),
+        Link(f"{site}/quan-12-ho-chi-minh-duoc-si-ban-thuoc-11517", ""),
+        Link(f"{site}/chau-doc-tu-van-ban-hang-da-nhiem-15719", "[Châu Đốc] Tư Vấn Bán Hàng"),
+        Link(f"{site}/quan-ly-du-an-drone-nong-nghiep-16271", "Quản lý Dự Án Drone Nông Nghiệp"),
+    ]
+    others = [
+        Link(f"{site}/gioi-thieu/quy-trinh-tuyen-dung-nhan-vien", "Quy trình tuyển dụng"),
+        Link(f"{site}/tra-cuu-ket-qua", "Tra cứu kết quả"),
+        Link(f"{site}/tong-ket-hoi-thao-2024", "Tổng kết hội thảo"),
+        Link(f"{site}/le-hoi-nhan-vien-2025", "Lễ hội nhân viên"),
+        Link(f"{site}/ngay-hoi-viec-lam-2023", "Ngày hội việc làm"),
+    ]
+    found = job_links([*cards, *others], f"{site}/")
+    assert [j.url for j in found] == [
+        f"{site}/quan-12-ho-chi-minh-duoc-si-ban-thuoc-11517",
+        f"{site}/chau-doc-tu-van-ban-hang-da-nhiem-15719",
+        f"{site}/quan-ly-du-an-drone-nong-nghiep-16271",
+    ]
+    assert found[0].title == "[Quận 12] Dược Sĩ Bán Thuốc"
+    # Hai thẻ chưa đủ thành khuôn.
+    assert job_links(cards[:3], f"{site}/") == []
+
+
+def test_url_shape() -> None:
+    assert url_shape("https://tuyendung.frt.vn/chau-doc-tu-van-15719") == "tuyendung.frt.vn"
+    assert url_shape("https://a.vn/Viec-Lam/Ke-Toan-123.html") == "a.vn/viec-lam"
+    assert url_shape("https://a.vn/jobs/744000153509469") == "a.vn/jobs"
+    assert url_shape("https://a.vn/tin-tuc/tong-ket-nam-2024") is None  # năm, không phải mã
+    assert url_shape("https://a.vn/jobs/ke-toan-12?ref=home") is None
+    assert url_shape("https://a.vn/jobs/ke-toan") is None
+    urls = [f"https://a.vn/jobs/vi-tri-{i}" for i in (10, 11, 12)] + ["https://a.vn/news/b-99"]
+    assert url_shapes(urls) == ["a.vn/jobs"]
+
+
 def test_jd_signals_and_labeled_fields() -> None:
     md = (
         "# Kỹ sư\n## Mô tả công việc\n- x\n## Yêu cầu\n- y\n## Quyền lợi\n- z\n"
@@ -160,10 +201,13 @@ async def test_base_vn_careers_follows_view_all_and_reads_json_ld() -> None:
     assert jobs[0].method is ExtractionMethod.JSONLD
     urls = [url for _, url, _ in fetcher.calls]
     assert urls[:2] == [f"{BASE}/", f"{BASE}/alljobs"]
-    details = urls[2:]
+    details = urls[2:-2]
     assert len(details) == len(set(details)) == 25  # 5 link trang đầu nằm trong 25 link
+    # Link tin cùng khuôn /job/<slug>-<mã>: thử sitemap (site này không có).
+    assert urls[-2:] == [f"{BASE}/sitemap.xml", f"{BASE}/sitemap_index.xml"]
     assert all(kind == "fetch" for kind, _, _ in fetcher.calls)  # không cần trình duyệt
-    assert len(s.records) == 27
+    assert len(s.records) == 29
+    assert s.plan.sitemaps == []
     assert [r.items for r in s.records if r.items] == [1]  # trang chi tiết có JSON-LD
 
 

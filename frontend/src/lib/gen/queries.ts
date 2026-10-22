@@ -242,12 +242,13 @@ export const PlanPollResult = {
 } as const;
 
 /**
- * Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs`).
+ * Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs` + `sitemaps`).
  */
 export type PlanPageOut = {
   api_only: boolean;
   hub: boolean;
   rendered: boolean;
+  sitemap: boolean;
   url: string;
 };
 

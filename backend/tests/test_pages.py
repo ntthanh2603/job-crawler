@@ -50,6 +50,27 @@ def test_main_markdown_drops_navigation_and_scripts() -> None:
         assert noise not in md
 
 
+def test_main_markdown_keeps_forms_that_wrap_the_content() -> None:
+    """tuyendung.frt.vn bọc cả mô tả công việc trong form "Ứng tuyển"; ASP.NET WebForms bọc cả
+    trang trong `<form runat=server>`. Form tìm kiếm / đăng nhập (ít chữ) vẫn là nhiễu."""
+    duties = "".join(
+        f"<p>• Nhiệm vụ số {i}: tư vấn, bán hàng, chăm sóc khách hàng.</p>" for i in range(12)
+    )
+    html = f"""<html><body>
+      <form action="/Search"><input name="q"><select><option>Hà Nội</option></select>
+        <button>Tìm việc</button></form>
+      <form action="/Applicant/Apply" method="post"><input type="hidden" name="token" value="x">
+        <h3>Tư vấn bán hàng</h3><h4>CHI TIẾT CÔNG VIỆC</h4>{duties}
+        <button type="submit">Ứng tuyển</button></form>
+      <form action="/login"><label>Email</label><input name="email"></form>
+    </body></html>"""
+    md = main_markdown(html)
+    assert "### Tư vấn bán hàng" in md
+    assert "Nhiệm vụ số 11" in md
+    for noise in ("Tìm việc", "Hà Nội", "Ứng tuyển", "Email"):
+        assert noise not in md
+
+
 def test_html_to_markdown_collapses_blank_lines() -> None:
     assert html_to_markdown("<p>a</p><p></p><p></p><p>b</p>") == "a\n\nb"
 

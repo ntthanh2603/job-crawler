@@ -22,8 +22,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections import Counter
+from collections.abc import AsyncIterator, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl, urlsplit
 
 from jobcrawler.common.logging import get_logger
@@ -55,7 +57,8 @@ from jobcrawler.sources.base import (
     text_or_none,
     transient_failure,
 )
-from jobcrawler.sources.plan import ApiSpec
+from jobcrawler.sources.plan import ApiSpec, SitemapSpec
+from jobcrawler.sources.sitemaps import is_sitemap, parse_sitemap, sitemap_body
 
 log = get_logger(__name__)
 
@@ -69,6 +72,13 @@ _LLM_LISTING_CHUNKS = 4
 # Câu trả lời LLM theo nội dung trang (lượt refresh không hỏi lại trang không đổi).
 LISTING_CACHE_SECONDS = 86_400
 DETAIL_CACHE_SECONDS = 7 * 86_400
+# Sitemap của site careers: số file đọc mỗi lượt build (sitemap index → file con), số link tin
+# lấy tối đa, và tuổi `lastmod` tối đa của một tin (cũ hơn: tin đã đóng mà sitemap còn giữ).
+_MAX_SITEMAPS = 3
+_MAX_SITEMAP_LINKS = 500
+SITEMAP_MAX_AGE_DAYS = 180
+# File con của sitemap index nên đọc trước.
+_JOB_SITEMAP = re.compile(r"job|career|tuyen|recruit|viec|vacanc|position", re.I)
 
 # Đoạn đường dẫn hay gặp của trang việc làm (đã bỏ dấu, viết thường).
 JOB_SEGMENTS = frozenset(
@@ -176,6 +186,9 @@ _STOP_HEADS = (
 _STOP_TAILS = ("privacy", "policy", "terms", "terms-of-use", "cookies")
 # Đoạn có mã số (tin "-12", "/744000153509469/"): là tin, không phải trang chính sách.
 _HAS_ID = re.compile(r"(?:^|-)\d{2,}(?:-|$)")
+# Mã tin ở cuối đoạn cuối ("-16271", "/744000153509469"); năm trong slug bài viết
+# ("tong-ket-nam-2024") không tính.
+_TAIL_ID = re.compile(r"(?:^|-)(\d{2,})$")
 # Trang mục lục việc làm (/en/jobs/, /careers/tuyen-dung/): đi tiếp như trang danh sách.
 _INDEX_SEGMENTS = frozenset(
     {
@@ -235,6 +248,11 @@ LISTING_SEGMENTS = frozenset(
 )
 # Trang "chi tiết" có từ ngần này link tin trở lên thì là danh sách con.
 _SUB_LISTING_LINKS = 3
+# Từ ngần này link có mã (`/<slug>-16271`) và chữ giống tên vị trí trở lên, cùng một thư mục cha:
+# là các thẻ tin của danh sách, kể cả khi đường dẫn không có từ khoá tuyển dụng
+# (tuyendung.frt.vn/quan-12-ho-chi-minh-duoc-si-ban-thuoc-11517). Cũng là số link tối thiểu để
+# nhận một khuôn URL tin (`url_shape`) khi đọc sitemap.
+_ID_SIBLINGS = 3
 # Trang không có mã tin trong URL mà dẫn tới từ ngần này tin có mã: trang danh mục / theo tỉnh
 # (vieclam.thegioididong.com/tuyen-dung/ban-hang-thu-ngan... → /tuyen-dung/nhan-vien-...-45).
 _HUB_ID_LINKS = 3
@@ -244,7 +262,14 @@ _THIN_DETAIL = 400
 
 # Nhóm từ khoá của một bản mô tả công việc (đã bỏ dấu). Đếm số nhóm xuất hiện.
 _JD_SIGNALS: tuple[tuple[str, ...], ...] = (
-    ("mo ta cong viec", "job description", "about the role", "the role", "job summary"),
+    (
+        "mo ta cong viec",
+        "chi tiet cong viec",
+        "job description",
+        "about the role",
+        "the role",
+        "job summary",
+    ),
     ("yeu cau", "requirements", "qualifications", "what you need", "who you are"),
     ("quyen loi", "phuc loi", "che do dai ngo", "benefits", "what we offer", "perks"),
     ("trach nhiem", "responsibilities", "what you will do", "what you'll do", "nhiem vu"),
@@ -271,6 +296,7 @@ _LABELS: dict[str, tuple[str, ...]] = {
     "employment_type": (
         "hinh thuc lam viec",
         "hinh thuc",
+        "loai hinh cong viec",
         "loai hinh",
         "employment type",
         "job type",
@@ -380,13 +406,30 @@ def _is_id_param(key: str) -> bool:
     return key in _ID_PARAMS or key.endswith(("_id", "jobid", "postid", "requestid"))
 
 
+def url_shape(url: str) -> str | None:
+    """Khuôn URL của một tin: host + thư mục cha, khi đoạn cuối kết thúc bằng mã tin
+    (`tuyendung.frt.vn/<slug>-16271` → "tuyendung.frt.vn") và URL không có tham số."""
+    segs = _segments(url)
+    if not segs or urlsplit(url).query or (m := _TAIL_ID.search(segs[-1])) is None:
+        return None
+    if len(m[1]) == 4 and 1990 <= int(m[1]) <= 2039:
+        return None  # năm, không phải mã tin
+    return "/".join([host_of(url), *segs[:-1]])
+
+
+def url_shapes(urls: Iterable[str]) -> list[str]:
+    """Khuôn URL tin có từ `_ID_SIBLINGS` link tin trở lên."""
+    counts = Counter(shape for url in set(urls) if (shape := url_shape(url)))
+    return [shape for shape, n in counts.items() if n >= _ID_SIBLINGS]
+
+
 def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
     """Link có dạng trang chi tiết tin tuyển dụng, cùng site với trang danh sách."""
     listing = normalize_url(listing_url) or listing_url
     listing_segs = _segments(listing)
     # Trang danh sách là trang gốc (hoặc chỉ có tiền tố ngôn ngữ) thì mọi link đều "con".
     listing_is_root = not _content_segments(listing_segs)
-    best: dict[str, JobLink] = {}
+    candidates: list[tuple[Link, list[str], set[str]]] = []
     for link in links:
         url = link.url
         if url == listing or not same_site(url, listing) or _FILE_EXT.search(urlsplit(url).path):
@@ -397,6 +440,12 @@ def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
         query = {k.lower() for k, _ in parse_qsl(urlsplit(url).query)}
         if query & PAGE_PARAMS:
             continue
+        candidates.append((link, segs, query))
+    # Thẻ tin cùng khuôn URL (link có mã + chữ giống tên vị trí) lặp lại trên trang.
+    families = set(url_shapes(link.url for link, _, _ in candidates if _title_like(link.text)))
+    best: dict[str, JobLink] = {}
+    for link, segs, query in candidates:
+        url = link.url
         by_id = any(_is_id_param(k) for k in query)  # /job-detail.html?id=12
         # Trang con của trang danh sách (/tuyen-dung → /tuyen-dung/ke-toan). Trang danh sách là
         # trang gốc thì mọi link đều "con", nên không tính.
@@ -414,9 +463,10 @@ def job_links(links: list[Link], listing_url: str) -> list[JobLink]:
         last = segs[-1]
         slug = by_id or ((bool(re.search(r"\d", last)) or last.count("-") >= 2) and len(last) >= 5)
         titled = _title_like(link.text)
+        sibling = url_shape(url) in families
         # Tham số khác id (?dept=, ?location=) thường là bộ lọc của trang danh sách.
         filtered = bool(query) and not by_id
-        score = (2 if child or job_seg else 0) + slug + titled - filtered
+        score = (2 if child or job_seg else 0) + slug + titled + sibling - filtered
         if score < 3:
             continue
         title = link.text if titled else None
@@ -799,6 +849,39 @@ def feed_spec(doc: json_jobs.JsonDoc, listing: str) -> ApiSpec:
     )
 
 
+def sitemap_links(
+    text: str, shapes: Collection[str], *, now: datetime | None = None
+) -> list[JobLink]:
+    """Link tin trong một sitemap `urlset`: URL cùng khuôn với link tin đã thấy trên trang danh
+    sách (`url_shape`), bỏ URL có `lastmod` quá cũ (sitemap hay giữ cả tin đã đóng)."""
+    _, items = parse_sitemap(text)
+    oldest = (now or datetime.now(UTC)) - timedelta(days=SITEMAP_MAX_AGE_DAYS)
+    found: dict[str, JobLink] = {}
+    for loc, lastmod in items:
+        url = normalize_url(loc)
+        if url is None or url_shape(url) not in shapes or (lastmod and lastmod < oldest):
+            continue
+        found.setdefault(url, JobLink(url=url, title=None))
+        if len(found) >= _MAX_SITEMAP_LINKS:
+            break
+    return list(found.values())
+
+
+def _plan_request_failed(
+    session: SourceSession, url: str, *, kind: str, wrong_type: str, truncation: str
+) -> None:
+    """Request theo bộ khung (API, sitemap) không trả dữ liệu: 4xx (trừ 429) hoặc trả về sai
+    loại thì bộ khung hỏng (build lại); lỗi tạm thì chỉ đánh dấu lượt chưa đọc trọn."""
+    last = session.records[-1] if session.records else None
+    status = last.http_status if last is not None else None
+    if status is not None and 400 <= status < 500 and status != 429:
+        session.mark_broken(f"{kind}_http_{status}: {url}")
+    elif last is not None and last.outcome is FetchOutcome.OK:
+        session.mark_broken(f"{wrong_type}: {url}")
+    else:
+        session.truncate(truncation)
+
+
 def api_pager(api: ApiSpec) -> json_jobs.Pager:
     return json_jobs.Pager(
         url=api.url,
@@ -924,6 +1007,48 @@ class CareersSource(Source):
                 return  # trang rỗng / API bỏ qua tham số trang
         if not pager.done(read):
             session.truncate("api_pages")
+
+    # --- sitemap ---
+
+    async def _sitemap_text(self, session: SourceSession, url: str) -> str | None:
+        """Nội dung một sitemap (None: lỗi, bị chặn, hoặc trả về không phải sitemap)."""
+        try:
+            result = await session.fetch(url)
+        except SourceError:
+            return None
+        if not result.ok:
+            return None
+        body = sitemap_body(result.content)
+        return body if body is not None and is_sitemap(body) else None
+
+    async def _sitemaps(
+        self, session: SourceSession, shapes: Collection[str]
+    ) -> list[tuple[SitemapSpec, list[JobLink]]]:
+        """Sitemap của site careers có link tin cùng khuôn `shapes`: `/sitemap.xml`, không có thì
+        `/sitemap_index.xml`; sitemap index thì đọc các file con tên giống tin tuyển dụng trước."""
+        if not shapes:
+            return []
+        parts = urlsplit(self.url)
+        root = f"{parts.scheme}://{parts.netloc}"
+        queue = [f"{root}/sitemap.xml", f"{root}/sitemap_index.xml"]
+        found: list[tuple[SitemapSpec, list[JobLink]]] = []
+        read = 0
+        while queue and read < _MAX_SITEMAPS:
+            url = queue.pop(0)
+            read += 1
+            text = await self._sitemap_text(session, url)
+            if text is None:
+                continue
+            queue = [u for u in queue if not u.endswith("/sitemap_index.xml")]
+            is_index, items = parse_sitemap(text)
+            if is_index:
+                children = [loc for loc, _ in items if same_site(loc, root)]
+                children.sort(key=lambda u: not _JOB_SITEMAP.search(u))
+                queue = [*children, *queue]
+                continue
+            if links := sitemap_links(text, shapes):
+                found.append((SitemapSpec(url=url, shapes=sorted(shapes)), links))
+        return found
 
     # --- danh sách bằng LLM ---
 
@@ -1228,38 +1353,52 @@ class CareersSource(Source):
 
         opened = 0
         hubs = 0  # trang danh mục đã mở (không tính vào giới hạn trang tin)
-        while pending and opened < limits.max_detail_pages:
-            batch: list[JobLink] = []
-            size = min(limits.detail_concurrency, limits.max_detail_pages - opened)
-            while pending and len(batch) < size:
-                url = next(iter(pending))
-                link = pending.pop(url)
-                if url in done_urls:
-                    continue
-                if (known := reuse(url)) is not None:
-                    if known.external_id not in yielded:
-                        yielded.add(known.external_id)
-                        yield note(url, known)
-                    continue
-                done_urls.add(url)
-                batch.append(link)
-            opened += len(batch)
-            for link, (job, more, hub) in zip(
-                batch, await gather_all(self._detail(session, link) for link in batch), strict=True
-            ):
-                add_links(more, listed=hub)
-                if hub:
-                    plan.add("hubs", link.url)
-                    hubs += 1
-                    if hubs <= limits.max_sub_listings:
-                        opened -= 1
-                    log.debug("careers.hub", url=link.url, links=len(more))
-                    continue
-                if job is not None:
-                    session.count(link.url, 1)
-                if job is not None and job.external_id not in yielded:
-                    yielded.add(job.external_id)
-                    yield note(link.url, job)
+        sitemaps_read = False
+        while True:
+            while pending and opened < limits.max_detail_pages:
+                batch: list[JobLink] = []
+                size = min(limits.detail_concurrency, limits.max_detail_pages - opened)
+                while pending and len(batch) < size:
+                    url = next(iter(pending))
+                    link = pending.pop(url)
+                    if url in done_urls:
+                        continue
+                    if (known := reuse(url)) is not None:
+                        if known.external_id not in yielded:
+                            yielded.add(known.external_id)
+                            yield note(url, known)
+                        continue
+                    done_urls.add(url)
+                    batch.append(link)
+                opened += len(batch)
+                for link, (job, more, hub) in zip(
+                    batch,
+                    await gather_all(self._detail(session, link) for link in batch),
+                    strict=True,
+                ):
+                    add_links(more, listed=hub)
+                    if hub:
+                        plan.add("hubs", link.url)
+                        hubs += 1
+                        if hubs <= limits.max_sub_listings:
+                            opened -= 1
+                        log.debug("careers.hub", url=link.url, links=len(more))
+                        continue
+                    if job is not None:
+                        session.count(link.url, 1)
+                    if job is not None and job.external_id not in yielded:
+                        yielded.add(job.external_id)
+                        yield note(link.url, job)
+            if sitemaps_read:
+                break
+            sitemaps_read = True
+            # Sitemap của site: đủ tin khi trang danh sách chỉ hiện một phần (phần còn lại nạp
+            # bằng XHR / cuộn vô hạn). Chỉ lấy URL cùng khuôn với link tin trên trang danh sách /
+            # danh mục (đọc sau khi mở trang danh mục để học khuôn từ cả các trang đó).
+            for sitemap, links in await self._sitemaps(session, url_shapes(direct)):
+                plan.add_sitemap(sitemap)
+                session.count(sitemap.url, len(links))
+                add_links(links)
         # Hết lượt mở trang: tin còn lại đã biết thì vẫn dùng lại được.
         for url in list(pending):
             known = reuse(url) if url not in done_urls else None
@@ -1285,14 +1424,9 @@ class CareersSource(Source):
         pager = api_pager(api)
         docs = await (self._api_page(session, pager, 0) if api.paged else self._feed(session, api))
         if docs is None:
-            last = session.records[-1] if session.records else None
-            status = last.http_status if last is not None else None
-            if status is not None and 400 <= status < 500 and status != 429:
-                session.mark_broken(f"api_http_{status}: {api.url}")
-            elif last is not None and last.outcome is FetchOutcome.OK:
-                session.mark_broken(f"api_not_json: {api.url}")
-            else:
-                session.truncate("api_pages")
+            _plan_request_failed(
+                session, api.url, kind="api", wrong_type="api_not_json", truncation="api_pages"
+            )
             return
         page = Page(api.listing or self.url, "")
         read = 0
@@ -1373,6 +1507,30 @@ class CareersSource(Source):
             if got and api.listing in spec.api_only:
                 api_listings.add(api.listing)
 
+        # Sitemap: một request mà đủ link tin (trang danh sách chỉ hiện một phần).
+        for sitemap in spec.sitemaps:
+            if not budget.take():
+                break
+            text = await self._sitemap_text(session, sitemap.url)
+            if text is None:
+                _plan_request_failed(
+                    session,
+                    sitemap.url,
+                    kind="sitemap",
+                    wrong_type="sitemap_not_xml",
+                    truncation="sitemap",
+                )
+                continue
+            links = sitemap_links(text, sitemap.shapes)
+            if not links:
+                # Không còn URL cùng khuôn: site đổi cấu trúc URL (hoặc đã gỡ hết tin).
+                session.mark_broken(f"sitemap_no_jobs: {sitemap.url}")
+                continue
+            session.count(sitemap.url, len(links))
+            listed += len(links)
+            for link in links:
+                pending.setdefault(link.url, link)
+
         # Trang danh sách (bỏ trang SPA đã có API thay), trang sau, trang danh mục.
         rendered = set(spec.rendered)
         queue = [u for u in dict.fromkeys([*spec.listings, *spec.hubs]) if u not in api_listings]
@@ -1409,7 +1567,9 @@ class CareersSource(Source):
                     yield known_or(job)
             for link in scan.job_links:
                 listed += 1
-                pending.setdefault(link.url, link)
+                # Chữ trên link (gợi ý tiêu đề) thay cho link cùng URL từ sitemap.
+                if link.url not in pending or (link.title and not pending[link.url].title):
+                    pending[link.url] = link
             queue.extend(u for u in scan.next_pages if u not in visited)
             texts = {link.url: link.text for link in scan.links}
             scan_names = {**names, **scan.id_names}
@@ -1450,7 +1610,9 @@ class CareersSource(Source):
             session.truncate("plan_pages")
 
         # Trang chi tiết: tin đã biết dùng lại, link không phải tin bỏ qua, chỉ mở link mới.
-        done: set[str] = set()
+        # Link tới trang danh sách / danh mục vừa đọc (danh mục cũng là "link tin" trên trang chủ)
+        # không mở lại.
+        done: set[str] = set(visited)
         opened = 0
         while pending and opened < limits.max_detail_pages:
             batch: list[JobLink] = []

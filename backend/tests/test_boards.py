@@ -16,14 +16,9 @@ from jobcrawler.pipeline.profiles import decide
 from jobcrawler.services.fakes import FakeChatClient, FakeFetcher
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.sources.base import SourceError, SourceLimits, SourceSession
-from jobcrawler.sources.boards.base import (
-    BoardEntry,
-    BoardJob,
-    ListingState,
-    parse_sitemap,
-    sitemap_body,
-)
+from jobcrawler.sources.boards.base import BoardEntry, BoardJob, ListingState
 from jobcrawler.sources.boards.profile_source import BoardProfileSource
+from jobcrawler.sources.sitemaps import parse_sitemap, sitemap_body
 
 from .boards_fake import HOME, FakeBoard, fake_site, job_page, sitemap_index, urlset
 

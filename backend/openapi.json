@@ -3436,7 +3436,7 @@
         "type": "object"
       },
       "PlanPageOut": {
-        "description": "Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs`).",
+        "description": "Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs` + `sitemaps`).",
         "properties": {
           "api_only": {
             "title": "Api Only",
@@ -3450,6 +3450,10 @@
             "title": "Rendered",
             "type": "boolean"
           },
+          "sitemap": {
+            "title": "Sitemap",
+            "type": "boolean"
+          },
           "url": {
             "title": "Url",
             "type": "string"
@@ -3458,6 +3462,7 @@
         "required": [
           "url",
           "hub",
+          "sitemap",
           "rendered",
           "api_only"
         ],

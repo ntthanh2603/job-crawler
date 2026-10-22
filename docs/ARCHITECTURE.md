@@ -21,7 +21,7 @@ Ba loại nguồn:
 | Nguồn                          | Ví dụ                                   | Cách lấy                                                                           |
 | ------------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------- |
 | ATS có API công khai           | Greenhouse, Lever, Workday…             | adapter gọi API của ATS                                                            |
-| Trang careers của doanh nghiệp | careers.shopee.vn, tuyendung.vcb.com.vn | parser chung: JSON-LD, link tin, JSON / API của trang SPA, LLM khi rule không thấy |
+| Trang careers của doanh nghiệp | careers.shopee.vn, tuyendung.vcb.com.vn | parser chung: JSON-LD, link tin, JSON / API của trang SPA, sitemap, LLM khi rule không thấy |
 | Trang tuyển dụng (job board)   | TopCV, VietnamWorks, ITviec…            | index cả trang, gắn tin vào doanh nghiệp qua profile nhà tuyển dụng                |
 
 ```mermaid
@@ -109,6 +109,15 @@ cố định (hash của id). Doanh nghiệp mới và bộ khung hỏng thì bu
    `careers.` / `tuyendung.` / `jobs.` → đường dẫn phổ biến. Kết quả cache 7 ngày; build đêm tìm lại.
 4. **Thu thập** (`pipeline/collect.py`): mỗi nguồn một task, đọc **đủ** site (≤ 10 trang danh sách,
    ≤ 20 trang API, ≤ 80 trang chi tiết mỗi nguồn); tin đã tải trong `JOB_REUSE_DAYS` dùng lại.
+   Nguồn careers (`sources/careers.py`) nhận link tin theo đường dẫn (trang con của trang danh
+   sách, đoạn `tuyen-dung` / `job`…), mã tin trong slug và chữ trên link; ≥ 3 thẻ tin
+   `/<slug>-<mã>` cùng thư mục cha trên một trang cũng là link tin dù đường dẫn không có từ khoá
+   tuyển dụng (tuyendung.frt.vn). Sau trang danh sách / danh mục, nó đọc **sitemap** của site
+   (`/sitemap.xml`, không có thì `/sitemap_index.xml`) và lấy URL cùng **khuôn** (host + thư mục cha
+   của link tin có mã đã thấy, ≥ 3 link; bỏ `lastmod` > 180 ngày, ≤ 500 link): đủ tin khi trang
+   danh sách chỉ hiện một phần (phần còn lại nạp bằng XHR / cuộn vô hạn). Nội dung chính bỏ
+   `<form>` ít chữ (tìm kiếm, đăng nhập) nhưng giữ form bọc nội dung (ASP.NET WebForms, mô tả công
+   việc nằm trong form "Ứng tuyển").
 5. **Chuẩn hoá → xác minh → gộp → lưu** (mục 6). Lượt đọc đủ mọi nguồn mới đóng việc không còn thấy
    (trang lỗi tạm — timeout, 5xx, 429, robots.txt không tải được — làm nguồn chưa đủ).
 6. **Ghi bộ khung** (`crawl_plans`) và lịch (`company_schedules`).
@@ -122,16 +131,17 @@ Mỗi nguồn website / ATS một dòng: trang / API cần đọc lại và mã 
 | `listings`             | trang danh sách đã đọc (kể cả trang sau, "xem tất cả")                       |
 | `hubs`                 | trang danh mục / theo tỉnh dẫn tới tin                                       |
 | `apis`                 | API danh sách tin của trang SPA (cách phân trang, tổng số tin)               |
+| `sitemaps`             | sitemap có link tin và khuôn URL tin (host + thư mục cha) để lọc link        |
 | `rendered`, `api_only` | trang phải mở bằng trình duyệt; trang mà API thay được (poll chỉ gọi API)    |
 | `ignored`, `indirect`  | link không phải tin (poll không mở lại); tin chỉ tới được qua trang tin khác |
 | `ats`                  | bảng tin ATS                                                                 |
 | `pages`                | **số trang một lượt poll được đọc ở nguồn này**                              |
 
 **Chia trang** (`modules/crawl/plan_service.allocate_pages`): mỗi doanh nghiệp có `PLAN_MAX_PAGES` (10)
-trang mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) + số
-trang API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday: 20 tin / trang). Chia theo thứ tự: mỗi
-nguồn tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho nguồn careers
-(site thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
+trang mỗi lượt poll. Nhu cầu của một nguồn = trang danh sách + danh mục (bỏ trang có API thay) +
+sitemap + số trang API (tổng tin / cỡ trang); bảng tin ATS = 1 (Workday: 20 tin / trang). Chia theo
+thứ tự: mỗi nguồn tới `min(nhu cầu, PLAN_MIN_PAGES)` (3) → chia vòng tới đủ nhu cầu → trang dư cho
+nguồn careers (site thêm trang sau vẫn đọc trọn). Site 1–2 trang thì bộ khung đúng 1–2 trang.
 
 ## 4. Poll ngày (`modules/crawl/crawl_service.poll_company`)
 
@@ -141,8 +151,9 @@ poll đầu tiên lúc 06:00 thấy.
 
 1. Nạp bộ khung các nguồn `active` và (nguồn, mã, URL) các tin đã lưu — không đọc nội dung tin.
 2. Mỗi nguồn đọc tối đa `pages` trang: **API trước** (gọi thẳng bằng HTTP, không mở trình duyệt),
-   rồi trang danh sách / danh mục bằng HTTP (chỉ render khi HTML trống mà lượt build đã phải render).
-   Không đi ra ngoài phần trang của mình.
+   rồi sitemap, rồi trang danh sách / danh mục bằng HTTP (chỉ render khi HTML trống mà lượt build đã
+   phải render). Không đi ra ngoài phần trang của mình. Link tới trang danh sách / danh mục vừa đọc
+   không bị mở lại như trang chi tiết.
 3. So với mã tin lượt trước: **mới** = mã chưa có → chỉ mở trang chi tiết của tin mới (≤
    `POLL_MAX_DETAIL_PAGES` = 10 mỗi nguồn, còn lại lượt sau). **Đã gỡ** = mã cũ vắng mặt, chỉ khi
    nguồn đọc trọn (không bị cắt vì hết trang / deadline, không lỗi).
@@ -151,16 +162,17 @@ poll đầu tiên lúc 06:00 thấy.
    poll không đọc, nên không bị ghi đè bằng phần tin lượt poll thấy: [DEDUP.md](DEDUP.md) mục 8);
    tin đã gỡ → đóng việc nếu không còn bản tin nào khác.
 5. **Bộ khung hỏng → build lại ngay** (`REBUILD_ON_ERROR`): trang chính 404/410, API không còn JSON /
-   không còn tin, trang danh sách hết sạch tin, lỗi tạm lặp `POLL_MAX_FAILURES` (3) lượt. Build lại
-   vẫn hỏng → thử lại sau 2 giờ (trạng thái "Bộ khung hỏng"). Tắt `REBUILD_ON_ERROR`: nguồn hỏng chờ
-   lượt build đêm, doanh nghiệp vẫn `ready`, các nguồn khác vẫn được poll. Doanh nghiệp `paused`
-   không bao giờ bị lượt poll đổi trạng thái: lượt theo lịch / `board` bỏ qua, chỉ lượt bấm tay chạy
+   không còn tin, sitemap 4xx / không còn là XML / không còn URL cùng khuôn, trang danh sách hết
+   sạch tin, lỗi tạm lặp `POLL_MAX_FAILURES` (3) lượt. Build lại vẫn hỏng → thử lại sau 2 giờ
+   (trạng thái "Bộ khung hỏng"). Tắt `REBUILD_ON_ERROR`: nguồn hỏng chờ lượt build đêm, doanh
+   nghiệp vẫn `ready`, các nguồn khác vẫn được poll. Doanh nghiệp `paused` không bao giờ bị lượt
+   poll đổi trạng thái: lượt theo lịch / `board` bỏ qua, chỉ lượt bấm tay chạy
    (và không xếp build lại).
 6. **Chốt chặn đóng nhầm**: mất ≥ 30% tin (≥ 3 tin, nguồn ≥ 5 tin) trong một lượt → không đóng, đếm
    như lỗi; lặp 3 lượt → build lại, lượt build đọc đủ mới đóng đúng.
 
 Tab "Bộ khung & lịch" của doanh nghiệp (`GET /api/companies/{id}/crawl`, `modules/crawl/crawl_service.py:
-plan_view`) vẽ đường này cho từng nguồn: các API và trang theo thứ tự lượt poll đọc, số mã tin, phần
+plan_view`) vẽ đường này cho từng nguồn: các API, sitemap và trang theo thứ tự lượt poll đọc, số mã tin, phần
 trang của nguồn, và **kết quả lượt poll gần nhất** (`last_poll`). Vì lượt không đổi không ghi
 `company_runs`, kết quả này suy từ cột của `crawl_plans`: `retired` / `broken` theo `status`; chưa poll
 khi `polled_at` trống hoặc trước `built_at`; lỗi tạm khi `failures` > 0; có thay đổi khi `changed_at ≥

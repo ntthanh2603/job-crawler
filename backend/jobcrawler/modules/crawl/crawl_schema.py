@@ -24,10 +24,13 @@ class PlanPollResult(StrEnum):
 
 
 class PlanPageOut(ApiOut):
-    """Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs`)."""
+    """Một trang lượt poll đọc lại (`PlanSpec.listings` + `hubs` + `sitemaps`)."""
 
     url: str
     hub: bool  # trang danh mục / theo tỉnh dẫn tới tin (False: trang danh sách)
+    # Sitemap của site: lấy link cùng khuôn với link tin trên trang danh sách (đủ tin khi trang
+    # danh sách chỉ hiện một phần).
+    sitemap: bool
     rendered: bool  # lượt build phải mở bằng trình duyệt: poll đọc HTTP trước, trống mới render
     api_only: bool  # mọi tin có trong API bắt được: API trả tin thì poll không mở trang này
 

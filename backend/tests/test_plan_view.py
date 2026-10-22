@@ -20,7 +20,7 @@ from jobcrawler.modules.crawl.crawl_service import (
     plan_detail_view,
     plan_view,
 )
-from jobcrawler.sources.plan import ApiSpec, PlanSpec
+from jobcrawler.sources.plan import ApiSpec, PlanSpec, SitemapSpec
 
 BUILT = datetime(2026, 10, 20, 1, 0, tzinfo=UTC)
 LIST = "https://tuyendung.acme.vn/viec-lam"
@@ -87,6 +87,23 @@ def test_plan_view_lists_pages_and_apis_in_poll_order() -> None:
     assert (out.ignored, out.indirect, out.llm_listing) == (1, 2, True)
     # Trang SPA có API thay không tính; API nhúng tính trừ trang đầu (đọc cùng trang danh sách).
     assert (out.pages, out.pages_needed) == (6, spec.demand())
+
+
+def test_plan_view_lists_sitemap_before_pages() -> None:
+    sitemap = "https://tuyendung.acme.vn/sitemap.xml"
+    spec = PlanSpec(
+        listings=[LIST],
+        hubs=["https://tuyendung.acme.vn/ha-noi"],
+        sitemaps=[SitemapSpec(url=sitemap, shapes=["tuyendung.acme.vn"])],
+    )
+    out = plan_view(_plan(spec))
+    assert [(p.url, p.sitemap, p.hub) for p in out.listings] == [
+        (sitemap, True, False),
+        (LIST, False, False),
+        ("https://tuyendung.acme.vn/ha-noi", False, True),
+    ]
+    assert out.listings_total == 3
+    assert out.pages_needed == 3
 
 
 def test_plan_view_caps_long_listing_and_reads_ats_kind() -> None:

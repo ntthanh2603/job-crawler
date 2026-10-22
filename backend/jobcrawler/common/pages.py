@@ -12,7 +12,7 @@ from selectolax.lexbor import LexborHTMLParser, LexborNode
 
 from jobcrawler.common.urls import normalize_url, same_site
 
-# Phần không phải nội dung: menu, footer, form, script... Bỏ trước khi lấy nội dung chính.
+# Phần không phải nội dung: menu, footer, script... Bỏ trước khi lấy nội dung chính.
 _NOISE = (
     "script",
     "style",
@@ -20,7 +20,6 @@ _NOISE = (
     "template",
     "svg",
     "iframe",
-    "form",
     "button",
     "select",
     "nav",
@@ -33,6 +32,10 @@ _NOISE = (
     "[aria-hidden=true]",
 )
 _MAIN = ("main", "[role=main]", "article", "#main", "#content", ".content", ".main-content")
+# `<form>` còn ít chữ hơn mức này (sau khi bỏ nút, ô chọn...) là form nhập liệu (tìm kiếm, đăng
+# nhập, ứng tuyển): nhiễu. Form nhiều chữ hơn là khung trang: ASP.NET WebForms bọc cả trang trong
+# `<form runat="server">`, trang tin hay bọc cả mô tả công việc trong form "Ứng tuyển".
+_FORM_TEXT = 500
 # Khung của app SPA: HTML gần như rỗng, nội dung do JavaScript dựng.
 _SPA_MARKERS = (
     'id="root"',
@@ -155,6 +158,9 @@ def main_node(tree: LexborHTMLParser) -> LexborNode | None:
     """
     for selector in _NOISE:
         for node in tree.css(selector):
+            node.decompose()
+    for node in tree.css("form"):
+        if len(node_text(node)) < _FORM_TEXT:
             node.decompose()
     best: LexborNode | None = None
     best_len = 0
