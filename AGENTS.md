@@ -91,7 +91,8 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
   Marker `browser` (worker) cần `playwright install chromium`, không có thì tự bỏ qua.
 - Tích hợp (`-m integration`, `backend/tests/integration/`): cần Postgres + Redis (`task infra`) và
   `TEST_DATABASE_URL` trỏ tới DB **tên kết thúc `_test`**, khác `DATABASE_URL` — schema ở đó bị xoá
-  và dựng lại. Compose tạo sẵn `jobcrawler_test` khi volume còn trống.
+  và dựng lại. Compose tạo sẵn `jobcrawler_test` khi volume còn trống. **Không chạy ở CI / `task
+  check`**: chạy `task backend:test` khi sửa phần DB, Redis, hàng đợi, gateway.
 - Các bộ test tích hợp dùng chung `jobcrawler_test`: không chạy hai bộ song song.
 - `.env` của test tích hợp đọc từ thư mục làm việc: chạy pytest backend trong `backend/` (đọc
   `backend/.env`).

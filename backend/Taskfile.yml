@@ -45,12 +45,13 @@ tasks:
       - uv run pytest -m "not integration" {{.CLI_ARGS}}
 
   check:
-    desc: Mọi thứ CI chạy cho backend (lint, typecheck, spec OpenAPI, test) — chạy trước khi commit
+    desc: Mọi thứ CI chạy cho backend (lint, typecheck, spec OpenAPI, test unit) — chạy trước khi commit
     cmds:
       - task: lint
       - task: typecheck
       - task: api:check
-      - task: test
+      # Test tích hợp (Postgres + Redis) không chạy ở CI: `task backend:test` khi sửa phần DB / Redis.
+      - task: test:unit
 
   dev:
     desc: API trên máy, tự nạp lại khi sửa code (http://127.0.0.1:8000/api/docs)

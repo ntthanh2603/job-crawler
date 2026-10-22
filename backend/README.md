@@ -158,9 +158,10 @@ uv run pytest                        # cả test tích hợp
 
 Test tích hợp cần Postgres + Redis thật và `TEST_DATABASE_URL` (env hoặc `.env`) trỏ tới một DB
 riêng có tên kết thúc bằng `_test`: schema ở đó bị xoá và dựng lại. Thiếu thì các test này bị bỏ
-qua (trên CI, `CI=true`, thì là lỗi).
+qua (`CI=true` thì là lỗi). CI và `task check` không chạy chúng; chạy `task backend:test` (cả test
+tích hợp) khi sửa phần DB, Redis, hàng đợi, gateway.
 
-`task check` chạy đủ: lint, pyright, kiểm tra spec OpenAPI, pytest.
+`task check` = đúng những gì CI chạy: lint, pyright, kiểm tra spec OpenAPI, pytest unit.
 
 ## Spec OpenAPI
 

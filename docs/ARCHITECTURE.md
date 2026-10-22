@@ -594,6 +594,7 @@ của Redis.
   `ALERT_REPEAT_MINUTES`, và khi đã ổn. Trạng thái từng loại trên Redis chính (`<prefix>:alerts:*`);
   webhook gọi thẳng từ backend (`api_http`) như SERP.
 - **Test**: unit không gọi mạng (`FakeFetcher` với HTML / JSON chụp từ trang thật, `FakeChatClient`,
-  gateway giả); tích hợp trên Postgres + Redis thật (`TEST_DATABASE_URL` tên kết thúc `_test`); hợp
+  gateway giả); tích hợp trên Postgres + Redis thật (`TEST_DATABASE_URL` tên kết thúc `_test`,
+  chạy ở máy bằng `task backend:test`, không chạy ở CI); hợp
   đồng API (`test_openapi.py`) và gRPC (`buf breaking`); Vitest cho giao diện; Playwright E2E chạy ở
   máy trên stack đang chạy. `task check` = đúng những gì CI chạy.
