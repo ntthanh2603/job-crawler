@@ -57,7 +57,7 @@ Mỗi thư mục là một service tự đủ (mã, lockfile, `Dockerfile`, `Tas
 | --------- | ---------------------- | ---------------------------------------------------------------------- |
 | api       | `jobcrawler api`       | API JSON `/api/...` (chỉ trong mạng nội bộ, sau `frontend`)            |
 | gateway   | `jobcrawler gateway`   | gRPC cho worker (cổng 50051): giao việc từ Redis Streams, nhận kết quả |
-| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis; leader kiểm và gửi cảnh báo |
+| scheduler | `jobcrawler scheduler` | mỗi giây xếp build / poll đến hạn; một bản giữ lease leader trên Redis; leader kiểm và gửi cảnh báo; song song: relay sự kiện việc làm cho hệ thống ngoài (lease riêng, mục 12) |
 | runner    | `jobcrawler runner`    | chạy job của 3 hàng đợi (`--role poll\|build\|boards` để tách vai)     |
 
 Máy ≥ 4 CPU thì `serve` chạy mỗi vai runner một process: `runner-build` (máy ≥ 8 CPU:
@@ -77,7 +77,7 @@ Mã nguồn backend (`backend/jobcrawler/`) chia như `core-api/src` của open-
 | Thư mục                | Nội dung                                                                        |
 | ---------------------- | ------------------------------------------------------------------------------- |
 | `bootstrap/`           | điểm vào process: CLI `jobcrawler` (`cli.py`), `serve`, ứng dụng FastAPI (`app.py`: middleware, ghép router), `gateway`, `runner`, `scheduler` |
-| `modules/<tính năng>/` | mỗi file đặt tên `<tên>_<loại>.py`: `<module>_router.py` (API `/api/...`), `<module>_schema.py` (mô hình `...Out` / `...In`), `<module>_service.py` (truy vấn cho giao diện + thao tác của API + nghiệp vụ chính), `<tên>_service.py` cho phần nghiệp vụ tách riêng (vd. `crawl/plan_service.py`, `crawl/sla_service.py`): `companies/`, `crawl/` (build, poll, bộ khung, lịch, độ trễ phát hiện), `jobs/`, `runs/`, `boards/`, `queue/`, `overview/`, `maintenance/`, `evaluate/`, `audit/`, `auth/`, `meta/`, `settings/`, `proxies/`, `gateway/` (gRPC cho worker + API Workers), `live/` (SSE) |
+| `modules/<tính năng>/` | mỗi file đặt tên `<tên>_<loại>.py`: `<module>_router.py` (API `/api/...`), `<module>_schema.py` (mô hình `...Out` / `...In`), `<module>_service.py` (truy vấn cho giao diện + thao tác của API + nghiệp vụ chính), `<tên>_service.py` cho phần nghiệp vụ tách riêng (vd. `crawl/plan_service.py`, `crawl/sla_service.py`): `companies/`, `crawl/` (build, poll, bộ khung, lịch, độ trễ phát hiện), `jobs/`, `runs/`, `boards/`, `queue/`, `overview/`, `maintenance/`, `evaluate/`, `audit/`, `auth/`, `meta/`, `settings/`, `proxies/`, `gateway/` (gRPC cho worker + API Workers), `live/` (SSE), `integration/` (API + feed + webhook cho hệ thống ngoài) |
 | `pipeline/`            | logic: KYC, tìm nguồn, thu thập, chuẩn hoá, xác minh, gộp, lưu                  |
 | `sources/`             | nguồn tin (ATS, careers, trang tuyển dụng), chỉ biết `SourceSession`, không biết DB |
 | `services/`            | hạ tầng dùng chung: `resources.py` (`Resources`), `redis/` (hàng đợi Streams, khoá, heartbeat), `net/` (HttpClient, proxy pool, rate limit, robots), LLM, SERP, mã hoá, fake cho test |
@@ -509,6 +509,8 @@ Cài đặt hiện cạnh mỗi ô số đang chạy lúc này trên cả máy.
 | `company_runs`, `source_fetches`, `failed_pages`, `logs` | lượt build / poll có thay đổi, từng request, trang parse lỗi, log                           |
 | `company_fences`                                         | fencing token của khoá theo doanh nghiệp (tăng mỗi lượt build / poll giữ khoá)              |
 | `board_index_runs`                                       | lịch sử index trang tuyển dụng                                                              |
+| `job_events`, `job_event_counter`                        | sự kiện việc làm cho hệ thống ngoài (`seq` gán sau commit); seq cuối / đã dọn (mục 12)      |
+| `api_clients`, `api_keys`, `company_refs`                | hệ thống ngoài + webhook; khoá API (chỉ sha256); mã doanh nghiệp bên ngoài (mục 12)         |
 | `app_settings`, `audit_events`, `compression_dicts`      | cài đặt (trường bí mật mã hoá AES-256-GCM); nhật ký thao tác (chỉ ghi thêm); từ điển zstd   |
 
 Khoá chính UUIDv7. Schema chỉ đổi bằng revision Alembic mới. Danh sách luôn phân trang ở server,
@@ -598,3 +600,41 @@ của Redis.
   chạy ở máy bằng `task backend:test`, không chạy ở CI); hợp
   đồng API (`test_openapi.py`) và gRPC (`buf breaking`); Vitest cho giao diện; Playwright E2E chạy ở
   máy trên stack đang chạy. `task check` = đúng những gì CI chạy.
+
+## 12. Tích hợp hệ thống ngoài (`modules/integration/`)
+
+Hệ thống ngoài (backend của đối tác) đẩy doanh nghiệp vào và nhận việc làm mới; hướng dẫn cho bên đó:
+[INTEGRATION.md](INTEGRATION.md).
+
+**Sự kiện việc làm (outbox `job_events`)**. Mọi chỗ đổi `jobs` ghi một dòng sự kiện trong cùng
+transaction (`store.emit_job_events`; lượt mất khoá bị rollback thì sự kiện mất cùng):
+
+| Đường ghi                                                       | Sự kiện                                                                  |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `store.save_company_jobs` (build / poll)                        | `created` (job chưa có), `reopened` (job đã đóng), `updated` (hash đổi)  |
+| đóng job không còn thấy, `store.close_postings`                 | `closed`                                                                 |
+| `kyc.merge_companies`                                           | `updated` (job chuyển doanh nghiệp), `deleted` (job trùng bị xoá cùng)   |
+| bảo trì: gộp job trùng / làm sạch lại / phân loại lại           | `closed` / `updated`                                                     |
+
+`jobs.content_hash` (`store.content_hash`) gồm các trường nội dung (tiêu đề, phân loại, nơi làm,
+lương, kinh nghiệm, ba phần mô tả, kỹ năng, link ứng tuyển, ngày hạn nộp), không gồm mốc thấy, độ
+tin cậy, nguồn, ngày đăng: lượt build đêm ghi lại mọi job mà không phát `updated`. Hash NULL (dữ
+liệu trước revision 0007, vừa làm sạch / phân loại lại — đã phát `updated` ở đó) là chưa có mốc:
+lượt sau chỉ ghi mốc. Việc quá hạn nộp mà dòng còn `active` không phát gì; payload tính `status`
+`expired` như danh sách việc làm.
+
+**Thứ tự** (`feed_service.sequence`): id sự kiện cấp lúc INSERT nên transaction commit lệch thứ tự
+id; relay (một bản trên cụm) mỗi giây khoá dòng `job_event_counter`, gán `seq` liên tục
+(`last + 1…`) theo id cho các dòng **đã commit**, tăng `last`, commit. Các lượt gán nối tiếp và mỗi
+lượt hiện ra cùng lúc nên người đọc `seq > cursor` không bao giờ thấy seq lớn mà thiếu seq nhỏ hơn.
+Khoá dòng (không advisory) nên chạy được sau PgBouncer chế độ transaction; hai relay chồng nhau chỉ
+chờ nhau. Payload là trạng thái **hiện tại** của việc lúc đọc (`job` null khi đã xoá): bên nhận
+upsert theo `job.id`, khử trùng theo `seq` (giao ít nhất một lần).
+
+**Đọc** (`feed_service.changes` / `snapshot`): feed quét tối đa 5.000 seq mỗi lần, lọc theo doanh
+nghiệp có mã của client (`company_refs`, EXISTS) trừ client `all_companies`, `next_cursor` luôn
+tiến tới cuối đoạn đã quét. Snapshot theo id tăng dần (keyset, không offset / đếm), trang đầu kèm
+`feed_cursor` = `last` đọc trước khi đọc việc. Bảo trì giờ dọn đầu feed quá
+`JOB_EVENTS_RETENTION_DAYS` (14 ngày; chỉ dòng đã có seq, một đoạn liên tục) và ghi `pruned`:
+cursor < `pruned` hoặc > `last` (DB khôi phục) → `ResyncRequired` (HTTP 410, đồng bộ lại bằng
+snapshot).

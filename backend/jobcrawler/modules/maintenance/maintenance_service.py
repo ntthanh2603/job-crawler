@@ -26,10 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.config import Settings
 from jobcrawler.common.logging import get_logger
-from jobcrawler.common.schemas import EducationLevel, JobStatus, RawJob, RunStatus
+from jobcrawler.common.schemas import EducationLevel, JobEventType, JobStatus, RawJob, RunStatus
 from jobcrawler.database import compress
 from jobcrawler.database.ids import NIL
 from jobcrawler.database.models import BoardIndexRun, CompanyRun, Job, JobPosting
+from jobcrawler.modules.integration import feed_service
 from jobcrawler.pipeline import store
 from jobcrawler.pipeline.categories import title_category
 from jobcrawler.pipeline.dedup import Cluster, merge, stored_fingerprint
@@ -115,6 +116,17 @@ async def delete_older(
             deleted = (await session.execute(sql, {"cutoff": cutoff})).rowcount or 0  # pyright: ignore[reportAttributeAccessIssue]
         total += deleted
         if deleted < DELETE_BATCH:
+            return total
+
+
+async def prune_job_events(sessionmaker: async_sessionmaker[AsyncSession], cutoff: datetime) -> int:
+    """Dọn đầu feed sự kiện việc làm (`feed_service.prune`) theo lô, mỗi lô một transaction."""
+    total = 0
+    while True:
+        async with sessionmaker.begin() as session:
+            deleted = await feed_service.prune(session, before=cutoff)
+        total += deleted
+        if deleted < feed_service.PRUNE_BATCH:
             return total
 
 
@@ -248,6 +260,9 @@ async def dedupe_jobs(
                     .where(Job.id == row.id)
                     .values(fingerprint=fp, status=JobStatus.REMOVED.value, updated_at=now)
                 )
+                await store.emit_job_events(
+                    session, [(row.id, row.company_id, JobEventType.CLOSED)]
+                )
                 report.merged += 1
                 touched.add(row.company_id)
             last_id = rows[-1].id
@@ -260,6 +275,19 @@ async def dedupe_jobs(
 
 
 RECLEAN_BATCH = 500
+
+
+async def _rewrite(
+    session: AsyncSession, job_id: UUID, company_id: UUID, values: dict[str, Any]
+) -> None:
+    """Ghi nội dung tính lại của một job: phát `updated`, xoá `content_hash` để lượt build / poll
+    sau ghi mốc mới mà không phát lần nữa."""
+    await session.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(**values, content_hash=None, updated_at=func.now())
+    )
+    await store.emit_job_events(session, [(job_id, company_id, JobEventType.UPDATED)])
 
 
 @dataclass(slots=True)
@@ -282,6 +310,7 @@ async def reclean_jobs(
                 await session.execute(
                     select(
                         Job.id,
+                        Job.company_id,
                         Job.apply_url,
                         Job.description_md,
                         Job.requirements_md,
@@ -305,11 +334,7 @@ async def reclean_jobs(
                 if values:
                     report.changed += 1
                     if not dry_run:
-                        await session.execute(
-                            update(Job)
-                            .where(Job.id == row.id)
-                            .values(**values, updated_at=func.now())
-                        )
+                        await _rewrite(session, row.id, row.company_id, values)
             last_id = rows[-1].id
 
 
@@ -373,6 +398,7 @@ async def reclassify_jobs(
                 await session.execute(
                     select(
                         Job.id,
+                        Job.company_id,
                         Job.title,
                         Job.canonical_posting_id,
                         Job.requirements_md,
@@ -412,9 +438,7 @@ async def reclassify_jobs(
                     continue
                 report.changed += 1
                 if not dry_run:
-                    await session.execute(
-                        update(Job).where(Job.id == row.id).values(**values, updated_at=func.now())
-                    )
+                    await _rewrite(session, row.id, row.company_id, values)
             last_id = rows[-1].id
 
 
@@ -451,6 +475,9 @@ async def run_maintenance(
                 report.deleted[table] = await delete_older(
                     res.sessionmaker, table, column, now - timedelta(days=days)
                 )
+            report.deleted["job_events"] = await prune_job_events(
+                res.sessionmaker, now - timedelta(days=s.job_events_retention_days)
+            )
         if compression:
             report.trained = await compress.train_dictionaries(
                 res.sessionmaker, train_options(s), now=now

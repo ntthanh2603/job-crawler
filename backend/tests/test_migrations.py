@@ -12,9 +12,10 @@ def _script() -> ScriptDirectory:
 
 def test_single_linear_head() -> None:
     script = _script()
-    assert script.get_heads() == ["0006"]
-    # walk_revisions đi từ head về gốc: chuỗi thẳng 0006 → 0005 → … → 0001.
+    assert script.get_heads() == ["0007"]
+    # walk_revisions đi từ head về gốc: chuỗi thẳng 0007 → 0006 → … → 0001.
     assert [r.revision for r in script.walk_revisions()] == [
+        "0007",
         "0006",
         "0005",
         "0004",

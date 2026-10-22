@@ -49,6 +49,7 @@ def test_groups_in_order() -> None:
         "ai",
         "quality",
         "alerts",
+        "integration",
         "maintenance",
     ]
     assert all(g.title and g.description and g.items for g in a.GROUPS)

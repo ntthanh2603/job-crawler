@@ -350,6 +350,12 @@ class Settings(BaseSettings):
     alert_http_slot_usage: float = Field(default=0.7, ge=0, le=1)
     alert_llm_error_rate: float = Field(default=0.2, ge=0, le=1)
 
+    # Tích hợp hệ thống ngoài (`/api/integration/v1`, modules/integration, docs/INTEGRATION.md).
+    # Sự kiện việc làm (`job_events`) giữ chừng này ngày; client đọc cursor cũ hơn phải đồng bộ lại.
+    job_events_retention_days: float = Field(default=14, gt=0)
+    # Nhịp relay (process scheduler): gán seq cho sự kiện mới, giao webhook.
+    relay_interval_seconds: float = Field(default=1.0, ge=0.2, le=30)
+
     # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth_service.py`).
     # Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.
     ui_username: str = "admin"

@@ -123,6 +123,16 @@ class JobStatus(StrEnum):
     REMOVED = "removed"
 
 
+class JobEventType(StrEnum):
+    """Loại sự kiện việc làm (`job_events`, modules/integration/feed_service.py)."""
+
+    CREATED = "created"  # việc lần đầu thấy
+    UPDATED = "updated"  # nội dung đổi (`jobs.content_hash`) hoặc chuyển sang doanh nghiệp khác
+    CLOSED = "closed"  # gỡ / hết hạn / gộp vào việc khác
+    REOPENED = "reopened"  # việc đã đóng được đăng lại
+    DELETED = "deleted"  # dòng `jobs` bị xoá (gộp doanh nghiệp trùng)
+
+
 class SalaryPeriod(StrEnum):
     MONTH = "month"
     YEAR = "year"

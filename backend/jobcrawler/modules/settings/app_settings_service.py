@@ -1334,6 +1334,28 @@ GROUPS: tuple[Group, ...] = (
         ),
     ),
     _group(
+        "integration",
+        "Tích hợp",
+        "Hệ thống ngoài đẩy doanh nghiệp và nhận việc làm mới qua API tích hợp (khoá API ở trang "
+        "Tích hợp): feed sự kiện việc làm và webhook ký HMAC.",
+        _s(
+            "job_events_retention_days",
+            "float",
+            "Giữ sự kiện việc làm",
+            "Sự kiện việc làm (tạo / đổi / đóng) giữ chừng này ngày. Hệ thống ngoài ngừng đọc lâu "
+            "hơn thì phải đồng bộ lại từ đầu.",
+            unit="ngày",
+        ),
+        _s(
+            "relay_interval_seconds",
+            "float",
+            "Nhịp relay",
+            "Cứ chừng này giây relay (process scheduler) đánh số sự kiện mới cho feed và gửi "
+            "webhook. Nhịp ngắn thì việc làm mới tới hệ thống ngoài sớm hơn.",
+            unit="giây",
+        ),
+    ),
+    _group(
         "maintenance",
         "Bảo trì & lưu trữ",
         "Dọn dữ liệu cũ, tính sẵn số liệu trang tổng quan và nén các cột lớn bằng từ điển zstd.",
@@ -1638,6 +1660,7 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
             "alert_llm_error_rate",
         ),
     ),
+    "integration": (_sec("Feed sự kiện", "relay_interval_seconds", "job_events_retention_days"),),
     "maintenance": (
         _sec("Lịch", "maintenance_cron", "overview_cron"),
         _sec(

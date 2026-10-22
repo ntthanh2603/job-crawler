@@ -10,6 +10,9 @@ hoặc dừng (nhả khoá). Không giữ kết nối Postgres suốt đời pro
 transaction. Leader treo quá hạn khoá thì mất khoá (lần gia hạn sau báo `scheduler.lease_lost`) —
 nhịp xếp lịch chạy trùng trong chốc lát vô hại vì job có khoá duy nhất.
 
+Song song vòng xếp lịch là relay sự kiện việc làm cho hệ thống ngoài
+(`modules/integration/relay_service.py`, lease riêng `<prefix>:lock:relay`).
+
 Health: vòng lặp chính ghi heartbeat `scheduler` (`jobcrawler.services.redis.heartbeat`) — replica
 dự phòng sau mỗi lần hỏi được Postgres, replica làm việc sau mỗi nhịp xếp lịch thành công; mất
 Postgres / Redis / nhịp lỗi liên tục thì heartbeat cũ dần và `jobcrawler health scheduler` báo hỏng.
@@ -35,6 +38,7 @@ from jobcrawler.common.watchdog import Watchdog, start_watchdog
 from jobcrawler.modules.alerts import alert_service
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.modules.crawl import schedule_service
+from jobcrawler.modules.integration import relay_service
 from jobcrawler.services.redis.heartbeat import Heartbeat
 from jobcrawler.services.redis.locks import RedisLease
 from jobcrawler.services.resources import Resources, open_resources
@@ -145,8 +149,12 @@ async def run_scheduler(settings: Settings) -> None:
             poll_interval=settings.poll_interval_seconds,
             timezone=settings.crawl_timezone,
         )
-        dog = start_watchdog(COMPONENT, max_stall=settings.watchdog_seconds, parts=("main",))
+        dog = start_watchdog(
+            COMPONENT, max_stall=settings.watchdog_seconds, parts=("main", relay_service.PART)
+        )
         try:
-            await run_loop(res, stop, watchdog=dog)
+            await asyncio.gather(
+                run_loop(res, stop, watchdog=dog), relay_service.run_relay(res, stop, watchdog=dog)
+            )
         finally:
             dog.stop()  # trước khi đóng tài nguyên: lượt dừng chậm không bị watchdog giết

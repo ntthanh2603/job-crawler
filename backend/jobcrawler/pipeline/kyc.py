@@ -34,6 +34,7 @@ from jobcrawler.common.logging import get_logger
 from jobcrawler.common.pages import extract_links, parse
 from jobcrawler.common.schemas import (
     CompanyIn,
+    JobEventType,
     JobStatus,
     KycCandidate,
     KycEvidence,
@@ -52,6 +53,7 @@ from jobcrawler.common.urls import (
 from jobcrawler.database.models import (
     Company,
     CompanyAlias,
+    CompanyRef,
     CompanyRun,
     Job,
     JobPosting,
@@ -1079,8 +1081,9 @@ async def load_company(
 
 
 async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> None:
-    """Gộp `src` vào `dst` (cùng pháp nhân): chuyển alias, lượt build / poll, fetch, profile, job
-    rồi xoá `src`."""
+    """Gộp `src` vào `dst` (cùng pháp nhân): chuyển alias, mã bên ngoài, lượt build / poll, fetch,
+    profile, job rồi xoá `src`. Job chuyển sang phát `updated`, job bị xoá cùng `src` phát `deleted`
+    (theo `dst`: mã bên ngoài của `src` giờ trỏ vào đó)."""
     await session.execute(
         pg_insert(CompanyAlias)
         .from_select(
@@ -1094,7 +1097,7 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
         )
         .on_conflict_do_nothing(index_elements=["company_id", "alias_norm"])
     )
-    for model in (CompanyRun, SourceFetch, SourceProfile, JobPosting):
+    for model in (CompanyRef, CompanyRun, SourceFetch, SourceProfile, JobPosting):
         await session.execute(
             update(model).where(model.company_id == src.id).values(company_id=dst.id)
         )
@@ -1106,16 +1109,25 @@ async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> 
         Job.status == JobStatus.ACTIVE.value,
         Job.fingerprint.is_not(None),
     )
-    await session.execute(
-        update(Job)
-        .where(
-            Job.company_id == src.id,
-            Job.cluster_key.not_in(taken),
-            (Job.status != JobStatus.ACTIVE.value)
-            | Job.fingerprint.is_(None)
-            | Job.fingerprint.not_in(same_content),
+    moved = list(
+        await session.scalars(
+            update(Job)
+            .where(
+                Job.company_id == src.id,
+                Job.cluster_key.not_in(taken),
+                (Job.status != JobStatus.ACTIVE.value)
+                | Job.fingerprint.is_(None)
+                | Job.fingerprint.not_in(same_content),
+            )
+            .values(company_id=dst.id)
+            .returning(Job.id)
         )
-        .values(company_id=dst.id)
+    )
+    dropped = list(await session.scalars(select(Job.id).where(Job.company_id == src.id)))
+    await store.emit_job_events(
+        session,
+        [(j, dst.id, JobEventType.UPDATED) for j in moved]
+        + [(j, dst.id, JobEventType.DELETED) for j in dropped],
     )
     domains = [dst.primary_domain, *(dst.other_domains or [])]
     extra = [src.primary_domain, *(src.other_domains or [])]

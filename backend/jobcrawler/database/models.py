@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Identity,
     Index,
     LargeBinary,
     MetaData,
@@ -29,6 +30,7 @@ from jobcrawler.common.schemas import (
     EducationLevel,
     EmploymentType,
     FetchOutcome,
+    JobEventType,
     JobLevel,
     JobStatus,
     KycStatus,
@@ -115,6 +117,9 @@ class Company(Base):
     input_name: Mapped[str]
     # Website và ghi chú từ `companies.csv` (`jobcrawler import`), dùng lại khi enqueue.
     input_website: Mapped[str | None]
+    # Trang tuyển dụng / bảng ATS người nhập biết sẵn: lượt tìm nguồn thử trước (website vẫn dùng
+    # cho KYC).
+    input_careers_url: Mapped[str | None]
     note: Mapped[str | None]
     legal_name: Mapped[str | None]
     brand_name: Mapped[str | None]
@@ -412,8 +417,108 @@ class Job(Base):
     status: Mapped[str] = mapped_column(server_default=JobStatus.ACTIVE.value)
     confidence: Mapped[float]
     verification_reasons: Mapped[list[str]] = mapped_column(server_default=EMPTY_ARRAY)
+    # Hash các trường nội dung (`store.content_hash`): lượt ghi lại job chỉ phát sự kiện `updated`
+    # khi hash đổi. NULL: chưa có mốc (dữ liệu cũ, vừa làm sạch lại) — lượt sau ghi mốc, không phát.
+    content_hash: Mapped[str | None]
     first_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class JobEvent(Base):
+    """Outbox sự kiện việc làm cho hệ thống ngoài (modules/integration/feed_service.py): ghi cùng
+    transaction đổi `jobs` (`store.emit_job_events`), relay gán `seq` liên tục theo thứ tự đã
+    commit (`feed_service.sequence`) — feed / webhook đọc `seq > cursor` không bao giờ bỏ sót.
+    Không có khoá ngoại: sự kiện của job / doanh nghiệp đã xoá vẫn phải tới được bên nhận."""
+
+    __tablename__ = "job_events"
+    __table_args__ = (
+        one_of("type", JobEventType),
+        Index("ix_job_events_unsequenced", "id", postgresql_where=text("seq IS NULL")),
+        Index("ix_job_events_created_at", "created_at", postgresql_using="brin"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    seq: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    job_id: Mapped[uuid.UUID]
+    company_id: Mapped[uuid.UUID]
+    type: Mapped[str]
+    created_at: Mapped[datetime] = _created_at()
+
+
+class JobEventCounter(Base):
+    """Một dòng (`id = 1`): seq cuối đã gán (`last`) và seq cuối đã dọn (`pruned`, cursor thấp hơn
+    phải đồng bộ lại). Sequencer khoá dòng này nên hai relay chạy chồng không gán trùng."""
+
+    __tablename__ = "job_event_counter"
+    __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    last: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    pruned: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+
+
+class ApiClient(Base):
+    """Hệ thống ngoài dùng API tích hợp (`/api/integration/v1`, modules/integration): gọi bằng khoá
+    `api_keys`, nhận sự kiện việc làm qua webhook ký HMAC hoặc đọc feed."""
+
+    __tablename__ = "api_clients"
+
+    id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(unique=True)
+    # companies:write (đẩy doanh nghiệp, kèm quyền đọc), jobs:read (đọc việc làm / feed).
+    scopes: Mapped[list[str]] = mapped_column(
+        server_default=text("'{companies:write,jobs:read}'::text[]")
+    )
+    # False: chỉ việc làm của doanh nghiệp đã liên kết (`company_refs`); True: mọi việc làm.
+    all_companies: Mapped[bool] = mapped_column(server_default=text("false"))
+    include_description: Mapped[bool] = mapped_column(server_default=text("true"))
+    # URL và secret webhook lưu mã hoá (`services/secretbox.py`).
+    webhook_url: Mapped[str | None]
+    webhook_secret: Mapped[str | None]
+    webhook_enabled: Mapped[bool] = mapped_column(server_default=text("false"))
+    # Seq cuối bên nhận đã trả 2xx (relay tiến bằng compare-and-set).
+    webhook_cursor: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    webhook_last_ok_at: Mapped[datetime | None]
+    webhook_failing_since: Mapped[datetime | None]
+    webhook_last_error: Mapped[str | None]
+    created_by: Mapped[str | None]
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class ApiKey(Base):
+    """Khoá API của một client: chỉ lưu sha256 (khoá hiện một lần lúc tạo)."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = _pk()
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("api_clients.id", ondelete="CASCADE"), index=True
+    )
+    prefix: Mapped[str]  # vài ký tự đầu của khoá, để nhận ra trên giao diện
+    digest: Mapped[str] = mapped_column(unique=True)
+    created_by: Mapped[str | None]
+    created_at: Mapped[datetime] = _created_at()
+    last_used_at: Mapped[datetime | None]
+    revoked_at: Mapped[datetime | None]
+
+
+class CompanyRef(Base):
+    """Mã doanh nghiệp bên hệ thống ngoài → `companies`. Nhiều mã có thể trỏ một doanh nghiệp (hai
+    bản ghi bên ngoài hoá ra cùng pháp nhân, KYC gộp). Doanh nghiệp có mã mà mọi mã `active=false`
+    thì lịch thu thập `paused`."""
+
+    __tablename__ = "company_refs"
+    __table_args__ = (Index("ix_company_refs_company_id_client_id", "company_id", "client_id"),)
+
+    client_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("api_clients.id", ondelete="CASCADE"), primary_key=True
+    )
+    external_id: Mapped[str] = mapped_column(primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"))
+    active: Mapped[bool] = mapped_column(server_default=text("true"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 

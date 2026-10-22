@@ -9,14 +9,15 @@ chưa đủ gộp cụm của job đã lưu với các tin khác của job đó 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Collection, Mapping, Sequence
+import json
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from datasketch import MinHash
-from sqlalchemy import and_, case, func, or_, select, tuple_, update
+from sqlalchemy import and_, case, func, insert, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from jobcrawler.common.schemas import (
     EducationLevel,
     EmploymentType,
     ExperienceYears,
+    JobEventType,
     JobLevel,
     JobOut,
     JobStatus,
@@ -35,7 +37,7 @@ from jobcrawler.common.schemas import (
     SalaryPeriod,
     WorkMode,
 )
-from jobcrawler.database.models import Company, Job, JobPosting
+from jobcrawler.database.models import Company, Job, JobEvent, JobPosting
 from jobcrawler.pipeline import provinces
 from jobcrawler.pipeline.dedup import (
     TITLE_THRESHOLD,
@@ -177,8 +179,57 @@ def job_values(
     }
 
 
-def job_to_out(row: Job, *, now: datetime | None = None) -> JobOut:
-    """Dòng `jobs` → `JobOut`. Có `now` thì job đã quá hạn nộp được trả về là `expired`."""
+# Trường nội dung của job với hệ thống nhận sự kiện (`content_hash`): đổi một trong số này mới là
+# "việc đổi". Không gồm mốc thấy, độ tin cậy, nguồn, ngày đăng (tin ghi "2 ngày trước" tính lại mỗi
+# lượt) — lượt build đêm ghi lại mọi job mà hash không đổi. Hạn nộp chỉ tính theo ngày.
+_HASHED = (
+    "title",
+    "level",
+    "employment_type",
+    "work_mode",
+    "categories",
+    "education",
+    "openings",
+    "locations",
+    "salary_min",
+    "salary_max",
+    "salary_currency",
+    "salary_period",
+    "salary_negotiable",
+    "salary_raw",
+    "experience_years_min",
+    "experience_years_max",
+    "description_md",
+    "requirements_md",
+    "benefits_md",
+    "apply_url",
+)
+
+
+def content_hash(values: Mapping[str, Any]) -> str:
+    """Hash nội dung của một job (`job_values`), ổn định giữa các lượt ghi lại cùng tin."""
+    data: dict[str, Any] = {k: values.get(k) for k in _HASHED}
+    data["skills"] = sorted(values.get("skills") or [])
+    expires = values.get("expires_at")
+    data["expires_at"] = expires.date().isoformat() if expires else None
+    raw = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.blake2b(raw.encode(), digest_size=16).hexdigest()
+
+
+async def emit_job_events(
+    session: AsyncSession, events: Iterable[tuple[UUID, UUID, JobEventType]]
+) -> None:
+    """Ghi sự kiện (job, doanh nghiệp, loại) vào outbox `job_events` trong transaction của
+    `session`: commit cùng thay đổi của job, rollback (vd. lượt mất khoá) thì mất cùng. Mọi chỗ đổi
+    `jobs` (tạo, đổi nội dung, đóng, mở lại, xoá) phải gọi hàm này."""
+    rows = [{"job_id": j, "company_id": c, "type": t.value} for j, c, t in events]
+    if rows:
+        await session.execute(insert(JobEvent), rows)
+
+
+def job_to_out(row: Job, *, now: datetime | None = None, content: bool = True) -> JobOut:
+    """Dòng `jobs` → `JobOut`. Có `now` thì job đã quá hạn nộp được trả về là `expired`.
+    `content=False`: không đọc ba phần nội dung dài (dòng nạp không kèm chúng), trả rỗng."""
     salary = None
     if row.salary_raw or row.salary_min is not None or row.salary_max is not None:
         salary = Salary(
@@ -214,9 +265,9 @@ def job_to_out(row: Job, *, now: datetime | None = None) -> JobOut:
         locations=[Location.model_validate(loc) for loc in row.locations or []],
         salary=salary,
         experience_years=experience,
-        description_md=row.description_md,
-        requirements_md=row.requirements_md,
-        benefits_md=row.benefits_md,
+        description_md=row.description_md if content else "",
+        requirements_md=row.requirements_md if content else None,
+        benefits_md=row.benefits_md if content else None,
         skills=list(row.skills or []),
         posted_at=row.posted_at,
         expires_at=row.expires_at,
@@ -295,7 +346,9 @@ async def close_postings(
         )
         .returning(Job.id)
     )
-    closed = len(result.all())
+    closed_ids = list(result.scalars())
+    await emit_job_events(session, ((j, company_id, JobEventType.CLOSED) for j in closed_ids))
+    closed = len(closed_ids)
     await refresh_active_jobs(session, company_id)
     log.info("jobs.closed", postings=len(keys), jobs=closed)
     return closed
@@ -584,6 +637,17 @@ def _unclear_values(job: NormalizedJob) -> dict[str, str]:
     return {name: getattr(job, name).value for name in _UNCLEAR}
 
 
+def _event_of(before: Any, digest: str) -> JobEventType | None:
+    """Sự kiện của một job vừa ghi, theo trạng thái trước lượt (`None`: job chưa có)."""
+    if before is None:
+        return JobEventType.CREATED
+    if before.status != JobStatus.ACTIVE.value:
+        return JobEventType.REOPENED
+    if before.content_hash is not None and before.content_hash != digest:
+        return JobEventType.UPDATED
+    return None
+
+
 async def save_company_jobs(
     session: AsyncSession,
     *,
@@ -730,6 +794,22 @@ async def save_company_jobs(
             return list(verdict_of[_key(job)].reasons)
         return list(extra_rows[_key(job)].reasons)
 
+    # Trạng thái trước lượt này của các job sắp ghi (theo khoá cụm, hoặc job đang mở cùng dấu vân
+    # tay mà `_upsert_job` ghi vào): phân biệt việc mới / mở lại / đổi nội dung cho `job_events`.
+    before = {
+        row.id: row
+        for row in await session.execute(
+            select(Job.id, Job.status, Job.content_hash).where(
+                Job.company_id == company_id,
+                or_(
+                    Job.cluster_key.in_([k for k in keys if k is not None]),
+                    and_(Job.fingerprint.in_(fingerprints), Job.status == JobStatus.ACTIVE.value),
+                ),
+            )
+        )
+    }
+    events: dict[UUID, JobEventType] = {}
+
     out: list[JobOut] = []
     touched: set[UUID] = set()
     created: set[UUID] = set()
@@ -756,8 +836,11 @@ async def save_company_jobs(
             "first_seen_at": min(r.first_seen_at for r in every),
             "last_seen_at": max(r.last_seen_at for r in every),
         }
+        values["content_hash"] = content_hash(values)
         job_row = await _upsert_job(session, values)
         touched.add(job_row.id)
+        if (event := _event_of(before.get(job_row.id), values["content_hash"])) is not None:
+            events.setdefault(job_row.id, event)
         if job_row.first_seen_at == now:  # mọi tin của job đều mới thấy, job chưa có từ trước
             created.add(job_row.id)
         await session.execute(
@@ -794,7 +877,10 @@ async def save_company_jobs(
         )
         .returning(Job.id)
     )
-    removed = len((await session.execute(stale)).all())
+    stale_ids = list((await session.execute(stale)).scalars())
+    removed = len(stale_ids)
+    events |= dict.fromkeys(stale_ids, JobEventType.CLOSED)
+    await emit_job_events(session, ((j, company_id, t) for j, t in events.items()))
     await refresh_active_jobs(session, company_id)
     # Chữ ký JD theo dấu vân tay của mọi job vừa ghi: lượt sau so tin mới với job này khỏi đọc JD.
     await signatures.save(
