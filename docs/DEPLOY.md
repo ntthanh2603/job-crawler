@@ -188,6 +188,7 @@ kết nối, slot HTTP, lỗi LLM.
 | Hàng đợi build còn việc lúc 06:00                                           | thêm worker / máy render (runner tự nhận thêm build theo slot worker); chạm "Job build song song tối đa" (mặc định 25 / process) thì tăng nó hoặc thêm `runner-build`; kiểm tra LLM (`LLM_CLUSTER_CONCURRENCY` cả cụm, lỗi "chờ lượt LLM chung"); nới `BUILD_WINDOW` |
 | Postgres CPU > 70% / chờ khoá                                               | PgBouncer, máy lớn hơn, bản sao đọc cho `api`                           |
 | Redis CPU > 70%                                                             | tách cache (`CACHE_REDIS_URL`), máy CPU nhanh hơn                       |
+| Redis chính đầy bộ nhớ                                                      | tách cache: chữ ký JD (512 byte mỗi tin, ~150 MB ở mức L), trang HTTP, LLM nằm trên cache |
 
 ## 6. Kiểm chứng trước khi lên mức sau
 

@@ -113,21 +113,66 @@ lượt. Lượt chưa xong tự xếp lượt nối tiếp (≤ 2).
 
 1. **KYC** (`pipeline/kyc.py`): còn hạn thì dùng lại; không thì SERP + website (chân trang, JSON-LD)
    → LLM chọn kèm trích đoạn → rule kiểm lại. Kết quả `verified` / `ambiguous` / `not_found`.
-2. **Nguồn trang tuyển dụng** (song song bước 3): profile đã map → tin từ index chung.
+2. **Nguồn trang tuyển dụng** (song song bước 3): profile chưa map có tên gần alias của doanh nghiệp
+   (index gặp trước khi KYC thêm alias khớp, profile thêm từ danh bạ nhà tuyển dụng) được map ngay
+   bằng rule (`boards_service.map_company_profiles`; còn mơ hồ thì để lượt index đủ xét) → profile
+   đã map → tin từ index chung, profile chưa đủ tin trong index thì đọc trang profile (tối đa 5
+   profile mỗi trang tuyển dụng mỗi doanh nghiệp, profile đang có tin trong index trước — doanh
+   nghiệp lớn có hàng chục profile chi nhánh / bản trùng; phần còn lại chỉ dùng tin đã index).
 3. **Tìm nguồn trên website** (`pipeline/discovery.py`): trang chủ → link tuyển dụng (LLM chọn khi
-   nhiều; link tới một tin được thay bằng trang danh sách cha) → sitemap → subdomain
-   `careers.` / `tuyendung.` / `jobs.` → đường dẫn phổ biến. Kết quả cache 7 ngày; build đêm tìm lại.
+   nhiều hơn 3 ứng viên, chờ tối đa 10 s rồi chọn theo điểm; link tới một tin được thay bằng trang
+   danh sách cha) → sitemap (cả sitemap khai trong robots.txt) → subdomain `careers.` / `tuyendung.` /
+   `jobs.` / `career.` / `vieclam.` / `recruitment.` / `job.` (thử tên ngẫu nhiên trước để nhận ra
+   DNS wildcard) → đường dẫn phổ biến. Link tuyển dụng có thể ở domain khác mang tên thương hiệu
+   (job.matbao.com của matbao.net, tuyendung.ivy.com.vn của ivymoda.com), ở domain khác mà chữ trên
+   link đúng là "Tuyển dụng" (trừ mạng xã hội, trang tuyển dụng chung), hay trong mục tin tức
+   (`/tin-tuc/tuyen-dung`, `/category/tuyen-dung`). URL đoán bị chặn (WAF) chỉ bỏ URL đó; trang chủ
+   bị chặn / không mở được thì vẫn thử subdomain. Sitemap / đường dẫn đoán theo scheme của trang chủ
+   (site chỉ có http). Trang tin của nhiều nhà tuyển dụng không phải trang careers: trang trên chính
+   sàn tuyển dụng (`job_board_host`: topcv.vn, itviec.com… — công ty sở hữu sàn lấy tin qua trang
+   công ty của nó trên sàn), hay trang có link tới ≥ 3 hồ sơ nhà tuyển dụng mang tên pháp nhân khác
+   nhau (`multi_employer_page`: `/nha-tuyen-dung/công-ty-…`, chuyên trang việc làm của báo, gốc nền
+   tảng tuyển dụng). Nguồn careers cũng bỏ các trang đó khi đi theo link (build và poll) cùng link
+   tin dẫn vào chúng (`PlanSpec.boards`); trang chính của nguồn là trang như vậy, hay mọi link tin
+   của nó dẫn vào đó, thì nguồn báo `job_board_page`: không ghi bộ khung, không tính là nguồn lỗi.
+   Lượt build bỏ bộ khung careers cũ trên chính sàn / vừa thấy là trang sàn (cả khi tìm nguồn chưa
+   trọn) rồi gỡ tin nó đã ghi (`plan_service._retire_job_board_plans`). Kết quả cache 7 ngày; build
+   đêm tìm lại.
 4. **Thu thập** (`pipeline/collect.py`): mỗi nguồn một task, đọc **đủ** site (≤ 10 trang danh sách,
-   ≤ 20 trang API, ≤ 80 trang chi tiết mỗi nguồn); tin đã tải trong `JOB_REUSE_DAYS` dùng lại.
+   ≤ 20 trang API, ≤ 80 trang chi tiết mỗi nguồn); tin đã tải trong `JOB_REUSE_DAYS` dùng lại (tin
+   đã nhận, và tin chỉ bị loại vì đăng lại: nội dung đủ, lượt sau xác minh lại cùng các tin kia).
    Nguồn careers (`sources/careers.py`) nhận link tin theo đường dẫn (trang con của trang danh
    sách, đoạn `tuyen-dung` / `job`…), mã tin trong slug và chữ trên link; ≥ 3 thẻ tin
    `/<slug>-<mã>` cùng thư mục cha trên một trang cũng là link tin dù đường dẫn không có từ khoá
-   tuyển dụng (tuyendung.frt.vn). Sau trang danh sách / danh mục, nó đọc **sitemap** của site
+   tuyển dụng (tuyendung.frt.vn), cũng như ≥ 3 link cùng thư mục cha mà chữ là tên vị trí ("Chuyên
+   viên kế toán", "Senior Backend Engineer"). Bài tuyển dụng một vị trí trong mục tin tức
+   (`/tin-tuc/tuyen-dung-brand-marketing`, `/thong-bao-tuyen-dung-quan-ly-nha-an`) là link tin;
+   thông báo chung (`tuyen-dung-thang-10`) và trang giới thiệu thì không; link phân trang không bao
+   giờ là tin; đuôi ngày trong slug (`-28072026`) không phải mã tin. Trang careers chỉ giới thiệu thì
+   đi tiếp cả cổng tuyển dụng trên subdomain của site (careers.mbbank.com.vn). Trang chi tiết gần
+   như không có dấu hiệu JD (≤ 1 nhóm) mà tiêu đề không phải tên vị trí thì bỏ luôn, không hỏi LLM.
+   Bước tìm nguồn không nhận trang lỗi trả mã 200 ("Không tìm thấy trang") và trang chuyển về trang
+   chủ. Sau trang danh sách / danh mục, nó đọc **sitemap** của site
    (`/sitemap.xml`, không có thì `/sitemap_index.xml`) và lấy URL cùng **khuôn** (host + thư mục cha
    của link tin có mã đã thấy, ≥ 3 link; bỏ `lastmod` > 180 ngày, ≤ 500 link): đủ tin khi trang
    danh sách chỉ hiện một phần (phần còn lại nạp bằng XHR / cuộn vô hạn). Nội dung chính bỏ
    `<form>` ít chữ (tìm kiếm, đăng nhập) nhưng giữ form bọc nội dung (ASP.NET WebForms, mô tả công
-   việc nằm trong form "Ứng tuyển").
+   việc nằm trong form "Ứng tuyển"). Mô tả của trang tin là **khối nhỏ nhất chứa các tiêu đề mục
+   JD** (mô tả / yêu cầu / quyền lợi, cùng bảng từ khoá với `normalize.split_sections`), không lấy
+   menu, cột bên, tin liên quan, chân trang, khung chat; trường có nhãn vẫn đọc cả nội dung chính
+   (kể cả nhãn đứng riêng một dòng không có dấu ":"), phần chữ còn lại gửi kèm tin
+   (`extra.page_context`) để normalize bù lương / kinh nghiệm / học vấn. Trang không có nhãn địa
+   điểm thì lấy tỉnh trên thẻ tin trỏ về chính trang (khối "tin liên quan"; thẻ "Tất cả" thì bỏ).
+   Khối `aria-hidden` nhiều chữ (cửa sổ bật lên, khối thu gọn, tab đang đóng — JD từng vị trí trên
+   trang danh sách) được giữ, khối ít chữ / toàn link và bản sao của slider thì bỏ. JSON-LD chỉ ghi
+   tóm tắt (< 200 ký tự) thì mô tả là khối JD trong HTML. Tiêu đề chỉ là "Thông báo tuyển dụng" /
+   "<Thương hiệu> - Tuyển dụng" thì lấy nhãn "Vị trí tuyển dụng:". Nhãn có số thứ tự ("7. Hạn nhận
+   hồ sơ:") vẫn nhận; dòng là link (thẻ tin khác) và mọi thứ từ khối "Việc làm liên quan" bị bỏ;
+   tin ghi nhiều hạn nộp thì lấy ngày muộn nhất. Ngày giữ chỗ trước năm 2000 ("01-01-1970") coi như
+   không ghi. Vị trí không có trang riêng (LLM đọc trang danh sách) lấy **mô tả là phần của nó trên
+   trang danh sách** (từ dòng ghi tên vị trí tới dòng ghi tên vị trí khác, lần có nhiều chữ nhất),
+   trường có nhãn trong phần đó và cột của dòng bảng tóm tắt chứa tên vị trí ("Ngày hết hạn",
+   "Số lượng") — trước đây chỉ có tên nên luôn bị loại `EMPTY_JD`.
 5. **Chuẩn hoá → xác minh → gộp → lưu** (mục 6). Lượt đọc đủ mọi nguồn mới đóng việc không còn thấy
    (trang lỗi tạm — timeout, 5xx, 429, robots.txt không tải được — làm nguồn chưa đủ).
 6. **Ghi bộ khung** (`crawl_plans`) và lịch (`company_schedules`).
@@ -142,8 +187,9 @@ Mỗi nguồn website / ATS một dòng: trang / API cần đọc lại và mã 
 | `hubs`                 | trang danh mục / theo tỉnh dẫn tới tin                                       |
 | `apis`                 | API danh sách tin của trang SPA (cách phân trang, tổng số tin)               |
 | `sitemaps`             | sitemap có link tin và khuôn URL tin (host + thư mục cha) để lọc link        |
-| `rendered`, `api_only` | trang phải mở bằng trình duyệt; trang mà API thay được (poll chỉ gọi API)    |
+| `rendered`, `api_only` | trang phải mở bằng trình duyệt (chỉ khi bản render thêm tin / link / chữ so với HTML, `careers.render_adds`); trang mà API thay được (poll chỉ gọi API) |
 | `ignored`, `indirect`  | link không phải tin (poll không mở lại); tin chỉ tới được qua trang tin khác |
+| `boards`               | host của trang tin nhiều nhà tuyển dụng gặp ở lượt build: poll bỏ link tin dẫn vào đó |
 | `ats`                  | bảng tin ATS                                                                 |
 | `pages`                | **số trang một lượt poll được đọc ở nguồn này**                              |
 
@@ -163,10 +209,15 @@ poll đầu tiên lúc 06:00 thấy.
 2. Mỗi nguồn đọc tối đa `pages` trang: **API trước** (gọi thẳng bằng HTTP, không mở trình duyệt),
    rồi sitemap, rồi trang danh sách / danh mục bằng HTTP (chỉ render khi HTML trống mà lượt build đã
    phải render). Không đi ra ngoài phần trang của mình. Link tới trang danh sách / danh mục vừa đọc
-   không bị mở lại như trang chi tiết.
+   không bị mở lại như trang chi tiết. Bản ngôn ngữ khác của cùng trang (`/career`, `/ja/career`,
+   `/ko/career`) chỉ đọc bản đầu.
 3. So với mã tin lượt trước: **mới** = mã chưa có → chỉ mở trang chi tiết của tin mới (≤
    `POLL_MAX_DETAIL_PAGES` = 10 mỗi nguồn, còn lại lượt sau). **Đã gỡ** = mã cũ vắng mặt, chỉ khi
-   nguồn đọc trọn (không bị cắt vì hết trang / deadline, không lỗi).
+   nguồn đọc trọn (không bị cắt vì hết trang / deadline, không lỗi). Lượt poll chờ một lời gọi LLM
+   (bóc trang tin ít dấu hiệu JD, đọc trang danh sách bằng LLM) tối đa 15 s: quá thì trang trông như
+   tin được bóc bằng rule, không thì để lượt sau (nguồn bị cắt, không phải hỏng). Hết hạn 60 s khi
+   đã đọc xong danh sách (chỉ còn trang chi tiết của tin mới) thì như nguồn bị cắt: không tính là
+   lỗi bộ khung.
 4. Không đổi gì → chỉ cập nhật lịch (đa số lượt, không ghi `company_runs`). Có tin mới → chuẩn hoá →
    xác minh → gộp với việc đã có → lưu (việc đã lưu được gộp lại cùng các tin khác của nó mà lượt
    poll không đọc, nên không bị ghi đè bằng phần tin lượt poll thấy: [DEDUP.md](DEDUP.md) mục 8);
@@ -242,6 +293,12 @@ P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của
 **Index trang tuyển dụng** (`pipeline/board_index.py`, mỗi trang một `BoardAdapter`):
 
 - **Đủ** (đêm): đọc toàn bộ danh sách, tải tin mới / đổi, tin vắng 2 lượt → gỡ; map profile mới.
+  Trước đó đọc **danh bạ nhà tuyển dụng** của trang (`BoardAdapter.company_sitemaps`,
+  `pipeline/board_directory.py`: TopCV ~49 nghìn, JobsGO ~184 nghìn, ITviec ~12 nghìn, vieclam24h
+  ~7 nghìn, CareerViet 1 nghìn profile, 10/2026): profile có khoá tên trong slug URL
+  (`company_match_key`) trùng khoá tên một doanh nghiệp được thêm vào `source_profiles` (tên tạm từ
+  slug, index gặp tin thì ghi tên thật) — doanh nghiệp chưa có tin nào trong index vẫn có profile
+  để map, không cần SERP. Chỉ thêm profile khớp tên: bảng không phình theo mọi nhà tuyển dụng.
 - **Đuôi** (ngày, mỗi 2 phút): 1–4 request tới phần mới nhất, tải tin chưa từng thấy.
 - Doanh nghiệp có profile vừa có tin mới → **poll ngay** (lượt `board`: đọc thêm tin của doanh nghiệp
   trong index). Lượt poll không gọi trang tuyển dụng theo từng doanh nghiệp. Job poll có một khoá
@@ -249,13 +306,17 @@ P95, % trong 3 phút, độ tươi (tuổi lượt poll đủ gần nhất của
   (một ngày): lượt poll đang chờ lấy cờ và đọc index như lượt `board`; cờ đặt trong lúc lượt build /
   poll đang chạy thì lượt đó xếp thêm một lượt `board` khi xong — tin không phải chờ tới build đêm.
 - Map profile ↔ doanh nghiệp (`pipeline/profiles.py`): cùng MST → website trùng domain → tên khớp
-  đúng một doanh nghiệp; còn mơ hồ thì LLM chọn kèm lý do.
+  đúng một doanh nghiệp; còn mơ hồ thì LLM chọn kèm lý do. Khớp tên chỉ tính khi hai tên không mâu
+  thuẫn loại hình pháp lý (`text.same_legal_entity_form`: "Công ty TNHH Hòa Phát" ≠ "Công ty Cổ phần
+  Tập đoàn Hòa Phát", "Công ty TNHH Thương mại Hà Nội" ≠ "Tổng Công ty Thương mại Hà Nội"); khác
+  loại hình thì chờ website / MST trên trang profile hay LLM.
 
 **Chuẩn hoá** (`pipeline/normalize.py`, rule trước, LLM sau): HTML → markdown sạch (ẩn SĐT / email cá
 nhân); lương → min / max / tiền tệ / kỳ ("tối thiểu", "trở lên", "15tr+" là mức sàn; lương theo
 ngày / tuần để trống kỳ vì `SalaryPeriod` chỉ có tháng / năm / giờ); địa điểm → 34 tỉnh/thành sau
 sáp nhập 2025 (ô chỉ ghi danh sách tỉnh "Hà Nội, Hồ Chí Minh" → mỗi tỉnh một địa điểm; tên đường trùng
-tên tỉnh như "72 Nguyễn Huệ", "Xa lộ Hà Nội" không tính); cấp bậc / loại hình / hình thức (LLM chỉ hỏi
+tên tỉnh như "72 Nguyễn Huệ", "Xa lộ Hà Nội" không tính; địa chỉ không nêu tỉnh mà tiêu đề nêu đúng
+một tỉnh thì lấy tỉnh đó); cấp bậc / loại hình / hình thức (LLM chỉ hỏi
 trường việc **đã gộp** còn `unknown`, sau bước gộp); học vấn tối thiểu (trường nguồn ghi, không có
 thì câu "tốt nghiệp …" / "… degree" trong JD, bỏ mức chỉ là ưu tiên: "thạc sĩ là lợi thế", "MBA
 preferred"); số lượng tuyển. Hai nguồn trả cùng một tin `(source, external_id)` trong một lượt thì chỉ
@@ -317,7 +378,9 @@ và mốc hết tạm dừng chung (từ PTTL `<REDIS_PREFIX>:rl:pause:llm`; là
 
 **Gộp** (`pipeline/dedup.py`): cùng tiêu đề, chung tỉnh/thành, JD giống (MinHash ≥ 0,8) hoặc cùng nơi
 nộp → một việc. Bản chuẩn: ATS / careers > trang tuyển dụng đủ JD > mới nhất. Index duy nhất trong DB
-chặn hai việc đang mở y hệt.
+chặn hai việc đang mở y hệt. Chỉ so các cặp ứng viên tìm bằng băng LSH trên chữ ký MinHash (cùng kết
+quả như so mọi cặp), chữ ký lưu Redis cache, phần CPU chạy trong thread; tin đăng lại của việc vừa
+đóng (≤ 30 ngày) mở lại việc cũ. Chi tiết: [DEDUP.md](DEDUP.md).
 
 ## 7. Lấy trang qua worker (`modules/gateway/`, `worker/`)
 
@@ -338,6 +401,11 @@ sequenceDiagram
   R-->>H: kết quả → nhận diện trang chặn, retry, cache
 ```
 
+- **Chứng chỉ TLS không kiểm được** (curl lỗi 60 — thường là site thiếu chứng chỉ trung gian, trình
+  duyệt tự tải bù nên người xem không thấy lỗi): worker đọc lại một lần không kiểm chứng chỉ (chỉ đọc
+  trang công khai, không gửi gì bí mật). Trước đây robots.txt lỗi làm cả site bị coi như cấm
+  (viglacera.com.vn, becamex.com.vn). Tên miền không phân giải được (subdomain đoán mò không tồn tại)
+  thì `HttpClient` không thử lại.
 - **Một việc = một request.** Mọi logic (robots, rate limit, retry, nhận diện chặn, parse) ở
   backend; worker không giữ trạng thái. Gateway không nhớ gì ngoài Redis → chạy nhiều bản sau load
   balancer.
@@ -482,7 +550,7 @@ của Redis.
   cả hai; lệch thì test đỏ.
 - **Cập nhật trực tiếp** (`modules/live/live_service.py`, `frontend/src/lib/live.ts`): Server-Sent Events ở
   `GET /api/events?topic=…`, một kết nối mỗi tab cho mọi chủ đề — `workers` (trang Workers),
-  `queue` (trang Hàng đợi, thanh bên, thẻ Hàng đợi ở Tổng quan), `run` (trang lượt chạy khi lượt
+  `queue` (trang Hàng đợi, thanh bên, thẻ Hàng đợi ở Tổng quan), `run` (trang lượt build / poll khi lượt
   build đang chạy: trạng thái, số log / request, danh sách log; lượt poll chỉ ghi khi xong). Mỗi
   process API một task đọc chung mỗi chủ đề mỗi 2 s (Redis / Postgres, dùng lại hàm của endpoint
   JSON), chỉ đẩy khi nội dung đổi (băm JSON) hoặc 30 s chưa gửi; nhiều replica tự đọc nên không cần

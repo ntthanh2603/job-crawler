@@ -175,7 +175,7 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   `alerts.send_failed`) thì lần kiểm sau gửi lại. Làm gì khi nhận: bảng "Dấu hiệu" ở docs/DEPLOY.md
   mục 5.
 - Log: `docker compose logs <service>` (xoay 10 MB × 3); `LOG_FORMAT=json` cho máy đọc. Bảng `logs` giữ
-  log của lượt chạy; production đặt `LOG_DB_LEVEL=WARNING`. Mỗi request API có `X-Request-Id`, lỗi 500
+  log của lượt build / poll; production đặt `LOG_DB_LEVEL=WARNING`. Mỗi request API có `X-Request-Id`, lỗi 500
   trả `request_id` để tra log.
 - **Nhật ký thao tác**: ai lưu cài đặt / bấm build / thêm doanh nghiệp / xuất dữ liệu / đăng nhập
   (kể cả đăng nhập sai)…, lúc nào, từ IP và trình duyệt nào, giá trị trước → sau (bí mật bị che).
@@ -189,12 +189,12 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   đang chạy), `gateway.worker_lost` với `reason=orphan` (worker không nhận được việc đã giao) và
   `gateway.revoked`. Lặp lại thường xuyên → xem runner / worker đó có bị đứng (CPU, swap, GC) hay mạng
   tới Redis / gateway chập chờn.
-- **Bảo trì tự động** mỗi giờ: lượt chạy treo → `failed`, gộp việc trùng còn sót, xoá dữ liệu cũ
+- **Bảo trì tự động** mỗi giờ: lượt build / poll treo → `failed`, gộp việc trùng còn sót, xoá dữ liệu cũ
   (`failed_pages` 7 ngày, `source_fetches` / `logs` 30 ngày), nén lại dần. Tay:
   `jobcrawler db maintain`, `db reclean` (sau khi đổi luật làm sạch), `db reclassify` (sau khi đổi
   luật ngành nghề / học vấn; `--dry-run` chỉ đếm), `db dedup`, `index-boards --rematch` (sau khi đổi
   luật so tên profile).
-- **Ngành nghề, học vấn, số lượng tuyển** (revision 0005): việc lưu trước đó để trống tới lượt chạy
+- **Ngành nghề, học vấn, số lượng tuyển** (revision 0005): việc lưu trước đó để trống tới lượt build
   sau của doanh nghiệp; muốn có ngay thì chạy một lần `jobcrawler db reclassify` (đọc nội dung thô
   của tin đã lưu, không tải lại trang). Học vấn / số lượng tuyển / danh mục nghề TopCV đọc từ HTML
   chỉ có ở tin được tải lại sau khi nâng cấp (tin mới, tin đổi, tin quá hạn làm mới); trước đó ngành
