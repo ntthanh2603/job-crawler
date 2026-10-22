@@ -18,6 +18,7 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
     closed_port,
     make_settings,
     start_gateway,
+    stop_gateway,
 )
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
@@ -225,7 +226,7 @@ async def test_gateway_down_does_not_exit() -> None:
         await wait_until(lambda: worker.health.state == RUNNING, timeout=20)
 
         # Gateway chết khi worker đang chạy: Heartbeat lỗi / hết hạn, lease chờ backoff.
-        await server.stop(0)
+        await stop_gateway(server)
         await wait_until(lambda: worker.health.state == RECONNECTING, timeout=20)
         await asyncio.sleep(2.0)
         assert worker.health.state == RECONNECTING
@@ -233,7 +234,7 @@ async def test_gateway_down_does_not_exit() -> None:
         assert exits == []
     finally:
         await run.stop()
-        await server.stop(0)
+        await stop_gateway(server)
     assert exits == []
 
 
@@ -265,7 +266,7 @@ async def test_silent_gateway_does_not_exit(monkeypatch: pytest.MonkeyPatch) -> 
         assert exits == []
     finally:
         await run.stop()
-        await server.stop(0)
+        await stop_gateway(server)
     assert exits == []
 
 

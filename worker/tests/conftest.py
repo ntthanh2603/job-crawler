@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+import asyncio
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 import pytest
 from worker_fakes import (  # pyright: ignore[reportMissingImports]
     FakeGateway,
     ForwardProxy,
+    GrpcSafeEventLoop,
     WebServer,
     start_gateway,
+    stop_gateway,
 )
 
 from jobworker.common import config
 from jobworker.common.config import WorkerSettings
+
+
+def pytest_asyncio_loop_factories() -> dict[str, Callable[[], asyncio.AbstractEventLoop]]:
+    """Mọi test async chạy trên GrpcSafeEventLoop (một factory: id test không đổi)."""
+    return {"grpc_safe": GrpcSafeEventLoop}
 
 
 @pytest.fixture(autouse=True)
@@ -45,4 +53,4 @@ async def gateway() -> AsyncIterator[tuple[FakeGateway, int]]:
     gw = FakeGateway()
     server, port = await start_gateway(gw)
     yield gw, port
-    await server.stop(0)
+    await stop_gateway(server)

@@ -16,6 +16,7 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
     RunningWorker,
     closed_port,
     make_settings,
+    stop_gateway,
 )
 
 from jcproto.v1 import crawl_pb2_grpc
@@ -260,11 +261,11 @@ async def test_gateway_down_is_starting_then_reconnecting(tmp_path: Path) -> Non
         await server.start()
         await gw.wait_for(lambda: read(path)["state"] == RUNNING, timeout=20)
 
-        await server.stop(0)  # gateway chết khi worker đang chạy
+        await stop_gateway(server)  # gateway chết khi worker đang chạy
         await gw.wait_for(lambda: read(path)["state"] == RECONNECTING, timeout=20)
         data = read(path)
         assert data["last_ok_at"] is not None
         assert data["disconnected_since"] is not None
     finally:
         await run.stop()
-        await server.stop(0)
+        await stop_gateway(server)

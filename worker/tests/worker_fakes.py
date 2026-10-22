@@ -1,4 +1,5 @@
-"""Gateway gRPC giả (trong process) + web server và forward proxy HTTP nhỏ cho test worker."""
+"""Event loop của test, gateway gRPC giả (trong process) + web server và forward proxy HTTP nhỏ cho
+test worker."""
 
 from __future__ import annotations
 
@@ -8,11 +9,13 @@ import contextlib
 import http.client
 import json
 import random
+import sys
 import tempfile
 import threading
 import time
 from collections import Counter
 from collections.abc import Callable
+from contextvars import Context
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -21,6 +24,36 @@ from urllib.parse import urlsplit
 import grpc
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
+
+# --- event loop ----------------------------------------------------------------------------------
+
+if sys.platform == "win32":
+    _BaseEventLoop = asyncio.ProactorEventLoop
+else:
+    _BaseEventLoop = asyncio.SelectorEventLoop
+
+
+class GrpcSafeEventLoop(_BaseEventLoop):
+    """Event loop của test (conftest): callback từ thread khác tới sau khi loop đã đóng thì bỏ,
+    không ném lỗi.
+
+    grpc.aio giao kết quả mọi lời gọi qua một thread poller chung cả process; ProactorEventLoop
+    (Windows) không có `add_reader` nên chính thread đó gọi `call_soon_threadsafe` vào loop của lời
+    gọi. Mỗi test một loop: lời gọi / lệnh bị huỷ của test trước xong sau khi loop của nó đã đóng →
+    `Event loop is closed` giết thread poller, mọi lời gọi gRPC sau đó trong process treo mãi."""
+
+    def call_soon_threadsafe(
+        self, callback: Callable[..., object], *args: Any, context: Context | None = None
+    ) -> asyncio.Handle:
+        try:
+            return super().call_soon_threadsafe(callback, *args, context=context)
+        except RuntimeError:
+            if not self.is_closed():
+                raise
+            handle = asyncio.Handle(callback, args, self, context)
+            handle.cancel()
+            return handle
+
 
 # --- gateway giả ---------------------------------------------------------------------------------
 
@@ -179,6 +212,12 @@ async def start_gateway(gateway: FakeGateway) -> tuple[grpc.aio.Server, int]:
     port = server.add_insecure_port("127.0.0.1:0")
     await server.start()
     return server, port
+
+
+async def stop_gateway(server: grpc.aio.Server, timeout: float = 10.0) -> None:
+    """`server.stop(0)` có hạn: gRPC hỏng (thread poller của grpc.aio đã chết) thì test lỗi thay
+    vì treo mãi."""
+    await asyncio.wait_for(server.stop(0), timeout)
 
 
 def http_task(task_id: str, url: str, **kw: Any) -> crawl_pb2.FetchTask:
@@ -440,12 +479,27 @@ def make_settings(port: int, **kw: Any) -> Any:
 class RunningWorker:
     """Chạy `Worker.run()` nền; `stop()` dừng êm và chờ thoát."""
 
+    CANCEL_ATTEMPTS = 5
+    CANCEL_WAIT_SECONDS = 2.0
+
     def __init__(self, worker: Any) -> None:
         self.worker = worker
         self.task = asyncio.create_task(worker.run())
 
     async def wait(self, timeout: float = 20.0) -> None:
-        await asyncio.wait_for(self.task, timeout=timeout)
+        """Chờ worker thoát tối đa `timeout` giây, ném lỗi của nó nếu có. Quá hạn thì huỷ rồi ném
+        TimeoutError. Không dùng `asyncio.wait_for`: nó chờ việc huỷ xong, mà mỗi lần huỷ chỉ cắt
+        một lời gọi gRPC — `finally` của worker (Complete, Leave) còn gọi tiếp, gRPC hỏng thì treo
+        mãi. Ở đây huỷ lặp lại, mỗi lần chờ có hạn."""
+        await asyncio.wait({self.task}, timeout=timeout)
+        if not self.task.done():
+            for _ in range(self.CANCEL_ATTEMPTS):
+                self.task.cancel()
+                await asyncio.wait({self.task}, timeout=self.CANCEL_WAIT_SECONDS)
+                if self.task.done():
+                    break
+            raise TimeoutError(f"worker không thoát sau {timeout} s")
+        self.task.result()
 
     async def stop(self, timeout: float = 20.0) -> None:
         if not self.task.done():

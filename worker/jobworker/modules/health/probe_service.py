@@ -8,6 +8,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+import grpc
 import zstandard
 
 from jcproto.v1 import crawl_pb2
@@ -19,6 +20,7 @@ from jobworker.services.proxies import load_proxies
 # Trả IP đi ra dạng `ip=1.2.3.4` (một dòng mỗi trường).
 TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 DIRECT_LABEL = "đi thẳng (không proxy)"
+READY_POLL_SECONDS = 0.02  # nhịp hỏi trạng thái kênh gRPC trong `check_gateway`
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,14 +40,20 @@ class RouteCheck:
 
 
 async def check_gateway(settings: WorkerSettings, timeout: float) -> GatewayCheck:
-    """Mở kênh gRPC tới gateway, chờ sẵn sàng tối đa `timeout` giây."""
+    """Mở kênh gRPC tới gateway, chờ sẵn sàng tối đa `timeout` giây.
+
+    Hỏi trạng thái kênh mỗi READY_POLL_SECONDS, không dùng `channel_ready()`: huỷ nó khi hết hạn bỏ
+    lại lệnh theo dõi kết nối trong gRPC core, lệnh đó xong sau khi event loop đã đóng thì thread
+    poller của grpc.aio (ProactorEventLoop trên Windows) chết vì `Event loop is closed` và mọi lời
+    gọi gRPC sau đó trong process treo."""
     channel = open_channel(settings)
     started = time.monotonic()
     try:
-        await asyncio.wait_for(channel.channel_ready(), timeout=timeout)
+        while channel.get_state(try_to_connect=True) != grpc.ChannelConnectivity.READY:
+            if time.monotonic() - started >= timeout:
+                return GatewayCheck(ok=False, ms=(time.monotonic() - started) * 1000)
+            await asyncio.sleep(READY_POLL_SECONDS)
         return GatewayCheck(ok=True, ms=(time.monotonic() - started) * 1000)
-    except TimeoutError:
-        return GatewayCheck(ok=False, ms=(time.monotonic() - started) * 1000)
     finally:
         await channel.close()
 

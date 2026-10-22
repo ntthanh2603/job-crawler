@@ -19,6 +19,7 @@ from worker_fakes import (  # pyright: ignore[reportMissingImports]
     http_task,
     make_settings,
     render_task,
+    stop_gateway,
 )
 
 from jcproto.v1 import crawl_pb2, crawl_pb2_grpc
@@ -421,7 +422,7 @@ async def test_gateway_down_then_up(web: WebServer) -> None:
         await gw.wait_results(1, timeout=20)
     finally:
         await run.stop()
-        await server.stop(0)
+        await stop_gateway(server)
 
 
 # --- Chromium lỗi: tạm tắt render rồi thử lại -----------------------------------------------------
