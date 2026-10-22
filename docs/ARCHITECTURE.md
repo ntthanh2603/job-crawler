@@ -373,9 +373,16 @@ sequenceDiagram
   tham gia, ghi token là một script Lua (lỗi Redis giữa chừng không làm mất khoá tham gia); khoá đã
   dùng thì không huỷ được. Dùng khoá tham gia thì ghi nhật ký
   thao tác `worker.joined` qua hàng chờ Redis (mục 10). "Thêm worker" ghép lệnh `docker run`
-  từ khoá + `GATEWAY_PUBLIC_URL` (trống = địa chỉ trang web) + `GATEWAY_WORKER_IMAGE`.
-- **Slot**: `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống = tự tính theo máy (HTTP 8 / CPU trong
-  [8, 64], render 1 / 768 MiB trong [1, 8]); gateway gửi mức trần.
+  từ khoá + `GATEWAY_PUBLIC_URL` (trống = địa chỉ trang web) + `GATEWAY_WORKER_IMAGE`, kèm pool và
+  slot nhập trong hộp thoại.
+- **Slot** (số việc cùng lúc tối đa của từng worker, như `WORKER_MAX_CONCURRENCY` của open-asm):
+  `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` đặt ở worker, trống = tự tính theo máy (HTTP 8 / CPU
+  trong [8, 64], render 1 / 768 MiB trong [1, 8]). Cấu hình riêng của worker (slot,
+  `WORKER_IMPERSONATE`, proxy riêng) chỉ nằm trong lệnh khởi tạo, không ở trang Cài đặt: gateway gửi
+  0 / rỗng cho các trường đó của `WorkerConfig` (worker giữ cấu hình của nó); trang Cài đặt chỉ đẩy
+  phần của backend (chu kỳ báo sống, thời gian chờ việc, dung lượng trang, proxy chung).
+  Worker kéo việc theo slot còn trống (`LeaseRequest.http_slots` / `render_slots`), runner nhận job
+  theo tổng slot HTTP của worker đang sống (mục 8).
 
 ### Proxy (`PROXY_MODE`)
 

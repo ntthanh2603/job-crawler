@@ -126,9 +126,10 @@ Mỗi `Heartbeat` kể các việc worker còn nợ kết quả (`task_ids`: đa
 cho backend; việc worker kể mà gateway đã thu hồi (worker từng quá hạn báo sống) được báo lại trong
 `revoked_task_ids` và worker huỷ ngay (`worker.task_revoked`).
 
-Cấu hình đẩy xuống từ backend nằm ở các biến `GATEWAY_HTTP_SLOTS`, `GATEWAY_RENDER_SLOTS`,
-`GATEWAY_IMPERSONATE`… trong `.env` của backend (hoặc trang Cài đặt), không trùng tên với biến
-`WORKER_*` ở đây. Riêng `GATEWAY_TOKEN` (nếu worker vào bằng khoá cố định) phải đặt cùng giá trị ở
+Cấu hình riêng của worker (slot, giả lập trình duyệt, proxy riêng, pool) chỉ đặt ở đây, bằng biến
+`WORKER_*` (lệnh khởi tạo trong hộp thoại "Thêm worker" điền sẵn slot / giả lập trình duyệt). Backend
+chỉ đẩy xuống phần của nó (chu kỳ báo sống, thời gian chờ việc, dung lượng trang, proxy chung — trang
+Cài đặt, biến `GATEWAY_*` / `FETCH_*` của backend), không trùng tên với biến `WORKER_*` ở đây. Riêng `GATEWAY_TOKEN` (nếu worker vào bằng khoá cố định) phải đặt cùng giá trị ở
 cả hai `.env`.
 
 Xác thực (backend đặt `GATEWAY_TOKEN`): `Register` bằng khoá tham gia — `WORKER_JOIN_KEY` rồi

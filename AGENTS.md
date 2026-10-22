@@ -102,7 +102,8 @@ Hook git không cài sẵn; muốn dùng: `uvx pre-commit install -t pre-commit 
    trang; chỉ SERP / LLM gọi thẳng từ backend. Code nguồn mới dùng `HttpClient` / fetcher, không
    gọi `httpx` trực tiếp.
 2. **Tên biến môi trường**: backend dùng `GATEWAY_*` (gateway + cấu hình đẩy xuống worker như
-   `GATEWAY_HTTP_SLOTS`); worker dùng `WORKER_*` và `GATEWAY_ADDR` / `GATEWAY_TOKEN` /
+   `GATEWAY_HEARTBEAT_SECONDS`); worker dùng `WORKER_*` (slot, giả lập trình duyệt, proxy riêng: chỉ
+   đặt ở worker, trong lệnh khởi tạo) và `GATEWAY_ADDR` / `GATEWAY_TOKEN` /
    `GATEWAY_TLS` / `GATEWAY_CA_CERT`. Mỗi bên đọc `.env` của thư mục mình (`backend/.env`,
    `worker/.env`); `GATEWAY_TOKEN` phải giống nhau ở hai file.
 3. **Cài đặt nằm trong DB** (bảng `app_settings`, trang Cài đặt, đè `.env`, nạp lại ≤ 5 s); `.env`

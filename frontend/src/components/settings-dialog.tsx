@@ -12,9 +12,14 @@ export const SETTINGS_PARAM = "settings"
 const SettingsPanel = lazy(() => import("@/pages/settings").then((m) => ({ default: m.SettingsPanel })))
 
 /** Tham số tìm kiếm mở popup trên trang hiện tại (giữ các tham số khác). */
-export function settingsSearch(search: string, group = ""): string {
+// Ô cài đặt cần mở thẳng tới (cuộn tới và đặt con trỏ vào).
+export const SETTING_KEY_PARAM = "setting"
+
+export function settingsSearch(search: string, group = "", key = ""): string {
   const params = new URLSearchParams(search)
   params.set(SETTINGS_PARAM, group)
+  if (key) params.set(SETTING_KEY_PARAM, key)
+  else params.delete(SETTING_KEY_PARAM)
   return `?${params.toString()}`
 }
 
@@ -24,6 +29,7 @@ export function SettingsDialog() {
   const close = () => {
     const next = new URLSearchParams(params)
     next.delete(SETTINGS_PARAM)
+    next.delete(SETTING_KEY_PARAM)
     setParams(next)
   }
   return (
@@ -40,7 +46,10 @@ export function SettingsDialog() {
               </div>
             }
           >
-            <SettingsPanel initialGroup={params.get(SETTINGS_PARAM) || null} />
+            <SettingsPanel
+              initialGroup={params.get(SETTINGS_PARAM) || null}
+              initialKey={params.get(SETTING_KEY_PARAM) || null}
+            />
           </Suspense>
         )}
       </DialogContent>

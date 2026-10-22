@@ -190,10 +190,8 @@ class Settings(BaseSettings):
     fetch_routes: dict[str, str] = Field(default_factory=dict)
     # Worker không báo sống chừng này giây thì coi là đã rời.
     gateway_worker_ttl_seconds: float = Field(default=30, ge=5)
-    # Cấu hình đẩy xuống worker (0 / trống = giữ cấu hình của từng worker).
-    gateway_http_slots: int = Field(default=0, ge=0)
-    gateway_render_slots: int = Field(default=0, ge=0)
-    gateway_impersonate: str = "chrome"
+    # Cấu hình đẩy xuống worker. Slot, giả lập trình duyệt, proxy riêng đặt ở từng worker (biến
+    # WORKER_* trong lệnh khởi tạo của hộp thoại "Thêm worker").
     gateway_heartbeat_seconds: int = Field(default=5, ge=1)
     gateway_lease_wait_ms: int = Field(default=1000, ge=50, le=30_000)
     # Lệnh của nút "Thêm worker" (worker nối gRPC qua cổng giao diện); trống = địa chỉ trang web.

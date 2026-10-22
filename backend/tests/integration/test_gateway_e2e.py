@@ -693,19 +693,19 @@ async def test_heartbeat_reconciles_tasks_the_worker_holds(
 
 
 async def test_config_follows_settings_provider(redis: Redis, prefix: str) -> None:
-    current = {"settings": make_settings(prefix, gateway_http_slots=7, proxy_mode="central")}
+    current = {"settings": make_settings(prefix, gateway_lease_wait_ms=700, proxy_mode="central")}
     async with (
         gateway(redis, current["settings"], settings_provider=lambda: current["settings"]) as gw,
         FakeWorker(gw.port, serve=False) as worker,
     ):
         assert worker.config is not None
-        assert (worker.config.http_slots, worker.config.use_local_proxies) == (7, False)
+        assert (worker.config.lease_wait_ms, worker.config.use_local_proxies) == (700, False)
         before = (await worker.lease(wait_ms=0)).config_version
         assert before == worker.config.version
-        current["settings"] = make_settings(prefix, gateway_http_slots=9, proxy_mode="central")
+        current["settings"] = make_settings(prefix, gateway_lease_wait_ms=900, proxy_mode="central")
         after = (await worker.lease(wait_ms=0)).config_version
         assert after != before
-        assert (await worker.register()).http_slots == 9
+        assert (await worker.register()).lease_wait_ms == 900
 
 
 # --- nhiều gateway, định tuyến, xác thực ---------------------------------------------------------

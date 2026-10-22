@@ -190,7 +190,13 @@ function GroupHeader({ group, dirty, autoRestart }: { group: SettingGroup; dirty
 // --- popup -----------------------------------------------------------------------------------------
 
 /** Nội dung popup Cài đặt (`components/settings-dialog.tsx` mở / đóng theo `?settings`). */
-export function SettingsPanel({ initialGroup }: { initialGroup: string | null }) {
+export function SettingsPanel({
+  initialGroup,
+  initialKey = null,
+}: {
+  initialGroup: string | null
+  initialKey?: string | null
+}) {
   const client = useQueryClient()
   // Đang áp dụng cài đặt cần khởi động lại: hỏi lại mỗi 2 giây tới khi backend báo xong (lúc
   // backend khởi động lại API trả lỗi vài giây — giữ dữ liệu cũ, hỏi tiếp).
@@ -239,6 +245,16 @@ export function SettingsPanel({ initialGroup }: { initialGroup: string | null })
     setGroup(groupOf.get(first)!)
     setTimeout(() => document.getElementById(`row-${first}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50)
   }
+
+  // Mở thẳng tới một ô (vd. từ hộp thoại "Thêm worker"): cuộn tới và đặt con trỏ vào, một lần.
+  const focused = useRef(false)
+  useEffect(() => {
+    if (focused.current || !initialKey || !groupOf.has(initialKey)) return
+    focused.current = true
+    showFirst([initialKey])
+    setTimeout(() => document.getElementById(`setting-${initialKey}`)?.focus({ preventScroll: true }), 100)
+    // Chỉ chạy khi cài đặt vừa tải xong.
+  }, [initialKey, groupOf])
 
   // Hết "đang áp dụng" (backend đã khởi động lại xong): báo một lần.
   const wasPending = useRef(false)

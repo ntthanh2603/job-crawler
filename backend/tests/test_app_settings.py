@@ -100,7 +100,10 @@ def test_live_flags() -> None:
     assert live["poll_interval_seconds"]
     assert live["build_window"]
     assert live["kyc_min_confidence"]
-    assert live["gateway_http_slots"]  # đẩy xuống worker qua gateway
+    assert live["gateway_heartbeat_seconds"]  # đẩy xuống worker qua gateway
+    # Slot, giả lập trình duyệt: cấu hình của từng worker (lệnh khởi tạo), không ở trang Cài đặt.
+    for key in ("gateway_http_slots", "gateway_render_slots", "gateway_impersonate"):
+        assert key not in live
     assert not live["llm_base_url"]
     assert not live["llm_api_key"]
     assert not live["runner_poll_concurrency"]
@@ -116,7 +119,7 @@ def test_validate_value_checks_type_bounds_and_format() -> None:
     with pytest.raises(ValueError, match="lớn hơn hoặc bằng 10"):
         a.validate_value("poll_interval_seconds", 5)
     with pytest.raises(ValueError, match="số nguyên"):
-        a.validate_value("gateway_http_slots", 1.5)
+        a.validate_value("gateway_heartbeat_seconds", 1.5)
     assert a.validate_value("build_window", "6:00-24:00") == "06:00-24:00"
     with pytest.raises(ValueError, match="HH:MM"):
         a.validate_value("poll_window", "sáng")

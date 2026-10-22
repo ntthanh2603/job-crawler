@@ -384,16 +384,14 @@ def _settings(**kw: Any) -> Settings:
 def test_worker_config_from_settings() -> None:
     config = worker_config(
         _settings(
-            gateway_http_slots=32,
-            gateway_render_slots=2,
-            gateway_impersonate="chrome131",
             fetch_max_body_bytes=2048,
             gateway_heartbeat_seconds=7,
             gateway_lease_wait_ms=900,
             proxy_mode="worker",
         )
     )
-    assert (config.http_slots, config.render_slots, config.impersonate) == (32, 2, "chrome131")
+    # Slot, giả lập trình duyệt không gửi (0 / rỗng): worker giữ cấu hình trong lệnh khởi tạo.
+    assert (config.http_slots, config.render_slots, config.impersonate) == (0, 0, "")
     assert (config.max_body_bytes, config.heartbeat_seconds, config.lease_wait_ms) == (
         2048,
         7,
@@ -434,14 +432,14 @@ def test_queue_max_wait_must_exceed_grace() -> None:
 
 
 def test_worker_config_version_is_stable() -> None:
-    a = worker_config(_settings(gateway_http_slots=8))
+    a = worker_config(_settings(gateway_lease_wait_ms=800))
     assert a.version > 0
-    assert worker_config(_settings(gateway_http_slots=8)).version == a.version
+    assert worker_config(_settings(gateway_lease_wait_ms=800)).version == a.version
     # Cài đặt không đẩy xuống worker không đổi version.
-    assert worker_config(_settings(gateway_http_slots=8, poll_interval_seconds=99)).version == (
-        a.version
-    )
-    assert worker_config(_settings(gateway_http_slots=9)).version != a.version
+    assert worker_config(
+        _settings(gateway_lease_wait_ms=800, poll_interval_seconds=99)
+    ).version == (a.version)
+    assert worker_config(_settings(gateway_lease_wait_ms=900)).version != a.version
     assert config_version({"a": 1, "b": 2}) == config_version({"b": 2, "a": 1})
     assert config_version({"a": 1}) < 2**63
 

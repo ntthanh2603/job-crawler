@@ -171,10 +171,9 @@ def proxies_hash(urls: list[str]) -> str:
 
 def worker_config(settings: Settings) -> crawl_pb2.WorkerConfig:
     shared = shared_proxies(settings)
+    # Slot và giả lập trình duyệt không gửi (0 / rỗng): mỗi worker dùng cấu hình trong lệnh khởi
+    # tạo của nó (WORKER_HTTP_SLOTS, WORKER_RENDER_SLOTS, WORKER_IMPERSONATE).
     fields: dict[str, Any] = {
-        "http_slots": settings.gateway_http_slots,
-        "render_slots": settings.gateway_render_slots,
-        "impersonate": settings.gateway_impersonate,
         "max_body_bytes": min(settings.fetch_max_body_bytes, _INT32_MAX),
         "heartbeat_seconds": settings.gateway_heartbeat_seconds,
         "lease_wait_ms": settings.gateway_lease_wait_ms,

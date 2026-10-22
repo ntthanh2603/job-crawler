@@ -52,17 +52,50 @@ describe("hộp thoại Thêm worker", () => {
       "docker pull ghcr.io/ntthanh2603/jobcrawler-worker:main",
       "docker run -d --name jobcrawler-worker-a1b2c3 --restart unless-stopped --init --stop-timeout 40 --shm-size 1g " +
         "--add-host host.docker.internal:host-gateway -e GATEWAY_ADDR=host.docker.internal:8000 -e GATEWAY_TLS=false " +
-        "-e WORKER_POOL=default -e WORKER_JOIN_KEY=jcj_secret-KEY_1 ghcr.io/ntthanh2603/jobcrawler-worker:main",
+        "-e WORKER_POOL=default -e WORKER_HTTP_SLOTS=32 -e WORKER_RENDER_SLOTS=4 -e WORKER_IMPERSONATE=chrome " +
+        "-e WORKER_JOIN_KEY=jcj_secret-KEY_1 ghcr.io/ntthanh2603/jobcrawler-worker:main",
     ])
     expect(within(dialog).getByText(/worker ở máy khác không nối vào được/)).toBeTruthy()
+    expect(within(dialog).getByRole("button", { name: "Đặt địa chỉ cho worker mới" })).toBeTruthy()
 
     fireEvent.change(within(dialog).getByLabelText("Pool"), { target: { value: "residential; rm" } })
     expect(command.textContent).toContain("-e WORKER_POOL=residentialrm ")
+
+    // Cấu hình của worker nằm trong lệnh: số điền sẵn sửa được, xoá trống = worker tự tính theo máy.
+    fireEvent.change(within(dialog).getByLabelText("Slot HTTP"), { target: { value: "48x" } })
+    fireEvent.change(within(dialog).getByLabelText("Slot render"), { target: { value: "" } })
+    expect(command.textContent).toContain("-e WORKER_HTTP_SLOTS=48 -e WORKER_IMPERSONATE=chrome ")
+    expect(command.textContent).not.toContain("WORKER_RENDER_SLOTS")
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Chép lệnh" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(command.textContent))
 
     view.unmount()
     await waitFor(() => expect(calls).toContain(`DELETE /api/workers/join-keys/${KEY.id}`))
+  })
+
+  it("địa chỉ localhost: nút trong cảnh báo mở thẳng ô địa chỉ cho worker mới trong Cài đặt", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof globalThis.fetch>(async (input, init) =>
+        init?.method === "POST" && String(input) === "/api/workers/join-keys"
+          ? json(KEY)
+          : json({ id: KEY.id, status: "pending", worker_id: null }),
+      ),
+    )
+    const onOpenChange = vi.fn()
+    const router = createMemoryRouter([{ path: "/workers", element: <JoinKeyDialog open onOpenChange={onOpenChange} /> }], {
+      initialEntries: ["/workers"],
+    })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+
+    const dialog = await screen.findByRole("dialog", { name: "Thêm worker" })
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Đặt địa chỉ cho worker mới" }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(router.state.location.search).toBe("?settings=workers&setting=gateway_public_url"))
   })
 })

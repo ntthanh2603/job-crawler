@@ -107,7 +107,8 @@ Trang Cài đặt → **Proxy**.
   (worker nối gRPC qua cổng giao diện), image: Cài đặt → Worker lấy trang (`GATEWAY_PUBLIC_URL`,
   trống = địa chỉ đang mở giao diện; `GATEWAY_WORKER_IMAGE`, mặc định tag `main` vì GHCR chưa có
   `latest`). Địa chỉ `localhost` được đổi thành `host.docker.internal`, chỉ dùng được trên chính máy
-  backend; máy khác cần `WEB_BIND=0.0.0.0` hoặc load balancer. CA tự ký: thêm
+  backend (hộp thoại cảnh báo, kèm nút tới Cài đặt để đặt địa chỉ khác); máy khác cần
+  `WEB_BIND=0.0.0.0` hoặc load balancer. CA tự ký: thêm
   `GATEWAY_CA_CERT` vào lệnh. Xoá container rồi tạo lại cần khoá mới. Worker trong compose dùng
   `GATEWAY_TOKEN` (cùng giá trị ở `backend/.env` và `worker/.env`). Thu hồi một worker: xoá
   `<prefix>:gw:wtoken:*` của nó trên Redis.
@@ -118,9 +119,19 @@ Trang Cài đặt → **Proxy**.
 - Máy worker cần đồng bộ giờ (NTP): worker so hạn của việc với đồng hồ máy nó, máy nhanh giờ vài
   phút bỏ việc oan (`expired`), chậm giờ thì tải cả việc backend đã thôi chờ.
 - Không có worker nào → mọi request lỗi `no_worker`; worker quay lại thì tự chạy tiếp.
-- Slot: cấu hình ở trang Cài đặt → "Worker lấy trang" là **mức trần**; worker tự tính theo máy khi
-  `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS` trống. Chromium lỗi → worker tạm tắt render rồi thử lại
-  (30 s → 10 phút).
+- Slot = số việc worker làm cùng lúc tối đa, đặt **ở từng worker** như `WORKER_MAX_CONCURRENCY` của
+  open-asm: `WORKER_HTTP_SLOTS` / `WORKER_RENDER_SLOTS`, cùng `WORKER_IMPERSONATE` (giả lập trình
+  duyệt). Hộp thoại "Thêm worker" có ô "Slot HTTP" / "Slot render" / "Giả lập trình duyệt" điền sẵn
+  32 / 4 / chrome (hợp máy 4 CPU / 8 GB) và ghép vào lệnh; xoá trống = worker tự tính theo CPU / RAM
+  máy nó, render 0 = không mở Chromium. Worker chỉ nhận đúng số việc còn trống (Lease mang số slot
+  trống); đổi thì chạy lại container. Trang Cài đặt không còn ô slot / giả lập trình duyệt: cấu hình
+  của worker nằm ở worker, của backend nằm ở trang Cài đặt.
+- **Thêm worker là chạy nhanh hơn**: runner đọc tổng slot HTTP của worker còn kết nối mỗi 15 giây
+  và nhận thêm lượt build / poll theo đó (log `queue.resized`, trang Hàng đợi: cột tối đa; trang Cài
+  đặt: "Lúc này" dưới ô), trong mức tối đa "Job build / poll song song tối đa" mỗi process runner
+  (mặc định 25 / 60; `serve` chạy một process build và poll mỗi 4 CPU). Thêm nhiều lượt build thì
+  LLM gánh thêm: lời gọi vượt "Request LLM song song cả cụm" xếp hàng chờ (không bị 429); tăng mức
+  này nếu máy chủ LLM chịu được. Chromium lỗi → worker tạm tắt render rồi thử lại (30 s → 10 phút).
 
 ## 6. Đăng nhập và bí mật
 

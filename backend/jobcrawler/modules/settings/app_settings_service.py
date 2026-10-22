@@ -581,34 +581,8 @@ GROUPS: tuple[Group, ...] = (
         "workers",
         "Worker lấy trang",
         "Worker (chạy ở máy nào cũng được, kèm proxy riêng) nhận việc lấy trang từ backend qua "
-        "gateway. Các giá trị slot, giả lập trình duyệt, chu kỳ báo sống được đẩy xuống mọi worker "
-        "đang kết nối.",
-        _s(
-            "gateway_http_slots",
-            "int",
-            "Slot HTTP mỗi worker",
-            "Mức trần số request HTTP mỗi worker chạy cùng lúc: worker dùng số nhỏ hơn giữa giá "
-            "trị này và cấu hình riêng của nó (máy nhỏ không bị đẩy lên). 0 = giữ cấu hình của "
-            "worker.",
-            unit="request",
-        ),
-        _s(
-            "gateway_render_slots",
-            "int",
-            "Slot render mỗi worker",
-            "Mức trần số trang trình duyệt (render JavaScript) mỗi worker mở cùng lúc: worker dùng "
-            "số nhỏ hơn giữa giá trị này và cấu hình riêng của nó. 0 = giữ cấu hình của worker.",
-            unit="trang",
-        ),
-        _s(
-            "gateway_impersonate",
-            "str",
-            "Giả lập trình duyệt",
-            "Dấu vân tay TLS / HTTP mà worker giả lập khi gửi request, ví dụ chrome, safari, "
-            "firefox.",
-            check=_check_text,
-            placeholder="chrome",
-        ),
+        "gateway. Chu kỳ báo sống, thời gian chờ việc được đẩy xuống mọi worker đang kết nối; số "
+        "việc cùng lúc (slot) và giả lập trình duyệt đặt ở từng worker.",
         _s(
             "gateway_heartbeat_seconds",
             "int",
@@ -1447,13 +1421,11 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
     "workers": (
         _sec(
             "Cấu hình gửi xuống worker",
-            "gateway_http_slots",
-            "gateway_render_slots",
-            "gateway_impersonate",
             "gateway_heartbeat_seconds",
             "gateway_lease_wait_ms",
-            description="Gateway gửi kèm khi worker đăng ký và mỗi lần báo sống; 0 / trống là giữ "
-            "cấu hình của worker.",
+            description="Gateway gửi kèm khi worker đăng ký và mỗi lần báo sống. Số việc cùng lúc "
+            "(slot), giả lập trình duyệt, proxy riêng đặt ở từng worker, trong lệnh khởi tạo của "
+            "hộp thoại “Thêm worker”.",
         ),
         _sec(
             "Gateway",
