@@ -1362,6 +1362,28 @@ GROUPS: tuple[Group, ...] = (
             "Retry-After. 0 là không giới hạn.",
             unit="request / phút",
         ),
+        _s(
+            "webhook_batch_size",
+            "int",
+            "Số sự kiện mỗi lần gửi webhook",
+            "Mỗi request webhook gửi tối đa chừng này sự kiện (và tối đa 1 MB).",
+            unit="sự kiện",
+        ),
+        _s(
+            "webhook_timeout_seconds",
+            "float",
+            "Hạn chờ webhook",
+            "Bên nhận không trả lời trong chừng này giây thì coi là lỗi và gửi lại sau.",
+            unit="giây",
+        ),
+        _s(
+            "alert_webhook_failing_minutes",
+            "float",
+            "Cảnh báo webhook lỗi sau",
+            "Webhook của một hệ thống ngoài lỗi liên tục quá chừng này phút thì gửi cảnh báo "
+            "(Cài đặt → Cảnh báo). 0 là tắt.",
+            unit="phút",
+        ),
     ),
     _group(
         "maintenance",
@@ -1671,6 +1693,12 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
     "integration": (
         _sec("API", "integration_rate_per_minute"),
         _sec("Feed sự kiện", "relay_interval_seconds", "job_events_retention_days"),
+        _sec(
+            "Webhook",
+            "webhook_batch_size",
+            "webhook_timeout_seconds",
+            "alert_webhook_failing_minutes",
+        ),
     ),
     "maintenance": (
         _sec("Lịch", "maintenance_cron", "overview_cron"),

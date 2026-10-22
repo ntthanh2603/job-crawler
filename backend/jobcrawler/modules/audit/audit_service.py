@@ -82,6 +82,8 @@ API_CLIENT_UPDATE = "api_client.update"
 API_CLIENT_DELETE = "api_client.delete"
 API_KEY_CREATE = "api_key.create"
 API_KEY_REVOKE = "api_key.revoke"
+API_WEBHOOK_SECRET = "api_client.webhook_secret"
+API_WEBHOOK_TEST = "api_client.webhook_test"
 # Hệ thống ngoài gọi API tích hợp (người thao tác `api:<tên client>`).
 INTEGRATION_COMPANIES = "integration.companies"
 INTEGRATION_REFRESH = "integration.refresh"
@@ -115,6 +117,8 @@ ACTIONS: tuple[str, ...] = (
     API_CLIENT_DELETE,
     API_KEY_CREATE,
     API_KEY_REVOKE,
+    API_WEBHOOK_SECRET,
+    API_WEBHOOK_TEST,
     INTEGRATION_COMPANIES,
     INTEGRATION_REFRESH,
 )

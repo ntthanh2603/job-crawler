@@ -115,3 +115,41 @@ def closed_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+class Receiver:
+    """Bên nhận webhook giả: ghi mọi POST (header, body), trả lần lượt các mã trong `statuses`
+    (hết danh sách thì 200)."""
+
+    def __init__(self, statuses: list[int]) -> None:
+        self.statuses = statuses
+        self.requests: list[tuple[dict[str, str], bytes]] = []
+        self.url = ""
+
+
+@contextmanager
+def serve_receiver(statuses: list[int] | None = None) -> Iterator[Receiver]:
+    receiver = Receiver(list(statuses or []))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            receiver.requests.append(({k.lower(): v for k, v in self.headers.items()}, body))
+            status = receiver.statuses.pop(0) if receiver.statuses else 200
+            self.send_response(status)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    receiver.url = f"http://127.0.0.1:{server.server_address[1]}/hooks/jobs?token=bi-mat"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield receiver
+    finally:
+        server.shutdown()
+        server.server_close()

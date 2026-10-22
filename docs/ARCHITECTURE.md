@@ -592,7 +592,8 @@ của Redis.
   slot, việc xong / lỗi. Heartbeat Redis của scheduler / runner là healthcheck của `backend`.
 - **Cảnh báo chủ động** (`modules/alerts/alert_service.py`): leader scheduler mỗi
   `ALERT_CHECK_SECONDS` đọc chính các số đo trên (P95 cửa sổ phát hiện 30 phút trong khung poll, hàng
-  đợi build sau khung build, số worker còn kết nối, slot HTTP đang dùng, tỉ lệ lỗi LLM giờ qua) và gửi
+  đợi build sau khung build, số worker còn kết nối, slot HTTP đang dùng, tỉ lệ lỗi LLM giờ qua,
+  webhook tới hệ thống ngoài lỗi liên tục quá `ALERT_WEBHOOK_FAILING_MINUTES`) và gửi
   tin tới webhook (`ALERT_WEBHOOK_URL`, trang Cài đặt → Cảnh báo) khi bắt đầu lỗi, nhắc lại sau
   `ALERT_REPEAT_MINUTES`, và khi đã ổn. Trạng thái từng loại trên Redis chính (`<prefix>:alerts:*`);
   webhook gọi thẳng từ backend (`api_http`) như SERP.
@@ -674,3 +675,19 @@ nghiệp. Mọi mã của một doanh nghiệp `active=false` → lịch `paused
 vẫn dùng cho KYC và lưu tin. Danh sách việc làm của API này dùng keyset (không `GetManyQuery` /
 `PageOut`): offset + đếm không đi hết bảng 1 triệu dòng. Giao diện không sinh hàm cho các đường này
 (orval bỏ `/api/integration/`).
+
+**Webhook** (`webhook_service.py`, chạy trong relay): mỗi client bật webhook một task giao riêng
+(client chậm / lỗi không làm chậm client khác), được đánh thức khi relay gán seq mới (không thì tự
+kiểm lại sau 5 s). Một lô = sự kiện sau `api_clients.webhook_cursor` theo phạm vi client (≤
+`WEBHOOK_BATCH_SIZE` 100, ≤ 1 MB), JSON `{delivery_id, client, events, cursor, head}` cùng dạng sự
+kiện với feed, header `X-JC-Delivery`, `X-JC-Timestamp`, `X-JC-Signature: v1=hex(HMAC-SHA256(secret,
+"<timestamp>.<body>"))`. Chỉ 2xx là thành công (không theo chuyển hướng, chống SSRF qua redirect);
+thành công → tiến cursor bằng compare-and-set (`WHERE webhook_cursor = cũ`: hai relay chồng nhau
+lúc đổi leader chỉ gửi trùng, không làm cursor lùi); lỗi → giữ cursor, ghi `webhook_failing_since` /
+`webhook_last_error`, lùi 1 s → 5 phút (±20%), gửi lại đúng lô đó. Đoạn quét không có sự kiện của
+client thì chỉ tiến cursor. Lần bật đầu tiên bắt đầu từ seq mới nhất (dữ liệu cũ lấy bằng
+snapshot); tắt rồi bật lại tiếp tục từ chỗ dừng; cursor đã bị dọn → nhảy tới mốc còn giữ và ghi lỗi
+"cần đồng bộ lại". URL / secret lưu mã hoá secretbox (`jobcrawler serve` mã hoá lại khi đổi
+`ENCRYPTION_KEYS`); giao diện chỉ hiện URL bỏ query (có thể chứa token). Gọi thẳng từ backend
+(`api_http`, ≤ 20 request / giây / host) như SERP / cảnh báo: đích là backend của đối tác, không
+phải website thu thập. Độ trễ thêm sau commit ≈ nhịp relay (1 s) + một request.

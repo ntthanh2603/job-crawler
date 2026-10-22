@@ -357,6 +357,12 @@ class Settings(BaseSettings):
     relay_interval_seconds: float = Field(default=1.0, ge=0.2, le=30)
     # Số request tối đa mỗi phút của một khoá API tích hợp (0: không giới hạn).
     integration_rate_per_minute: int = Field(default=600, ge=0)
+    # Webhook tới hệ thống ngoài (`modules/integration/webhook_service.py`): số sự kiện mỗi lô, hạn
+    # chờ bên nhận trả lời.
+    webhook_batch_size: int = Field(default=100, ge=1, le=1000)
+    webhook_timeout_seconds: float = Field(default=10, gt=0, le=60)
+    # Cảnh báo khi webhook của một hệ thống ngoài lỗi liên tục quá chừng này phút (0: tắt).
+    alert_webhook_failing_minutes: float = Field(default=5, ge=0)
 
     # Tài khoản đăng nhập giao diện / API (trang đăng nhập → JWT, `modules/auth/auth_service.py`).
     # Không đặt UI_PASSWORD thì không hỏi đăng nhập: chỉ dùng khi cổng chỉ mở ở 127.0.0.1.

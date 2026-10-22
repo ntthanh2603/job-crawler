@@ -8,6 +8,7 @@ ALERT_CHECK_SECONDS, đọc các số đo sẵn có và gửi tin tới ALERT_WE
 | `workers`   | số worker lấy trang còn kết nối < ALERT_MIN_WORKERS                      |
 | `http`      | tỉ lệ slot HTTP đang dùng trên mọi worker > ngưỡng                       |
 | `llm`       | tỉ lệ lời gọi LLM lỗi trong giờ gần nhất > ngưỡng                        |
+| `partner`   | webhook tới một hệ thống ngoài lỗi liên tục > ALERT_WEBHOOK_FAILING_MINUTES |
 
 Mỗi loại một trạng thái trên Redis chính (`alerts:<loại>`, kv trên `res.redis`): bắt đầu lỗi → gửi,
 còn lỗi → nhắc lại sau ALERT_REPEAT_MINUTES, hết lỗi → gửi "đã ổn". Không đủ số liệu (ngoài khung
@@ -27,7 +28,10 @@ from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
+from sqlalchemy import select
+
 from jobcrawler.common.logging import get_logger
+from jobcrawler.database.models import ApiClient
 from jobcrawler.modules.crawl import schedule_service, sla_service
 from jobcrawler.modules.gateway.registry_service import Keys, list_workers
 from jobcrawler.services import llm_metrics
@@ -148,7 +152,37 @@ async def llm(res: Resources, now: datetime) -> list[Finding]:
     ]
 
 
-PROBES: tuple[Probe, ...] = (detection, build_backlog, workers, llm)
+async def partner_webhooks(res: Resources, now: datetime) -> list[Finding]:
+    """Webhook tới hệ thống ngoài (`modules/integration/webhook_service.py`) lỗi liên tục quá lâu:
+    việc làm mới không tới được bên kia."""
+    minutes = res.settings.alert_webhook_failing_minutes
+    if not minutes:
+        return [Finding("partner", None)]
+    async with res.sessionmaker() as session:
+        rows = (
+            await session.execute(
+                select(
+                    ApiClient.name, ApiClient.webhook_failing_since, ApiClient.webhook_last_error
+                )
+                .where(
+                    ApiClient.webhook_enabled.is_(True),
+                    ApiClient.webhook_failing_since.is_not(None),
+                    ApiClient.webhook_failing_since < now - timedelta(minutes=minutes),
+                )
+                .order_by(ApiClient.name)
+            )
+        ).all()
+    detail = "; ".join(f"{name}: {error or 'lỗi'}" for name, _, error in rows[:5])
+    return [
+        Finding(
+            "partner",
+            bool(rows),
+            f"Webhook tới {len(rows)} hệ thống ngoài lỗi liên tục quá {minutes:g} phút ({detail})",
+        )
+    ]
+
+
+PROBES: tuple[Probe, ...] = (detection, build_backlog, workers, llm, partner_webhooks)
 
 
 def webhook_request(url: str, text: str) -> tuple[str, dict[str, Any]]:

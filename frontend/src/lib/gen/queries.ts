@@ -39,6 +39,19 @@ export type ApiKeyOut = {
   revoked_at: string | null;
 };
 
+/**
+ * Webhook của client. URL chỉ hiện phần không có query (có thể chứa token).
+ */
+export type WebhookOut = {
+  enabled: boolean;
+  failing_since: string | null;
+  lag: number;
+  last_error: string | null;
+  last_ok_at: string | null;
+  secret_set: boolean;
+  url: string | null;
+};
+
 export type ApiClientDetailOut = {
   active_keys: number;
   all_companies: boolean;
@@ -51,6 +64,7 @@ export type ApiClientDetailOut = {
   last_used_at: string | null;
   name: string;
   scopes: string[];
+  webhook: WebhookOut;
 };
 
 export type ApiClientInScopesItem = typeof ApiClientInScopesItem[keyof typeof ApiClientInScopesItem];
@@ -87,6 +101,7 @@ export type ApiClientOut = {
   last_used_at: string | null;
   name: string;
   scopes: string[];
+  webhook: WebhookOut;
 };
 
 /**
@@ -97,6 +112,10 @@ export type ApiClientUpdateIn = {
   include_description?: boolean | null;
   name?: string | null;
   scopes?: ('companies:write' | 'jobs:read')[] | null;
+  /** Bật gửi webhook (cần URL và secret) */
+  webhook_enabled?: boolean | null;
+  /** URL nhận webhook (http:// hoặc https://); chuỗi rỗng để xoá */
+  webhook_url?: string | null;
 };
 
 /**
@@ -1939,6 +1958,20 @@ export const SortOrder = {
   DESC: 'DESC',
 } as const;
 
+/**
+ * Secret ký webhook mới (chỉ hiện một lần); bên nhận kiểm `X-JC-Signature` bằng nó.
+ */
+export type WebhookSecretOut = {
+  secret: string;
+};
+
+export type WebhookTestOut = {
+  error: string | null;
+  ms: number;
+  ok: boolean;
+  status: number | null;
+};
+
 export type GetApiClientsParams = {
 /**
  * Tìm kiếm (cột tìm tuỳ endpoint)
@@ -2927,6 +2960,141 @@ export const useDeleteApiClientKey = <TError = HTTPValidationError,
         TContext
       > => {
       return useMutation(getDeleteApiClientKeyMutationOptions(options), queryClient);
+    }
+
+/**
+ * Tạo / đổi secret ký webhook (chỉ hiện một lần). Secret cũ hết dùng ngay: bên nhận cập nhật
+ * rồi, lô gửi lỗi trong lúc đổi được gửi lại.
+ * @summary Post Api Client Webhook Secret
+ */
+export const postApiClientWebhookSecret = (
+    clientId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<WebhookSecretOut>(
+      {url: `/api/api-clients/${clientId}/webhook/secret`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getPostApiClientWebhookSecretMutationKey = () => ['postApiClientWebhookSecret'] as const;
+
+export const getPostApiClientWebhookSecretMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookSecret>>, TError,PostApiClientWebhookSecretMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookSecret>>, TError,PostApiClientWebhookSecretMutationVariables, TContext> => {
+
+const mutationKey = getPostApiClientWebhookSecretMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiClientWebhookSecret>>, PostApiClientWebhookSecretMutationVariables> = (props) => {
+          const {clientId} = props ?? {};
+
+          return  postApiClientWebhookSecret(clientId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiClientWebhookSecretMutationResult = NonNullable<Awaited<ReturnType<typeof postApiClientWebhookSecret>>>
+
+    export type PostApiClientWebhookSecretMutationError = HTTPValidationError
+    export type PostApiClientWebhookSecretMutationVariables = {clientId: string}
+
+    /**
+ * @summary Post Api Client Webhook Secret
+ */
+export const usePostApiClientWebhookSecret = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookSecret>>, TError,PostApiClientWebhookSecretMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiClientWebhookSecret>>,
+        TError,
+        PostApiClientWebhookSecretMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiClientWebhookSecretMutationOptions(options), queryClient);
+    }
+
+/**
+ * Gửi một lô thử (không có sự kiện, `test: true`) tới webhook, ký như lô thật.
+ * @summary Post Api Client Webhook Test
+ */
+export const postApiClientWebhookTest = (
+    clientId: string,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<WebhookTestOut>(
+      {url: `/api/api-clients/${clientId}/webhook/test`, method: 'POST', signal
+    },
+      );
+    }
+
+
+
+
+export const getPostApiClientWebhookTestMutationKey = () => ['postApiClientWebhookTest'] as const;
+
+export const getPostApiClientWebhookTestMutationOptions = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookTest>>, TError,PostApiClientWebhookTestMutationVariables, TContext>, }
+): UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookTest>>, TError,PostApiClientWebhookTestMutationVariables, TContext> => {
+
+const mutationKey = getPostApiClientWebhookTestMutationKey();
+const {mutation: mutationOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postApiClientWebhookTest>>, PostApiClientWebhookTestMutationVariables> = (props) => {
+          const {clientId} = props ?? {};
+
+          return  postApiClientWebhookTest(clientId,)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PostApiClientWebhookTestMutationResult = NonNullable<Awaited<ReturnType<typeof postApiClientWebhookTest>>>
+
+    export type PostApiClientWebhookTestMutationError = HTTPValidationError
+    export type PostApiClientWebhookTestMutationVariables = {clientId: string}
+
+    /**
+ * @summary Post Api Client Webhook Test
+ */
+export const usePostApiClientWebhookTest = <TError = HTTPValidationError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postApiClientWebhookTest>>, TError,PostApiClientWebhookTestMutationVariables, TContext>, }
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof postApiClientWebhookTest>>,
+        TError,
+        PostApiClientWebhookTestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPostApiClientWebhookTestMutationOptions(options), queryClient);
     }
 
 /**

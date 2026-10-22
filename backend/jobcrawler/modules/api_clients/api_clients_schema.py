@@ -34,6 +34,14 @@ class ApiClientUpdateIn(BaseModel):
     scopes: list[Scope] | None = None
     all_companies: bool | None = None
     include_description: bool | None = None
+    webhook_url: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="URL nhận webhook (http:// hoặc https://); chuỗi rỗng để xoá",
+    )
+    webhook_enabled: bool | None = Field(
+        default=None, description="Bật gửi webhook (cần URL và secret)"
+    )
 
 
 class ApiKeyOut(ApiOut):
@@ -56,10 +64,37 @@ class ApiClientOut(ApiOut):
     last_used_at: datetime | None
     created_by: str | None
     created_at: datetime
+    webhook: WebhookOut
+
+
+class WebhookOut(ApiOut):
+    """Webhook của client. URL chỉ hiện phần không có query (có thể chứa token)."""
+
+    enabled: bool
+    url: str | None
+    secret_set: bool
+    # Số sự kiện (mọi doanh nghiệp, trước khi lọc theo client) chưa giao: seq mới nhất − cursor.
+    lag: int
+    last_ok_at: datetime | None
+    failing_since: datetime | None
+    last_error: str | None
 
 
 class ApiClientDetailOut(ApiClientOut):
     keys: list[ApiKeyOut]
+
+
+class WebhookSecretOut(ApiOut):
+    """Secret ký webhook mới (chỉ hiện một lần); bên nhận kiểm `X-JC-Signature` bằng nó."""
+
+    secret: str
+
+
+class WebhookTestOut(ApiOut):
+    ok: bool
+    status: int | None
+    error: str | None
+    ms: int
 
 
 class ApiKeyCreatedOut(ApiOut):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import Field
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.pagination import GetManyQuery, Page, ordering, paginate
 from jobcrawler.database.models import ApiClient, ApiKey, CompanyRef
-from jobcrawler.modules.integration import key_service
+from jobcrawler.modules.integration import feed_service, key_service, webhook_service
 
 
 class ApiClientQuery(GetManyQuery):
@@ -112,11 +113,42 @@ async def create_client(
     return client
 
 
+class WebhookConfigError(ValueError):
+    """Cấu hình webhook không dùng được (URL sai, bật khi chưa có URL / secret)."""
+
+
+def clean_webhook_url(value: str) -> str | None:
+    """URL webhook: rỗng = xoá; phải là http(s)://host..."""
+    value = value.strip()
+    if not value:
+        return None
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.hostname or " " in value:
+        raise WebhookConfigError("URL webhook phải bắt đầu bằng http:// hoặc https://")
+    return value
+
+
 async def update_client(
     session: AsyncSession, client: ApiClient, values: dict[str, object]
 ) -> dict[str, object]:
     """Ghi các trường có trong `values`; trả {trường: {before, after}} của trường đổi."""
     changes: dict[str, object] = {}
+    values = dict(values)
+    if "webhook_url" in values:
+        url = clean_webhook_url(str(values.pop("webhook_url") or ""))
+        before = webhook_service.unseal(webhook_service.URL_FIELD, client.webhook_url)
+        if url != before:
+            client.webhook_url = webhook_service.seal(webhook_service.URL_FIELD, url)
+            changes["webhook_url"] = {
+                "before": webhook_service.url_hint(before),
+                "after": webhook_service.url_hint(url),
+            }
+            if url is None:
+                values["webhook_enabled"] = False
+    if values.get("webhook_enabled") and not client.webhook_enabled:
+        if client.webhook_url is None or client.webhook_secret is None:
+            raise WebhookConfigError("Cần URL và secret webhook trước khi bật")
+        await webhook_service.start_cursor(session, client)
     for field_name, value in values.items():
         if field_name == "name" and isinstance(value, str):
             value = value.strip()
@@ -135,6 +167,18 @@ async def delete_client(session: AsyncSession, client_id: UUID) -> bool:
     """Xoá client cùng khoá và mã doanh nghiệp của nó (doanh nghiệp vẫn giữ)."""
     result = await session.execute(delete(ApiClient).where(ApiClient.id == client_id))
     return bool(getattr(result, "rowcount", 0))
+
+
+async def rotate_secret(session: AsyncSession, client: ApiClient) -> str:
+    """Secret ký webhook mới (cũ hết dùng ngay; lô đang lỗi được ký lại bằng secret mới)."""
+    secret = webhook_service.new_secret()
+    client.webhook_secret = webhook_service.seal(webhook_service.SECRET_FIELD, secret)
+    client.updated_at = datetime.now(UTC)
+    return secret
+
+
+async def head(session: AsyncSession) -> int:
+    return await feed_service.head(session)
 
 
 async def create_key(

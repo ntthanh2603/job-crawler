@@ -94,6 +94,9 @@
             },
             "title": "Scopes",
             "type": "array"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WebhookOut"
           }
         },
         "required": [
@@ -107,6 +110,7 @@
           "last_used_at",
           "created_by",
           "created_at",
+          "webhook",
           "keys"
         ],
         "title": "ApiClientDetailOut",
@@ -213,6 +217,9 @@
             },
             "title": "Scopes",
             "type": "array"
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WebhookOut"
           }
         },
         "required": [
@@ -225,7 +232,8 @@
           "active_keys",
           "last_used_at",
           "created_by",
-          "created_at"
+          "created_at",
+          "webhook"
         ],
         "title": "ApiClientOut",
         "type": "object"
@@ -285,6 +293,31 @@
               }
             ],
             "title": "Scopes"
+          },
+          "webhook_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bật gửi webhook (cần URL và secret)",
+            "title": "Webhook Enabled"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URL nhận webhook (http:// hoặc https://); chuỗi rỗng để xoá",
+            "title": "Webhook Url"
           }
         },
         "title": "ApiClientUpdateIn",
@@ -8059,6 +8092,136 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WebhookOut": {
+        "description": "Webhook của client. URL chỉ hiện phần không có query (có thể chứa token).",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "failing_since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failing Since"
+          },
+          "lag": {
+            "title": "Lag",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_ok_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok At"
+          },
+          "secret_set": {
+            "title": "Secret Set",
+            "type": "boolean"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "enabled",
+          "url",
+          "secret_set",
+          "lag",
+          "last_ok_at",
+          "failing_since",
+          "last_error"
+        ],
+        "title": "WebhookOut",
+        "type": "object"
+      },
+      "WebhookSecretOut": {
+        "description": "Secret ký webhook mới (chỉ hiện một lần); bên nhận kiểm `X-JC-Signature` bằng nó.",
+        "properties": {
+          "secret": {
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "title": "WebhookSecretOut",
+        "type": "object"
+      },
+      "WebhookTestOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ms": {
+            "title": "Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "ok",
+          "status",
+          "error",
+          "ms"
+        ],
+        "title": "WebhookTestOut",
+        "type": "object"
+      },
       "WorkMode": {
         "enum": [
           "onsite",
@@ -8762,6 +8925,94 @@
           }
         },
         "summary": "Delete Api Client Key",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
+    "/api/api-clients/{client_id}/webhook/secret": {
+      "post": {
+        "description": "Tạo / đổi secret ký webhook (chỉ hiện một lần). Secret cũ hết dùng ngay: bên nhận cập nhật\nrồi, lô gửi lỗi trong lúc đổi được gửi lại.",
+        "operationId": "post_api_client_webhook_secret",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Api Client Webhook Secret",
+        "tags": [
+          "api-clients"
+        ]
+      }
+    },
+    "/api/api-clients/{client_id}/webhook/test": {
+      "post": {
+        "description": "Gửi một lô thử (không có sự kiện, `test: true`) tới webhook, ký như lô thật.",
+        "operationId": "post_api_client_webhook_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Client Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Api Client Webhook Test",
         "tags": [
           "api-clients"
         ]

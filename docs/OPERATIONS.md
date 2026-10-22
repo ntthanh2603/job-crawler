@@ -174,7 +174,8 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
   URL incoming webhook; Telegram: `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`).
   Leader scheduler kiểm mỗi phút: P95 độ trễ phát hiện 30 phút qua > 180 s (trong khung poll, từ 20
   lượt poll), hàng đợi build còn việc trong 30 phút sau khung build, worker còn kết nối < số tối thiểu,
-  slot HTTP đang dùng > 70%, LLM lỗi > 20% giờ qua (từ 20 lời gọi). Mỗi loại báo một lần khi bắt đầu,
+  slot HTTP đang dùng > 70%, LLM lỗi > 20% giờ qua (từ 20 lời gọi), webhook tới hệ thống ngoài lỗi
+  liên tục > 5 phút (Cài đặt → Tích hợp). Mỗi loại báo một lần khi bắt đầu,
   nhắc lại mỗi giờ khi còn, và báo "đã ổn"; ngưỡng 0 tắt riêng loại đó. Gửi lỗi (log
   `alerts.send_failed`) thì lần kiểm sau gửi lại. Làm gì khi nhận: bảng "Dấu hiệu" ở docs/DEPLOY.md
   mục 5.
@@ -261,15 +262,20 @@ Phía vận hành:
    của doanh nghiệp đã đẩy (mặc định) hay mọi việc làm, có gửi mô tả không.
 2. "Tạo khoá": chép khoá (chỉ hiện một lần) gửi bên kia qua kênh bí mật. Đổi khoá: tạo khoá mới,
    bên kia chuyển sang, rồi thu hồi khoá cũ.
-3. Bên kia đẩy doanh nghiệp (API hoặc CSV). Doanh nghiệp mới được build ngay (mọi giờ): 10k doanh
+3. Webhook (nếu bên kia nhận đẩy): nhập URL, "Tạo secret" (chỉ hiện một lần, gửi bên kia), bật,
+   "Gửi thử". Trang hiện trạng thái: số sự kiện còn chờ, lần gửi được gần nhất, lỗi gần nhất. Đổi
+   secret: secret cũ hết dùng ngay — báo bên kia trước; lô gửi lỗi trong lúc đổi được gửi lại.
+4. Bên kia đẩy doanh nghiệp (API hoặc CSV). Doanh nghiệp mới được build ngay (mọi giờ): 10k doanh
    nghiệp lần đầu mất vài giờ theo số build song song (DEPLOY.md mục 4) — nạp theo đợt 1–2 nghìn.
    Theo dõi ở trang Doanh nghiệp / Hàng đợi; trạng thái từng mã cũng có ở
    `GET /api/integration/v1/companies`.
 
-| Dấu hiệu                                 | Nguyên nhân / làm gì                                                            |
-| ---------------------------------------- | ------------------------------------------------------------------------------- |
-| Bên kia nhận 401                         | khoá sai / đã thu hồi; khoá API gửi tới đường không phải `/api/integration`     |
-| 429 `Vượt giới hạn request mỗi phút`     | tăng "Giới hạn request mỗi khoá" (Cài đặt → Tích hợp) hoặc bên kia gọi thưa hơn |
-| 410 `resync_required`                    | cursor cũ hơn `JOB_EVENTS_RETENTION_DAYS`: bên kia đồng bộ lại từ snapshot      |
-| Doanh nghiệp `paused`                    | mọi mã của nó `active=false`; bên kia đẩy lại `active=true` để bật              |
-| Feed không có sự kiện mới dù có việc mới | relay không chạy: kiểm process `scheduler` (log `relay.leader`, `relay.error`)  |
+| Dấu hiệu                                       | Nguyên nhân / làm gì                                                             |
+| ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| Bên kia nhận 401                               | khoá sai / đã thu hồi; khoá API gửi tới đường không phải `/api/integration`      |
+| 429 `Vượt giới hạn request mỗi phút`           | tăng "Giới hạn request mỗi khoá" (Cài đặt → Tích hợp) hoặc bên kia gọi thưa hơn  |
+| 410 `resync_required`                          | cursor cũ hơn `JOB_EVENTS_RETENTION_DAYS`: bên kia đồng bộ lại từ snapshot       |
+| Doanh nghiệp `paused`                          | mọi mã của nó `active=false`; bên kia đẩy lại `active=true` để bật               |
+| Feed không có sự kiện mới dù có việc mới       | relay không chạy: kiểm process `scheduler` (log `relay.leader`, `relay.error`)   |
+| Webhook "lỗi gần nhất" `HTTP 4xx/5xx`, timeout | bên nhận lỗi / chậm (> `WEBHOOK_TIMEOUT_SECONDS`); tự gửi lại, không mất sự kiện |
+| Webhook "cần đồng bộ lại"                      | webhook lỗi lâu hơn thời gian giữ sự kiện: bên kia đồng bộ lại từ snapshot       |

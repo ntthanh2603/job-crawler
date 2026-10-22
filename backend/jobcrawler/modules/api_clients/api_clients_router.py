@@ -19,13 +19,35 @@ from jobcrawler.modules.api_clients.api_clients_schema import (
     ApiClientUpdateIn,
     ApiKeyCreatedOut,
     ApiKeyOut,
+    WebhookOut,
+    WebhookSecretOut,
+    WebhookTestOut,
 )
 from jobcrawler.modules.audit import audit_service
+from jobcrawler.modules.integration import webhook_service
 
 router = APIRouter(prefix="/api", tags=["api-clients"])
 
 
-def _client_out(s: api_clients_service.ClientSummary) -> ApiClientOut:
+def _webhook_out(c: ApiClient, head: int) -> WebhookOut:
+    try:
+        url = webhook_service.url_hint(
+            webhook_service.unseal(webhook_service.URL_FIELD, c.webhook_url)
+        )
+    except Exception:  # khoá mã hoá đã đổi mà chưa mã hoá lại
+        url = None
+    return WebhookOut(
+        enabled=c.webhook_enabled,
+        url=url,
+        secret_set=c.webhook_secret is not None,
+        lag=max(0, head - c.webhook_cursor) if c.webhook_enabled else 0,
+        last_ok_at=c.webhook_last_ok_at,
+        failing_since=c.webhook_failing_since,
+        last_error=c.webhook_last_error,
+    )
+
+
+def _client_out(s: api_clients_service.ClientSummary, head: int) -> ApiClientOut:
     c = s.client
     return ApiClientOut(
         id=c.id,
@@ -38,6 +60,7 @@ def _client_out(s: api_clients_service.ClientSummary) -> ApiClientOut:
         last_used_at=s.last_used_at,
         created_by=c.created_by,
         created_at=c.created_at,
+        webhook=_webhook_out(c, head),
     )
 
 
@@ -62,10 +85,13 @@ def _forget_keys(request: Request) -> None:
 async def _detail(request: Request, client_id: UUID) -> ApiClientDetailOut:
     async with res_of(request).sessionmaker() as session:
         found = await api_clients_service.get_client(session, client_id)
+        head = await api_clients_service.head(session)
     if found is None:
         raise HTTPException(404, "Không có hệ thống này")
     summary, keys = found
-    return ApiClientDetailOut(**_client_out(summary).model_dump(), keys=[_key_out(k) for k in keys])
+    return ApiClientDetailOut(
+        **_client_out(summary, head).model_dump(), keys=[_key_out(k) for k in keys]
+    )
 
 
 @router.get("/api-clients")
@@ -75,7 +101,8 @@ async def get_api_clients(
     """Các hệ thống ngoài dùng API tích hợp."""
     async with res_of(request).sessionmaker() as session:
         page = await api_clients_service.list_clients(session, query)
-    return page_out(page, [_client_out(s) for s in page.items])
+        head = await api_clients_service.head(session)
+    return page_out(page, [_client_out(s, head) for s in page.items])
 
 
 @router.post("/api-clients")
@@ -124,7 +151,10 @@ async def patch_api_client(
             session, name, other_than=client_id
         ):
             raise HTTPException(409, "Đã có hệ thống tên này")
-        changes = await api_clients_service.update_client(session, client, values)
+        try:
+            changes = await api_clients_service.update_client(session, client, values)
+        except api_clients_service.WebhookConfigError as exc:
+            raise HTTPException(400, str(exc)) from None
     if changes:
         _forget_keys(request)
         await audit_service.record_safely(
@@ -158,6 +188,46 @@ async def delete_api_client(request: Request, client_id: UUID) -> OkOut:
         metadata={"name": name},
     )
     return OkOut(ok=True)
+
+
+@router.post("/api-clients/{client_id}/webhook/secret")
+async def post_api_client_webhook_secret(request: Request, client_id: UUID) -> WebhookSecretOut:
+    """Tạo / đổi secret ký webhook (chỉ hiện một lần). Secret cũ hết dùng ngay: bên nhận cập nhật
+    rồi, lô gửi lỗi trong lúc đổi được gửi lại."""
+    res = res_of(request)
+    async with res.sessionmaker.begin() as session:
+        client = await session.get(ApiClient, client_id, with_for_update=True)
+        if client is None:
+            raise HTTPException(404, "Không có hệ thống này")
+        secret = await api_clients_service.rotate_secret(session, client)
+    await audit_service.record_safely(
+        res.sessionmaker,
+        action=audit_service.API_WEBHOOK_SECRET,
+        actor=actor_of(request),
+        resource_type="api_client",
+        resource_id=client_id,
+    )
+    return WebhookSecretOut(secret=secret)
+
+
+@router.post("/api-clients/{client_id}/webhook/test")
+async def post_api_client_webhook_test(request: Request, client_id: UUID) -> WebhookTestOut:
+    """Gửi một lô thử (không có sự kiện, `test: true`) tới webhook, ký như lô thật."""
+    res = res_of(request)
+    async with res.sessionmaker() as session:
+        client = await session.get(ApiClient, client_id)
+    if client is None:
+        raise HTTPException(404, "Không có hệ thống này")
+    attempt = await webhook_service.send_test(res, client)
+    await audit_service.record_safely(
+        res.sessionmaker,
+        action=audit_service.API_WEBHOOK_TEST,
+        actor=actor_of(request),
+        resource_type="api_client",
+        resource_id=client_id,
+        metadata={"ok": attempt.ok, "status": attempt.status, "error": attempt.error},
+    )
+    return WebhookTestOut(ok=attempt.ok, status=attempt.status, error=attempt.error, ms=attempt.ms)
 
 
 @router.post("/api-clients/{client_id}/keys")

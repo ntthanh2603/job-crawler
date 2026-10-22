@@ -223,6 +223,7 @@ async def _prepare(*, demo: bool) -> None:
     """Trước khi chạy process con: mã hoá các trường nhạy cảm còn lưu nguyên văn / bằng khoá cũ,
     và (DEMO_COMPANIES) nạp doanh nghiệp mẫu khi DB chưa có doanh nghiệp nào. Lỗi chỉ ghi log."""
     from jobcrawler.modules.companies.companies_service import seed_demo_if_empty
+    from jobcrawler.modules.integration import webhook_service
     from jobcrawler.modules.settings import app_settings_service
     from jobcrawler.services.resources import open_resources
 
@@ -230,6 +231,7 @@ async def _prepare(*, demo: bool) -> None:
         # Nạp cả cài đặt trong DB (như process con) để log khởi động không báo nhầm thiếu LLM.
         async with open_resources(db_logs=False) as res:
             await app_settings_service.seal_stored(res.sessionmaker)
+            await webhook_service.seal_stored(res.sessionmaker)
             outcome = await seed_demo_if_empty(res) if demo else None
     except Exception as exc:
         log.warning("serve.prepare_failed", error=str(exc))
