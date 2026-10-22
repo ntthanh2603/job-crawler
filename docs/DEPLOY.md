@@ -89,6 +89,8 @@ flowchart LR
   chuyển tiếp giá trị đó cho backend, backend mới đặt cookie đăng nhập `Secure`.
 - **Image**: CI build và đẩy `jobcrawler-backend`, `-worker`, `-frontend` lên GHCR sau khi mọi kiểm
   tra xanh, mỗi lần push `main` (tag `main`, `sha-<7>`) và mỗi tag `vX.Y.Z`; pull request chỉ build thử.
+  Image build song song với test (ghi cache GitHub Actions), đẩy khi đã xanh (dựng lại từ cache) rồi
+  quét Trivy một lần (lỗ hổng CRITICAL / HIGH đã có bản vá → job đỏ).
   Production sửa ba image trong `x-production` và ghim cùng một tag; giá trị worker được dùng cả
   cho service lẫn lệnh sinh từ nút "Thêm worker". Quay lại bản trước bằng cách đổi tag rồi pull/up
   lại. Phát hành: `task release VERSION=X.Y.Z`.

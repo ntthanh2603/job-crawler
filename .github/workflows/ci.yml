@@ -2,9 +2,12 @@ name: CI
 
 # Pull request: chỉ kiểm tra — format, lint, typecheck, mã sinh (proto, OpenAPI), test, build thử ba
 # image (không đẩy). Push lên main (merge PR hoặc commit thẳng) và tag vX.Y.Z (`task release`): kiểm
-# tra như trên rồi build và đẩy ba image lên GHCR (ghcr.io/<owner>/jobcrawler-{backend,worker,frontend}).
-# Mỗi service một job, chạy trong thư mục của nó với lockfile / công cụ riêng (như `task <svc>:check`).
-# Test E2E trên stack compose chạy ở máy (`task frontend:e2e`), không chạy ở CI.
+# tra như trên rồi đẩy ba image lên GHCR (ghcr.io/<owner>/jobcrawler-{backend,worker,frontend}).
+# Mỗi service một job, chạy trong thư mục của nó với lockfile / công cụ riêng (như `task <svc>:check`);
+# backend chia ba job song song (lint / typecheck, test unit, test tích hợp cần Postgres + Redis).
+# Image build ngay từ đầu, song song với kiểm tra (`image-build`, ghi cache, không đẩy); khi mọi kiểm
+# tra xanh, `images` dựng lại từ cache (vài giây), đẩy và quét Trivy — image vẫn chỉ được đẩy khi đã
+# xanh. Test E2E trên stack compose chạy ở máy (`task frontend:e2e`), không chạy ở CI.
 on:
   push:
     branches: [main]
@@ -87,8 +90,51 @@ jobs:
           archive: false
           pr_comment: false
 
-  backend:
-    name: backend (ruff, pyright, OpenAPI, pytest + Postgres/Redis)
+  backend-lint:
+    name: backend (ruff, pyright, OpenAPI)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - name: openapi.json khớp mô hình API
+        run: uv run python scripts/export_openapi.py --check
+
+  backend-unit:
+    name: backend (pytest unit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      # Như `task backend:test:unit`: không cần Postgres / Redis.
+      - run: uv run pytest -q -m "not integration"
+
+  backend-integration:
+    name: backend (pytest tích hợp + Postgres/Redis)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -139,12 +185,7 @@ jobs:
         run: >-
           docker exec ${{ job.services.postgres.id }}
           psql -U jobcrawler -d jobcrawler -c "CREATE DATABASE jobcrawler_test"
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run pyright
-      - name: openapi.json khớp mô hình API
-        run: uv run python scripts/export_openapi.py --check
-      - run: uv run pytest -q
+      - run: uv run pytest -q -m integration
 
   worker:
     name: worker (ruff, pyright, pytest)
@@ -193,12 +234,53 @@ jobs:
       - run: npm run build
 
 
-  images:
-    name: image ${{ matrix.image }}
-    # Chỉ build / đẩy image khi mọi kiểm tra đã xanh.
-    needs: [proto, proto-breaking, backend, worker, frontend]
+  image-build:
+    name: image ${{ matrix.image }} (build)
+    # Không chờ kiểm tra: build song song với test và ghi cache (không đẩy). PR / bấm tay trên nhánh
+    # khác chỉ có bước này (build thử).
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Mỗi image build từ thư mục service của nó; backend / worker lấy thêm proto/ làm
+          # build context tên `proto` (như `additional_contexts` trong docker-compose.yaml).
+          - image: backend
+            context: backend
+            contexts: proto=proto
+          - image: worker
+            context: worker
+            contexts: proto=proto
+          - image: frontend
+            context: frontend
+            contexts: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Build (ghi cache, không đẩy)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          build-contexts: ${{ matrix.contexts }}
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+  images:
+    name: image ${{ matrix.image }} (đẩy + Trivy)
+    # Chỉ đẩy khi mọi kiểm tra đã xanh và image đã build được; push main hoặc tag vX.Y.Z.
+    needs:
+      [proto, proto-breaking, backend-lint, backend-unit, backend-integration, worker, frontend, image-build]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -208,8 +290,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Mỗi image build từ thư mục service của nó; backend / worker lấy thêm proto/ làm
-          # build context tên `proto` (như `additional_contexts` trong docker-compose.yaml).
           - image: backend
             context: backend
             contexts: proto=proto
@@ -222,9 +302,6 @@ jobs:
             context: frontend
             contexts: ""
             description: jobcrawler web UI (nginx, proxies /api to the backend)
-    env:
-      # Đẩy lên GHCR khi push main hoặc tag vX.Y.Z; PR / bấm tay trên nhánh khác: chỉ build thử.
-      PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -241,7 +318,6 @@ jobs:
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
-        if: env.PUBLISH == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -263,25 +339,25 @@ jobs:
             org.opencontainers.image.title=jobcrawler-${{ matrix.image }}
             org.opencontainers.image.description=${{ matrix.description }}
 
-      - name: Build${{ env.PUBLISH == 'true' && ' + push' || '' }}
+      # Mọi lớp đã có trong cache do `image-build` ghi: chỉ dựng lại từ cache, gắn tag / nhãn rồi đẩy.
+      - name: Build + push (từ cache)
         id: build
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           build-contexts: ${{ matrix.contexts }}
           platforms: linux/amd64
-          push: ${{ env.PUBLISH == 'true' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          provenance: ${{ env.PUBLISH == 'true' && 'mode=max' || 'false' }}
+          provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
-      # Quét image vừa đẩy: lỗ hổng CRITICAL/HIGH đã có bản vá → tab Security (SARIF) và job đỏ.
-      # trivy-action ghim theo commit (v0.36.0): các tag cũ của action từng bị chiếm (03/2026).
-      - name: Trivy (SARIF)
-        if: env.PUBLISH == 'true'
+      # Quét image vừa đẩy một lần: lỗ hổng CRITICAL/HIGH đã có bản vá → SARIF (tab Security) và job
+      # đỏ; bước sau in danh sách vào log. trivy-action ghim theo commit (v0.36.0): các tag cũ của
+      # action từng bị chiếm (03/2026).
+      - name: Trivy (chặn khi có lỗ hổng đã có bản vá)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.name.outputs.ref }}@${{ steps.build.outputs.digest }}
@@ -290,33 +366,25 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           limit-severities-for-sarif: true
-          exit-code: "0"
+          exit-code: "1"
         env:
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lỗ hổng tìm thấy
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.image)) != ''
+        env:
+          SARIF: trivy-${{ matrix.image }}.sarif
+        run: |
+          jq -r '[.runs[].results[]] | if length == 0 then "Không có lỗ hổng CRITICAL/HIGH đã có bản vá."
+            else .[] | "\(.ruleId)  \(.message.text | gsub("\n"; "; "))" end' "$SARIF"
+
       # Repo riêng tư cần GitHub Advanced Security (Code scanning) để nhận SARIF; không có thì bước
-      # này lỗi nhưng bước quét dạng bảng bên dưới vẫn chạy và in kết quả vào log.
+      # này lỗi (bỏ qua), danh sách vẫn nằm trong log ở bước trên.
       - name: Tải kết quả lên Code scanning
-        if: always() && env.PUBLISH == 'true'
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.image)) != ''
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.image }}.sarif
           category: trivy-${{ matrix.image }}
-
-      - name: Trivy (chặn khi có lỗ hổng đã có bản vá)
-        if: env.PUBLISH == 'true'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ steps.name.outputs.ref }}@${{ steps.build.outputs.digest }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-          # Bước trên đã cài Trivy và tải DB lỗ hổng.
-          skip-setup-trivy: true
-        env:
-          TRIVY_USERNAME: ${{ github.actor }}
-          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          TRIVY_SKIP_DB_UPDATE: "true"
