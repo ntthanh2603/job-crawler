@@ -99,9 +99,13 @@ class Settings(BaseSettings):
     llm_max_concurrency: int = Field(default=8, ge=1)
     llm_max_input_chars: int = Field(default=20_000, ge=1_000)
     llm_timeout_seconds: float = Field(default=30, gt=0)
-    # Giới hạn request/phút của endpoint, dùng chung mọi worker qua Redis (để trống = không giới
-    # hạn). Đặt thấp hơn giới hạn của server một chút; LLM_MAX_CONCURRENCY là mỗi process.
-    llm_requests_per_minute: float | None = Field(default=None, gt=0)
+    # Giới hạn request/phút của endpoint, dùng chung mọi worker qua Redis. Đặt thấp hơn giới hạn của
+    # server một chút; LLM_MAX_CONCURRENCY là mỗi process.
+    llm_requests_per_minute: float = Field(default=60, gt=0)
+    # Số lời gọi LLM đồng thời của cả cụm (hàng chờ có ưu tiên trên Redis chính; 0 = tắt, mỗi
+    # process tự giới hạn theo LLM_MAX_CONCURRENCY). Endpoint báo quá giới hạn thì tự hạ dần.
+    llm_cluster_concurrency: int = Field(default=16, ge=0)
+    llm_queue_wait_seconds: float = Field(default=300, gt=0)
 
     # SERP. Thiếu key thì bỏ qua các bước dùng SERP (kèm cảnh báo).
     serp_provider: Literal["serper", "brave"] = "serper"

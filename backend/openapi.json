@@ -2367,6 +2367,284 @@
         "title": "KycStatus",
         "type": "string"
       },
+      "LLMHourOut": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "hour": {
+            "format": "date-time",
+            "title": "Hour",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "ok",
+          "cached",
+          "failed",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "LLMHourOut",
+        "type": "object"
+      },
+      "LLMPromptStatsOut": {
+        "properties": {
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "integer"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt",
+          "calls",
+          "ok",
+          "cached",
+          "avg_ms",
+          "prompt_tokens",
+          "completion_tokens"
+        ],
+        "title": "LLMPromptStatsOut",
+        "type": "object"
+      },
+      "LLMStatsOut": {
+        "description": "Lời gọi LLM trong cửa sổ (theo giờ tròn, từ `since`) và trạng thái hiện tại.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms"
+          },
+          "cached": {
+            "title": "Cached",
+            "type": "integer"
+          },
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "chart": {
+            "items": {
+              "$ref": "#/components/schemas/LLMHourOut"
+            },
+            "title": "Chart",
+            "type": "array"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "errors": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "integer"
+          },
+          "p50_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Seconds"
+          },
+          "p95_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Seconds"
+          },
+          "paused_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Until"
+          },
+          "per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Hour"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "prompts": {
+            "items": {
+              "$ref": "#/components/schemas/LLMPromptStatsOut"
+            },
+            "title": "Prompts",
+            "type": "array"
+          },
+          "requests_per_minute": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requests Per Minute"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "throttled": {
+            "title": "Throttled",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "since",
+          "enabled",
+          "model",
+          "requests_per_minute",
+          "max_concurrency",
+          "timeout_seconds",
+          "paused_until",
+          "calls",
+          "ok",
+          "cached",
+          "failed",
+          "throttled",
+          "attempts",
+          "prompt_tokens",
+          "completion_tokens",
+          "avg_ms",
+          "p50_seconds",
+          "p95_seconds",
+          "per_hour",
+          "errors",
+          "prompts",
+          "chart"
+        ],
+        "title": "LLMStatsOut",
+        "type": "object"
+      },
       "LiveOut": {
         "description": "Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với\n`GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.\n`run` null khi không có lượt build / poll này.",
         "properties": {
@@ -2706,6 +2984,9 @@
             "title": "Fetch Chart",
             "type": "array"
           },
+          "llm": {
+            "$ref": "#/components/schemas/LLMStatsOut"
+          },
           "recent_runs": {
             "items": {
               "$ref": "#/components/schemas/RecentRunOut"
@@ -2722,7 +3003,8 @@
           "chart",
           "fetch_chart",
           "charts",
-          "recent_runs"
+          "recent_runs",
+          "llm"
         ],
         "title": "OverviewOut",
         "type": "object"

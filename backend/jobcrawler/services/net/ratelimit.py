@@ -18,6 +18,11 @@ from redis.asyncio import Redis
 Sleep = Callable[[float], Awaitable[None]]
 
 
+def pause_key(prefix: str, domain: str) -> str:
+    """Khoá tạm dừng của `domain` (`penalize`); PTTL là thời gian còn phải chờ."""
+    return f"{prefix}:rl:pause:{domain}"
+
+
 class RateLimiter(Protocol):
     async def acquire(self, domain: str, *, rate: float, burst: int = 1) -> float:
         """Chờ tới khi lấy được một token. Trả về tổng thời gian đã chờ (giây)."""
@@ -66,7 +71,7 @@ class RedisRateLimiter:
         self._script: Any = redis.register_script(_TOKEN_BUCKET_LUA)
 
     async def acquire(self, domain: str, *, rate: float, burst: int = 1) -> float:
-        keys = [f"{self._prefix}:rl:{domain}", f"{self._prefix}:rl:pause:{domain}"]
+        keys = [f"{self._prefix}:rl:{domain}", pause_key(self._prefix, domain)]
         waited = 0.0
         while True:
             wait_ms = int(await self._script(keys=keys, args=[rate, burst]))
@@ -81,7 +86,7 @@ class RedisRateLimiter:
         if seconds <= 0:
             return
         r: Any = self._redis
-        key = f"{self._prefix}:rl:pause:{domain}"
+        key = pause_key(self._prefix, domain)
         # Chỉ kéo dài, không rút ngắn lần tạm dừng đang có.
         current = int(await r.pttl(key))
         ms = int(seconds * 1000)

@@ -53,7 +53,7 @@ import {
   pct,
   sourceLabel,
 } from "@/lib/format"
-import type { Overview, Pair } from "@/lib/types"
+import type { LlmStats, Overview, Pair } from "@/lib/types"
 
 const WINDOWS = [
   ["1", "1 giờ qua"],
@@ -64,7 +64,7 @@ const WINDOWS = [
   ["0", "Toàn bộ"],
 ] as const
 
-const TABS = ["runs", "jobs", "storage"] as const
+const TABS = ["runs", "jobs", "llm", "storage"] as const
 
 // Thứ tự khoá = thứ tự xếp chồng từ dưới lên (đã kiểm định màu kề nhau, xem index.css --viz-*).
 const runsConfig = {
@@ -80,6 +80,48 @@ const fetchConfig = {
   error: { label: "Lỗi / quá giờ", color: "var(--viz-ambiguous)" },
   blocked: { label: "Bị chặn", color: "var(--viz-failed)" },
 } satisfies ChartConfig
+
+const llmConfig = {
+  ok: { label: "Thành công", color: "var(--viz-ok)" },
+  cached: { label: "Dùng lại từ cache", color: "var(--viz-1)" },
+  failed: { label: "Lỗi", color: "var(--viz-failed)" },
+} satisfies ChartConfig
+
+const tokensConfig = {
+  prompt_tokens: { label: "Token vào", color: "var(--viz-1)" },
+  completion_tokens: { label: "Token ra", color: "var(--viz-2)" },
+} satisfies ChartConfig
+
+// Tên prompt (`backend/jobcrawler/prompts/*.py`) → bước dùng LLM.
+const PROMPT_NAMES: Record<string, string> = {
+  careers_pick: "Chọn trang careers",
+  job_listing: "Bóc danh sách tin",
+  job_detail: "Bóc chi tiết tin",
+  job_verify: "Chấm tin còn nghi ngờ",
+  job_fields: "Phân loại cấp bậc / loại hình",
+  kyc_pick: "KYC: chọn website / pháp nhân",
+  profile_match: "Khớp profile nhà tuyển dụng",
+  healthcheck: "Kiểm tra kết nối",
+}
+
+// Loại lỗi (`llm_metrics.error_kind`): phần trước dấu ":" của `LLMResult.error`.
+const LLM_ERRORS: Record<string, string> = {
+  timeout: "Quá giờ",
+  rate_limited: "Chờ lượt quá lâu",
+  parse_error: "JSON sai schema",
+  empty_response: "Phản hồi rỗng",
+  connection: "Không kết nối được",
+  error: "Phản hồi sai dạng",
+  http_429: "Quá tải (429)",
+}
+
+const clockFmt = new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+const clock = (iso: string) => clockFmt.format(new Date(iso))
+
+function llmError(kind: string) {
+  const code = /^http_(\d+)$/.exec(kind)?.[1]
+  return LLM_ERRORS[kind] ?? (code ? `Lỗi HTTP ${code}` : cap(kind))
+}
 
 const daysConfig = {
   careers: { label: "Trang careers của doanh nghiệp", color: "var(--viz-1)" },
@@ -351,6 +393,159 @@ function RunsTab({ data }: { data: Overview }) {
           )}
         </Section>
       </div>
+    </div>
+  )
+}
+
+function LlmTab({ llm }: { llm: LlmStats }) {
+  const called = llm.calls - llm.cached
+  const tokens = llm.prompt_tokens + llm.completion_tokens
+  const status = !llm.enabled ? (
+    <StatusBadge value={null} tone="warn" text="Chưa cấu hình" />
+  ) : llm.paused_until && new Date(llm.paused_until).getTime() > Date.now() ? (
+    <StatusBadge value={null} tone="bad" text={`Tạm dừng tới ${clock(llm.paused_until)}`} />
+  ) : (
+    <StatusBadge value={null} tone="good" text="Hoạt động" />
+  )
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <Section
+          title="Lời gọi LLM"
+          description={`Từ ${dt(llm.since)} · tìm nguồn, bóc tin, chấm tin, phân loại trường, KYC`}
+          actions={status}
+          bodyClassName="space-y-5"
+        >
+          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+            <MiniStat
+              label="Lời gọi"
+              value={num(llm.calls)}
+              sub={llm.per_hour ? `${num(llm.per_hour)} lời gọi/giờ` : undefined}
+            />
+            <MiniStat
+              label="Thành công"
+              value={called ? pct((llm.ok - llm.cached) / called) : "–"}
+              sub={called ? `${num(llm.failed)} lỗi / ${num(called)} lần gọi` : undefined}
+            />
+            <MiniStat
+              label="Thời gian mỗi lời gọi"
+              value={llm.p95_seconds === null ? "–" : `P95 ≤ ${num(llm.p95_seconds)} s`}
+              sub={
+                llm.p50_seconds === null ? undefined : `P50 ≤ ${num(llm.p50_seconds)} s · TB ${duration(llm.avg_ms)}`
+              }
+            />
+            <MiniStat
+              label="Token"
+              value={num(tokens)}
+              sub={tokens ? `${num(llm.prompt_tokens)} vào · ${num(llm.completion_tokens)} ra` : undefined}
+            />
+          </div>
+          <dl className="grid gap-x-6 gap-y-3 border-t pt-4 text-sm md:grid-cols-2">
+            <div>
+              <dt className="text-meta text-muted-foreground">Model</dt>
+              <dd className="font-mono text-meta break-all">{llm.model ?? "–"}</dd>
+            </div>
+            <div>
+              <dt className="text-meta text-muted-foreground">Dùng lại từ cache</dt>
+              <dd className="tabular-nums">
+                {num(llm.cached)} câu trả lời{llm.calls ? ` (${pct(llm.cached / llm.calls, 0)} số lời gọi)` : ""}
+              </dd>
+            </div>
+            <div>
+              <dt className="inline-flex items-center gap-1 text-meta text-muted-foreground">
+                Giới hạn
+                <InfoTip>
+                  Mọi tiến trình dùng chung giới hạn request/phút. Khi endpoint báo vượt giới hạn, cả hệ thống tạm dừng gọi
+                  LLM trong thời gian được yêu cầu; khi báo quá nhiều lời gọi cùng lúc, tiến trình đó tự bớt số lời gọi
+                  đồng thời rồi tăng lại dần.
+                </InfoTip>
+              </dt>
+              <dd className="tabular-nums">
+                {llm.requests_per_minute ? `${num(llm.requests_per_minute)} request/phút` : "Không giới hạn request/phút"} ·{" "}
+                {num(llm.max_concurrency)} lời gọi cùng lúc · chờ tối đa {num(llm.timeout_seconds)} s
+              </dd>
+            </div>
+            <div>
+              <dt className="text-meta text-muted-foreground">Bị từ chối vì quá tải (429)</dt>
+              <dd className="tabular-nums">
+                <span className={llm.throttled ? "text-warning-ink" : undefined}>{num(llm.throttled)} lần</span>
+                {called > 0 && ` · ${dec(llm.attempts / called, 2)} lần gửi mỗi lời gọi`}
+              </dd>
+            </div>
+          </dl>
+        </Section>
+
+        <Section
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Lỗi hay gặp
+              <InfoTip>
+                Lời gọi lỗi (sau khi đã thử lại) được coi là "không chắc": bước đó tự quyết định bằng rule, không dừng lượt
+                build / poll.
+              </InfoTip>
+            </span>
+          }
+          description="Số lời gọi lỗi theo nguyên nhân"
+        >
+          <BarList
+            items={llm.errors.map(([k, v]) => ({ key: k, label: llmError(k), value: v, hint: k }))}
+            total={called}
+            empty={llm.calls ? "Không có lời gọi lỗi." : "Chưa có lời gọi nào."}
+          />
+        </Section>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Section title="Lời gọi LLM 24 giờ qua" description="Theo giờ, chia theo kết quả">
+          <StackedColumns data={llm.chart} config={llmConfig} x="hour" tick={hour} />
+        </Section>
+        <Section title="Token 24 giờ qua" description="Theo giờ, không tính câu trả lời dùng lại từ cache">
+          <StackedColumns data={llm.chart} config={tokensConfig} x="hour" tick={hour} />
+        </Section>
+      </div>
+
+      <Section title="Theo bước" description="Lời gọi trong khoảng đã chọn, theo prompt" bodyClassName="p-0">
+        {llm.prompts.length ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Bước</TableHead>
+                <TableHead className="text-right">Lời gọi</TableHead>
+                <TableHead className="text-right">Dùng lại từ cache</TableHead>
+                <TableHead className="text-right">Thành công</TableHead>
+                <TableHead className="text-right">Thời gian TB</TableHead>
+                <TableHead className="text-right">Token vào / ra</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {llm.prompts.map((p) => {
+                const real = p.calls - p.cached
+                return (
+                  <TableRow key={p.prompt}>
+                    <TableCell>
+                      <div className="font-medium">{PROMPT_NAMES[p.prompt] ?? p.prompt}</div>
+                      <div className="font-mono text-meta text-muted-foreground">{p.prompt}</div>
+                    </TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">{num(p.calls)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {num(p.cached)}
+                      <span className="ml-1.5 text-meta text-muted-foreground">{pct(p.calls ? p.cached / p.calls : null, 0)}</span>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{real ? pct((p.ok - p.cached) / real, 0) : "–"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{duration(p.avg_ms)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {num(p.prompt_tokens)}
+                      <span className="text-muted-foreground"> / {num(p.completion_tokens)}</span>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <Empty>Chưa có lời gọi nào.</Empty>
+        )}
+      </Section>
     </div>
   )
 }
@@ -651,6 +846,7 @@ export function OverviewPage() {
               items={[
                 { value: "runs", label: "Lượt build / poll" },
                 { value: "jobs", label: "Việc làm" },
+                { value: "llm", label: "LLM" },
                 { value: "storage", label: "Lưu trữ" },
               ]}
             />
@@ -659,6 +855,9 @@ export function OverviewPage() {
             </TabsContent>
             <TabsContent value="jobs">
               <JobsTab data={data} />
+            </TabsContent>
+            <TabsContent value="llm">
+              <LlmTab llm={data.llm} />
             </TabsContent>
             <TabsContent value="storage">
               <StorageTab data={data} measured={storage} onMeasure={() => setStorage(true)} />

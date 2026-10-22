@@ -7,10 +7,10 @@ Hai phần, cache khác nhau:
   nên tính sẵn — cron `overview_cron` làm mới mỗi vài phút, kết quả nằm trong Redis cache
   (`CHARTS_KEY`, CACHE_REDIS_URL); người xem chỉ đọc. Chưa có (Redis mới, khoá bị đẩy ra) thì
   tính một lần rồi lưu.
-- **Theo cửa sổ thời gian** (lượt chạy, request theo giờ, thống kê
-  `stats_service.collect_stats`): chỉ đọc các dòng trong cửa sổ qua index `started_at` / BRIN
-  `fetched_at`; cache `VIEW_TTL` giây theo cửa sổ để nhiều người xem / tự làm mới không chạy lại
-  truy vấn.
+- **Theo cửa sổ thời gian** (lượt build / poll, request theo giờ, thống kê
+  `stats_service.collect_stats`, lời gọi LLM `llm_metrics.collect`): chỉ đọc các dòng trong cửa
+  sổ qua index `started_at` / BRIN `fetched_at` (LLM: hash theo giờ trên Redis chính); cache
+  `VIEW_TTL` giây theo cửa sổ để nhiều người xem / tự làm mới không chạy lại truy vấn.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from jobcrawler.common.schemas import FetchOutcome
 from jobcrawler.database.models import Company, CompanyRun, Job, SourceFetch
 from jobcrawler.modules.jobs.status_service import open_jobs
 from jobcrawler.modules.overview import stats_service
+from jobcrawler.services import llm_metrics
 from jobcrawler.services.resources import Resources
 
 log = get_logger(__name__)
@@ -247,6 +248,7 @@ async def build_overview(res: Resources, *, hours: float | None, storage: bool) 
     if cached:
         return json.loads(cached)
     st = await stats_service.collect_stats(res, hours=hours, storage=storage)
+    llm = await llm_metrics.collect(res.redis, res.settings, hours=hours)
     async with res.sessionmaker() as session:
         runs_chart = await runs_per_hour(session)
         fetch_chart = await fetches_per_hour(session)
@@ -283,6 +285,7 @@ async def build_overview(res: Resources, *, hours: float | None, storage: bool) 
             }
             for run, name in recent
         ],
+        "llm": dataclasses.asdict(llm),
     }
     await res.cache_redis.set(key, _dump(payload), ex=VIEW_TTL)
     return json.loads(_dump(payload))

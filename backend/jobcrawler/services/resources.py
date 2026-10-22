@@ -9,7 +9,8 @@ Hai vai Redis:
 - `redis` (REDIS_URL, phải noeviction + lưu đĩa): hàng đợi job (streamqueue, tự mở client theo
   REDIS_URL), stream / trả lời / registry / inflight của gateway lấy trang, khoá doanh nghiệp, rate
   limit theo domain và của LLM (token bucket + tạm dừng sau 429: bị đẩy ra là gửi dồn tới site),
-  trạng thái proxy pool, phiên bản cài đặt, số đo SLA poll, chặn đoán mật khẩu, heartbeat health.
+  trạng thái proxy pool, phiên bản cài đặt, số đo SLA poll và lời gọi LLM, chặn đoán mật khẩu,
+  heartbeat health.
 - `cache_redis` (CACHE_REDIS_URL; trống = cùng client `redis`): chỉ cache tính lại được — trang
   HTTP (`http:`), robots.txt, kết quả tìm nguồn, SERP, câu trả lời LLM (`cache_kv`, cũng là kv của
   `http` / `api_http` / `llm`) và số liệu trang tổng quan (`overview:`). Đặt được maxmemory +
@@ -35,6 +36,7 @@ from jobcrawler.modules.gateway.dispatch_service import FetchClient
 from jobcrawler.modules.gateway.remote_service import RemoteRenderer, RemoteTransport
 from jobcrawler.services import secretbox
 from jobcrawler.services.llm import LLMClient
+from jobcrawler.services.llm_metrics import LLMMetrics
 from jobcrawler.services.net.direct import DirectTransport
 from jobcrawler.services.net.http import HttpClient, HttpConfig
 from jobcrawler.services.net.kv import KeyValueStore, RedisKV
@@ -42,6 +44,7 @@ from jobcrawler.services.net.proxy_pool import Proxy, ProxyPool
 from jobcrawler.services.net.proxy_pool import central_proxies as proxy_list
 from jobcrawler.services.net.ratelimit import RedisRateLimiter
 from jobcrawler.services.redis.queues import Queues
+from jobcrawler.services.redis.semaphore import RedisSemaphore
 
 log = jlog.get_logger(__name__)
 
@@ -117,9 +120,26 @@ def wire_network(
     state_kv = RedisKV(redis, prefix=settings.redis_prefix)
     cache_kv = RedisKV(cache_redis, prefix=settings.redis_prefix)
     # Giới hạn request/phút của endpoint LLM dùng chung mọi worker (token bucket trên Redis chính);
-    # cache câu trả lời theo nội dung trên Redis cache.
+    # cache câu trả lời theo nội dung trên Redis cache; số đo lời gọi trên Redis chính.
     limiter = RedisRateLimiter(redis, prefix=settings.redis_prefix)
-    llm = LLMClient.from_settings(settings, limiter=limiter, cache=cache_kv)
+    metrics = LLMMetrics(redis, prefix=settings.redis_prefix)
+    # Số lời gọi đồng thời của cả cụm: hàng chờ có ưu tiên trên Redis chính. Chỗ giữ tối đa lúc chờ
+    # token request/phút + một lần gọi (mỗi thứ ≤ LLM_TIMEOUT_SECONDS) + dư; process chết thì chỗ
+    # tự trả sau chừng đó.
+    slots = (
+        RedisSemaphore(
+            redis,
+            "llm",
+            limit=settings.llm_cluster_concurrency,
+            lease=settings.llm_timeout_seconds * 2 + 30,
+            prefix=settings.redis_prefix,
+        )
+        if settings.llm_cluster_concurrency > 0
+        else None
+    )
+    llm = LLMClient.from_settings(
+        settings, limiter=limiter, cache=cache_kv, metrics=metrics, slots=slots
+    )
 
     proxy_list: list[Proxy] = []
     if settings.proxy_mode != "central":

@@ -163,9 +163,59 @@ class RecentRunOut(RunOut):
     company_name: str
 
 
+class LLMPromptStatsOut(ApiOut):
+    # Trường của `llm_metrics.LLMPromptStats` (tests/test_openapi.py kiểm khớp).
+    prompt: str
+    calls: int
+    ok: int
+    cached: int
+    avg_ms: int | None
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class LLMHourOut(ApiOut):
+    # Trường của `llm_metrics.LLMHour` (tests/test_openapi.py kiểm khớp).
+    hour: Timestamp
+    ok: int
+    cached: int
+    failed: int
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class LLMStatsOut(ApiOut):
+    """Lời gọi LLM trong cửa sổ (theo giờ tròn, từ `since`) và trạng thái hiện tại."""
+
+    # Trường của `llm_metrics.LLMStats` (tests/test_openapi.py kiểm khớp).
+    since: Timestamp
+    enabled: bool
+    model: str | None
+    requests_per_minute: float | None
+    max_concurrency: int
+    timeout_seconds: float
+    paused_until: Timestamp | None  # cả cụm tạm dừng gọi LLM tới lúc này (429 vượt request/phút)
+    calls: int
+    ok: int
+    cached: int
+    failed: int
+    throttled: int
+    attempts: int
+    prompt_tokens: int
+    completion_tokens: int
+    avg_ms: int | None
+    p50_seconds: float | None
+    p95_seconds: float | None
+    per_hour: float | None
+    errors: list[tuple[str, int]]  # (loại lỗi, số lời gọi)
+    prompts: list[LLMPromptStatsOut]
+    chart: list[LLMHourOut]  # 24 giờ gần nhất
+
+
 class OverviewOut(ApiOut):
     stats: StatsOut
-    chart: list[RunsHourOut]  # lượt chạy theo giờ, 24 giờ gần nhất
+    chart: list[RunsHourOut]  # lượt build / poll theo giờ, 24 giờ gần nhất
     fetch_chart: list[FetchesHourOut]  # request theo giờ, 24 giờ gần nhất
     charts: ChartsOut
     recent_runs: list[RecentRunOut]
+    llm: LLMStatsOut

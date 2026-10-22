@@ -75,6 +75,9 @@ export type Charts = S.ChartsOut
 
 export type Overview = S.OverviewOut
 
+/** Lời gọi LLM trên trang tổng quan (backend/jobcrawler/services/llm_metrics.py). */
+export type LlmStats = S.LLMStatsOut
+
 export type Meta = S.MetaOut
 
 export type ImportOutcome = S.ImportOutcomeOut

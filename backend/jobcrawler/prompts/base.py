@@ -4,6 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from string import Template
 
+# Thứ tự lấy lượt khi các lời gọi LLM phải chờ nhau (số nhỏ trước): tìm nguồn / bóc tin quyết định
+# doanh nghiệp có tin hay không và chặn deadline của lượt build / poll; xác minh quyết định nhận
+# tin; phân loại chỉ điền thêm trường còn trống nên chỉ dùng phần còn dư.
+PRIORITY_COLLECT = 0
+PRIORITY_VERIFY = 1
+PRIORITY_ENRICH = 2
+
 
 @dataclass(frozen=True, slots=True)
 class Prompt:
@@ -17,6 +24,7 @@ class Prompt:
     version: str
     system: str
     user: str
+    priority: int = PRIORITY_COLLECT
 
     def render(self, values: Mapping[str, str]) -> list[dict[str, str]]:
         return [

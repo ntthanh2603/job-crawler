@@ -278,18 +278,18 @@ async def test_put_rejects_invalid_values_without_saving(web: Web) -> None:
 async def test_secrets_nullable_and_reset(web: Web) -> None:
     r = await web.client.put(
         "/api/settings",
-        json={"values": {"serp_api_key": "sk-bi-mat", "llm_requests_per_minute": ""}},
+        json={"values": {"serp_api_key": "sk-bi-mat", "gateway_public_url": ""}},
     )
     assert r.status_code == 200, r.text
     assert "sk-bi-mat" not in r.text
     items = by_key(r.json())
     assert (items["serp_api_key"]["is_set"], items["serp_api_key"]["source"]) == (True, "ui")
     assert items["serp_api_key"]["value"] is None
-    assert items["llm_requests_per_minute"]["value"] is None
-    assert items["llm_requests_per_minute"]["source"] == "ui"
+    assert items["gateway_public_url"]["value"] is None
+    assert items["gateway_public_url"]["source"] == "ui"
     stored = await rows(web)
     assert stored["serp_api_key"][0] == "sk-bi-mat"
-    assert stored["llm_requests_per_minute"][0] is None  # JSON null, khác "không có dòng"
+    assert stored["gateway_public_url"][0] is None  # JSON null, khác "không có dòng"
     effective = await app_settings_service.load_effective(web.res.sessionmaker, web.settings)
     assert effective.serp_api_key == SecretStr("sk-bi-mat")
 

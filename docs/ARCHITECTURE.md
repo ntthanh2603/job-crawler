@@ -264,6 +264,46 @@ thức làm việc, danh mục nghề).
 **Xác minh** (`pipeline/verify.py`): mỗi tin một quyết định có lý do (`EXPIRED`, `EMPTY_JD`,
 `NOT_A_JOB`, `EMPLOYER_MISMATCH`, `AGENCY_POSTING`, `SCAM_SIGNALS`, `SPAM_REPOST`). Tin đáng ngờ phải
 được LLM xác nhận (cache 7 ngày theo prompt + model: đổi `LLM_MODEL` thì hỏi lại); LLM lỗi → hoãn (không nhận, không loại, việc cũ giữ nguyên).
+Tin trang tuyển dụng và trang careers không ghi hạn nộp mà đăng quá `VERIFY_BOARD_MAX_AGE_DAYS`
+(180 ngày) thì `EXPIRED` (trang careers hay để lại bài tuyển dụng 2020–2023 trong mục tin tức).
+Tiêu đề / slug ghi doanh nghiệp khác là bên tuyển ("MITEK VIỆT NAM TUYỂN DỤNG NHÂN VIÊN",
+`/tuyen-dung/cong-ty-tnhh-mitek-...` trên trang hợp tác doanh nghiệp của trường đại học) thì
+`EMPLOYER_MISMATCH` khi tên có loại hình pháp lý, không thì là điểm cần LLM xem; tiêu đề là nhóm
+nghề ("Corporate Social Responsibility Jobs") là trang danh sách (`NOT_A_JOB`).
+
+**Thứ tự lời gọi LLM** (`Prompt.priority`, `services/llm.PrioritySemaphore`): LLM dùng chung có giới
+hạn request/phút; khi quá tải, lời gọi chờ được xếp theo ưu tiên trong mỗi process — tìm nguồn / bóc
+tin (KYC, chọn trang careers, đọc danh sách, trang chi tiết, map profile) trước, rồi xác minh, cuối
+cùng phân loại thêm trường (`job_fields`, chỉ dùng phần còn dư). Trước đây hàng chục lời gọi phân loại
+của một doanh nghiệp chiếm hết lượt, KYC / tìm nguồn của doanh nghiệp khác hết giờ.
+
+**Số lời gọi LLM đồng thời của cả cụm** (`services/redis/semaphore.RedisSemaphore`,
+`LLM_CLUSTER_CONCURRENCY`, mặc định 16): endpoint giới hạn số lời gọi đồng thời theo khoá, tính chung
+mọi process (429 `key_concurrency_limit`, nhà cung cấp đổi lúc nào không báo). Mỗi process tự giới
+hạn thì nhiều process runner cộng lại vượt giới hạn, lời gọi bị 429 liên tục rồi hết giờ chờ (đo
+được: 6 process × 8 = 48 lời gọi cùng lúc, ~50% lỗi `rate_limited`). Nên mỗi lần gửi tới endpoint
+trước hết lấy một chỗ trong hàng chờ chung trên Redis chính (`<REDIS_PREFIX>:sem:llm:*`): hết chỗ thì
+xếp hàng theo `Prompt.priority` (cùng mức thì ai đến trước vào trước), chờ tối đa
+`LLM_QUEUE_WAIT_SECONDS` (300 s) rồi bỏ với lỗi `rate_limited`. Có chỗ rồi mới chờ token
+request/phút (`LLM_REQUESTS_PER_MINUTE`, tối đa `LLM_TIMEOUT_SECONDS`) và gửi: chỉ người giữ chỗ
+tranh token — nếu ngược lại, hàng trăm lời gọi cùng chờ bucket và phần lớn hết 30 s (đo được: 253 /
+278 lời gọi trong 3 phút). Chờ `retry_after` sau 429 thì trả chỗ, gửi lại thì xếp hàng lại. Mọi thao
+tác là script Lua dùng `TIME` của Redis; process chết thì chỗ đang giữ tự trả sau
+`LLM_TIMEOUT_SECONDS` × 2 + 30 s, người chờ thôi hỏi lại quá 5 s bị gỡ khỏi hàng. Số chỗ co giãn
+trong [1, `LLM_CLUSTER_CONCURRENCY`] cho cả cụm: 429 vì đồng thời bớt một chỗ (nhiều 429 trong 1 giây
+— các lời gọi đã vào trước khi bớt — chỉ bớt một, để số chỗ không tụt thẳng về 1), số chỗ × 4 lời
+gọi thành công liên tiếp thì thêm một — tự dò ra giới hạn thật của khoá. Khoá LLM dùng chung với nơi
+khác thì 429 vẫn có ở cả 1 chỗ: số chỗ nằm sát 1, lời gọi chờ trong hàng thay vì lỗi.
+`LLM_CLUSTER_CONCURRENCY` = 0 thì như cũ: mỗi process tự giới hạn trong [1, `LLM_MAX_CONCURRENCY`]
+với cùng cách co giãn.
+
+**Số đo LLM** (`services/llm_metrics.py`): mỗi lời gọi (kể cả câu trả lời dùng lại từ cache; LLM chưa
+cấu hình thì không tính) cộng vào hash `<REDIS_PREFIX>:llm:h:<giờ>` trên Redis chính, giữ 31 ngày: số
+lời gọi, thành công, cache, lỗi theo loại (phần trước dấu `:` của `LLMResult.error`), số lần 429, số
+lần gửi, token vào / ra, histogram thời gian; cùng các số đó theo prompt. Tab LLM của trang Tổng quan
+đọc theo khoảng đã chọn (làm tròn xuống đầu giờ, tối đa 30 ngày) kèm biểu đồ lời gọi / token 24 giờ
+và mốc hết tạm dừng chung (từ PTTL `<REDIS_PREFIX>:rl:pause:llm`; là mốc giờ vì số liệu tổng quan cache
+60 giây). Ghi số đo lỗi chỉ log, không làm hỏng lời gọi.
 
 **Gộp** (`pipeline/dedup.py`): cùng tiêu đề, chung tỉnh/thành, JD giống (MinHash ≥ 0,8) hoặc cùng nơi
 nộp → một việc. Bản chuẩn: ATS / careers > trang tuyển dụng đủ JD > mới nhất. Index duy nhất trong DB

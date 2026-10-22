@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from jobcrawler.prompts.base import Prompt
+from jobcrawler.prompts.base import PRIORITY_VERIFY, Prompt
 
 
 class JobVerification(BaseModel):
@@ -43,4 +43,5 @@ PROMPT = Prompt(
         "Doanh nghiệp:\n$company\n\nTin tuyển dụng (nguồn $source):\n$job\n\n"
         "Điểm cần xem lại: $concerns\n\nNội dung tin (markdown):\n$jd"
     ),
+    priority=PRIORITY_VERIFY,
 )

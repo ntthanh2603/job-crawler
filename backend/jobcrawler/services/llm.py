@@ -10,15 +10,24 @@ Endpoint dùng chung có giới hạn request/phút và số lời gọi đồng
 429 vì vượt request/phút thì tạm dừng cả cụm trong `retry_after`, 429 vì đồng thời thì chờ
 `retry_after` rồi thử lại. Thời gian chờ tối đa mỗi lời gọi bằng LLM_TIMEOUT_SECONDS; bước gọi
 LLM nào cũng có deadline riêng và huỷ lời gọi đang chờ khi hết giờ.
+
+Giới hạn số lời gọi đồng thời của endpoint tính theo khoá, chung mọi process: có `slots`
+(`services/redis/semaphore.RedisSemaphore`, LLM_CLUSTER_CONCURRENCY) thì mỗi lời gọi lấy một chỗ
+trong hàng chung của cả cụm trước (theo ưu tiên của prompt, chờ tối đa LLM_QUEUE_WAIT_SECONDS),
+nên lời gọi vượt giới hạn xếp hàng thay vì bị 429; 429 vì đồng thời thì cả cụm bớt một chỗ, chạy
+trơn thì thêm lại dần.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import heapq
+import itertools
 import random
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -29,8 +38,10 @@ from jobcrawler.prompts.base import Prompt
 
 if TYPE_CHECKING:
     from jobcrawler.common.config import Settings
+    from jobcrawler.services.llm_metrics import LLMMetrics
     from jobcrawler.services.net.kv import KeyValueStore
     from jobcrawler.services.net.ratelimit import RateLimiter
+    from jobcrawler.services.redis.semaphore import Slots
 
 log = get_logger(__name__)
 
@@ -73,12 +84,72 @@ class LLMResult[T: BaseModel]:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     attempts: int = 0
+    throttled: int = 0  # số phản hồi 429
     error: str | None = None
     cached: bool = False  # lấy từ cache (`cached_structured`), không gọi LLM
 
     @property
     def unknown(self) -> bool:
         return self.value is None
+
+
+class PrioritySemaphore:
+    """Semaphore xếp lời gọi đang chờ theo ưu tiên (`Prompt.priority`, số nhỏ trước; cùng mức thì
+    ai chờ trước vào trước): khi LLM quá tải, lời gọi tìm nguồn / bóc tin của doanh nghiệp đang
+    chạy không phải xếp sau hàng chục lời gọi phân loại thêm trường của doanh nghiệp khác.
+
+    Số chỗ co giãn trong [1, `value`]: endpoint báo quá số lời gọi đồng thời của khoá (429
+    `key_concurrency_limit`, giới hạn đổi theo nhà cung cấp và tính chung mọi process) thì bớt một
+    chỗ (`shrink`); chạy trơn thì thêm lại dần (`grow`)."""
+
+    def __init__(self, value: int) -> None:
+        self.limit = value
+        self.capacity = value
+        self._value = value
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+        self._order = itertools.count()
+
+    def shrink(self) -> None:
+        if self.capacity > 1:
+            self.capacity -= 1
+            self._value -= 1  # có thể âm: chỗ đang dùng trả lại thì không trao tiếp
+
+    def grow(self) -> None:
+        if self.capacity < self.limit:
+            self.capacity += 1
+            self._value += 1
+            self._wake()
+
+    async def acquire(self, priority: int) -> None:
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._waiters, (priority, next(self._order), future))
+        self._wake()
+        try:
+            await future
+        except asyncio.CancelledError:
+            if not future.cancelled():
+                self.release()  # được trao lượt đúng lúc bị huỷ: trao tiếp cho người sau
+            raise
+
+    def release(self) -> None:
+        self._value += 1
+        self._wake()
+
+    def _wake(self) -> None:
+        # Lời gọi đã huỷ (future xong) nằm lại trong heap tới khi tới lượt thì bỏ qua.
+        while self._value > 0 and self._waiters:
+            _, _, future = heapq.heappop(self._waiters)
+            if not future.done():
+                self._value -= 1
+                future.set_result(None)
+
+    @contextlib.asynccontextmanager
+    async def hold(self, priority: int) -> AsyncIterator[None]:
+        await self.acquire(priority)
+        try:
+            yield
+        finally:
+            self.release()
 
 
 def truncate(text: str, limit: int) -> str:
@@ -120,11 +191,15 @@ class LLMClient:
         requests_per_minute: float | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         cache: KeyValueStore | None = None,
+        metrics: LLMMetrics | None = None,
+        slots: Slots | None = None,
+        queue_wait: float = 300.0,
     ) -> None:
         self._client = client
         self.model = model
         self._disable_thinking = disable_thinking
-        self._sem = asyncio.Semaphore(max_concurrency)
+        self._sem = PrioritySemaphore(max_concurrency)
+        self._calm = 0  # lời gọi thành công liên tiếp từ lần bị 429 vì đồng thời
         self.max_input_chars = max_input_chars
         self._timeout = timeout
         self._limiter = limiter
@@ -132,6 +207,11 @@ class LLMClient:
         self._sleep = sleep
         # Cache câu trả lời theo nội dung (`cached()`), dùng chung mọi worker (Redis).
         self.cache = cache
+        # Số đo lời gọi cho trang Tổng quan (`llm_metrics`), cộng dồn trên Redis chính.
+        self.metrics = metrics
+        # Hàng chung của cả cụm (giới hạn số lời gọi đồng thời theo khoá của endpoint).
+        self._slots = slots
+        self._queue_wait = queue_wait
 
     @classmethod
     def from_settings(
@@ -139,6 +219,8 @@ class LLMClient:
         settings: Settings,
         limiter: RateLimiter | None = None,
         cache: KeyValueStore | None = None,
+        metrics: LLMMetrics | None = None,
+        slots: Slots | None = None,
     ) -> LLMClient:
         client = None
         if settings.llm_enabled:
@@ -161,6 +243,9 @@ class LLMClient:
             limiter=limiter,
             requests_per_minute=settings.llm_requests_per_minute,
             cache=cache,
+            metrics=metrics,
+            slots=slots,
+            queue_wait=settings.llm_queue_wait_seconds,
         )
 
     @property
@@ -194,6 +279,15 @@ class LLMClient:
         if is_rate_cap(exc) and self._limiter is not None:
             await self._limiter.penalize(LIMITER_KEY, delay)
             return delay < budget  # lần chờ thật nằm ở `_wait_turn`
+        if not is_rate_cap(exc):
+            # Quá số lời gọi đồng thời của khoá: cả cụm bớt chỗ (hàng chung), không có hàng chung
+            # thì process này bớt một chỗ.
+            if self._slots is not None:
+                with contextlib.suppress(Exception):
+                    await self._slots.shrink()
+            else:
+                self._sem.shrink()
+                self._calm = 0
         delay += random.uniform(0, 0.5)
         if delay >= budget:
             return False
@@ -246,51 +340,69 @@ class LLMClient:
         import openai
 
         started = time.monotonic()
+        client = self._client
+        # Có hàng chung của cả cụm thì nó thay chỗ của process (`_slot`).
+        hold = self._sem.hold(prompt.priority) if self._slots is None else contextlib.nullcontext()
+        queue_deadline = started + self._queue_wait
         waited = 0.0  # tổng thời gian chờ lượt / chờ sau 429, tối đa `timeout`
         tries = 0  # lần thử thường (lỗi tạm thời, JSON sai): tối đa 2
         limited = 0  # lần bị 429
-        async with self._sem:
+        async with hold:
             while tries < 2:
-                mark = time.monotonic()
-                turn = await self._wait_turn(self._timeout - waited)
-                waited += time.monotonic() - mark
-                if not turn:
-                    result.error = f"rate_limited: chờ quá {self._timeout:g} s" + (
-                        f" ({result.error})" if result.error else ""
-                    )
-                    break
-                tries += 1
-                result.attempts += 1
-                try:
-                    async with asyncio.timeout(self._timeout):
-                        resp = await self._client.chat.completions.create(
-                            messages=messages, **kwargs
+                resp: Any = None
+                failure: Exception | None = None
+                # Chỗ chung giữ trong lúc chờ token request/phút và chờ trả lời (chỉ người đang giữ
+                # chỗ tranh token); lỗi xử lý sau khi trả chỗ, chờ sau 429 không giữ chỗ.
+                async with self._slot(prompt.priority, queue_deadline) as granted:
+                    if not granted:
+                        result.error = (
+                            f"rate_limited: chờ lượt LLM chung quá {self._queue_wait:g} s"
                         )
-                except (TimeoutError, openai.APITimeoutError):
-                    result.error = "timeout"
-                    continue
-                except openai.APIConnectionError as exc:
-                    result.error = f"connection: {exc}"
-                    continue
-                except openai.APIStatusError as exc:
-                    result.error = f"http_{exc.status_code}: {exc.message}"
-                    if exc.status_code == 429:
-                        tries -= 1  # không tính vào số lần thử thường
-                        limited += 1
-                        mark = time.monotonic()
-                        again = limited <= MAX_RATE_LIMIT_RETRIES and await self._back_off(
-                            exc, self._timeout - waited
+                        break
+                    mark = time.monotonic()
+                    turn = await self._wait_turn(self._timeout - waited)
+                    waited += time.monotonic() - mark
+                    if not turn:
+                        result.error = f"rate_limited: chờ quá {self._timeout:g} s" + (
+                            f" ({result.error})" if result.error else ""
                         )
-                        waited += time.monotonic() - mark
-                        if again:
+                        break
+                    tries += 1
+                    result.attempts += 1
+                    try:
+                        async with asyncio.timeout(self._timeout):
+                            resp = await client.chat.completions.create(messages=messages, **kwargs)
+                    except Exception as exc:
+                        failure = exc
+                if failure is not None:
+                    try:
+                        raise failure
+                    except (TimeoutError, openai.APITimeoutError):
+                        result.error = "timeout"
+                        continue
+                    except openai.APIConnectionError as exc:
+                        result.error = f"connection: {exc}"
+                        continue
+                    except openai.APIStatusError as exc:
+                        result.error = f"http_{exc.status_code}: {exc.message}"
+                        if exc.status_code == 429:
+                            tries -= 1  # không tính vào số lần thử thường
+                            limited += 1
+                            result.throttled = limited
+                            mark = time.monotonic()
+                            again = limited <= MAX_RATE_LIMIT_RETRIES and await self._back_off(
+                                exc, self._timeout - waited
+                            )
+                            waited += time.monotonic() - mark
+                            if again:
+                                continue
+                            break
+                        if exc.status_code >= 500:
                             continue
                         break
-                    if exc.status_code >= 500:
+                    except Exception as exc:  # phản hồi sai dạng (APIResponseValidationError...)
+                        result.error = f"error: {type(exc).__name__}: {exc}"[:500]
                         continue
-                    break
-                except Exception as exc:  # phản hồi sai dạng (APIResponseValidationError...)
-                    result.error = f"error: {type(exc).__name__}: {exc}"[:500]
-                    continue
 
                 usage = getattr(resp, "usage", None)
                 if usage is not None:
@@ -309,6 +421,14 @@ class LLMClient:
                 try:
                     result.value = schema.model_validate_json(extract_json(content))
                     result.error = None
+                    if self._slots is not None:  # chạy trơn: cả cụm thêm lại chỗ dần
+                        with contextlib.suppress(Exception):
+                            await self._slots.grow()
+                    else:
+                        self._calm += 1
+                        if self._calm >= self._sem.capacity * 4:  # chạy trơn: thêm lại một chỗ
+                            self._sem.grow()
+                            self._calm = 0
                     break
                 except ValidationError as exc:
                     result.error = f"parse_error: {exc.error_count()} lỗi"
@@ -338,7 +458,27 @@ class LLMClient:
             attempts=result.attempts,
             error=result.error,
         )
+        if self.metrics is not None:
+            await self.metrics.record(result)
         return result
+
+    @contextlib.asynccontextmanager
+    async def _slot(self, priority: int, deadline: float) -> AsyncIterator[bool]:
+        """Một chỗ trong hàng chung của cả cụm cho một lần gửi (không có hàng chung: luôn có),
+        xếp hàng theo `priority` tới `deadline` (monotonic); False nếu chờ quá."""
+        slots = self._slots
+        if slots is None:
+            yield True
+            return
+        token = await slots.acquire(priority, timeout=max(0.0, deadline - time.monotonic()))
+        if token is None:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(slots.release(token))
 
 
 def cache_key(prompt: Prompt, key: str, model: str | None) -> str:
@@ -362,7 +502,7 @@ async def cached_structured[T: BaseModel](
     full_key = cache_key(prompt, key, llm.model)
     if kv is not None and (cached := await kv.get(full_key)) is not None:
         try:
-            return LLMResult(
+            hit = LLMResult(
                 value=schema.model_validate_json(cached),
                 prompt=prompt.name,
                 version=prompt.version,
@@ -371,6 +511,10 @@ async def cached_structured[T: BaseModel](
             )
         except ValidationError:
             pass
+        else:
+            if llm.metrics is not None:
+                await llm.metrics.record(hit)
+            return hit
     result = await llm.structured(prompt, schema, **values)
     if kv is not None and result.value is not None:
         await kv.set(full_key, result.value.model_dump_json(), ttl=ttl)

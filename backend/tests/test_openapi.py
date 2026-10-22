@@ -27,6 +27,9 @@ from jobcrawler.modules.jobs.jobs_schema import SourceReviewOut
 from jobcrawler.modules.overview import stats_service
 from jobcrawler.modules.overview.overview_schema import (
     BoardStatsOut,
+    LLMHourOut,
+    LLMPromptStatsOut,
+    LLMStatsOut,
     QueueStatsOut,
     RunStatsOut,
     SourceStatsOut,
@@ -36,7 +39,7 @@ from jobcrawler.modules.overview.overview_schema import (
 )
 from jobcrawler.modules.proxies import proxies_service
 from jobcrawler.modules.proxies.proxies_schema import ProxyCheckOut, ProxyStatusOut
-from jobcrawler.services import health
+from jobcrawler.services import health, llm_metrics
 
 SPEC = Path(__file__).resolve().parents[1] / "openapi.json"
 
@@ -145,6 +148,9 @@ MIRRORS: list[tuple[type[BaseModel], type, set[str]]] = [
     (SourceReviewOut, evaluate_service.SourceReview, {"precision"}),
     (ProxyStatusOut, proxies_service.ProxyStatus, set()),
     (ProxyCheckOut, health.ProxyCheck, set()),
+    (LLMStatsOut, llm_metrics.LLMStats, set()),
+    (LLMPromptStatsOut, llm_metrics.LLMPromptStats, set()),
+    (LLMHourOut, llm_metrics.LLMHour, set()),
 ]
 
 

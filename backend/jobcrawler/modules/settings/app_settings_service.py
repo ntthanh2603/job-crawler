@@ -1115,10 +1115,30 @@ GROUPS: tuple[Group, ...] = (
             live=False,
         ),
         _s(
+            "llm_cluster_concurrency",
+            "int",
+            "Request LLM song song cả cụm",
+            "Mọi process cộng lại gửi cùng lúc tối đa chừng này request tới LLM; request vượt mức "
+            "xếp hàng chờ theo ưu tiên thay vì bị máy chủ LLM từ chối. Máy chủ báo quá số request "
+            "đồng thời thì tự hạ dần, chạy trơn thì nâng lại tới mức này. 0 = tắt (mỗi process tự "
+            "giới hạn).",
+            unit="request",
+            live=False,
+        ),
+        _s(
+            "llm_queue_wait_seconds",
+            "float",
+            "Thời gian xếp hàng LLM tối đa",
+            "Một lời gọi chờ lượt trong hàng chung của cả cụm tối đa chừng này rồi bỏ.",
+            unit="giây",
+            live=False,
+        ),
+        _s(
             "llm_max_concurrency",
             "int",
             "Request LLM song song mỗi process",
-            "Mỗi process gửi cùng lúc tối đa chừng này request tới LLM.",
+            "Mỗi process gửi cùng lúc tối đa chừng này request tới LLM. Chỉ dùng khi tắt giới hạn "
+            "cả cụm.",
             unit="request",
             live=False,
         ),
@@ -1142,8 +1162,7 @@ GROUPS: tuple[Group, ...] = (
             "llm_requests_per_minute",
             "float",
             "Giới hạn request mỗi phút",
-            "Giới hạn chung cho mọi process (để trống = không giới hạn). Nên đặt thấp hơn giới hạn "
-            "của máy chủ LLM một chút.",
+            "Giới hạn chung cho mọi process. Nên đặt thấp hơn giới hạn của máy chủ LLM một chút.",
             unit="request/phút",
             live=False,
         ),
@@ -1527,6 +1546,8 @@ _SECTIONS: dict[str, tuple[Section, ...]] = {
         _sec("Mô hình LLM", "llm_base_url", "llm_model", "llm_api_key", "llm_disable_thinking"),
         _sec(
             "Giới hạn LLM",
+            "llm_cluster_concurrency",
+            "llm_queue_wait_seconds",
             "llm_max_concurrency",
             "llm_max_input_chars",
             "llm_timeout_seconds",

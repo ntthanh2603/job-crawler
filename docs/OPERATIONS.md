@@ -207,7 +207,15 @@ runner` (heartbeat Redis mỗi 5 s); `worker`: `jobworker health` (mất gateway
 
 - **Docker Desktop tắt** (máy ngủ / cập nhật): mở lại, container tự lên; worker tự nối lại gateway.
 - **LLM lỗi** (503…): mỗi lời gọi tốn ~4 s rồi bỏ; KYC ra `ambiguous`, tin cần LLM bị hoãn (lượt sau
-  chấm lại). Kiểm tra: `jobcrawler llm check`.
+  chấm lại). Kiểm tra: `jobcrawler llm check`. Trang **Tổng quan** → tab **LLM**: tỉ lệ thành công,
+  P50 / P95 thời gian, lỗi theo nguyên nhân, số lần 429 và từng bước (prompt). Nhãn "Tạm dừng" là cả
+  cụm đang chờ sau 429 vượt request/phút. Số lời gọi đồng thời của cả cụm có hàng chờ chung (Cài
+  đặt → LLM & tìm kiếm → "Request LLM song song cả cụm", tự hạ khi endpoint báo quá giới hạn — log
+  `semaphore.shrink` kèm số chỗ còn lại); lỗi "chờ lượt LLM chung quá … s" nhiều → endpoint không kịp
+  với số build đang chạy: giảm "Job build song song" hoặc tăng năng lực LLM. "Chờ lượt quá lâu" /
+  nhiều 429 → giảm `LLM_REQUESTS_PER_MINUTE` hoặc "Request LLM song song cả cụm" cho khớp giới hạn
+  của endpoint; "Quá giờ" nhiều → model chậm, tăng `LLM_TIMEOUT_SECONDS` hoặc giảm tải; "JSON sai
+  schema" tăng sau khi đổi `LLM_MODEL` → model mới không theo được structured output.
 - **Redis không lên sau khi tắt đột ngột** (log "Bad file format reading the append only file"):
 
   ```bash

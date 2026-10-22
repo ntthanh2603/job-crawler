@@ -87,7 +87,8 @@ def test_bounds_and_kinds() -> None:
     serp = a.SPEC_BY_KEY["serp_results"]
     assert (serp.min, serp.max) == (1, 20)
     assert a.SPEC_BY_KEY["llm_timeout_seconds"].min_exclusive
-    assert a.SPEC_BY_KEY["llm_requests_per_minute"].nullable
+    assert not a.SPEC_BY_KEY["llm_requests_per_minute"].nullable  # có số mặc định
+    assert a.SPEC_BY_KEY["gateway_public_url"].nullable
     assert not a.SPEC_BY_KEY["poll_interval_seconds"].nullable
     assert a.SPEC_BY_KEY["build_window"].kind == "window"
     assert a.SPEC_BY_KEY["board_tail_cron"].kind == "cron"
@@ -232,8 +233,8 @@ def test_prepare_secrets_resets_and_nullable() -> None:
     assert p.resets == {"serp_api_key"}
     assert p.after.serp_api_key == SecretStr("sk-env")
 
-    p = a.prepare(s, {}, {"llm_requests_per_minute": "", "llm_base_url": ""})
-    assert p.upserts == {"llm_requests_per_minute": None, "llm_base_url": None}
+    p = a.prepare(s, {}, {"gateway_public_url": "", "llm_base_url": ""})
+    assert p.upserts == {"gateway_public_url": None, "llm_base_url": None}
     assert not p.after.llm_enabled
 
 

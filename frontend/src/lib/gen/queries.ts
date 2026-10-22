@@ -791,6 +791,57 @@ export type JoinKeyStatusOut = {
   worker_id: string | null;
 };
 
+export type LLMHourOut = {
+  cached: number;
+  completion_tokens: number;
+  failed: number;
+  hour: string;
+  ok: number;
+  prompt_tokens: number;
+};
+
+export type LLMPromptStatsOut = {
+  avg_ms: number | null;
+  cached: number;
+  calls: number;
+  completion_tokens: number;
+  ok: number;
+  prompt: string;
+  prompt_tokens: number;
+};
+
+/**
+ * Lời gọi LLM trong cửa sổ (theo giờ tròn, từ `since`) và trạng thái hiện tại.
+ */
+export type LLMStatsOut = {
+  attempts: number;
+  avg_ms: number | null;
+  cached: number;
+  calls: number;
+  chart: LLMHourOut[];
+  completion_tokens: number;
+  enabled: boolean;
+  /**
+     * @items.minItems 2
+     * @items.maxItems 2
+     */
+  errors: [string, number][];
+  failed: number;
+  max_concurrency: number;
+  model: string | null;
+  ok: number;
+  p50_seconds: number | null;
+  p95_seconds: number | null;
+  paused_until: string | null;
+  per_hour: number | null;
+  prompt_tokens: number;
+  prompts: LLMPromptStatsOut[];
+  requests_per_minute: number | null;
+  since: string;
+  throttled: number;
+  timeout_seconds: number;
+};
+
 export type LiveOutTopic = typeof LiveOutTopic[keyof typeof LiveOutTopic];
 
 
@@ -1173,6 +1224,7 @@ export type OverviewOut = {
   chart: RunsHourOut[];
   charts: ChartsOut;
   fetch_chart: FetchesHourOut[];
+  llm: LLMStatsOut;
   recent_runs: RecentRunOut[];
   stats: StatsOut;
 };

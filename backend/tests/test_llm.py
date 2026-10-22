@@ -10,12 +10,14 @@ import pytest
 from pydantic import BaseModel
 
 from jobcrawler.prompts import Prompt
+from jobcrawler.prompts.base import PRIORITY_COLLECT, PRIORITY_ENRICH, PRIORITY_VERIFY
 from jobcrawler.prompts.healthcheck import PROMPT as HEALTHCHECK
 from jobcrawler.services.fakes import FakeChatClient
 from jobcrawler.services.llm import (
     MAX_RATE_LIMIT_RETRIES,
     TRUNCATION_MARK,
     LLMClient,
+    PrioritySemaphore,
     cached_structured,
     extract_json,
     is_rate_cap,
@@ -292,3 +294,166 @@ async def test_cache_is_per_model() -> None:
     other = await cached_structured(new, kv, "h1", PROMPT, Answer, ttl=60, document="x")
     assert other.value is not None
     assert not other.cached
+
+
+async def test_priority_semaphore_serves_lower_priority_number_first() -> None:
+    sem = PrioritySemaphore(1)
+    order: list[str] = []
+    await sem.acquire(0)
+
+    async def call(name: str, priority: int) -> None:
+        async with sem.hold(priority):
+            order.append(name)
+
+    tasks = [
+        asyncio.create_task(call("enrich", PRIORITY_ENRICH)),
+        asyncio.create_task(call("verify", PRIORITY_VERIFY)),
+        asyncio.create_task(call("collect-1", PRIORITY_COLLECT)),
+        asyncio.create_task(call("collect-2", PRIORITY_COLLECT)),
+    ]
+    await asyncio.sleep(0)
+    sem.release()
+    await asyncio.gather(*tasks)
+    assert order == ["collect-1", "collect-2", "verify", "enrich"]
+
+
+async def test_priority_semaphore_skips_cancelled_waiters() -> None:
+    sem = PrioritySemaphore(1)
+    await sem.acquire(0)
+    waiting = asyncio.create_task(sem.acquire(0))
+    await asyncio.sleep(0)
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    sem.release()
+    # Chỗ trống không bị lời gọi đã huỷ giữ: lời gọi sau vào ngay.
+    await asyncio.wait_for(sem.acquire(PRIORITY_ENRICH), timeout=1)
+
+
+async def test_slot_granted_to_cancelled_waiter_passes_on() -> None:
+    sem = PrioritySemaphore(1)
+    await sem.acquire(0)
+    first = asyncio.create_task(sem.acquire(0))
+    second = asyncio.create_task(sem.acquire(PRIORITY_ENRICH))
+    await asyncio.sleep(0)
+    sem.release()  # trao lượt cho `first`...
+    first.cancel()  # ...nhưng nó bị huỷ trước khi chạy tiếp
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await asyncio.wait_for(second, timeout=1)
+
+
+async def test_concurrency_429_shrinks_then_success_grows_back(clock: FakeClock) -> None:
+    """Khoá bị giới hạn số lời gọi đồng thời: process bớt chỗ, chạy trơn thì thêm lại dần."""
+    replies: list[str | BaseException] = [rate_limited("key_concurrency_limit", 1)] * 3
+    llm, _ = make([*replies, *[OK] * 40], sleep=clock.sleep, max_concurrency=4)
+    sem = llm._sem  # pyright: ignore[reportPrivateUsage]
+    await llm.structured(PROMPT, Answer, document="x")
+    assert sem.capacity == 1
+    for _ in range(4 * 1 + 4 * 2 + 4 * 3):
+        await llm.structured(PROMPT, Answer, document="x")
+    assert sem.capacity == 4
+
+
+class FakeSlots:
+    """Hàng chung giả của cả cụm (như `RedisSemaphore`) trong một process."""
+
+    def __init__(self, limit: int, *, grant: bool = True) -> None:
+        self.sem = PrioritySemaphore(limit)
+        self.grant = grant
+        self.held: set[str] = set()
+        self.priorities: list[int] = []
+        self.shrinks = 0
+        self.grows = 0
+        self._ids = iter(range(10**6))
+
+    async def acquire(self, priority: int, *, timeout: float) -> str | None:
+        self.priorities.append(priority)
+        if not self.grant:
+            return None
+        await self.sem.acquire(priority)
+        token = f"t{next(self._ids)}"
+        self.held.add(token)
+        return token
+
+    async def release(self, token: str) -> None:
+        self.held.discard(token)
+        self.sem.release()
+
+    async def shrink(self) -> int:
+        self.shrinks += 1
+        return 1
+
+    async def grow(self) -> int:
+        self.grows += 1
+        return 1
+
+
+async def test_cluster_slots_limit_calls_instead_of_process_limit() -> None:
+    slots = FakeSlots(2)
+    llm, fake = make([OK], delay=0.02, max_concurrency=8, slots=slots)
+    await asyncio.gather(*(llm.structured(PROMPT, Answer, document="x") for _ in range(6)))
+    assert fake.max_active == 2
+    assert slots.held == set()  # mọi chỗ đã trả
+    assert slots.grows == 6
+
+
+class CountingLimiter:
+    """Token bucket giả: đếm số lời gọi đang cùng chờ token."""
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+
+    async def acquire(self, domain: str, *, rate: float, burst: int = 1) -> float:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(0.01)
+        self.active -= 1
+        return 0.01
+
+    async def penalize(self, domain: str, seconds: float) -> None:
+        return None
+
+
+async def test_only_slot_holders_wait_for_the_rate_limit_token() -> None:
+    """Hàng chung trước, token request/phút sau: hàng trăm lời gọi không cùng lao vào bucket rồi
+    hết `timeout` (lời gọi chờ lâu trong hàng chung theo ưu tiên thay vào đó)."""
+    slots = FakeSlots(2)
+    limiter = CountingLimiter()
+    llm, fake = make([OK], slots=slots, limiter=limiter, requests_per_minute=600)
+    results = await asyncio.gather(
+        *(llm.structured(PROMPT, Answer, document="x") for _ in range(8))
+    )
+    assert all(r.value is not None for r in results)
+    assert limiter.max_active <= 2
+    assert fake.max_active <= 2
+
+
+async def test_cluster_slot_wait_too_long_gives_up_without_calling() -> None:
+    slots = FakeSlots(1, grant=False)
+    llm, fake = make([OK], slots=slots, queue_wait=5)
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.value is None
+    assert result.error == "rate_limited: chờ lượt LLM chung quá 5 s"
+    assert result.attempts == 0
+    assert fake.calls == []
+
+
+async def test_cluster_slot_is_released_while_backing_off_after_429() -> None:
+    slots = FakeSlots(1)
+    held_while_sleeping: list[int] = []
+
+    async def sleep(seconds: float) -> None:
+        held_while_sleeping.append(len(slots.held))
+
+    llm, fake = make(
+        [rate_limited("key_concurrency_limit", 1), OK], sleep=sleep, max_concurrency=4, slots=slots
+    )
+    result = await llm.structured(PROMPT, Answer, document="x")
+    assert result.value is not None
+    assert len(fake.calls) == 2
+    assert held_while_sleeping == [0]  # chờ sau 429 không giữ chỗ chung
+    assert slots.shrinks == 1  # cả cụm bớt chỗ, không phải process
+    assert llm._sem.capacity == 4  # pyright: ignore[reportPrivateUsage]
+    assert slots.priorities == [PROMPT.priority, PROMPT.priority]

@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from jobcrawler.common.schemas import RawJob
-from jobcrawler.prompts.base import Prompt
+from jobcrawler.prompts.base import PRIORITY_ENRICH, Prompt
 
 _EVIDENCE = "Trích nguyên văn (ngắn) đoạn trong tin cho thấy giá trị này; không có thì null"
 
@@ -66,4 +66,5 @@ PROMPT = Prompt(
         "Tiêu đề: $title\nTrường nguồn ghi:\n$fields\n\nCần xác định: $unclear\n\n"
         "Nội dung tin (markdown):\n$jd"
     ),
+    priority=PRIORITY_ENRICH,
 )
