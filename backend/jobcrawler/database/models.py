@@ -127,7 +127,7 @@ class Company(Base):
     # Danh sách bằng chứng [{url, snippet}] (hoặc ứng viên khi `ambiguous`).
     kyc_evidence: Mapped[Any | None] = mapped_column(JSONB)
     kyc_at: Mapped[datetime | None]
-    # Ghi sẵn để danh sách doanh nghiệp lọc/hiện không cần truy vấn con theo từng dòng: lượt chạy
+    # Ghi sẵn để danh sách doanh nghiệp lọc/hiện không cần truy vấn con theo từng dòng: lượt build
     # mới nhất (cập nhật khi lượt bắt đầu / kết thúc) và số job đang mở (sau mỗi lần lưu job;
     # bảo trì định kỳ đối chiếu lại).
     active_jobs: Mapped[int] = mapped_column(server_default=text("0"))
@@ -434,7 +434,7 @@ class JobReview(Base):
 
 
 class CompanyRun(Base):
-    """Một lượt chạy một doanh nghiệp: `build` (đủ, ghi bộ khung) hoặc `poll` (theo bộ khung).
+    """Một lượt của một doanh nghiệp: `build` (đủ, ghi bộ khung) hoặc `poll` (theo bộ khung).
 
     Lượt poll không đổi gì (không tin mới, không tin đóng, không lỗi) không ghi dòng ở đây, chỉ
     cập nhật `company_schedules` — ban ngày mỗi doanh nghiệp poll vài trăm lượt."""

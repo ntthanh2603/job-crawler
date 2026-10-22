@@ -133,7 +133,7 @@ class CompanyDetail:
     # Số việc đang mở / không còn mở (đếm có giới hạn) theo cùng định nghĩa với `company_jobs`.
     active_jobs: int
     inactive_jobs: int
-    runs: int  # số lượt chạy (đếm có giới hạn)
+    runs: int  # số lượt build / poll (đếm có giới hạn)
     rejected: int  # số tin bị loại (đếm có giới hạn)
     failed_pages: list[FailedPage]
 
@@ -157,8 +157,8 @@ async def company_names(session: AsyncSession, ids: set[str]) -> dict[str, str]:
 
 
 async def company_detail(session: AsyncSession, company_id: UUID) -> CompanyDetail | None:
-    """Thông tin doanh nghiệp + số đếm cho các tab; danh sách việc làm / lượt chạy / tin bị loại
-    lấy theo trang (`company_jobs`, `company_runs`, `company_rejected`)."""
+    """Thông tin doanh nghiệp + số đếm cho các tab; danh sách việc làm, lượt build / poll, tin bị
+    loại lấy theo trang (`company_jobs`, `company_runs`, `company_rejected`)."""
     company = await session.get(Company, company_id)
     if company is None:
         return None
@@ -290,12 +290,14 @@ async def enqueue_companies(
     company_ids: Sequence[UUID] | None = None,
     stale_hours: float | None = None,
 ) -> batch_service.EnqueueResult:
-    """`company_ids` None = mọi doanh nghiệp (lọc `stale_hours` nếu có)."""
+    """Build bấm từ giao diện (nút Build, thêm / nạp doanh nghiệp). `company_ids` None = mọi
+    doanh nghiệp (lọc `stale_hours` nếu có). Tìm nguồn lại và đọc trang mới: người dùng bấm
+    Build là để thấy site lúc này, không phải kết quả cache (lượt build xong trong vài giây)."""
     async with res.sessionmaker() as session:
         companies = await batch_service.select_companies(
             session, company_ids=company_ids, stale_hours=stale_hours
         )
-    return await batch_service.enqueue_companies(res, companies)
+    return await batch_service.enqueue_companies(res, companies, refresh=True)
 
 
 @dataclass(slots=True)

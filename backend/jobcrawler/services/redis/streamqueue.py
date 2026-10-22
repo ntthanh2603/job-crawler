@@ -14,7 +14,7 @@ Worker chết (OOM, kill): entry còn trong PEL của consumer đó. Worker số
 mình đang chạy mỗi lần báo sống (XCLAIM JUSTID); entry idle quá `reclaim_seconds` bị XAUTOCLAIM thu
 hồi: chạy lại nếu còn lượt (`retries` = số lần chạy tối đa), hết lượt thì `failed`. Mọi
 chuyển trạng thái chạy trong Lua và so `entry` (id entry đổi mỗi lần xếp lại: đóng vai fencing
-token của lượt chạy), nên lượt cũ (đã thu hồi) không ghi đè trạng thái job mới.
+token của lần chạy job), nên lượt cũ (đã thu hồi) không ghi đè trạng thái job mới.
 
 Lượt bị thu hồi khi worker vẫn sống (event loop đứng quá `reclaim_seconds`, mất Redis) tự dừng: mỗi
 lần báo sống, Lua chỉ làm mới entry mà hash job còn ghi đúng `entry` + worker + `active`; entry
@@ -155,7 +155,7 @@ return lost
 
 # Trả entry: `done` (xong / lỗi hẳn), `retry` (xếp lại cuối stream), `recover` (thu hồi từ worker
 # chết: chạy lại nếu còn lượt). KEYS: job, active, queued, stream. ARGV: key, entry, mode, now (ms),
-# trạng thái khi `done`, lỗi, kết quả, ttl, group, tính lượt chạy (1/0).
+# trạng thái khi `done`, lỗi, kết quả, ttl, group, tính lần chạy job (1/0).
 _RELEASE = """
 redis.call('XACK', KEYS[4], ARGV[9], ARGV[2])
 redis.call('XDEL', KEYS[4], ARGV[2])
@@ -514,7 +514,7 @@ class StreamQueue:
     ) -> list[str]:
         """Báo worker còn sống và làm mới idle các entry nó đang chạy (`running`: entry → khoá
         job) để không bị thu hồi. Trả các entry không còn là của worker (đã bị thu hồi / xếp lại):
-        worker phải dừng lượt chạy đó."""
+        worker phải dừng lần chạy job đó."""
         args: list[Any] = [worker_id, dump_json(info), int(ttl * 1000), GROUP, self._job_prefix]
         for entry, key in running.items():
             args += [entry, key]
@@ -640,7 +640,7 @@ class StreamWorker:
         self.stats: Counter[str] = Counter(complete=0, failed=0, retried=0, aborted=0, revoked=0)
         self.heartbeat = max(1.0, queue.reclaim_seconds / 6)
         self._started = datetime.now(UTC).isoformat()
-        self._running: dict[str, asyncio.Task[None]] = {}  # entry → lượt chạy
+        self._running: dict[str, asyncio.Task[None]] = {}  # entry → lần chạy job
         self._inner: dict[str, asyncio.Task[Any]] = {}  # entry → hàm job
         self._keys: dict[str, str] = {}  # entry → khoá job (báo sống kiểm quyền giữ)
         self._revoked: set[str] = set()  # entry bị thu hồi khi đang chạy: huỷ, không ghi gì

@@ -13,13 +13,13 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from jobcrawler.common.logging import get_logger
-from jobcrawler.common.schemas import CompanyIn, RunStatus, RunTrigger
+from jobcrawler.common.schemas import CompanyIn, RunKind, RunStatus, RunTrigger
 from jobcrawler.common.text import normalize_company_name, strip_accents
 from jobcrawler.common.urls import parse_domain_input
 from jobcrawler.database.models import Company, CompanyAlias, CompanyRun
@@ -37,11 +37,11 @@ _HEADERS = {
     "note": ("note", "notes", "ghi chu"),
 }
 IMPORT_CHUNK = 500
-# Lần thử lại một lô import bị Postgres huỷ vì deadlock (SQLSTATE 40P01) với lượt chạy doanh nghiệp.
+# Lần thử lại một lô import bị Postgres huỷ vì deadlock (SQLSTATE 40P01) với lượt build.
 IMPORT_DEADLOCK_RETRIES = 3
 DEADLOCK = "40P01"
 ENQUEUE_CHUNK = 500
-# Lượt chạy xong (có kết quả) — dùng cho `--stale-hours`; `failed` coi như chưa chạy.
+# Lượt build xong (có kết quả) — dùng cho `--stale-hours`; `failed` coi như chưa build.
 DONE_STATUSES = (RunStatus.OK.value, RunStatus.PARTIAL.value, RunStatus.AMBIGUOUS.value)
 
 
@@ -197,8 +197,8 @@ async def _import_chunk(
     norms = {normalize_company_name(r.name) for r in rows}
     taxes = {r.tax_code for r in rows if r.tax_code}
     # Khoá như `kyc.resolve_company` để worker đang chạy không tạo trùng cùng lúc, cùng thứ tự với
-    # nó (tên trước, `mst:` sau): xếp lẫn hai loại thì lô giữ `mst:X` chờ tên mà lượt chạy đang
-    # giữ, lượt chạy lại chờ `mst:X` → deadlock.
+    # nó (tên trước, `mst:` sau): xếp lẫn hai loại thì lô giữ `mst:X` chờ tên mà lượt build đang
+    # giữ, lượt build lại chờ `mst:X` → deadlock.
     for key in [*sorted(norms), *sorted(f"mst:{t}" for t in taxes)]:
         await kyc._lock(session, key)  # pyright: ignore[reportPrivateUsage]
     by_tax = {
@@ -297,6 +297,30 @@ class EnqueueResult:
     already_queued: int = 0  # đã có job cùng khoá đang chờ/chạy
 
 
+def _stale[S: Select[Any]](stmt: S, stale_hours: float | None, now: datetime | None) -> S:
+    """Chỉ doanh nghiệp chưa có lượt build xong trong `stale_hours` giờ (None: không lọc)."""
+    if stale_hours is None:
+        return stmt
+    cutoff = (now or datetime.now(UTC)) - timedelta(hours=stale_hours)
+    last = (
+        select(CompanyRun.company_id, func.max(CompanyRun.finished_at).label("finished"))
+        .where(CompanyRun.kind == RunKind.BUILD.value, CompanyRun.status.in_(DONE_STATUSES))
+        .group_by(CompanyRun.company_id)
+        .subquery()
+    )
+    return stmt.outerjoin(last, last.c.company_id == Company.id).where(
+        or_(last.c.finished.is_(None), last.c.finished < cutoff)
+    )
+
+
+async def count_companies(
+    session: AsyncSession, *, stale_hours: float | None = None, now: datetime | None = None
+) -> int:
+    """Số doanh nghiệp `select_companies(stale_hours=...)` sẽ chọn (hộp thoại Build đếm trước)."""
+    stmt = _stale(select(func.count()).select_from(Company), stale_hours, now)
+    return int(await session.scalar(stmt) or 0)
+
+
 async def select_companies(
     session: AsyncSession,
     *,
@@ -305,22 +329,12 @@ async def select_companies(
     limit: int | None = None,
     now: datetime | None = None,
 ) -> list[Company]:
-    """Doanh nghiệp cần chạy: theo danh sách id (None = tất cả), chỉ lấy doanh nghiệp chưa có
-    lượt chạy xong trong `stale_hours` giờ qua nếu có."""
-    stmt = select(Company)
+    """Doanh nghiệp cần build: theo danh sách id (None = tất cả), chỉ lấy doanh nghiệp chưa có
+    lượt build xong trong `stale_hours` giờ qua nếu có (lượt poll không tính: poll chỉ đọc lại
+    bộ khung, không tìm nguồn / đọc đủ site)."""
+    stmt = _stale(select(Company), stale_hours, now)
     if company_ids is not None:
         stmt = stmt.where(Company.id.in_(company_ids))
-    if stale_hours is not None:
-        cutoff = (now or datetime.now(UTC)) - timedelta(hours=stale_hours)
-        last = (
-            select(CompanyRun.company_id, func.max(CompanyRun.finished_at).label("finished"))
-            .where(CompanyRun.status.in_(DONE_STATUSES))
-            .group_by(CompanyRun.company_id)
-            .subquery()
-        )
-        stmt = stmt.outerjoin(last, last.c.company_id == Company.id).where(
-            or_(last.c.finished.is_(None), last.c.finished < cutoff)
-        )
     companies = list(await session.scalars(stmt.order_by(Company.id)))
     if company_ids is not None:
         order = {cid: i for i, cid in enumerate(company_ids)}
@@ -329,16 +343,23 @@ async def select_companies(
 
 
 async def enqueue_companies(
-    res: Resources, companies: Sequence[Company], *, trigger: RunTrigger = RunTrigger.MANUAL
+    res: Resources,
+    companies: Sequence[Company],
+    *,
+    trigger: RunTrigger = RunTrigger.MANUAL,
+    refresh: bool | None = None,
 ) -> EnqueueResult:
     """Mỗi doanh nghiệp một job `build_company` (lượt build đủ, ghi bộ khung; timeout cứng
-    COMPANY_TIMEOUT_SECONDS). Doanh nghiệp đang có job build chờ/chạy thì bỏ qua."""
+    COMPANY_TIMEOUT_SECONDS). Doanh nghiệp đang có job build chờ/chạy thì bỏ qua. `refresh`:
+    tìm nguồn lại và đọc trang mới (None: theo lý do, xem `crawl_service.build_company`)."""
     from jobcrawler.modules.crawl import crawl_service
 
     result = EnqueueResult(selected=len(companies))
     for i in range(0, len(companies), ENQUEUE_CHUNK):
         chunk = [c.id for c in companies[i : i + ENQUEUE_CHUNK]]
-        result.enqueued += await crawl_service.enqueue_builds(res, chunk, trigger=trigger)
+        result.enqueued += await crawl_service.enqueue_builds(
+            res, chunk, trigger=trigger, refresh=refresh
+        )
     result.already_queued = result.selected - result.enqueued
     log.info(
         "enqueue.done",

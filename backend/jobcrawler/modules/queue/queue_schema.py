@@ -25,7 +25,7 @@ class QueueJobOut(ApiOut):
     company_id: str | None
     # Vì sao job được xếp (build đêm, poll theo chu kỳ, poll lỗi → build lại...).
     trigger: Annotated[str | None, known_values(RunTrigger, nullable=True)]
-    # Lượt chạy tiếp thứ mấy sau lượt `partial` (0 = lượt thường).
+    # Lượt build tiếp thứ mấy sau lượt build `partial` (0 = lượt thường).
     continuation: int
 
 

@@ -33,14 +33,14 @@ class RunStatus(StrEnum):
 
 
 class RunKind(StrEnum):
-    """Loại lượt chạy một doanh nghiệp."""
+    """Loại lượt của một doanh nghiệp: build (đủ) hoặc poll (theo bộ khung)."""
 
     BUILD = "build"  # đủ: KYC, tìm nguồn, đọc hết danh sách + chi tiết, ghi bộ khung
     POLL = "poll"  # chỉ các trang/API trong bộ khung, tải chi tiết tin mới
 
 
 class RunTrigger(StrEnum):
-    """Vì sao lượt chạy được xếp."""
+    """Vì sao lượt build / poll được xếp."""
 
     NIGHTLY = "nightly"  # build ban đêm theo lịch
     SCHEDULE = "schedule"  # poll ban ngày theo chu kỳ

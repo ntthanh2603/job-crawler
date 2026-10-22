@@ -24,6 +24,7 @@ import {
   toneOf,
   useRowLink,
   useTabParam,
+  RunStatusBadge,
 } from "@/components/common"
 import { CompanyCrawlTab, JobDelta, RunTags, ScheduleBadge, useCompanyCrawl, useCrawlActions } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
@@ -38,13 +39,13 @@ import {
   dt,
   duration,
   failReason,
-  label,
   num,
   pct,
   provinces,
   salary,
   shortUrl,
   sourceLabel,
+  runStatusLabel,
 } from "@/lib/format"
 import {
   getGetCompanyJobsQueryOptions,
@@ -164,13 +165,13 @@ function CompanyJobs({ id, active, inactive }: { id: string; active: number; ina
 function CompanyRuns({ id }: { id: string }) {
   const rowLink = useRowLink()
   return (
-    <Section bodyClassName="p-0" title="Các lượt chạy" description="Bấm một dòng để xem request và log">
+    <Section bodyClassName="p-0" title="Các lượt build / poll" description="Bấm một dòng để xem request và log">
       <PagedList
         options={(p) => getGetCompanyRunsQueryOptions(id, p)}
         defaultSort={RUN_SORT}
         defaultLimit={RUN_LIMIT}
         searchPlaceholder="Tìm trong lỗi, hoặc đúng trạng thái / loại (ok, build, poll…)"
-        empty="Chưa chạy lần nào.">
+        empty="Chưa có lượt build / poll nào.">
         {(runs, { sort, onSort }) => (
           <Table>
             <TableHeader>
@@ -201,7 +202,7 @@ function CompanyRuns({ id }: { id: string }) {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-1">
-                      <StatusBadge value={r.status} />
+                      <RunStatusBadge value={r.status} />
                       <RunTags kind={r.kind} trigger={r.trigger} />
                     </div>
                     <div className="mt-0.5 text-meta text-muted-foreground tabular-nums">{duration(r.duration_ms)}</div>
@@ -325,9 +326,9 @@ export function CompanyPage() {
       <StatGrid className="mb-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Việc đang mở" value={num(d.active_jobs)} hint={`${num(d.inactive_jobs)} việc đã đóng`} />
         <StatCard
-          label="Lượt chạy mới nhất"
-          value={last ? cap(ago(last.started_at)) : runs.isLoading ? "…" : "Chưa chạy"}
-          status={last ? { tone: toneOf(last.status), text: label(last.status) } : undefined}
+          label="Lượt build / poll mới nhất"
+          value={last ? cap(ago(last.started_at)) : runs.isLoading ? "…" : "Chưa có lượt nào"}
+          status={last ? { tone: toneOf(last.status), text: runStatusLabel(last.status) } : undefined}
           hint={
             last ? (
               <span className="flex flex-wrap items-center gap-1.5">
@@ -373,7 +374,7 @@ export function CompanyPage() {
             items={[
               { value: "jobs", label: "Việc làm", count: d.active_jobs + d.inactive_jobs },
               { value: "crawl", label: "Bộ khung & lịch", count: crawl.data?.plans.length },
-              { value: "runs", label: "Lượt chạy", count: d.runs_total },
+              { value: "runs", label: "Lượt build / poll", count: d.runs_total },
               { value: "rejected", label: "Tin bị loại", count: d.rejected_total },
             ]}
           />

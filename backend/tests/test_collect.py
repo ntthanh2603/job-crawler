@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 from jobcrawler.common.schemas import ExtractionMethod, FetchOutcome, RawJob
 from jobcrawler.pipeline.collect import collect
@@ -151,3 +152,22 @@ async def test_truncated_source_is_reported_incomplete() -> None:
     assert by_name["fake:ok"].truncated == []
     assert result.incomplete_sources == ["fake:capped"]
     assert len(result.jobs) == 3
+
+
+async def test_fresh_build_and_poll_skip_the_http_cache() -> None:
+    """Build tìm nguồn lại (người dùng bấm Build) và poll đọc trang mới; build thường (lượt build
+    tiếp) dùng HTTP cache."""
+    llm = LLMClient(FakeChatClient(["{}"]), model=None)
+    cases: list[tuple[dict[str, Any], bool]] = [
+        ({}, True),
+        ({"fresh": True}, False),
+        ({"mode": "poll"}, False),
+    ]
+    for kwargs, cached in cases:
+        fetcher = FakeFetcher()
+        fetcher.add("https://one.vn/", "<html><body>Tuyển dụng</body></html>")
+        deadline = time.monotonic() + 5
+        source = Scripted("one", jobs=0)
+        await collect([source], fetcher=fetcher, llm=llm, deadline=deadline, **kwargs)
+        [(_, _, call)] = fetcher.calls
+        assert call.get("use_cache", True) is cached, kwargs

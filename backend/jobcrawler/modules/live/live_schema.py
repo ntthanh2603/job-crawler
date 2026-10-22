@@ -16,7 +16,7 @@ TOPICS: tuple[LiveTopic, ...] = ("workers", "queue", "run")
 class LiveOut(ApiOut):
     """Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với
     `GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.
-    `run` null khi không có lượt chạy này."""
+    `run` null khi không có lượt build / poll này."""
 
     topic: LiveTopic
     workers: WorkersPageOut | None = None

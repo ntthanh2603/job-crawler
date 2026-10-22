@@ -1,6 +1,6 @@
 """Bảo trì định kỳ (cron của runner mỗi giờ, `jobcrawler db maintain`).
 
-- Lượt chạy còn `running` quá timeout (worker chết, container bị kill) → `failed`.
+- Lượt build / poll còn `running` quá timeout (worker chết, container bị kill) → `failed`.
 - Xoá dữ liệu cũ theo lô: `failed_pages` (7 ngày), `source_fetches` và `logs` (30 ngày).
 - Huấn luyện từ điển nén khi đủ dữ liệu / từ điển đã cũ, rồi nén lại dần các dòng cũ.
 - Đối chiếu cột ghi sẵn trên `companies` (số job đang mở, lượt mới nhất); điền dấu vân tay và gộp
@@ -50,7 +50,7 @@ DEDUP_PER_RUN = 5_000
 LOCK_KEY = "jobcrawler-maintenance"
 # Hạn khoá của lượt bảo trì (gia hạn mỗi LOCK_SECONDS / 3 trong lúc chạy).
 LOCK_SECONDS = 60.0
-# Lượt chạy doanh nghiệp còn `running` sau timeout cứng + chừng này giây là đã chết.
+# Lượt build / poll doanh nghiệp còn `running` sau timeout cứng + chừng này giây là đã chết.
 ABANDON_GRACE_SECONDS = 300
 # Lượt index một trang: ngân sách + thời gian ghi cuối lượt + chừng này giây.
 BOARD_ABANDON_GRACE_SECONDS = 3600
@@ -130,8 +130,9 @@ def train_options(settings: Settings) -> compress.TrainOptions:
 
 
 async def refresh_company_summaries(session: AsyncSession) -> None:
-    """Đối chiếu lại các cột ghi sẵn trên `companies` (số job đang mở, lượt chạy mới nhất) với dữ
-    liệu thật — phòng khi một đường ghi nào đó bỏ sót. Chỉ ghi dòng lệch."""
+    """Đối chiếu lại các cột ghi sẵn trên `companies` (số job đang mở, lượt build mới nhất — lượt
+    poll không ghi các cột `last_run_*`) với dữ liệu thật — phòng khi một đường ghi nào đó bỏ sót.
+    Chỉ ghi dòng lệch."""
     await session.execute(
         text(
             """
@@ -153,7 +154,7 @@ async def refresh_company_summaries(session: AsyncSession) -> None:
                   FROM companies c3
                   CROSS JOIN LATERAL (
                       SELECT run_id, status, started_at, duration_ms, incomplete_sources
-                      FROM company_runs WHERE company_id = c3.id
+                      FROM company_runs WHERE company_id = c3.id AND kind = 'build'
                       ORDER BY started_at DESC LIMIT 1) lr) r
             WHERE r.company_id = c.id
               AND (c.last_run_id IS DISTINCT FROM r.run_id
@@ -326,7 +327,7 @@ def reclassified(
     """Ngành nghề / học vấn / số lượng tuyển của một job từ nội dung thô các tin đã gộp vào nó
     (tin chuẩn trước): mỗi tin qua `normalize_job` rồi gộp bằng `dedup.merge`, đúng như lúc chạy
     doanh nghiệp — học vấn lấy của tin chuẩn (trường nguồn, rồi JD của chính nó), tin khác chỉ
-    điền khi tin chuẩn chưa rõ. Không như vậy thì lượt chạy sau đổi lại giá trị vừa tính."""
+    điền khi tin chuẩn chưa rõ. Không như vậy thì lượt build / poll sau đổi lại giá trị vừa tính."""
     now = now or datetime.now(UTC)
     members: list[NormalizedJob] = []
     for raw in raws:

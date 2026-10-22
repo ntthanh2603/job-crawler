@@ -554,16 +554,16 @@ GROUPS: tuple[Group, ...] = (
         _s(
             "company_max_continuations",
             "int",
-            "Số lượt chạy tiếp tối đa",
-            "Lượt build chưa xong hết (chạm giới hạn, hết giờ, tin chờ LLM) tự xếp lượt chạy tiếp, "
-            "tối đa chừng này lần liên tiếp.",
+            "Số lượt build tiếp tối đa",
+            "Lượt build chưa xong hết (chạm giới hạn, hết giờ, tin chờ LLM) tự xếp lượt build "
+            "tiếp, tối đa chừng này lần liên tiếp.",
             unit="lượt",
         ),
         _s(
             "company_continuation_delay_seconds",
             "float",
-            "Chờ trước lượt chạy tiếp",
-            "Lượt chạy tiếp được hẹn sau chừng này giây.",
+            "Chờ trước lượt build tiếp",
+            "Lượt build tiếp được hẹn sau chừng này giây.",
             unit="giây",
         ),
         _s(
@@ -1274,7 +1274,8 @@ GROUPS: tuple[Group, ...] = (
             "maintenance_cron",
             "cron",
             "Lịch bảo trì",
-            f"Dọn dữ liệu cũ, đánh dấu lượt chạy treo, huấn luyện từ điển nén. {_CRON_HELP}",
+            f"Dọn dữ liệu cũ, đánh dấu lượt build / poll treo, huấn luyện từ điển nén. "
+            f"{_CRON_HELP}",
             live=False,
         ),
         _s(
@@ -1309,7 +1310,7 @@ GROUPS: tuple[Group, ...] = (
             "failed_pages_per_run",
             "int",
             "Trang lỗi lưu tối đa mỗi lượt",
-            "Số trang không bóc được tin tối đa được lưu lại để xem, mỗi lượt chạy.",
+            "Số trang không bóc được tin tối đa được lưu lại để xem, mỗi lượt build / poll.",
             unit="trang",
         ),
         _s(

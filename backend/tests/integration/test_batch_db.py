@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import select
 
 from jobcrawler.common.config import Settings
-from jobcrawler.common.schemas import CompanyIn, RunStatus, RunTrigger
+from jobcrawler.common.schemas import CompanyIn, RunKind, RunStatus, RunTrigger
 from jobcrawler.database.ids import uuid7
 from jobcrawler.database.models import Company, CompanyAlias, CompanyRun
 from jobcrawler.modules.companies import batch_service
@@ -105,17 +105,19 @@ async def test_select_stale_companies(integration_settings: Settings) -> None:
         )
         a, b, c, d = imported.company_ids
         async with res.sessionmaker.begin() as s:
-            for company_id, status, hours_ago in [
-                (a, RunStatus.OK, 30),
-                (a, RunStatus.FAILED, 1),  # lượt lỗi không tính là đã chạy
-                (b, RunStatus.PARTIAL, 2),
-                (c, RunStatus.FAILED, 1),
+            for company_id, kind, status, hours_ago in [
+                (a, RunKind.BUILD, RunStatus.OK, 30),
+                (a, RunKind.BUILD, RunStatus.FAILED, 1),  # lượt lỗi không tính là đã build
+                (b, RunKind.BUILD, RunStatus.PARTIAL, 2),
+                (c, RunKind.BUILD, RunStatus.FAILED, 1),
+                (d, RunKind.POLL, RunStatus.OK, 1),  # lượt poll không tính là đã build
             ]:
                 started = now - timedelta(hours=hours_ago)
                 s.add(
                     CompanyRun(
                         run_id=uuid4(),
                         company_id=company_id,
+                        kind=kind.value,
                         started_at=started,
                         finished_at=started + timedelta(minutes=2),
                         status=status.value,
@@ -127,6 +129,11 @@ async def test_select_stale_companies(integration_settings: Settings) -> None:
                 s, company_ids=ids, stale_hours=24, now=now
             )
             assert [x.id for x in stale] == [a, c, d]
+            # Hộp thoại Build đếm trước bằng cùng điều kiện.
+            for hours in (24, None):
+                every = await batch_service.select_companies(s, stale_hours=hours, now=now)
+                count = await batch_service.count_companies(s, stale_hours=hours, now=now)
+                assert count == len(every)
             assert [
                 x.id for x in await batch_service.select_companies(s, company_ids=[d, b, a])
             ] == [
@@ -200,3 +207,40 @@ async def test_timed_out_job_is_retried_once(res: Resources) -> None:
     assert attempts == [1, 2]
     assert done is not None
     assert done.status == "failed"
+
+
+async def test_company_summary_tracks_the_latest_build(integration_settings: Settings) -> None:
+    """`companies.last_run_*` (cột "Build gần nhất" của danh sách) là lượt build mới nhất: bảo trì
+    đối chiếu lại không lấy lượt poll mới hơn."""
+    from jobcrawler.database.models import Company
+    from jobcrawler.modules.maintenance import maintenance_service
+
+    tag = uuid4().hex[:6]
+    now = datetime.now(UTC)
+    async with open_resources(integration_settings, db_logs=False) as res:
+        [company_id] = (
+            await batch_service.import_companies(
+                res.sessionmaker, [CompanyIn(name=f"Summary {tag}")]
+            )
+        ).company_ids
+        build_id = uuid4()
+        async with res.sessionmaker.begin() as s:
+            runs = [(build_id, RunKind.BUILD, 5), (uuid4(), RunKind.POLL, 1)]
+            for run_id, kind, hours_ago in runs:
+                started = now - timedelta(hours=hours_ago)
+                s.add(
+                    CompanyRun(
+                        run_id=run_id,
+                        company_id=company_id,
+                        kind=kind.value,
+                        started_at=started,
+                        finished_at=started + timedelta(minutes=1),
+                        status=RunStatus.OK.value,
+                    )
+                )
+        async with res.sessionmaker.begin() as s:
+            await maintenance_service.refresh_company_summaries(s)
+        async with res.sessionmaker() as s:
+            company = await s.get(Company, company_id)
+        assert company is not None
+        assert company.last_run_id == build_id

@@ -1372,7 +1372,7 @@
                 "type": "null"
               }
             ],
-            "description": "Các doanh nghiệp cần chạy.",
+            "description": "Các doanh nghiệp cần build.",
             "title": "Company Ids"
           },
           "stale_hours": {
@@ -1386,11 +1386,24 @@
                 "type": "null"
               }
             ],
-            "description": "Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ.",
+            "description": "Chỉ doanh nghiệp chưa có lượt build xong trong N giờ.",
             "title": "Stale Hours"
           }
         },
         "title": "EnqueueIn",
+        "type": "object"
+      },
+      "EnqueuePreviewOut": {
+        "properties": {
+          "selected": {
+            "title": "Selected",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected"
+        ],
+        "title": "EnqueuePreviewOut",
         "type": "object"
       },
       "EnqueueResultOut": {
@@ -1637,6 +1650,16 @@
             ],
             "title": "Run Id"
           },
+          "run_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "title": "Source",
             "type": "string"
@@ -1654,6 +1677,7 @@
           "created_at",
           "http_status",
           "run_id",
+          "run_kind",
           "html"
         ],
         "title": "FailedPageOut",
@@ -2344,7 +2368,7 @@
         "type": "string"
       },
       "LiveOut": {
-        "description": "Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với\n`GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.\n`run` null khi không có lượt chạy này.",
+        "description": "Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với\n`GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.\n`run` null khi không có lượt build / poll này.",
         "properties": {
           "queue": {
             "anyOf": [
@@ -4763,7 +4787,7 @@
         "type": "object"
       },
       "RunKind": {
-        "description": "Loại lượt chạy một doanh nghiệp.",
+        "description": "Loại lượt của một doanh nghiệp: build (đủ) hoặc poll (theo bộ khung).",
         "enum": [
           "build",
           "poll"
@@ -5088,7 +5112,7 @@
         "type": "object"
       },
       "RunTrigger": {
-        "description": "Vì sao lượt chạy được xếp.",
+        "description": "Vì sao lượt build / poll được xếp.",
         "enum": [
           "nightly",
           "schedule",
@@ -7908,6 +7932,60 @@
         ]
       }
     },
+    "/api/enqueue/preview": {
+      "get": {
+        "description": "Số doanh nghiệp `POST /api/enqueue` sẽ xếp build với cùng điều kiện (không xếp gì).",
+        "operationId": "get_enqueue_preview",
+        "parameters": [
+          {
+            "description": "Chỉ doanh nghiệp chưa có lượt build xong trong N giờ (bỏ trống: tất cả).",
+            "in": "query",
+            "name": "stale_hours",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 87840,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Chỉ doanh nghiệp chưa có lượt build xong trong N giờ (bỏ trống: tất cả).",
+              "title": "Stale Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnqueuePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Enqueue Preview",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
     "/api/eval": {
       "post": {
         "description": "Precision/recall trên golden set tải lên (companies.csv + jobs.csv) hoặc thư mục golden/\ntrên máy chủ.",
@@ -8026,7 +8104,7 @@
             }
           },
           {
-            "description": "Lượt chạy của chủ đề `run`.",
+            "description": "Lượt build / poll của chủ đề `run`.",
             "in": "query",
             "name": "run_id",
             "required": false,
@@ -8040,7 +8118,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Lượt chạy của chủ đề `run`.",
+              "description": "Lượt build / poll của chủ đề `run`.",
               "title": "Run Id"
             }
           },
@@ -9789,7 +9867,7 @@
       "name": "crawl"
     },
     {
-      "description": "Lượt chạy: tóm tắt, request, log, trang parse lỗi",
+      "description": "Lượt build / poll: tóm tắt, request, log, trang parse lỗi",
       "name": "runs"
     },
     {

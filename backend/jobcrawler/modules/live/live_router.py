@@ -38,7 +38,9 @@ def live_request(
     page: int = 1,
     poll_page: int = 1,
     board_page: int = 1,
-    run_id: Annotated[uuid.UUID | None, Query(description="Lượt chạy của chủ đề `run`.")] = None,
+    run_id: Annotated[
+        uuid.UUID | None, Query(description="Lượt build / poll của chủ đề `run`.")
+    ] = None,
     last_event_id: Annotated[
         str | None,
         Header(description="Trình duyệt tự gửi khi nối lại: `id` của sự kiện cuối đã nhận."),

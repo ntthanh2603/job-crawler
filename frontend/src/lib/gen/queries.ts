@@ -517,10 +517,14 @@ export const EmploymentType = {
 export type EnqueueIn = {
   /** Mọi doanh nghiệp (kết hợp stale_hours). */
   all?: boolean;
-  /** Các doanh nghiệp cần chạy. */
+  /** Các doanh nghiệp cần build. */
   company_ids?: string[] | null;
-  /** Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ. */
+  /** Chỉ doanh nghiệp chưa có lượt build xong trong N giờ. */
   stale_hours?: number | null;
+};
+
+export type EnqueuePreviewOut = {
+  selected: number;
 };
 
 export type EnqueueResultOut = {
@@ -565,6 +569,17 @@ export type ExperienceYears = {
   min: number | null;
 };
 
+/**
+ * Loại lượt của một doanh nghiệp: build (đủ) hoặc poll (theo bộ khung).
+ */
+export type RunKind = typeof RunKind[keyof typeof RunKind];
+
+
+export const RunKind = {
+  build: 'build',
+  poll: 'poll',
+} as const;
+
 export type FailedPageOut = {
   created_at: string;
   html: string;
@@ -572,6 +587,7 @@ export type FailedPageOut = {
   id: string;
   reason: string;
   run_id: string | null;
+  run_kind: RunKind | null;
   source: string;
   url: string;
 };
@@ -845,18 +861,7 @@ export type SourceCount = {
 };
 
 /**
- * Loại lượt chạy một doanh nghiệp.
- */
-export type RunKind = typeof RunKind[keyof typeof RunKind];
-
-
-export const RunKind = {
-  build: 'build',
-  poll: 'poll',
-} as const;
-
-/**
- * Vì sao lượt chạy được xếp.
+ * Vì sao lượt build / poll được xếp.
  */
 export type RunTrigger = typeof RunTrigger[keyof typeof RunTrigger];
 
@@ -971,7 +976,7 @@ export type WorkersPageOut = {
 /**
  * Một sự kiện của `GET /api/events`: trường tên `topic` có dữ liệu (cùng mô hình với
  * `GET /api/workers`, `GET /api/queue`, `GET /api/runs/{run_id}`), hai trường còn lại null.
- * `run` null khi không có lượt chạy này.
+ * `run` null khi không có lượt build / poll này.
  */
 export type LiveOut = {
   queue: QueuePageOut | null;
@@ -1712,6 +1717,13 @@ export const GetCompanyRunsSortBy = {
 
 export type GetCrawlStatusParams = {
 minutes?: number;
+};
+
+export type GetEnqueuePreviewParams = {
+/**
+ * Chỉ doanh nghiệp chưa có lượt build xong trong N giờ (bỏ trống: tất cả).
+ */
+stale_hours?: number | null;
 };
 
 export type GetJobsParams = {
@@ -3728,6 +3740,101 @@ export const usePostEnqueue = <TError = HTTPValidationError,
       > => {
       return useMutation(getPostEnqueueMutationOptions(options), queryClient);
     }
+
+/**
+ * Số doanh nghiệp `POST /api/enqueue` sẽ xếp build với cùng điều kiện (không xếp gì).
+ * @summary Get Enqueue Preview
+ */
+export const getEnqueuePreview = (
+    params?: GetEnqueuePreviewParams,
+ signal?: AbortSignal
+) => {
+
+
+      return apiClient<EnqueuePreviewOut>(
+      {url: `/api/enqueue/preview`, method: 'GET',
+        params, signal
+    },
+      );
+    }
+
+
+
+
+export const getGetEnqueuePreviewQueryKey = (params?: GetEnqueuePreviewParams,) => {
+    return [
+    `/api/enqueue/preview`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetEnqueuePreviewQueryOptions = <TData = Awaited<ReturnType<typeof getEnqueuePreview>>, TError = HTTPValidationError>(params?: GetEnqueuePreviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData>>, }
+) => {
+
+const {query: queryOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEnqueuePreviewQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEnqueuePreview>>> = ({ signal }) => getEnqueuePreview(params, signal);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetEnqueuePreviewQueryResult = NonNullable<Awaited<ReturnType<typeof getEnqueuePreview>>>
+export type GetEnqueuePreviewQueryError = HTTPValidationError
+
+
+export function useGetEnqueuePreview<TData = Awaited<ReturnType<typeof getEnqueuePreview>>, TError = HTTPValidationError>(
+ params: undefined |  GetEnqueuePreviewParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEnqueuePreview>>,
+          TError,
+          Awaited<ReturnType<typeof getEnqueuePreview>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEnqueuePreview<TData = Awaited<ReturnType<typeof getEnqueuePreview>>, TError = HTTPValidationError>(
+ params?: GetEnqueuePreviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getEnqueuePreview>>,
+          TError,
+          Awaited<ReturnType<typeof getEnqueuePreview>>
+        > , 'initialData'
+      >, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetEnqueuePreview<TData = Awaited<ReturnType<typeof getEnqueuePreview>>, TError = HTTPValidationError>(
+ params?: GetEnqueuePreviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData>>, }
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get Enqueue Preview
+ */
+
+export function useGetEnqueuePreview<TData = Awaited<ReturnType<typeof getEnqueuePreview>>, TError = HTTPValidationError>(
+ params?: GetEnqueuePreviewParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getEnqueuePreview>>, TError, TData>>, }
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetEnqueuePreviewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 /**
  * Precision/recall trên golden set tải lên (companies.csv + jobs.csv) hoặc thư mục golden/

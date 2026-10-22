@@ -94,7 +94,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
         "description": "Thu thập: bộ khung + lịch của doanh nghiệp, build / poll ngay, độ trễ phát"
         " hiện",
     },
-    {"name": "runs", "description": "Lượt chạy: tóm tắt, request, log, trang parse lỗi"},
+    {"name": "runs", "description": "Lượt build / poll: tóm tắt, request, log, trang parse lỗi"},
     {"name": "jobs", "description": "Việc làm: danh sách, xuất CSV, chi tiết, kiểm tay"},
     {"name": "eval", "description": "Đánh giá độ chính xác trên golden set"},
     {"name": "boards", "description": "Trang tuyển dụng: trạng thái index, chạy index ngay"},

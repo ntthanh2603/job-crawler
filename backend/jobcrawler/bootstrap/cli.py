@@ -97,8 +97,8 @@ def db_maintain(
     ] = False,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Bảo trì (như cron mỗi giờ): lượt chạy treo → failed, xoá dữ liệu cũ, huấn luyện từ điển
-    nén và nén lại dữ liệu."""
+    """Bảo trì (như cron mỗi giờ): lượt build / poll treo → failed, xoá dữ liệu cũ, huấn luyện
+    từ điển nén và nén lại dữ liệu."""
     from jobcrawler.modules.maintenance import maintenance_service
 
     async def go() -> maintenance_service.MaintenanceReport:
@@ -115,7 +115,7 @@ def db_maintain(
         typer.secho(report.skipped, fg=typer.colors.YELLOW)
         return
     typer.echo(
-        f"lượt chạy treo → failed: {report.abandoned_runs} doanh nghiệp,"
+        f"lượt build / poll treo → failed: {report.abandoned_runs} doanh nghiệp,"
         f" {report.abandoned_board_runs} index"
     )
     if report.deleted:
@@ -775,7 +775,7 @@ def enqueue(
     stale_hours: Annotated[
         float | None,
         typer.Option(
-            "--stale-hours", help="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ qua."
+            "--stale-hours", help="Chỉ doanh nghiệp chưa có lượt build xong trong N giờ qua."
         ),
     ] = None,
     limit: Annotated[int | None, typer.Option(help="Tối đa N doanh nghiệp.")] = None,
@@ -974,15 +974,15 @@ def export(
 @app.command()
 def stats(
     hours: Annotated[
-        float, typer.Option(help="Cửa sổ thời gian (giờ) cho các lượt chạy; 0 = tất cả.")
+        float, typer.Option(help="Cửa sổ thời gian (giờ) cho các lượt build / poll; 0 = tất cả.")
     ] = 24,
     no_storage: Annotated[
         bool, typer.Option("--no-storage", help="Bỏ phần đo dung lượng nén (nhanh hơn).")
     ] = False,
     json_out: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Thống kê: queue, lượt chạy (p50/p95, tỉ lệ failed), nguồn, index trang tuyển dụng, dung
-    lượng DB và tỉ lệ nén."""
+    """Thống kê: queue, lượt build / poll (p50/p95, tỉ lệ failed), nguồn, index trang tuyển dụng,
+    dung lượng DB và tỉ lệ nén."""
     from jobcrawler.modules.overview import stats_service
 
     async def go() -> stats_service.Stats:
@@ -1033,7 +1033,7 @@ def _stats_lines(st: Any) -> list[str]:
             if st.jobs_by_source
             else ""
         ),
-        f"== Lượt chạy ({window}): {runs.runs} lượt, {runs.companies} doanh nghiệp"
+        f"== Lượt build / poll ({window}): {runs.runs} lượt, {runs.companies} doanh nghiệp"
         + (f", {runs.per_hour}/giờ" if runs.per_hour else ""),
         "  trạng thái: "
         + (", ".join(f"{k} {v}" for k, v in sorted(runs.by_status.items())) or "-"),
@@ -1053,7 +1053,7 @@ def _stats_lines(st: Any) -> list[str]:
     for error, n in runs.errors[:5]:
         lines.append(f"  lỗi ×{n}: {error}")
     if st.sources:
-        lines.append("== Nguồn (lượt chạy doanh nghiệp)")
+        lines.append("== Nguồn (lượt build / poll doanh nghiệp)")
         for src in st.sources[:15]:
             outcomes = ", ".join(f"{k} {v}" for k, v in sorted(src.outcomes.items()))
             lines.append(

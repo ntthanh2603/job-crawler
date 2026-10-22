@@ -1,7 +1,7 @@
 """Build (đủ, ghi bộ khung) và poll (theo bộ khung) một doanh nghiệp; xếp job vào queue.
 
 Build (`build_company`) là lượt `process_company` đầy đủ (modules/crawl/company_service.py) kèm ghi
-bộ khung và lịch; lượt `partial` tự xếp lượt chạy tiếp.
+bộ khung và lịch; lượt `partial` tự xếp lượt build tiếp.
 
 Poll (`poll_company`) — ban ngày, mỗi POLL_INTERVAL_SECONDS:
 1. Nạp bộ khung các nguồn website / ATS và (mã, URL) các tin đã lưu — không đọc nội dung tin.
@@ -224,7 +224,7 @@ async def build_company(
     continue_partial: bool = True,
     refresh: bool | None = None,
 ) -> CompanyResult:
-    """Lượt build một doanh nghiệp đã có trong `companies`; `partial` thì xếp lượt chạy tiếp
+    """Lượt build một doanh nghiệp đã có trong `companies`; `partial` thì xếp lượt build tiếp
     (trừ khi `continue_partial=False`)."""
     s = res.settings
     # Timeout cứng của job tính từ lúc job bắt đầu: thời gian chờ khoá trừ vào hạn của lượt build.
@@ -239,7 +239,7 @@ async def build_company(
         website=company.input_website,
         note=company.note,
     )
-    # Build đêm và build lại khi bộ khung hỏng: tìm nguồn lại từ đầu. Lượt chạy tiếp dùng cache
+    # Build đêm và build lại khi bộ khung hỏng: tìm nguồn lại từ đầu. Lượt build tiếp dùng cache
     # tìm nguồn của lượt đầu.
     if refresh is None:
         refresh = (
@@ -248,7 +248,7 @@ async def build_company(
             and trigger in (RunTrigger.NIGHTLY, RunTrigger.ERROR)
         )
     # Chờ lượt poll đang chạy (nếu có) xong. Không giữ được khoá (lượt build khác đang chạy) thì
-    # không chạy chồng: `CompanyBusyError`, lượt chạy job ghi `skipped`.
+    # không chạy chồng: `CompanyBusyError`, lần chạy job build ghi `skipped`.
     async with company_lock(
         res, company_id, wait=s.poll_timeout_seconds + BUILD_LOCK_EXTRA_WAIT_SECONDS
     ) as held:

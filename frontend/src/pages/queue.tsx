@@ -39,7 +39,7 @@ const BOARD_FUNCTIONS = new Set(["index_board", "tail_board"])
 const QUEUES = [
   {
     title: "Build bộ khung",
-    description: "Lượt đủ của từng doanh nghiệp: ban đêm, khi bộ khung hỏng, khi thêm mới hoặc chạy tay",
+    description: "Lượt build (đủ) của từng doanh nghiệp: ban đêm, khi bộ khung hỏng, khi thêm mới hoặc bấm Build",
     param: "page",
   },
   {
@@ -87,7 +87,7 @@ function Counts({ q }: { q: QueueStats }) {
       tone: q.capacity && q.active >= q.capacity && q.queued > 0 ? "warn" : undefined,
     },
     { label: "Đang chờ", value: num(q.queued) },
-    { label: "Hẹn giờ", value: num(q.scheduled), hint: "Việc định kỳ và lượt chạy tiếp" },
+    { label: "Hẹn giờ", value: num(q.scheduled), hint: "Việc định kỳ và lượt build tiếp" },
     { label: "Runner", value: num(q.workers), hint: "Số runner đang nhận việc của hàng đợi này", tone: q.workers ? undefined : "warn" },
     { label: "Đã xong", value: num(q.complete), hint: "Từ khi runner khởi động" },
     {
@@ -134,8 +134,8 @@ function JobName({ j }: { j: QueueJob }) {
         )}
         <RunTags trigger={trigger} />
         {j.continuation > 0 && (
-          <Tag className="bg-warning/14 text-warning-ink" title="Lượt trước chạy một phần; lượt này đọc nốt các nguồn còn dở">
-            Chạy tiếp lần {j.continuation}
+          <Tag className="bg-warning/14 text-warning-ink" title="Lượt build trước chạy một phần; lượt này đọc nốt các nguồn còn dở">
+            Build tiếp lần {j.continuation}
           </Tag>
         )}
       </div>

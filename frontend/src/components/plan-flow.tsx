@@ -180,7 +180,7 @@ function outcomes(plan: CrawlPlan, limits: PollLimits): Outcome[] {
       value: "unchanged",
       tone: "good",
       label: "Không đổi",
-      help: "Tập mã tin như lượt trước: chỉ cập nhật lịch, không ghi lượt chạy",
+      help: "Tập mã tin như lượt trước: chỉ cập nhật lịch, không ghi lượt poll",
     },
     {
       value: "changed",

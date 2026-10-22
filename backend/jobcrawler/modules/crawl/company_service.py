@@ -53,7 +53,7 @@ from jobcrawler.sources.base import FetchRecord, Source, failed_page_rows
 log = get_logger(__name__)
 
 KYC_SOURCE = "kyc"
-# Có tin hoãn xác minh (LLM chưa kịp chấm) trong lượt chạy.
+# Có tin hoãn xác minh (LLM chưa kịp chấm) trong lượt build / poll.
 VERIFY_SOURCE = "verify"
 # Phần cuối trước timeout cứng của job dành cho việc lưu (không chạy LLM nữa). Đủ rộng để DB chậm
 # lúc tải cao vẫn không chạm timeout cứng (lượt chạy bị huỷ = failed, không lưu được gì): chạy cả
@@ -244,7 +244,7 @@ async def process_jobs(
 
     Bước LLM (chấm tin nghi ngờ, phân loại trường mơ hồ) được chạy tới `deadline` cộng phần
     đệm trước timeout cứng của job (chừa SAVE_MARGIN_SECONDS để lưu). Còn tin hoãn xác minh thì
-    lượt chạy không đủ để đóng job cũ.
+    lượt build / poll không đủ để đóng job cũ.
 
     Lượt chưa đủ (`complete=False`, vd. poll chỉ có tin mới) gộp cụm của job đã lưu với các tin
     khác của job đó (`store.save_company_jobs`); `absent`: (nguồn, mã) các tin lượt này biết chắc
@@ -676,7 +676,7 @@ class KycReport:
 
 async def kyc_company(res: Resources, company_in: CompanyIn, *, refresh: bool = False) -> KycReport:
     """Chỉ chạy KYC (tra cache, tìm, lưu) cho một doanh nghiệp; fetch ghi vào `source_fetches`
-    (không gắn lượt chạy)."""
+    (không gắn lượt build / poll)."""
     async with res.sessionmaker.begin() as session:
         resolved = await resolve(res, session, company_in)
     state = RunState(company=resolved.company, fresh=resolved.fresh, how=resolved.how)

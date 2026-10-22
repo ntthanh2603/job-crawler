@@ -131,6 +131,7 @@ async def website_jobs(
             limits=limits,
             records=records,
             known=known,
+            fresh=refresh,
         )
 
     boards_task = asyncio.create_task(collect_boards()) if board_sources is not None else None
@@ -195,7 +196,9 @@ async def _website_jobs(
     domain = parse_domain_input(website)
     out = WebsiteJobs(website=website, domain=domain, discovery=None)
     out.collected.records = records
-    session = SourceSession(f"{DISCOVERY_SOURCE}:{domain}", fetcher, llm, limits, records)
+    session = SourceSession(
+        f"{DISCOVERY_SOURCE}:{domain}", fetcher, llm, limits, records, fresh=refresh
+    )
     budget = max(0.0, deadline - time.monotonic())
     out.discovery = await discover(
         session,
@@ -208,7 +211,7 @@ async def _website_jobs(
     )
     if out.discovery.error is not None:
         # Hết giờ, trang chủ không mở được, bị chặn...: chưa chắc đã thấy mọi nguồn trên website,
-        # nên lượt chạy không đủ để coi job cũ từ website là đã gỡ.
+        # nên lượt build không đủ để coi job cũ từ website là đã gỡ.
         log.warning(
             "discovery.incomplete",
             domain=domain,
@@ -226,6 +229,7 @@ async def _website_jobs(
         limits=limits,
         records=records,
         known=known,
+        fresh=refresh,
     )
     out.incomplete_sources += out.collected.incomplete_sources
     return out

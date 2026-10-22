@@ -183,7 +183,7 @@ async def tail_boards_cron(ctx: RunnerContext) -> dict[str, Any]:
 
 
 async def maintenance_cron(ctx: RunnerContext) -> dict[str, Any]:
-    """Cron: dọn dữ liệu cũ, đánh dấu lượt chạy treo, huấn luyện từ điển nén + nén lại."""
+    """Cron: dọn dữ liệu cũ, đánh dấu lượt build / poll treo, huấn luyện từ điển nén + nén lại."""
     report = await maintenance_service.run_maintenance(ctx["resources"])
     return report.as_dict()
 

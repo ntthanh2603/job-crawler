@@ -1,4 +1,4 @@
-"""`jobcrawler stats`: queue, các lượt chạy, nguồn, index trang tuyển dụng, dung lượng."""
+"""`jobcrawler stats`: queue, các lượt build / poll, nguồn, index trang tuyển dụng, dung lượng."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class RunStats:
     p95_seconds: float | None = None
     max_seconds: float | None = None
     over_timeout: int = 0  # lượt dài hơn timeout cứng
-    # Chờ trong hàng đợi (`started_at - queued_at`), chỉ lượt chạy từ queue.
+    # Chờ trong hàng đợi (`started_at - queued_at`), chỉ lượt build / poll từ queue.
     wait_p50_seconds: float | None = None
     wait_p95_seconds: float | None = None
     jobs_found: int = 0
@@ -264,7 +264,7 @@ async def run_stats(
 
 
 async def source_stats(session: AsyncSession, since: datetime | None) -> list[SourceStats]:
-    """Theo loại nguồn (phần trước dấu `:` của tên nguồn) trong các lượt chạy doanh nghiệp."""
+    """Theo loại nguồn (phần trước dấu `:` của tên nguồn) trong các lượt build / poll."""
     kind = func.split_part(SourceFetch.source, ":", 1)
     stmt = select(kind, SourceFetch.outcome, func.count(), func.avg(SourceFetch.duration_ms)).where(
         SourceFetch.run_id.is_not(None)

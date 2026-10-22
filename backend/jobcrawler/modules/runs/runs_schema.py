@@ -1,4 +1,4 @@
-"""Mô hình trả về của lượt chạy (build / poll) và trang parse lỗi."""
+"""Mô hình trả về của lượt build / poll và trang parse lỗi."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class RunOut(ApiOut):
     company_id: UUID
     kind: RunKind
     trigger: RunTrigger
-    # Timestamp: lượt chạy gần đây của trang tổng quan (`RecentRunOut`) đọc từ JSON cache.
+    # Timestamp: lượt build / poll gần đây của trang tổng quan (`RecentRunOut`) đọc từ JSON cache.
     started_at: Timestamp
     finished_at: Timestamp | None
     duration_ms: int | None
@@ -72,6 +72,7 @@ class RunDetailOut(ApiOut):
 class FailedPageOut(FailedPageItem):
     http_status: int | None
     run_id: str | None
+    run_kind: RunKind | None  # lượt build hay poll đã ghi trang này
     html: str
 
 

@@ -15,6 +15,7 @@ import {
   Section,
   StatusBadge,
   type Tone,
+  RunStatusBadge,
 } from "@/components/common"
 import { CrawlDay, PlanFlow, PlanReads } from "@/components/plan-flow"
 import { Button } from "@/components/ui/button"
@@ -44,14 +45,19 @@ export const RUN_KINDS: Record<RunKind, { label: string; title: string; classNam
   },
 }
 
+/** "Lượt build" / "Lượt poll" theo loại lượt; không rõ loại (lượt đã quá hạn lưu) thì "Lượt build / poll". */
+export function runName(kind: RunKind | null | undefined): string {
+  return kind === "poll" ? "Lượt poll" : kind === "build" ? "Lượt build" : "Lượt build / poll"
+}
+
 export const TRIGGERS: Record<RunTrigger, { label: string; title: string }> = {
   nightly: { label: "Đêm", title: "Build lại theo lịch ban đêm" },
   schedule: { label: "Chu kỳ", title: "Poll theo chu kỳ ban ngày" },
   error: { label: "Bộ khung hỏng", title: "Poll gặp lỗi hoặc cấu trúc trang đổi nên build lại bộ khung" },
   board: { label: "Trang tuyển dụng", title: "Trang tuyển dụng vừa có tin mới của doanh nghiệp" },
   new: { label: "Mới", title: "Doanh nghiệp chưa có bộ khung" },
-  manual: { label: "Thủ công", title: "Người dùng yêu cầu chạy" },
-  continuation: { label: "Chạy tiếp", title: "Lượt build trước chưa xong hết, chạy tiếp phần còn lại" },
+  manual: { label: "Thủ công", title: "Người dùng bấm Build / Poll ngay" },
+  continuation: { label: "Build tiếp", title: "Lượt build trước chưa xong hết, build tiếp phần còn lại" },
 }
 
 export const SCHEDULE_STATES: Record<ScheduleState, { label: string; tone: Tone; help: string }> = {
@@ -233,7 +239,7 @@ function ScheduleFacts({ schedule: s }: { schedule: CrawlSchedule }) {
       <Fact
         label="Build gần nhất"
         value={relative(s.last_build_at)}
-        sub={s.last_build_status ? <StatusBadge value={s.last_build_status} className="mt-1" /> : undefined}
+        sub={s.last_build_status ? <RunStatusBadge value={s.last_build_status} className="mt-1" /> : undefined}
       />
       <Fact label="Build tiếp theo" value={due(s.next_build_at)} />
       <Fact label="Số lượt poll" value={num(s.polls)} />
@@ -325,7 +331,7 @@ export function CompanyCrawlTab({ id }: { id: string }) {
         actions={
           <>
             <Button size="sm" onClick={() => poll.mutate({ companyId: id })} disabled={poll.isPending}>
-              <Radar /> {poll.isPending ? "Đang xếp hàng…" : "Poll ngay"}
+              <Radar /> {poll.isPending ? "Đang xếp lượt poll…" : "Poll ngay"}
             </Button>
             <ConfirmButton
               title="Build lại bộ khung?"

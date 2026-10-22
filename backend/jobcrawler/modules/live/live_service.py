@@ -64,7 +64,7 @@ HEX = "0123456789abcdef"
 
 @dataclass(frozen=True, slots=True)
 class TopicKey:
-    """Chủ đề kèm tham số: queue — trang của ba hàng đợi; run — id lượt chạy."""
+    """Chủ đề kèm tham số: queue — trang của ba hàng đợi; run — id lượt build / poll."""
 
     topic: LiveTopic
     params: tuple[Any, ...] = ()

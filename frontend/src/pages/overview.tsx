@@ -24,6 +24,7 @@ import {
   toneOf,
   useRowLink,
   useTabParam,
+  RunStatusBadge,
 } from "@/components/common"
 import { BarList, ShareBar, StackedColumns, type BarItem } from "@/components/charts"
 import { JobDelta, RunTags } from "@/components/crawl"
@@ -68,7 +69,7 @@ const TABS = ["runs", "jobs", "storage"] as const
 // Thứ tự khoá = thứ tự xếp chồng từ dưới lên (đã kiểm định màu kề nhau, xem index.css --viz-*).
 const runsConfig = {
   ok: { label: "Thành công", color: "var(--viz-ok)" },
-  ambiguous: { label: "Chưa rõ", color: "var(--viz-ambiguous)" },
+  ambiguous: { label: "Xong · KYC chưa rõ", color: "var(--viz-ambiguous)" },
   partial: { label: "Một phần", color: "var(--viz-partial)" },
   running: { label: "Đang chạy", color: "var(--viz-running)" },
   failed: { label: "Thất bại", color: "var(--viz-failed)" },
@@ -115,7 +116,7 @@ const TABLE_NAMES: Record<string, string> = {
   source_profiles: "Profile",
   companies: "Doanh nghiệp",
   company_aliases: "Tên gọi khác",
-  company_runs: "Lượt chạy",
+  company_runs: "Lượt build / poll",
   failed_pages: "Trang parse lỗi",
   board_index_runs: "Lượt index",
   compression_dicts: "Từ điển nén",
@@ -183,11 +184,11 @@ function RunsTab({ data }: { data: Overview }) {
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Section
-          title="Kết quả lượt chạy"
+          title="Kết quả lượt build / poll"
           description="Lượt mới nhất của mỗi doanh nghiệp trong khoảng đã chọn"
           bodyClassName="space-y-5"
         >
-          {latest.length ? <ShareBar items={latest} /> : <p className="text-sm text-muted-foreground">Chưa có lượt chạy nào.</p>}
+          {latest.length ? <ShareBar items={latest} /> : <p className="text-sm text-muted-foreground">Chưa có lượt build / poll nào.</p>}
           <div className="grid gap-3 sm:grid-cols-3">
             {st.targets.map((t) => (
               <MiniStat
@@ -231,18 +232,18 @@ function RunsTab({ data }: { data: Overview }) {
             <span className="inline-flex items-center gap-1.5">
               Nguồn chưa xong
               <InfoTip>
-                Lượt chạy dừng trước khi đọc hết một nguồn được ghi là "Một phần". Hệ thống tự xếp lượt chạy tiếp
-                (sau khoảng một phút) để đọc nốt, có giới hạn số lần.
+                Lượt build / poll dừng trước khi đọc hết một nguồn được ghi là "Một phần". Lượt build còn dở thì hệ
+                thống tự xếp lượt build tiếp (sau khoảng một phút) để đọc nốt, có giới hạn số lần.
               </InfoTip>
             </span>
           }
-          description="Số lượt chạy theo loại nguồn còn dở"
+          description="Số lượt build / poll theo loại nguồn còn dở"
           bodyClassName="space-y-5"
         >
           {runs.incomplete_sources.length ? (
             <IncompleteList items={runs.incomplete_sources.map(([source, count]) => ({ source, count }))} />
           ) : (
-            <p className="text-sm text-muted-foreground">Mọi lượt chạy đều đọc hết nguồn.</p>
+            <p className="text-sm text-muted-foreground">Mọi lượt build / poll đều đọc hết nguồn.</p>
           )}
           {runs.errors.length > 0 && (
             <div className="border-t pt-4">
@@ -261,7 +262,7 @@ function RunsTab({ data }: { data: Overview }) {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Section title="Lượt chạy 24 giờ qua" description="Theo giờ bắt đầu, chia theo kết quả">
+        <Section title="Lượt build / poll 24 giờ qua" description="Theo giờ bắt đầu, chia theo kết quả">
           <StackedColumns data={chartRows(data.chart)} config={runsConfig} x="hour" tick={hour} />
         </Section>
         <Section title="Request 24 giờ qua" description="Mọi request tới website doanh nghiệp, KYC và trang tuyển dụng">
@@ -270,7 +271,7 @@ function RunsTab({ data }: { data: Overview }) {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Section title="Lượt chạy gần đây" description="Bấm một dòng để xem chi tiết lượt chạy" bodyClassName="p-0">
+        <Section title="Lượt build / poll gần đây" description="Bấm một dòng để xem chi tiết lượt" bodyClassName="p-0">
           {data.recent_runs.length ? (
             <Table>
               <TableHeader>
@@ -293,7 +294,7 @@ function RunsTab({ data }: { data: Overview }) {
                     </TableCell>
                     <TableCell className="whitespace-normal">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <StatusBadge value={r.status} />
+                        <RunStatusBadge value={r.status} />
                         <RunTags kind={r.kind} trigger={r.trigger} />
                         <IncompleteSources sources={r.incomplete_sources} />
                       </div>
@@ -312,10 +313,10 @@ function RunsTab({ data }: { data: Overview }) {
               </TableBody>
             </Table>
           ) : (
-            <Empty>Chưa có lượt chạy nào.</Empty>
+            <Empty>Chưa có lượt build / poll nào.</Empty>
           )}
         </Section>
-        <Section title="Request theo nguồn" description="Trong các lượt chạy doanh nghiệp" bodyClassName="p-0">
+        <Section title="Request theo nguồn" description="Trong các lượt build / poll doanh nghiệp" bodyClassName="p-0">
           {st.sources.length ? (
             <Table>
               <TableHeader>
@@ -557,7 +558,7 @@ export function OverviewPage() {
         title="Tổng quan"
         description={
           st
-            ? `${runs?.since ? `Lượt chạy từ ${dt(runs.since)}` : "Toàn bộ lượt chạy"} · cập nhật lúc ${hour(st.generated_at)}`
+            ? `${runs?.since ? `Lượt build / poll từ ${dt(runs.since)}` : "Toàn bộ lượt build / poll"} · cập nhật lúc ${hour(st.generated_at)}`
             : "Đang tải số liệu…"
         }
         actions={
@@ -582,7 +583,7 @@ export function OverviewPage() {
             <ConfirmButton
               size="default"
               title="Chạy bảo trì ngay?"
-              description="Đóng các lượt chạy bị treo, xoá dữ liệu quá hạn lưu, huấn luyện từ điển nén và nén lại dữ liệu. Runner hàng đợi build sẽ chạy việc này."
+              description="Đóng các lượt build / poll bị treo, xoá dữ liệu quá hạn lưu, huấn luyện từ điển nén và nén lại dữ liệu. Runner hàng đợi build sẽ chạy việc này."
               onConfirm={() => maintenance.mutate()}
             >
               <Wrench /> Bảo trì
@@ -617,7 +618,7 @@ export function OverviewPage() {
               )})`}
             />
             <StatCard
-              label="Lượt chạy"
+              label="Lượt build / poll"
               icon={<Activity />}
               value={num(runs.runs)}
               hint={`${num(runs.companies)} doanh nghiệp${runs.per_hour ? ` · ${num(runs.per_hour)} lượt/giờ` : ""}`}
@@ -648,7 +649,7 @@ export function OverviewPage() {
           <Tabs value={tab} onValueChange={setTab} className="gap-6">
             <TabBar
               items={[
-                { value: "runs", label: "Lượt chạy" },
+                { value: "runs", label: "Lượt build / poll" },
                 { value: "jobs", label: "Việc làm" },
                 { value: "storage", label: "Lưu trữ" },
               ]}

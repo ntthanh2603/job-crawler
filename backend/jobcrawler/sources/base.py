@@ -227,9 +227,9 @@ class SourceSession:
         return result
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
-        """Fetch qua tầng mạng. Bị chặn → `SourceError(BLOCKED)` (dừng cả nguồn). Lượt poll không
-        dùng HTTP cache: phải thấy đúng trang lúc này."""
-        if self.polling:
+        """Fetch qua tầng mạng. Bị chặn → `SourceError(BLOCKED)` (dừng cả nguồn). Lượt poll và
+        build `fresh` không dùng HTTP cache: phải thấy đúng trang lúc này."""
+        if self.polling or self.fresh:
             kwargs["use_cache"] = False
         return self._record(await self.fetcher.fetch(url, source=self.name, **kwargs))
 

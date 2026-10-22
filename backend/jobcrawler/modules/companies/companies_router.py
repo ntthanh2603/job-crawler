@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 
-from jobcrawler.common.api import PageOut, actor_of, page_out, res_of
+from jobcrawler.common.api import MAX_HOURS, PageOut, actor_of, page_out, res_of
 from jobcrawler.common.schemas import CompanyEntity
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.modules.companies import batch_service, companies_service
@@ -19,6 +19,7 @@ from jobcrawler.modules.companies.companies_schema import (
     CompanyDetailOut,
     CompanyItem,
     EnqueueIn,
+    EnqueuePreviewOut,
     EnqueueResultOut,
     ImportOutcomeOut,
     ProfileOut,
@@ -195,6 +196,25 @@ async def post_import(
         },
     )
     return ImportOutcomeOut.model_validate(dataclasses.asdict(outcome))
+
+
+@router.get("/enqueue/preview")
+async def get_enqueue_preview(
+    request: Request,
+    stale_hours: Annotated[
+        float | None,
+        Query(
+            ge=0,
+            le=MAX_HOURS,
+            allow_inf_nan=False,
+            description="Chỉ doanh nghiệp chưa có lượt build xong trong N giờ (bỏ trống: tất cả).",
+        ),
+    ] = None,
+) -> EnqueuePreviewOut:
+    """Số doanh nghiệp `POST /api/enqueue` sẽ xếp build với cùng điều kiện (không xếp gì)."""
+    async with res_of(request).sessionmaker() as session:
+        selected = await batch_service.count_companies(session, stale_hours=stale_hours)
+    return EnqueuePreviewOut(selected=selected)
 
 
 @router.post("/enqueue")

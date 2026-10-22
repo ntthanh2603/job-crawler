@@ -138,12 +138,14 @@ async def collect(
     known: KnownJobs | None = None,
     mode: Mode = "build",
     plans: Mapping[str, PlanSpec] | None = None,
+    fresh: bool = False,
 ) -> CollectResult:
     """Chạy song song mọi nguồn tới `deadline` (theo `clock`, mặc định `time.monotonic()`).
 
     `records`: danh sách nhận các `FetchRecord` (truyền vào để vẫn còn khi bị huỷ giữa chừng).
     `known`: tin đã tải chi tiết ở lượt gần đây, nguồn dùng lại thay vì tải lại.
     `mode`, `plans`: build (ghi bộ khung) hoặc poll (đi theo bộ khung của từng nguồn, theo tên).
+    `fresh`: không dùng HTTP cache (build tìm nguồn lại).
     """
     limits = limits or SourceLimits()
     result = CollectResult(records=records if records is not None else [])
@@ -162,6 +164,7 @@ async def collect(
             )
         session = SourceSession(source.name, fetcher, llm, own, result.records, known=known)
         session.mode = mode
+        session.fresh = fresh
         if spec is not None:
             session.plan = spec.model_copy(deep=True)
         report = SourceReport(name=source.name, url=source.url)

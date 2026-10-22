@@ -1,4 +1,4 @@
-"""API lượt chạy: `/api/runs/…` (chi tiết, request, log) và `/api/failed-pages/…`."""
+"""API lượt build / poll: `/api/runs/…` (chi tiết, request, log) và `/api/failed-pages/…`."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api", tags=["runs"])
 
 
 async def load_run_detail(res: Resources, run_id: uuid.UUID) -> RunDetailOut | None:
-    """Tóm tắt lượt chạy như `GET /api/runs/{run_id}` (cũng là chủ đề `run` của
+    """Tóm tắt lượt build / poll như `GET /api/runs/{run_id}` (cũng là chủ đề `run` của
     `modules/live/live_service.py`)."""
     async with res.sessionmaker() as session:
         d = await runs_service.run_detail(session, run_id)
@@ -49,7 +49,7 @@ async def load_run_detail(res: Resources, run_id: uuid.UUID) -> RunDetailOut | N
 async def get_run(request: Request, run_id: uuid.UUID) -> RunDetailOut:
     detail = await load_run_detail(res_of(request), run_id)
     if detail is None:
-        raise HTTPException(404, "Không có lượt chạy này")
+        raise HTTPException(404, "Không có lượt build / poll này")
     return detail
 
 
@@ -92,6 +92,7 @@ async def get_run_logs(
 async def get_failed_page(request: Request, page_id: UUID) -> FailedPageOut:
     async with res_of(request).sessionmaker() as session:
         page = await runs_service.failed_page(session, page_id)
+        kind = await runs_service.run_kind(session, page.run_id) if page is not None else None
     if page is None:
         raise HTTPException(404, "Không có trang này (đã quá hạn lưu?)")
     return FailedPageOut(
@@ -102,6 +103,7 @@ async def get_failed_page(request: Request, page_id: UUID) -> FailedPageOut:
         created_at=page.created_at,
         http_status=page.http_status,
         run_id=str(page.run_id) if page.run_id else None,
+        run_kind=kind,
         html=page.html or "",
     )
 

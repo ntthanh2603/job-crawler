@@ -20,8 +20,9 @@ import {
   toneOf,
   useTabParam,
   type Tone,
+  RunStatusBadge,
 } from "@/components/common"
-import { RunTags } from "@/components/crawl"
+import { RunTags, runName } from "@/components/crawl"
 import { LiveStatus, useLiveRun } from "@/components/live"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -94,14 +95,14 @@ function RunProblems({ run }: { run: RunDetail["run"] }) {
           <div>
             <div className="font-medium">
               {run.incomplete_sources.length
-                ? `Lượt chạy chưa đọc hết ${num(run.incomplete_sources.length)} nguồn`
-                : "Lượt chạy gặp lỗi"}
+                ? `${runName(run.kind)} chưa đọc hết ${num(run.incomplete_sources.length)} nguồn`
+                : `${runName(run.kind)} gặp lỗi`}
             </div>
             {run.incomplete_sources.length > 0 && (
               <p className="text-meta text-muted-foreground">
                 {run.kind === "poll"
                   ? "Tin đã thu được vẫn được lưu; việc làm của nguồn lỗi không bị coi là đã gỡ. Lỗi tạm lặp lại nhiều lượt, hoặc bộ khung hỏng (trang chính lỗi, cấu trúc đổi), thì bộ khung được build lại."
-                  : "Tin đã thu được vẫn được lưu. Việc làm cũ của nguồn chưa xong không bị coi là đã gỡ; hệ thống tự xếp lượt chạy tiếp (sau khoảng một phút, có giới hạn số lần) để đọc nốt phần còn lại."}
+                  : "Tin đã thu được vẫn được lưu. Việc làm cũ của nguồn chưa xong không bị coi là đã gỡ; hệ thống tự xếp lượt build tiếp (sau khoảng một phút, có giới hạn số lần) để đọc nốt phần còn lại."}
               </p>
             )}
           </div>
@@ -140,7 +141,7 @@ export function RunPage() {
           { to: "/companies", label: "Doanh nghiệp" },
           { to: `/companies/${r.company_id}?tab=runs`, label: name },
         ]}
-        title={`${r.kind === "poll" ? "Lượt poll" : r.kind === "build" ? "Lượt build" : "Lượt chạy"} ${dt(r.started_at)}`}
+        title={`${runName(r.kind)} ${dt(r.started_at)}`}
         actions={
           <Button variant="outline" asChild>
             <Link to={`/companies/${r.company_id}`}>
@@ -150,10 +151,10 @@ export function RunPage() {
         }
       >
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-sm text-muted-foreground">
-          <StatusBadge value={r.status} />
+          <RunStatusBadge value={r.status} />
           <RunTags kind={r.kind} trigger={r.trigger} />
           <span>{cap(ago(r.started_at))}</span>
-          <code className="truncate font-mono text-meta text-muted-foreground/80" title="Mã lượt chạy">
+          <code className="truncate font-mono text-meta text-muted-foreground/80" title={`Mã ${runName(r.kind).toLowerCase()}`}>
             {r.run_id}
           </code>
           {r.status === "running" && <LiveStatus state={state} pollSeconds={5} />}
@@ -320,7 +321,7 @@ export function RunPage() {
                 defaultSort={LOG_SORT}
                 defaultLimit={100}
                 searchPlaceholder="Tìm theo tên sự kiện…"
-                empty="Không có log cho lượt chạy này.">
+                empty={`Không có log cho ${runName(r.kind).toLowerCase()} này.`}>
                 {(logs) => (
                   <div className="divide-y">
                     {logs.map((l, i) => {

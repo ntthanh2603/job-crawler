@@ -260,7 +260,7 @@ export const LABELS: Record<string, string> = {
   new: "Mới",
   deferred: "Hẹn giờ",
   // bộ lọc
-  never: "Chưa chạy",
+  never: "Chưa build",
   with: "Có job đang mở",
   without: "Không có job",
   no: "Chưa kiểm",
@@ -309,6 +309,11 @@ export function education(value: string | null | undefined): string {
 export function label(value: string | null | undefined): string {
   if (!value) return "–"
   return LABELS[value] ?? cap(value)
+}
+
+/** Kết quả một lượt build / poll. `ambiguous` là lượt đã xong mà KYC chưa rõ (không phải lượt dở). */
+export function runStatusLabel(value: string | null | undefined): string {
+  return value === "ambiguous" ? "Xong · KYC chưa rõ" : label(value)
 }
 
 /** "no_job: không bóc được tin" → "Không bóc được tin". */

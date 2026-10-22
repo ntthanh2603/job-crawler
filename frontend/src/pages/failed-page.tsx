@@ -2,6 +2,7 @@ import { Download, ExternalLinkIcon, History } from "lucide-react"
 import { Link, useParams } from "react-router"
 
 import { ErrorState, ExternalLink, Meta, PageHeader, PageLoading, Section, StatusBadge } from "@/components/common"
+import { runName } from "@/components/crawl"
 import { Button } from "@/components/ui/button"
 import { useGetFailedPage } from "@/lib/gen/queries"
 import { dt, failReason, num, sourceLabel } from "@/lib/format"
@@ -16,7 +17,7 @@ export function FailedPagePage() {
   return (
     <>
       <PageHeader
-        crumbs={p.run_id ? [{ to: `/runs/${p.run_id}`, label: "Lượt chạy" }] : undefined}
+        crumbs={p.run_id ? [{ to: `/runs/${p.run_id}`, label: runName(p.run_kind) }] : undefined}
         title="Trang parse lỗi"
         description={failReason(p.reason)}
         actions={
@@ -24,7 +25,7 @@ export function FailedPagePage() {
             {p.run_id && (
               <Button variant="outline" asChild>
                 <Link to={`/runs/${p.run_id}`}>
-                  <History /> Xem lượt chạy
+                  <History /> Xem {runName(p.run_kind).toLowerCase()}
                 </Link>
               </Button>
             )}

@@ -306,13 +306,13 @@ class Settings(BaseSettings):
     company_timeout_seconds: int = Field(default=180, gt=0)
     # Số lần chạy tối đa một job build (runner chết / timeout cứng thì chạy lại).
     company_job_retries: int = Field(default=2, ge=1)
-    # Lượt build `partial` (chạm giới hạn, hết giờ, tin chờ LLM): tự xếp lượt chạy tiếp, tối đa
+    # Lượt build `partial` (chạm giới hạn, hết giờ, tin chờ LLM): tự xếp lượt build tiếp, tối đa
     # chừng này lần liên tiếp, sau chừng này giây (lượt sau dùng lại tin đã tải nên đi tiếp được).
     company_max_continuations: int = Field(default=2, ge=0)
     company_continuation_delay_seconds: float = Field(default=60, ge=0)
 
-    # Bảo trì định kỳ (cron của runner, `jobcrawler db maintain`): dọn dữ liệu cũ, lượt chạy treo,
-    # huấn luyện từ điển nén.
+    # Bảo trì định kỳ (cron của runner, `jobcrawler db maintain`): dọn dữ liệu cũ, lượt build /
+    # poll treo, huấn luyện từ điển nén.
     maintenance_cron: str = "17 * * * *"  # mỗi giờ
     overview_cron: str = "*/5 * * * *"  # số liệu phân bố trang tổng quan
     source_fetch_retention_days: float = Field(default=30, gt=0)

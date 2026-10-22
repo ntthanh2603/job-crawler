@@ -56,13 +56,13 @@ class CompanyDetailOut(ApiOut):
 
 
 class EnqueueIn(BaseModel):
-    company_ids: list[UUID] | None = Field(default=None, description="Các doanh nghiệp cần chạy.")
+    company_ids: list[UUID] | None = Field(default=None, description="Các doanh nghiệp cần build.")
     stale_hours: float | None = Field(
         default=None,
         ge=0,
         le=MAX_HOURS,
         allow_inf_nan=False,
-        description="Chỉ doanh nghiệp chưa có lượt chạy xong trong N giờ.",
+        description="Chỉ doanh nghiệp chưa có lượt build xong trong N giờ.",
     )
     all: bool = Field(default=False, description="Mọi doanh nghiệp (kết hợp stale_hours).")
 
@@ -94,6 +94,10 @@ class CompanyCreatedOut(ApiOut):
     created: bool  # False: đã có doanh nghiệp này, chỉ bổ sung trường còn trống
     warnings: list[str]
     queued: bool | None  # None: không yêu cầu đưa vào hàng đợi
+
+
+class EnqueuePreviewOut(ApiOut):
+    selected: int  # số doanh nghiệp lượt xếp build với cùng điều kiện sẽ chọn
 
 
 class EnqueueResultOut(ApiOut):

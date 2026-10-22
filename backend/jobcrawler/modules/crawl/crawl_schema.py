@@ -17,7 +17,7 @@ class PlanPollResult(StrEnum):
 
     NEVER = "never"  # chưa poll kể từ lượt build ghi bộ khung
     UNCHANGED = "unchanged"  # tập mã tin như lượt trước: chỉ cập nhật lịch
-    CHANGED = "changed"  # có tin mới / tin gỡ: xử lý tin mới, ghi lượt chạy
+    CHANGED = "changed"  # có tin mới / tin gỡ: xử lý tin mới, ghi lượt poll
     RETRYING = "retrying"  # lỗi tạm, chưa tới POLL_MAX_FAILURES lượt liên tiếp
     BROKEN = "broken"  # bộ khung không còn đúng: đã xếp build lại
     RETIRED = "retired"  # lượt build gần nhất không còn thấy nguồn: không poll

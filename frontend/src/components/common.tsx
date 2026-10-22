@@ -36,7 +36,7 @@ import { TableHead } from "@/components/ui/table"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ApiError, errorMessage } from "@/lib/api"
-import { cap, label, num, reason, sourceProblem } from "@/lib/format"
+import { cap, label, num, reason, runStatusLabel, sourceProblem } from "@/lib/format"
 import type { Job, ListParams, Page, SortOrder, SortState } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -122,6 +122,19 @@ export function StatusBadge({
       {typeof text === "string" ? cap(text) : (text ?? label(value))}
     </span>
   )
+}
+
+/** Kết quả một lượt build / poll (`runStatusLabel`). */
+export function RunStatusBadge({
+  value,
+  pulse,
+  className,
+}: {
+  value: string | null | undefined
+  pulse?: boolean
+  className?: string
+}) {
+  return <StatusBadge value={value} text={runStatusLabel(value)} pulse={pulse} className={className} />
 }
 
 /** Chấm màu + chữ, không nền: dùng trong chú giải, danh sách đếm dày. */
@@ -279,7 +292,7 @@ export function IncompleteList({ items }: { items: { source: string; count?: num
               <div className="text-meta text-muted-foreground">{p.detail}</div>
             </div>
             {count !== undefined && (
-              <span className="shrink-0 text-sm font-semibold tabular-nums" title="Số lượt chạy">
+              <span className="shrink-0 text-sm font-semibold tabular-nums" title="Số lượt build / poll">
                 {num(count)}
               </span>
             )}

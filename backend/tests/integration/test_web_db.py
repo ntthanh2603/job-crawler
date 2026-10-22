@@ -350,6 +350,7 @@ async def test_companies_list_detail_and_run(web: Seed) -> None:
 
     page_ = (await web.client.get(f"/api/failed-pages/{web.failed_page_id}")).json()
     assert page_["html"].startswith("<html><script>")
+    assert page_["run_kind"] == "build"  # trang được ghi bởi lượt build của seed
     raw = await web.client.get(f"/api/failed-pages/{web.failed_page_id}/raw")
     assert raw.headers["content-type"].startswith("text/plain")
     assert "attachment" in raw.headers["content-disposition"]
@@ -465,8 +466,19 @@ async def test_import_enqueue_boards_queue(web: Seed) -> None:
     assert "thiếu cột `name`" in bad.json()["detail"]
 
     assert (await web.client.post("/api/enqueue", json={})).status_code == 400
+    # Hộp thoại Build đếm trước: chưa có lượt build nào xong thì mọi doanh nghiệp đều khớp.
+    preview = (await web.client.get("/api/enqueue/preview", params={"stale_hours": 24})).json()
+    assert preview["selected"] >= 1
+    bad = await web.client.get("/api/enqueue/preview", params={"stale_hours": -1})
+    assert bad.status_code == 422
     first = (await web.client.post("/api/enqueue", json={"company_ids": [web.company_id]})).json()
     assert first == {"selected": 1, "enqueued": 1, "already_queued": 0}
+    # Build bấm từ giao diện tìm nguồn lại và đọc trang mới (không phải kết quả cache).
+    from jobcrawler.services.resources import open_resources
+
+    async with open_resources(web.settings, db_logs=False) as res:
+        queued = (await res.queues.build.info(jobs=True))["jobs"]
+    assert {j["kwargs"].get("refresh") for j in queued} == {True}
     again = (await web.client.post("/api/enqueue", json={"company_ids": [web.company_id]})).json()
     assert again["already_queued"] == 1
 

@@ -323,7 +323,7 @@ async def evaluate(
             )
             report.companies.append(row)
             if company_id is None:
-                row.run_status = "chưa import/chạy"
+                row.run_status = "chưa import/build"
                 row.missing = [g.title or g.url or "" for g in expected][:5]
                 continue
             row.run_status = await session.scalar(

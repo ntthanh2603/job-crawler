@@ -1079,8 +1079,8 @@ async def load_company(
 
 
 async def merge_companies(session: AsyncSession, src: Company, dst: Company) -> None:
-    """Gộp `src` vào `dst` (cùng pháp nhân): chuyển alias, lượt chạy, fetch, profile, job rồi
-    xoá `src`."""
+    """Gộp `src` vào `dst` (cùng pháp nhân): chuyển alias, lượt build / poll, fetch, profile, job
+    rồi xoá `src`."""
     await session.execute(
         pg_insert(CompanyAlias)
         .from_select(

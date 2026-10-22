@@ -24,6 +24,7 @@ import {
   nextSort,
   pageLimit,
   useRowLink,
+  RunStatusBadge,
 } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -41,12 +42,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { errorMessage } from "@/lib/api"
-import { ago, cap, companyName, displayName, duration, num } from "@/lib/format"
+import { ago, cap, companyName, displayName, duration, num, runStatusLabel } from "@/lib/format"
 import {
   getGetCompaniesQueryKey,
   getGetQueueQueryKey,
   postEnqueue,
   useGetCompanies,
+  useGetEnqueuePreview,
   useGetMeta,
   usePostCompany,
   usePostImport,
@@ -67,8 +69,8 @@ const SORTS: readonly (readonly [GetCompaniesSortBy, SortOrder, string])[] = [
   ["name", "DESC", "Tên Z → A"],
   ["active_jobs", "DESC", "Nhiều việc mở nhất"],
   ["active_jobs", "ASC", "Ít việc mở nhất"],
-  ["last_run_at", "DESC", "Chạy gần đây nhất"],
-  ["last_run_at", "ASC", "Lâu chưa chạy nhất"],
+  ["last_run_at", "DESC", "Build gần đây nhất"],
+  ["last_run_at", "ASC", "Lâu chưa build nhất"],
 ]
 
 /** File CSV mẫu (50 doanh nghiệp lớn của Việt Nam), đúng định dạng nạp danh sách. */
@@ -77,8 +79,8 @@ const SAMPLE_CSV_URL = "/api/companies/import/sample.csv"
 const EMPTY_COMPANY = { name: "", tax_code: "", website: "", note: "" }
 
 function enqueueMessage(r: EnqueueResult) {
-  return `Đã đưa ${num(r.enqueued)}/${num(r.selected)} doanh nghiệp vào hàng đợi${
-    r.already_queued ? ` (${num(r.already_queued)} đã có việc đang chờ hoặc đang chạy)` : ""
+  return `Đã đưa ${num(r.enqueued)}/${num(r.selected)} doanh nghiệp vào hàng đợi build${
+    r.already_queued ? ` (${num(r.already_queued)} đã có lượt build đang chờ hoặc đang chạy)` : ""
   }`
 }
 
@@ -93,7 +95,9 @@ function useEnqueue(onDone?: () => void) {
   return useMutation({
     mutationFn: (body: EnqueueBody) => postEnqueue(body),
     onSuccess: (r) => {
-      toast.success(enqueueMessage(r))
+      if (r.enqueued) toast.success(enqueueMessage(r))
+      else if (r.selected) toast.warning("Các doanh nghiệp đã chọn đều đang có lượt build chờ hoặc đang chạy")
+      else toast.warning("Không có doanh nghiệp nào khớp để build")
       client.invalidateQueries({ queryKey: getGetCompaniesQueryKey() })
       client.invalidateQueries({ queryKey: getGetQueueQueryKey() })
       onDone?.()
@@ -101,18 +105,25 @@ function useEnqueue(onDone?: () => void) {
   })
 }
 
-/** Hộp thoại chạy nhiều doanh nghiệp: lâu chưa chạy (theo số giờ) hoặc tất cả. */
-function RunDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+/** Hộp thoại build nhiều doanh nghiệp: lâu chưa build (theo số giờ) hoặc tất cả; đếm trước số doanh nghiệp khớp
+ * để không bấm mà không có gì được xếp (vd. ngay sau build đêm, mọi doanh nghiệp đều vừa build). */
+function BuildDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [mode, setMode] = useState<"stale" | "all">("stale")
   const [hours, setHours] = useState("24")
+  const staleHours = Number(hours) || 24
   const enqueue = useEnqueue(() => onOpenChange(false))
+  const preview = useGetEnqueuePreview(mode === "all" ? undefined : { stale_hours: staleHours }, {
+    query: { enabled: open },
+  })
+  const matched = preview.data?.selected
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Chạy doanh nghiệp</DialogTitle>
+          <DialogTitle>Build doanh nghiệp</DialogTitle>
           <DialogDescription>
-            Mỗi doanh nghiệp một việc trong hàng đợi; doanh nghiệp đang chờ hoặc đang chạy không bị nạp trùng.
+            Mỗi doanh nghiệp một lượt build (tìm nguồn, đọc đủ site, ghi lại bộ khung) trong hàng đợi build; doanh nghiệp
+            đang chờ hoặc đang build không bị nạp trùng. Poll không cần bấm: tự chạy theo chu kỳ trong khung giờ poll.
           </DialogDescription>
         </DialogHeader>
         <RadioGroup value={mode} onValueChange={(v) => setMode(v === "all" ? "all" : "stale")} className="gap-2">
@@ -124,8 +135,8 @@ function RunDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
           >
             <RadioGroupItem value="stale" className="mt-0.5" />
             <div className="min-w-0 flex-1 space-y-2">
-              <div className="text-sm font-medium">Doanh nghiệp lâu chưa cập nhật</div>
-              <NumberChip prefix="Chưa có lượt chạy xong trong" suffix="giờ" value={hours} onChange={setHours} min={1} />
+              <div className="text-sm font-medium">Doanh nghiệp lâu chưa build</div>
+              <NumberChip prefix="Chưa có lượt build xong trong" suffix="giờ" value={hours} onChange={setHours} min={1} />
             </div>
           </label>
           <label
@@ -137,19 +148,33 @@ function RunDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open:
             <RadioGroupItem value="all" className="mt-0.5" />
             <div>
               <div className="text-sm font-medium">Tất cả doanh nghiệp</div>
-              <div className="text-meta text-muted-foreground">Chạy lại toàn bộ danh sách, có thể mất nhiều giờ.</div>
+              <div className="text-meta text-muted-foreground">Build lại toàn bộ danh sách, có thể mất nhiều giờ.</div>
             </div>
           </label>
         </RadioGroup>
+        <p className={cn("text-sm", matched === 0 ? "text-warning-ink" : "text-muted-foreground")}>
+          {matched === undefined
+            ? "Đang đếm doanh nghiệp…"
+            : matched > 0
+              ? `Khớp ${num(matched)} doanh nghiệp.`
+              : mode === "all"
+                ? "Chưa có doanh nghiệp nào."
+                : `Mọi doanh nghiệp đã có lượt build xong trong ${num(staleHours)} giờ qua (build đêm). Giảm số giờ hoặc chọn Tất cả doanh nghiệp.`}
+        </p>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Huỷ
           </Button>
           <Button
-            disabled={enqueue.isPending}
-            onClick={() => enqueue.mutate(mode === "all" ? { all: true } : { stale_hours: Number(hours) || 24 })}
+            disabled={enqueue.isPending || !matched}
+            onClick={() => enqueue.mutate(mode === "all" ? { all: true } : { stale_hours: staleHours })}
           >
-            <Play /> {enqueue.isPending ? "Đang đưa vào hàng đợi…" : "Đưa vào hàng đợi"}
+            <Play />{" "}
+            {enqueue.isPending
+              ? "Đang đưa vào hàng đợi build…"
+              : matched
+                ? `Build ${num(matched)} doanh nghiệp`
+                : "Đưa vào hàng đợi build"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -418,10 +443,10 @@ function CompanyCell({ row }: { row: CompanyItem }) {
 }
 
 function LastRun({ row }: { row: CompanyItem }) {
-  if (!row.last_status) return <span className="text-meta text-muted-foreground">Chưa chạy</span>
+  if (!row.last_status) return <span className="text-meta text-muted-foreground">Chưa build</span>
   return (
     <div className="flex flex-col items-start gap-1">
-      <StatusBadge value={row.last_status} />
+      <RunStatusBadge value={row.last_status} />
       <span className="text-meta whitespace-nowrap text-muted-foreground tabular-nums">
         {cap(ago(row.last_started))} · {duration(row.last_duration_ms)}
       </span>
@@ -439,7 +464,7 @@ export function CompaniesPage() {
   const [search, setSearch] = useState(filters.search)
   useEffect(() => setSearch(filters.search), [filters.search])
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [runOpen, setRunOpen] = useState(false)
+  const [buildOpen, setBuildOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const rowLink = useRowLink()
@@ -503,13 +528,13 @@ export function CompaniesPage() {
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               <Upload /> Nạp danh sách
             </Button>
-            <Button onClick={() => setRunOpen(true)}>
-              <Play /> Chạy…
+            <Button onClick={() => setBuildOpen(true)}>
+              <Play /> Build…
             </Button>
           </>
         }
       />
-      <RunDialog open={runOpen} onOpenChange={setRunOpen} />
+      <BuildDialog open={buildOpen} onOpenChange={setBuildOpen} />
       <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
 
@@ -532,7 +557,8 @@ export function CompaniesPage() {
             options={[...(meta.data?.kyc_statuses ?? []), "none"]}
           />
           <FilterSelect
-            label="Lượt chạy mới nhất"
+            label="Build gần nhất"
+            labels={runStatusLabel}
             value={filters.run}
             onChange={(v) => update({ run: v })}
             options={[...(meta.data?.run_statuses ?? []), "never"]}
@@ -582,12 +608,12 @@ export function CompaniesPage() {
                         <KycBadge status={row.company.kyc_status} />
                         {row.last_status ? (
                           <>
-                            <StatusBadge value={row.last_status} />
+                            <RunStatusBadge value={row.last_status} />
                             <span className="text-meta text-muted-foreground">{cap(ago(row.last_started))}</span>
                             <IncompleteSources sources={row.last_incomplete} />
                           </>
                         ) : (
-                          <span className="text-meta text-muted-foreground">Chưa chạy</span>
+                          <span className="text-meta text-muted-foreground">Chưa build</span>
                         )}
                       </div>
                     </div>
@@ -610,7 +636,7 @@ export function CompaniesPage() {
                     </SortHead>
                     <TableHead>KYC</TableHead>
                     <SortHead column="last_run_at" sort={sort} onSort={onSort}>
-                      Lượt chạy mới nhất
+                      Build gần nhất
                     </SortHead>
                     <SortHead column="active_jobs" sort={sort} onSort={onSort} className="text-right">
                       Việc đang mở
@@ -693,7 +719,7 @@ export function CompaniesPage() {
               Bỏ chọn
             </Button>
             <Button size="sm" disabled={enqueue.isPending} onClick={() => enqueue.mutate({ company_ids: [...selected] })}>
-              <Play /> Chạy ngay
+              <Play /> Build ngay
             </Button>
           </div>
         </div>

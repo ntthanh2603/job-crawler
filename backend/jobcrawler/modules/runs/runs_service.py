@@ -1,4 +1,4 @@
-"""Truy vấn lượt chạy cho giao diện: chi tiết, request, log, trang parse lỗi."""
+"""Truy vấn lượt build / poll cho giao diện: chi tiết, request, log, trang parse lỗi."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from jobcrawler.common.pagination import (
     ordering,
     paginate,
 )
-from jobcrawler.common.schemas import RunStatus
+from jobcrawler.common.schemas import RunKind, RunStatus
 from jobcrawler.database.models import Company, CompanyRun, FailedPage, Log, SourceFetch
 
 
@@ -35,7 +35,7 @@ class RunDetail:
 
 
 async def run_detail(session: AsyncSession, run_id: uuid.UUID) -> RunDetail | None:
-    """Tóm tắt một lượt chạy; request và log lấy theo trang (`run_fetches`, `run_logs`)."""
+    """Tóm tắt một lượt build / poll; request và log lấy theo trang (`run_fetches`, `run_logs`)."""
     run = await session.get(CompanyRun, run_id)
     if run is None:
         return None
@@ -139,7 +139,8 @@ class HourBucket:
 
 
 async def runs_per_hour(session: AsyncSession, *, hours: int = 24) -> list[HourBucket]:
-    """Số lượt chạy theo giờ (theo trạng thái) trong `hours` giờ qua, đủ cả giờ không có lượt."""
+    """Số lượt build / poll theo giờ (theo trạng thái) trong `hours` giờ qua, đủ cả giờ không có
+    lượt."""
     now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     start = now - timedelta(hours=hours - 1)
     hour = func.date_trunc("hour", CompanyRun.started_at)
@@ -170,6 +171,14 @@ async def recent_runs(session: AsyncSession, limit: int = 15) -> list[tuple[Comp
 
 async def failed_page(session: AsyncSession, page_id: UUID) -> FailedPage | None:
     return await session.get(FailedPage, page_id)
+
+
+async def run_kind(session: AsyncSession, run_id: UUID | None) -> RunKind | None:
+    """Lượt `run_id` là build hay poll (None: không có / đã quá hạn lưu)."""
+    if run_id is None:
+        return None
+    kind = await session.scalar(select(CompanyRun.kind).where(CompanyRun.run_id == run_id))
+    return RunKind(kind) if kind is not None else None
 
 
 RUN_STATUSES = [s.value for s in RunStatus]

@@ -103,7 +103,7 @@ const FIELDS: Record<string, string> = {
   enqueued: "Đã đưa vào hàng đợi",
   already_queued: "Đã có trong hàng đợi",
   all: "Mọi doanh nghiệp",
-  stale_hours: "Lâu chưa chạy (giờ)",
+  stale_hours: "Lâu chưa build (giờ)",
   company_ids: "Doanh nghiệp",
   filename: "File",
   rows: "Dòng hợp lệ",
