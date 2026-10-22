@@ -12,6 +12,7 @@ Thao tác trang tuyển dụng cho API: danh sách trang, xếp lượt index.""
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,7 +20,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import Field
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,6 +256,22 @@ async def board_sources(
                 .order_by(SourceProfile.id)
             )
         ).all()
+        # Profile đang có tin trong index trước: doanh nghiệp lớn có hàng chục profile (mỗi chi
+        # nhánh, bản trùng trên JobsGO), phần lớn không có tin.
+        active = dict(
+            (
+                await session.execute(
+                    select(JobPosting.source_profile_id, func.count())
+                    .where(
+                        JobPosting.source_profile_id.in_([p.id for p in profiles]),
+                        JobPosting.status == JobStatus.ACTIVE.value,
+                    )
+                    .group_by(JobPosting.source_profile_id)
+                )
+            ).all()
+        )
+    profiles = sorted(profiles, key=lambda p: -active.get(p.id, 0))
+    reads: Counter[str] = Counter()  # profile được đọc trang tuyển dụng, mỗi trang
     sources: list[Source] = []
     for profile in profiles:
         adapter = registry.get(profile.source)
@@ -263,6 +280,9 @@ async def board_sources(
         if not _usable(profile, policy, names):
             continue
         fresh = profile.indexed_at is not None and profile.indexed_at >= stale_before
+        online = network and not fresh and reads[profile.source] < MAX_PROFILE_READS
+        if online:
+            reads[profile.source] += 1
         sources.append(
             BoardProfileSource(
                 adapter,
@@ -271,27 +291,70 @@ async def board_sources(
                 fresh=fresh,
                 index=_ProfileIndex(res, profile.source, profile.id),
                 name=profile.name_on_source,
-                network=network,
+                network=online,
             )
         )
     return sources
 
 
+# Mỗi lượt build đọc trang tuyển dụng cho tối đa chừng này profile chưa đủ tin trong index của
+# một doanh nghiệp trên một trang; profile còn lại chỉ dùng tin đã index.
+MAX_PROFILE_READS = 5
+
+
 MAX_SERP_PROFILES = 3
+# Profile chưa map xét cho một doanh nghiệp trong lượt build (tên gần alias).
+MAX_COMPANY_PROFILES = 50
+
+
+async def map_company_profiles(res: Resources, company_id: UUID) -> int:
+    """Profile đã có trong bảng nhưng chưa map (index gặp tin trước khi doanh nghiệp có alias
+    khớp, profile thêm từ danh bạ nhà tuyển dụng) có tên gần alias của doanh nghiệp: map ngay bằng
+    rule trong lượt build, không chờ lượt index đủ ban đêm. Profile còn mơ hồ để lượt index xét
+    (đọc trang profile, LLM). Trả số profile map được."""
+    s = res.settings
+    async with res.sessionmaker.begin() as session:
+        await session.execute(
+            text("SELECT set_config('pg_trgm.similarity_threshold', :t, true)"),
+            {"t": str(s.profile_match_trigram)},
+        )
+        ids = list(
+            await session.scalars(
+                select(SourceProfile.id)
+                .join(CompanyAlias, CompanyAlias.alias_norm.op("%")(SourceProfile.name_norm))
+                .where(CompanyAlias.company_id == company_id, SourceProfile.company_id.is_(None))
+                .distinct()
+                .limit(MAX_COMPANY_PROFILES)
+            )
+        )
+        matched = await map_profiles(
+            session,
+            profile_ids=ids,
+            trigram_threshold=s.profile_match_trigram,
+            min_confidence=s.profile_match_min_confidence,
+            retry=True,
+            record_misses=False,
+        )
+    if matched:
+        log.info("boards.company_profiles", company_id=company_id, matched=matched)
+    return matched
 
 
 async def lookup_profiles(
     res: Resources, company: Company, *, timeout: float, records: list[FetchRecord]
 ) -> int:
-    """Doanh nghiệp chưa có profile trên một số trang tuyển dụng: tìm `"<tên>" site:...` bằng
-    SERP, mở trang profile tìm được và map bằng rule (tên/website/MST khớp). Trả số profile mới.
+    """Profile của doanh nghiệp trên các trang tuyển dụng, trước khi đọc tin. Trả số profile mới.
 
-    Không có SERP_API_KEY (hoặc BOARD_SERP_LOOKUP=false) thì bỏ qua. SERP gọi thẳng từ backend
-    (`api_http`); trang profile tìm được thì đi qua tầng mạng crawl (`http`)."""
+    1. Profile đã có trong bảng, chưa map, tên gần alias (`map_company_profiles`).
+    2. Trang chưa có profile nào của doanh nghiệp: tìm `"<tên>" site:...` bằng SERP, mở trang
+       profile tìm được và map bằng rule (tên/website/MST khớp). Không có SERP_API_KEY (hoặc
+       BOARD_SERP_LOOKUP=false) thì bỏ qua. SERP gọi thẳng từ backend (`api_http`); trang profile
+       tìm được thì đi qua tầng mạng crawl (`http`)."""
     s = res.settings
+    found = await map_company_profiles(res, company.id)
     serp = SerpClient.from_settings(s, res.api_http, res.cache_kv)
     if not s.board_serp_lookup or not serp.enabled:
-        return 0
+        return found
     async with res.sessionmaker() as session:
         mapped = set(
             await session.scalars(
@@ -301,9 +364,8 @@ async def lookup_profiles(
     remaining = [a for a in selected_boards(s) if a.name not in mapped]
     name = company.legal_name or company.brand_name or company.input_name
     if not remaining or not name:
-        return 0
+        return found
     sites = " OR ".join(f"site:{registrable_domain(host_of(a.home))}" for a in remaining)
-    found = 0
     try:
         async with asyncio.timeout(timeout):
             response = await serp.search(f'"{name}" ({sites})', records=records)

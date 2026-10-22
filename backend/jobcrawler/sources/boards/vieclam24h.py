@@ -10,6 +10,8 @@
   theo mã tin). `identifier` là mã nhà tuyển dụng.
 - Profile `/danh-sach-tin-tuyen-dung-<slug>-ntd<mã>p<tỉnh>.html`. Website và MST của nhà tuyển
   dụng có trong dữ liệu trang chi tiết tin (`__NEXT_DATA__`): đọc luôn, không tốn request.
+- Danh bạ nhà tuyển dụng: `sitemap-index.xml` → `employer-0.xml` → `congty-0..1.xml` (~7 nghìn
+  profile, 10/2026).
 Mẫu: tests/fixtures/boards/vieclam24h/.
 """
 
@@ -55,11 +57,13 @@ class Vieclam24h(ListingBoard):
     note = "chỉ ~1 nghìn tin mới nhất; không đánh dấu tin gỡ"
     job_url = re.compile(r"^https://vieclam24h\.vn/[^/]+/[^/]+-c\d+p\d+id(?P<id>\d+)\.html$")
     profile_url = re.compile(
-        r"^https://vieclam24h\.vn/danh-sach-tin-tuyen-dung-[^/]*-ntd(?P<id>\d+)p\d+\.html$"
+        r"^https://vieclam24h\.vn/danh-sach-tin-tuyen-dung-(?P<slug>[^/]*)-ntd(?P<id>\d+)p\d+\.html$"
     )
     profile_selector = 'a[title][href*="/danh-sach-tin-tuyen-dung-"]'
     # Trang profile chia trang `?page=N` (link `rel=next`).
     profile_listing_complete = True
+    company_sitemaps = ("https://vieclam24h.vn/file/sitemap/sitemap-index.xml",)
+    company_sitemap = re.compile(r"/(?:employer-\d+|congty-\d+)\.xml$")
 
     def parse_job(self, html: str, url: str) -> BoardJob | None:
         parsed = super().parse_job(html, url)

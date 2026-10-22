@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -11,7 +12,7 @@ from sqlalchemy import delete, func, select, text, update
 
 from jobcrawler.common.config import Settings
 from jobcrawler.common.schemas import CompanyIn, FetchOutcome, JobStatus, KycStatus, RunStatus
-from jobcrawler.common.text import normalize_company_name
+from jobcrawler.common.text import company_match_key, normalize_company_name
 from jobcrawler.database.models import (
     BoardIndexRun,
     Company,
@@ -30,7 +31,7 @@ from jobcrawler.services.net.http import FetchResult
 from jobcrawler.services.resources import Resources, open_resources
 from jobcrawler.sources import boards
 
-from ..boards_fake import HOME, FakeBoard, fake_site, job_page
+from ..boards_fake import HOME, FakeBoard, fake_site, job_page, urlset
 
 pytestmark = pytest.mark.integration
 
@@ -526,3 +527,83 @@ async def test_unparseable_detail_page_is_kept_in_failed_pages(
         assert page.html.startswith("<html><body><h1>Bố cục mới</h1>")
         assert stored is not None
         assert stored < len(page.html.encode()) / 5  # HTML lưu nén
+
+
+class DirectoryBoard(FakeBoard):
+    """Trang giả có danh bạ nhà tuyển dụng (sitemap profile, tên trong slug)."""
+
+    profile_url = re.compile(r"/cong-ty/(?P<slug>[\w-]+)-(?P<id>\d+)$")
+    company_sitemaps = (f"{HOME}companies.xml",)
+
+
+async def test_full_index_adds_directory_profiles_matching_companies(
+    integration_settings: Settings,
+) -> None:
+    """Profile trong danh bạ chưa có tin nào trong index: thêm nếu tên trùng tên doanh nghiệp
+    rồi map ở cuối lượt; profile không liên quan không được thêm."""
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        company_id = await reset(res)
+        site = fake_site(JOBS)
+        site.add(
+            f"{HOME}companies.xml",
+            urlset(
+                ("cong-ty/cong-ty-co-phan-acme-board-viet-nam-99", None),
+                ("cong-ty/cong-ty-tnhh-khong-lien-quan-98", None),
+                ("cong-ty/acme-7", None),  # đã có từ tin trong index
+            ),
+            content_type="application/xml",
+        )
+        board = BoardIndexer(
+            DirectoryBoard(),
+            redis=res.redis,
+            redis_prefix=res.settings.redis_prefix,
+            sessionmaker=res.sessionmaker,
+            fetcher=site,
+            llm=LLMClient(FakeChatClient(["{}"]), model=None),
+            options=IndexOptions(),
+        )
+        stats = await board.run()
+        assert stats.status is RunStatus.OK
+        assert (stats.directory, stats.directory_new) == (3, 1)
+        profiles = await profile_rows(res)
+        assert "98" not in profiles
+        assert profiles["99"].name_on_source == "cong ty co phan acme board viet nam"
+        assert profiles["99"].company_id == company_id
+        async with res.sessionmaker() as s:
+            run = await s.get(BoardIndexRun, stats.run_id)
+        assert run is not None
+        assert (run.stats["directory"], run.stats["directory_new"]) == (3, 1)
+
+
+async def test_build_maps_existing_profiles_of_company(
+    integration_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Profile đã thử map trước khi doanh nghiệp có alias khớp (index gặp trước, danh bạ thêm):
+    lượt build map ngay bằng rule; profile còn mơ hồ để nguyên cho lượt index đủ xét."""
+    monkeypatch.setattr(boards, "registry", lambda: {FakeBoard.name: FakeBoard()})
+    async with open_resources(settings_for(integration_settings), db_logs=False) as res:
+        company_id = await reset(res)
+        tried = datetime(2026, 1, 1, tzinfo=UTC)
+        async with res.sessionmaker.begin() as s:
+            for external_id, name in (
+                ("7", ACME),
+                ("8", "Công ty TNHH ACME Board Logistics"),
+            ):
+                s.add(
+                    SourceProfile(
+                        source=FakeBoard.name,
+                        external_id=external_id,
+                        url=f"{HOME}cong-ty/acme-{external_id}",
+                        name_on_source=name,
+                        name_norm=company_match_key(name),
+                        matched_at=tried,
+                    )
+                )
+        found = await boards_service.lookup_profiles(
+            res, await _company(res, company_id), timeout=10, records=[]
+        )
+        assert found == 1
+        profiles = await profile_rows(res)
+        assert profiles["7"].company_id == company_id
+        assert profiles["8"].company_id is None
+        assert profiles["8"].matched_at == tried

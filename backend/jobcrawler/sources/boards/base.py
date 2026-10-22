@@ -256,6 +256,10 @@ class BoardAdapter(ABC):
     placeholder_profiles: ClassVar[frozenset[str]] = frozenset()
     # Lượt đuôi: số trang danh sách / trang API tối đa (dừng sớm hơn khi tới phần đã index).
     tail_max_pages: ClassVar[int] = 5
+    # Danh bạ nhà tuyển dụng (`pipeline/board_directory.py`): sitemap gốc liệt kê URL profile
+    # (tên nhà tuyển dụng nằm trong slug), và sitemap con cần đọc khi gốc là sitemap index.
+    company_sitemaps: ClassVar[tuple[str, ...]] = ()
+    company_sitemap: ClassVar[re.Pattern[str] | None] = None
 
     @property
     def source(self) -> str:
@@ -269,6 +273,10 @@ class BoardAdapter(ABC):
     @abstractmethod
     def profile_id(self, url: str) -> str | None:
         """Mã profile nhà tuyển dụng trong URL (None: không phải URL profile)."""
+
+    def profile_slug(self, url: str) -> str | None:
+        """Tên nhà tuyển dụng viết trong URL profile (`cong-ty-co-phan-mat-bao`), nếu có."""
+        return None
 
     @abstractmethod
     def entries(self, session: SourceSession, state: ListingState) -> AsyncIterator[BoardEntry]:
@@ -506,6 +514,11 @@ class SitemapBoard(BoardAdapter):
     def profile_id(self, url: str) -> str | None:
         m = self.profile_url.search(self.canonical(url))
         return m.group("id") if m else None
+
+    def profile_slug(self, url: str) -> str | None:
+        # Nhóm `slug` của `profile_url` (adapter có tên trong URL profile).
+        m = self.profile_url.search(self.canonical(url))
+        return m.groupdict().get("slug") if m else None
 
     async def _sitemap(self, session: SourceSession, url: str) -> str | None:
         result = await session.fetch(url, rate=self.rate, use_cache=False)

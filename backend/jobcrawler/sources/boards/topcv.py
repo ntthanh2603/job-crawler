@@ -10,6 +10,8 @@
   `/brand/<b>/tuyen-dung/<slug>-j<id>.html`.
 - JSON-LD: `hiringOrganization.sameAs` = profile trên TopCV (`/cong-ty/<slug>/<id>.html`, thương
   hiệu: `/brand/<slug>?id=<id>`); `identifier` là mã công ty.
+- Danh bạ nhà tuyển dụng: `sitemap/companies.xml` → `companies_0..N.xml` (~49 nghìn profile,
+  200 URL/file, 10/2026).
 - Trang profile: Organization JSON-LD (website ở `sameAs`, địa chỉ); tin đang mở ở trang riêng
   `/cong-ty/<slug>-cid<id>/tuyen-dung.html` (thương hiệu: `/brand/<slug>/tuyen-dung?id=<id>`),
   chia trang bằng JavaScript ("1/2 trang", `data-page-url`): trang sau đọc bằng `?page=N`.
@@ -89,11 +91,14 @@ class TopCV(SitemapBoard):
         r"(?P<id>\d+)\.html$"
     )
     profile_url = re.compile(
-        r"^https://www\.topcv\.vn/(?:cong-ty/[^/]+/(?P<id>\d+)\.html|brand/[^/?]+\?id=(?P<bid>\d+))$"
+        r"^https://www\.topcv\.vn/(?:cong-ty/(?P<slug>[^/]+)/(?P<id>\d+)\.html"
+        r"|brand/[^/?]+\?id=(?P<bid>\d+))$"
     )
     profile_selector = ".box-company-info__detail a.name"
     tail_sitemaps = ("https://www.topcv.vn/sitemap/jobs.xml",)
     tail_files = 3
+    company_sitemaps = ("https://www.topcv.vn/sitemap/companies.xml",)
+    company_sitemap = re.compile(r"/sitemap/companies_\d+\.xml$")
 
     def canonical(self, url: str) -> str:
         base = super().canonical(url)

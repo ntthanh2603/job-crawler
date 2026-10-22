@@ -20,12 +20,12 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import ColumnElement, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobcrawler.common.logging import get_logger
 from jobcrawler.common.schemas import KycStatus
-from jobcrawler.common.text import branch_of, company_match_key
+from jobcrawler.common.text import branch_of, company_match_key, same_legal_entity_form
 from jobcrawler.common.urls import parse_domain_input, registrable_domain
 from jobcrawler.database.models import Company, CompanyAlias, SourceProfile
 from jobcrawler.pipeline.company_facts import names_match
@@ -93,12 +93,14 @@ def decide(profile: SourceProfile, candidates: list[tuple[Company, str, float]])
         if branch and branches and branch not in branches:
             continue
         plausible[company.id] = company
+        names = _company_names(company)
         if (
             name_norm == alias_norm
-            or any(names_match(profile.name_on_source, n) for n in _company_names(company))
-            or company_match_key(profile.name_on_source)
-            in {company_match_key(n) for n in _company_names(company)}
-        ):
+            or any(names_match(profile.name_on_source, n) for n in names)
+            or company_match_key(profile.name_on_source) in {company_match_key(n) for n in names}
+        ) and same_legal_entity_form(profile.name_on_source, names):
+            # Khác loại hình pháp lý ("Công ty TNHH Hòa Phát" ≠ "Công ty Cổ phần Tập đoàn Hòa
+            # Phát"): không map bằng tên, chờ website / MST trên trang profile hay LLM.
             by_name[company.id] = company
     if len(strong) == 1:
         company_id, (confidence, signal) = next(iter(strong.items()))
@@ -175,19 +177,26 @@ async def map_profiles(
     enrich: Enrich | None = None,
     now: datetime | None = None,
     profile_ids: Collection[UUID] | None = None,
+    retry: bool = False,
+    record_misses: bool = True,
 ) -> int:
     """Map các profile chưa map (hoặc đã thử trước khi có alias mới). Trả số profile map được.
 
-    `profile_ids`: chỉ xét các profile này (lượt index đuôi: profile vừa gặp)."""
+    `profile_ids`: chỉ xét các profile này (lượt index đuôi: profile vừa gặp). `retry`: xét cả
+    profile đã thử trước đó. `record_misses=False`: chỉ ghi profile map được, profile chưa quyết
+    được giữ nguyên để lượt index đủ (có đọc trang profile, có LLM) xét lại."""
     now = now or datetime.now(UTC)
     if profile_ids is not None and not profile_ids:
         return 0
     latest_alias = select(func.max(CompanyAlias.created_at)).scalar_subquery()
-    pending = [
+    pending: list[ColumnElement[bool]] = [
         SourceProfile.company_id.is_(None),
         SourceProfile.name_norm.is_not(None),
-        or_(SourceProfile.matched_at.is_(None), SourceProfile.matched_at < latest_alias),
     ]
+    if not retry:
+        pending.append(
+            or_(SourceProfile.matched_at.is_(None), SourceProfile.matched_at < latest_alias)
+        )
     if source is not None:
         pending.append(SourceProfile.source == source)
     if profile_ids is not None:
@@ -214,10 +223,11 @@ async def map_profiles(
                 options.append((company_id, alias_norm, sim))
 
     # Không có ứng viên: chỉ ghi đã thử.
-    no_candidate = update(SourceProfile).where(*pending).values(matched_at=now)
-    if by_profile:
-        no_candidate = no_candidate.where(SourceProfile.id.not_in(list(by_profile)))
-    await session.execute(no_candidate)
+    if record_misses:
+        no_candidate = update(SourceProfile).where(*pending).values(matched_at=now)
+        if by_profile:
+            no_candidate = no_candidate.where(SourceProfile.id.not_in(list(by_profile)))
+        await session.execute(no_candidate)
     if not by_profile:
         return 0
 
@@ -246,6 +256,9 @@ async def map_profiles(
                 decision = await _ask_llm(llm, profile, uniq, min_confidence=min_confidence)
             else:
                 decision = Decision(None, 0.0, {"signal": "ambiguous_no_llm"})
+        accepted = decision.company_id is not None and decision.confidence >= min_confidence
+        if not accepted and not record_misses:
+            continue
         evidence = {
             **decision.evidence,
             "candidates": [
@@ -255,7 +268,8 @@ async def map_profiles(
         }
         profile.matched_at = now
         profile.match_evidence = evidence
-        if decision.company_id is not None and decision.confidence >= min_confidence:
+        if accepted:
+            assert decision.company_id is not None
             profile.company_id = decision.company_id
             profile.match_confidence = decision.confidence
             matched += 1

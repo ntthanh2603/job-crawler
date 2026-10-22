@@ -14,6 +14,8 @@
 - Profile `/tuyen-dung/<slug>-<id>.html` hoặc `/brand/<slug>-<id>.html`: tên, link tin đang mở,
   MST thường nằm trong phần mô tả ("Mã số thuế 0107593793"); không có website. Một doanh nghiệp
   có thể có nhiều profile (theo canonical).
+- Danh bạ nhà tuyển dụng: `sitemap.xml` → `sitemap-employer1..4.xml.gz` (~184 nghìn profile,
+  10/2026).
 Mẫu: tests/fixtures/boards/jobsgo/.
 """
 
@@ -33,10 +35,12 @@ class JobsGO(SitemapBoard):
     job_sitemap = re.compile(r"/sitemap-job\.xml$")
     job_url = re.compile(r"^https://jobsgo\.vn/viec-lam/[a-z0-9-]+-(?P<id>\d{8,})\.html$")
     profile_url = re.compile(
-        r"^https://jobsgo\.vn/(?:tuyen-dung|brand)/[a-z0-9-]*-(?P<id>\d{6,})\.html$"
+        r"^https://jobsgo\.vn/(?:tuyen-dung|brand)/(?P<slug>[a-z0-9-]*)-(?P<id>\d{6,})\.html$"
     )
     tail_sitemaps = ("https://jobsgo.vn/sitemap-job.xml",)
     tail_conditional = True
+    company_sitemaps = ("https://jobsgo.vn/sitemap.xml",)
+    company_sitemap = re.compile(r"/sitemap-employer\d+\.xml\.gz$")
 
     def parse_profile(self, html: str, url: str) -> ProfileRef | None:
         tree = parse(html)

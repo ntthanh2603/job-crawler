@@ -10,6 +10,7 @@
   `employmentType` bị bọc thêm dấu nháy (`"\\"FULL_TIME\\""`).
 - Trang profile: Organization JSON-LD (website, địa chỉ); MST chỉ có trong dữ liệu trang
   (`emp_tax_id`), 10 link tin đang mở.
+- Danh bạ nhà tuyển dụng: `sitemap/employer.xml` (1.000 profile, 10/2026).
 Mẫu: tests/fixtures/boards/careerviet/.
 """
 
@@ -31,10 +32,12 @@ class CareerViet(SitemapBoard):
         r"^https://careerviet\.vn/vi/tim-viec-lam/[^/]+\.(?P<id>[0-9A-Fa-f]{8})\.html$"
     )
     profile_url = re.compile(
-        r"^https://careerviet\.vn/vi/nha-tuyen-dung/[^/]+\.(?P<id>[0-9A-Fa-f]{8})\.html$"
+        r"^https://careerviet\.vn/vi/nha-tuyen-dung/(?P<slug>[^/]+)\.(?P<id>[0-9A-Fa-f]{8})\.html$"
     )
     identifier_is_job = True
     tail_sitemaps = ("https://careerviet.vn/sitemap/job_current_date.xml",)
+    company_sitemaps = ("https://careerviet.vn/sitemap/sitemap.xml",)
+    company_sitemap = re.compile(r"/employer\.xml$")
 
     def parse_job(self, html: str, url: str) -> BoardJob | None:
         parsed = super().parse_job(html, url)

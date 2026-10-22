@@ -27,7 +27,7 @@ class ITviec(SitemapBoard):
     sitemaps = ("https://itviec.com/dunggiatminh.xml",)
     job_sitemap = re.compile(r"twinnings_jobs_desc_vn\.xml$")
     job_url = re.compile(r"^https://itviec\.com/viec-lam-it/(?P<id>[a-z0-9_-]+-\d+)$")
-    profile_url = re.compile(r"^https://itviec\.com/nha-tuyen-dung/(?P<id>[a-z0-9-]+)$")
+    profile_url = re.compile(r"^https://itviec\.com/nha-tuyen-dung/(?P<id>(?P<slug>[a-z0-9-]+))$")
     trust_lastmod = False
     # Cloudflare chặn sau ~50 trang ở 1 req/s (một IP, không proxy).
     rate = 1 / 3
@@ -35,6 +35,8 @@ class ITviec(SitemapBoard):
     title_selector = "h1"
     profile_selector = ".job-show-employer-info h3 a"
     tail_sitemaps = ("https://itviec.com/twinnings_jobs_desc_vn.xml",)
+    # Danh bạ nhà tuyển dụng: một file (~12 nghìn profile, 10/2026); mã profile là slug tên.
+    company_sitemaps = ("https://itviec.com/twinnings_companies_vn.xml",)
 
     def parse_profile(self, html: str, url: str) -> ProfileRef | None:
         url = self.canonical(url)

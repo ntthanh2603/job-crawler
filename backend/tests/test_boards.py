@@ -467,6 +467,21 @@ def test_decide_maps_profile_name_variants() -> None:
     assert d.company_id is None
 
 
+def test_decide_does_not_map_by_name_across_legal_forms() -> None:
+    """Cùng khoá tên nhưng khác loại hình pháp lý (danh bạ nhà tuyển dụng có hàng trăm nghìn tên):
+    không map bằng tên, chờ website / MST hay LLM."""
+    hpg = _company(8, "Công ty Cổ phần Tập đoàn Hòa Phát")
+    for name in ("Công ty TNHH Hòa Phát", "cong ty tnhh hoa phat"):
+        profile = _profile(name)
+        profile.name_norm = company_match_key(name)
+        assert decide(profile, [(hpg, company_match_key(hpg.input_name), 1.0)]) is None, name
+    same = _profile("cong ty co phan tap doan hoa phat")
+    same.name_norm = company_match_key(same.name_on_source)
+    d = decide(same, [(hpg, company_match_key(hpg.input_name), 1.0)])
+    assert d is not None
+    assert d.company_id == 8
+
+
 def test_decide_profile_match_rules() -> None:
     acme = _company(1, "Công ty Cổ phần ACME Việt Nam", domain="acme.vn", tax="0101234567")
     other = _company(2, "Công ty TNHH ACME Logistics", domain="acmelog.vn")

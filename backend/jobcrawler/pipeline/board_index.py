@@ -2,6 +2,8 @@
 
 Lượt đủ (ban đêm):
 
+0. Trang có danh bạ nhà tuyển dụng (`company_sitemaps`): thêm profile có tên trùng tên một doanh
+   nghiệp, kể cả chưa có tin trong index (`pipeline/board_directory.py`), map ở bước 5.
 1. Đọc danh sách tin của trang (sitemap kèm `lastmod`).
 2. So với DB: tin còn thấy được đánh dấu `last_seen_at`; chỉ tải trang chi tiết của tin mới,
    tin có `lastmod` mới hơn, tin lâu chưa tải lại (`refresh_days`) hoặc tin đã gỡ nay thấy lại.
@@ -51,6 +53,7 @@ from jobcrawler.database.models import (
     SourceFetch,
     SourceProfile,
 )
+from jobcrawler.pipeline import board_directory
 from jobcrawler.pipeline.profiles import map_profiles
 from jobcrawler.services.llm import LLMClient
 from jobcrawler.services.net.http import Fetcher, FetchResult
@@ -121,6 +124,8 @@ class IndexStats:
     profiles_new: int = 0
     profiles_matched: int = 0
     profiles_fresh: int = 0  # profile được đánh dấu index đủ tin
+    directory: int = 0  # profile trong danh bạ nhà tuyển dụng
+    directory_new: int = 0  # profile thêm từ danh bạ (tên trùng tên một doanh nghiệp)
     duration_ms: int = 0
     error: str | None = None
     # Không chạy (trang đang được index ở process khác): status FAILED, không ghi board_index_runs.
@@ -261,6 +266,8 @@ class BoardIndexer:
                         "to_fetch": st.to_fetch,
                         "truncated": st.truncated,
                         "profiles_fresh": st.profiles_fresh,
+                        "directory": st.directory,
+                        "directory_new": st.directory_new,
                         "listing_errors": st.listing_errors[:20],
                         "duration_ms": st.duration_ms,
                     },
@@ -602,8 +609,33 @@ class BoardIndexer:
         budget = self.options.budget_seconds
         return budget is not None and self.clock() - started >= budget
 
+    async def _directory(self) -> None:
+        """Danh bạ nhà tuyển dụng: thêm profile khớp tên doanh nghiệp (chưa map)."""
+        st = self.stats
+        try:
+            found = await board_directory.read_directory(self.adapter, self.session)
+        except SourceError as exc:
+            st.listing_errors.append(f"danh bạ: {exc}")
+            return
+        st.directory = len(found.entries)
+        st.listing_errors += [f"danh bạ: {e}" for e in found.errors]
+        async with self.sessionmaker.begin() as s:
+            keys = await board_directory.company_keys(s)
+            wanted = board_directory.matching(found.entries, keys)
+            st.directory_new = await board_directory.add_profiles(s, self.adapter.name, wanted)
+        log.info(
+            "board.directory",
+            source=self.adapter.source,
+            sitemaps=found.sitemaps,
+            profiles=st.directory,
+            matching=len(wanted),
+            new=st.directory_new,
+        )
+
     async def _run(self, started: float, started_at: datetime) -> None:
         st, opts = self.stats, self.options
+        if self.adapter.company_sitemaps:
+            await self._directory()
         listing = ListingState()
         entries: dict[str, BoardEntry] = {}
         try:
@@ -616,7 +648,7 @@ class BoardIndexer:
             listing.fail(str(exc))
             st.error = str(exc)
         st.urls_seen = len(entries)
-        st.listing_errors = listing.errors
+        st.listing_errors += listing.errors
 
         existing = await self._load_existing()
         await self._touch([existing[k].id for k in entries if k in existing], started_at)
