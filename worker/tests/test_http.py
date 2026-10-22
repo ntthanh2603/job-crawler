@@ -139,3 +139,33 @@ async def test_through_proxy_with_auth(fetcher: HttpFetcher, web: WebServer) -> 
     assert result.status == 200
     assert result.body == b"ok"
     assert proxy.requests == [web.url("/small")]
+
+
+async def test_certificate_error_is_retried_without_verification(fetcher: HttpFetcher) -> None:
+    """Site thiếu chứng chỉ trung gian (curl lỗi 60): đọc lại không kiểm chứng chỉ."""
+    from curl_cffi.requests import exceptions as cx
+
+    calls: list[object] = []
+
+    class Response:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.url = "https://chain.test/"
+            self.headers = {"Content-Type": "text/html"}
+            self.content = b"<html>ok</html>"
+
+    class Session:
+        async def request(self, method: str, url: str, **kwargs: object) -> Response:
+            calls.append(kwargs["verify"])
+            if kwargs["verify"]:
+                raise cx.CertificateVerifyError("unable to get local issuer certificate")
+            return Response()
+
+        async def close(self) -> None:
+            return None
+
+    fetcher._current.session = Session()  # pyright: ignore[reportPrivateUsage]
+    result = await fetcher.execute(http_task("t", "https://chain.test/"))
+    assert result.error_kind == crawl_pb2.ERROR_KIND_NONE
+    assert result.status == 200
+    assert calls == [True, False]

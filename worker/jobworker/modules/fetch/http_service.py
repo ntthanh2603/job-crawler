@@ -39,6 +39,14 @@ def classify_error(exc: BaseException, *, proxied: bool = False) -> crawl_pb2.Er
     return crawl_pb2.ERROR_KIND_OTHER
 
 
+def certificate_error(exc: BaseException) -> bool:
+    """curl không kiểm được chứng chỉ của site (lỗi 60): thường là site thiếu chứng chỉ trung gian
+    — trình duyệt tự tải bù nên người xem không thấy lỗi, curl thì không."""
+    from curl_cffi.requests import exceptions as cx
+
+    return isinstance(exc, cx.CertificateVerifyError)
+
+
 @dataclass(slots=True)
 class _Session:
     session: Any
@@ -116,8 +124,9 @@ class HttpFetcher:
         slot = self._current
         slot.inflight += 1
         max_body = self.max_body_bytes
-        try:
-            resp = await slot.session.request(
+
+        async def request(timeout: float, *, verify: bool = True) -> Any:
+            return await slot.session.request(
                 task.method.upper() or "GET",
                 task.url,
                 headers=dict(task.headers),
@@ -127,7 +136,19 @@ class HttpFetcher:
                 allow_redirects=task.allow_redirects,
                 max_redirects=10,
                 impersonate=self.impersonate,
+                verify=verify,
             )
+
+        try:
+            try:
+                resp = await request(timeout)
+            except Exception as exc:
+                left = timeout - (time.monotonic() - started)
+                if not certificate_error(exc) or left <= 0:
+                    raise
+                # Chỉ đọc trang công khai, không gửi gì bí mật: đọc lại không kiểm chứng chỉ thay
+                # vì bỏ cả site (robots.txt lỗi → coi như cấm toàn site).
+                resp = await request(left, verify=False)
         except Exception as exc:
             kind = classify_error(exc, proxied=bool(proxy))
             message = (
