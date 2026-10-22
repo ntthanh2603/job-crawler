@@ -58,6 +58,7 @@ import {
   type GetCompanyRunsSortBy,
 } from "@/lib/gen/queries"
 import type { CompanyDetail, SortState } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const SIGNALS: Record<string, string> = {
   name: "tên",
@@ -421,6 +422,37 @@ export function CompanyPage() {
                         >
                           {shortUrl(d.input_website)}
                         </ExternalLink>,
+                      ] as [string, ReactNode],
+                    ]
+                  : []),
+                ...(d.input_careers_url
+                  ? [
+                      [
+                        "Trang tuyển dụng nhập",
+                        <ExternalLink
+                          href={/^https?:/.test(d.input_careers_url) ? d.input_careers_url : `https://${d.input_careers_url}`}
+                          className="break-all"
+                        >
+                          {shortUrl(d.input_careers_url)}
+                        </ExternalLink>,
+                      ] as [string, ReactNode],
+                    ]
+                  : []),
+                ...(d.refs.length
+                  ? [
+                      [
+                        "Mã bên ngoài",
+                        <ul className="space-y-0.5">
+                          {d.refs.map((r) => (
+                            <li key={`${r.client_id}:${r.external_id}`} className={cn(!r.active && "text-muted-foreground")}>
+                              <span className="font-mono break-all">{r.external_id}</span>{" "}
+                              <span className="text-meta text-muted-foreground">
+                                · {r.client_name}
+                                {r.active ? "" : " · đã ngừng theo dõi"}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>,
                       ] as [string, ReactNode],
                     ]
                   : []),

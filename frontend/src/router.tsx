@@ -24,6 +24,7 @@ const pages = {
   boards: lazyPage(() => import("@/pages/boards"), "BoardsPage"),
   queue: lazyPage(() => import("@/pages/queue"), "QueuePage"),
   workers: lazyPage(() => import("@/pages/workers"), "WorkersPage"),
+  integration: lazyPage(() => import("@/pages/integration"), "IntegrationPage"),
   audit: lazyPage(() => import("@/pages/audit"), "AuditPage"),
   login: lazyPage(() => import("@/pages/login"), "LoginPage"),
 }
@@ -61,6 +62,7 @@ export const routes: RouteObject[] = [
           { path: "boards", element: page(pages.boards) },
           { path: "queue", element: page(pages.queue) },
           { path: "workers", element: page(pages.workers) },
+          { path: "integration", element: page(pages.integration) },
           { path: "audit", element: page(pages.audit) },
           // Cài đặt là popup mở trên trang đang xem (`?settings`); đường dẫn cũ mở trên Tổng quan.
           { path: "settings", element: <Navigate to="/?settings=" replace /> },

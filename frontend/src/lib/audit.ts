@@ -26,6 +26,15 @@ const ACTIONS: Record<string, string> = {
   "worker.join_key": "Tạo khoá tham gia cho worker",
   "worker.join_key_revoke": "Huỷ khoá tham gia của worker",
   "worker.joined": "Worker tham gia bằng khoá",
+  "api_client.create": "Thêm hệ thống ngoài",
+  "api_client.update": "Sửa hệ thống ngoài",
+  "api_client.delete": "Xoá hệ thống ngoài",
+  "api_client.webhook_secret": "Đổi secret webhook",
+  "api_client.webhook_test": "Gửi thử webhook",
+  "api_key.create": "Tạo khoá API",
+  "api_key.revoke": "Thu hồi khoá API",
+  "integration.companies": "Hệ thống ngoài đẩy doanh nghiệp",
+  "integration.refresh": "Hệ thống ngoài yêu cầu thu thập ngay",
 }
 
 /** Tên thao tác → nhãn tiếng Việt; tên lạ giữ nguyên ("foo.bar"). */
@@ -45,6 +54,7 @@ export const RESOURCE_TYPES: Record<string, string> = {
   settings: "Cài đặt",
   proxies: "Proxy",
   session: "Phiên đăng nhập",
+  api_client: "Hệ thống ngoài",
 }
 
 export function resourceTypeLabel(type: string | null | undefined): string {
@@ -64,6 +74,7 @@ export function resourceHref(event: Pick<AuditEvent, "resource_type" | "resource
   if (event.resource_type === "company") return `/companies/${event.resource_id}`
   if (event.resource_type === "job") return `/jobs/${event.resource_id}`
   if (event.resource_type === "worker" || event.resource_type === "join_key") return auditHref(event.resource_type, event.resource_id)
+  if (event.resource_type === "api_client") return "/integration"
   return null
 }
 
@@ -88,6 +99,8 @@ export function actorLabel(actor: string): string {
   if (actor === "system") return "Hệ thống"
   if (actor === "anonymous") return "Không đăng nhập"
   if (actor === "worker") return "Worker"
+  // Hệ thống ngoài gọi API tích hợp bằng khoá: `api:<tên>`.
+  if (actor.startsWith("api:")) return `Hệ thống ngoài ${actor.slice(4)}`
   return actor
 }
 
@@ -126,6 +139,21 @@ const FIELDS: Record<string, string> = {
   join_id: "Khoá tham gia",
   gone: "Worker đã rời",
   ttl_seconds: "Thời hạn",
+  // hệ thống ngoài
+  via: "Cách gửi",
+  items: "Số doanh nghiệp gửi",
+  linked: "Gắn vào doanh nghiệp đã có",
+  error: "Lỗi",
+  key_id: "Khoá API",
+  prefix: "Đầu khoá",
+  client_id: "Hệ thống ngoài",
+  external_id: "Mã bên ngoài",
+  kind: "Cách thu thập",
+  scopes: "Quyền",
+  all_companies: "Đọc mọi việc làm",
+  include_description: "Gửi kèm mô tả",
+  webhook_url: "URL webhook",
+  webhook_enabled: "Bật webhook",
   // cài đặt
   reset: "Về giá trị mặc định",
   // đăng nhập
@@ -346,6 +374,25 @@ export function summary(event: Pick<AuditEvent, "action" | "metadata" | "changes
       add(typeof meta.hostname === "string" ? `Máy ${meta.hostname}` : null)
       add(typeof meta.pool === "string" && meta.pool !== "default" ? `nhóm ${meta.pool}` : null)
       add(meta.gone === true ? "worker đã rời" : null)
+      break
+    case "integration.companies":
+      add(typeof meta.via === "string" ? ({ put: "Từng doanh nghiệp", batch: "Lô", csv: "CSV" }[meta.via] ?? meta.via) : null)
+      add(count(meta, "items") !== null ? `${num(count(meta, "items"))} doanh nghiệp` : null)
+      add(count(meta, "created") ? `${num(count(meta, "created"))} mới` : null)
+      add(count(meta, "linked") ? `${num(count(meta, "linked"))} gắn mã` : null)
+      add(count(meta, "updated") ? `${num(count(meta, "updated"))} cập nhật` : null)
+      add(count(meta, "error") ? `${num(count(meta, "error"))} lỗi` : null)
+      break
+    case "integration.refresh":
+      add(typeof meta.external_id === "string" ? `Mã ${meta.external_id}` : null)
+      add(meta.kind === "poll" ? "Poll" : meta.kind === "build" ? "Build" : null)
+      add(meta.queued === false ? "Không xếp (vừa gọi / đang chạy / đã tắt)" : null)
+      break
+    case "api_key.create":
+      add(typeof meta.prefix === "string" ? `jca_${meta.prefix}…` : null)
+      break
+    case "api_client.webhook_test":
+      add(meta.ok === true ? "Thành công" : typeof meta.error === "string" ? `Lỗi: ${meta.error}` : null)
       break
     case "eval.run":
       add(count(meta, "precision") !== null ? `Precision ${formatAuditValue(meta.precision, "precision")}` : null)

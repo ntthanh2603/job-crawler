@@ -335,9 +335,14 @@ class ImportOutcome:
     already_queued: int = 0
 
 
-async def import_csv(res: Resources, content: bytes, *, enqueue: bool) -> ImportOutcome:
+async def import_csv(
+    res: Resources, content: bytes, *, enqueue: bool, client_id: UUID | None = None
+) -> ImportOutcome:
     """Import `companies.csv` tải lên; `enqueue` thì đưa luôn các doanh nghiệp trong file vào
-    queue. Ném `batch_service.CsvFormatError` nếu file sai định dạng."""
+    queue. `client_id`: nạp cho một hệ thống ngoài (cột `external_id` bắt buộc, gắn mã như API
+    tích hợp). Ném `batch_service.CsvFormatError` nếu file sai định dạng."""
+    if client_id is not None:
+        return await _import_for_client(res, content, client_id, enqueue=enqueue)
     if len(content) > MAX_UPLOAD_BYTES:
         raise batch_service.CsvFormatError("file quá lớn (tối đa 20 MB)")
     try:
@@ -361,6 +366,33 @@ async def import_csv(res: Resources, content: bytes, *, enqueue: bool) -> Import
     )
     if enqueue and result.company_ids:
         queued = await enqueue_companies(res, company_ids=result.company_ids)
+        outcome.enqueued, outcome.already_queued = queued.enqueued, queued.already_queued
+    return outcome
+
+
+async def _import_for_client(
+    res: Resources, content: bytes, client_id: UUID, *, enqueue: bool
+) -> ImportOutcome:
+    from jobcrawler.modules.integration import integration_service
+
+    try:
+        report = integration_service.parse_csv(content)
+    except integration_service.CsvInputError as exc:
+        raise batch_service.CsvFormatError(str(exc)) from None
+    done = await integration_service.import_csv(res, client_id, report)
+    results = done.results
+    outcome = ImportOutcome(
+        rows=done.rows,
+        created=sum(r.result == "created" for r in results),
+        updated=sum(r.result in ("updated", "linked") for r in results),
+        unchanged=sum(r.result == "unchanged" for r in results),
+        duplicates=done.duplicates,
+        errors=done.errors + [f"mã {r.external_id}: {r.error}" for r in results if r.error],
+        warnings=done.warnings + [f"mã {r.external_id}: {w}" for r in results for w in r.warnings],
+    )
+    ids = list(dict.fromkeys(r.company_id for r in results if r.company_id is not None))
+    if enqueue and ids:
+        queued = await enqueue_companies(res, company_ids=ids)
         outcome.enqueued, outcome.already_queued = queued.enqueued, queued.already_queued
     return outcome
 

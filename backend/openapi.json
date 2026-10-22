@@ -894,6 +894,19 @@
       },
       "Body_post_import": {
         "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nạp cho hệ thống ngoài này: cột `external_id` bắt buộc, gắn mã",
+            "title": "Client Id"
+          },
           "enqueue": {
             "default": false,
             "title": "Enqueue",

@@ -13,6 +13,7 @@ import {
   Menu,
   Monitor,
   Moon,
+  Plug,
   SlidersHorizontal,
   Sun,
   Target,
@@ -69,6 +70,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     title: "Hệ thống",
     items: [
       { to: "/workers", label: "Workers", icon: Cpu },
+      { to: "/integration", label: "Tích hợp", icon: Plug },
       { to: "/audit", label: "Nhật ký thao tác", icon: History },
     ],
   },

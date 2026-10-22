@@ -63,8 +63,8 @@ describe("thêm doanh nghiệp bằng tay", () => {
     fireEvent.click(submit)
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     expect(posts).toEqual([
-      { name: "Công ty ABC", tax_code: "12", website: "", note: "", enqueue: false },
-      { name: "Công ty ABC", tax_code: "", website: "abc.vn", note: "", enqueue: true },
+      { name: "Công ty ABC", tax_code: "12", website: "", careers_url: "", note: "", enqueue: false },
+      { name: "Công ty ABC", tax_code: "", website: "abc.vn", careers_url: "", note: "", enqueue: true },
     ])
   })
 })

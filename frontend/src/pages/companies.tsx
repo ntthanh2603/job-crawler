@@ -39,6 +39,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { errorMessage } from "@/lib/api"
@@ -49,6 +50,7 @@ import {
   postEnqueue,
   useGetCompanies,
   useGetEnqueuePreview,
+  useGetApiClients,
   useGetMeta,
   usePostCompany,
   usePostImport,
@@ -76,7 +78,10 @@ const SORTS: readonly (readonly [GetCompaniesSortBy, SortOrder, string])[] = [
 /** File CSV mẫu (50 doanh nghiệp lớn của Việt Nam), đúng định dạng nạp danh sách. */
 const SAMPLE_CSV_URL = "/api/companies/import/sample.csv"
 
-const EMPTY_COMPANY = { name: "", tax_code: "", website: "", note: "" }
+const EMPTY_COMPANY = { name: "", tax_code: "", website: "", careers_url: "", note: "" }
+
+/** Giá trị "không gắn hệ thống ngoài" của ô chọn trong hộp thoại nạp danh sách. */
+const NO_CLIENT = "none"
 
 function enqueueMessage(r: EnqueueResult) {
   return `Đã đưa ${num(r.enqueued)}/${num(r.selected)} doanh nghiệp vào hàng đợi build${
@@ -269,6 +274,17 @@ function CreateDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
             </div>
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="company-careers">Trang tuyển dụng</Label>
+            <Input
+              id="company-careers"
+              value={form.careers_url}
+              onChange={set("careers_url")}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="abc.vn/tuyen-dung (nếu biết, tìm nguồn nhanh hơn)"
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="company-note">Ghi chú</Label>
             <Textarea id="company-note" value={form.note} onChange={set("note")} rows={2} />
           </div>
@@ -302,6 +318,9 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
   const client = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [enqueue, setEnqueue] = useState(false)
+  const [clientId, setClientId] = useState(NO_CLIENT)
+  const clients = useGetApiClients({ limit: 100, sortBy: "name", sortOrder: "ASC" }, { query: { enabled: open } })
+  const choices = clients.data?.data ?? []
   const mutation = usePostImport({
     mutation: {
       onSuccess: (r) => {
@@ -328,8 +347,8 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           <DialogTitle>Nạp danh sách doanh nghiệp</DialogTitle>
           <DialogDescription>
             File CSV gồm cột <code className="font-mono">name</code> (bắt buộc), <code className="font-mono">tax_code</code>,{" "}
-            <code className="font-mono">website</code>, <code className="font-mono">note</code>. Nạp lại cùng file không tạo
-            trùng doanh nghiệp.
+            <code className="font-mono">website</code>, <code className="font-mono">careers_url</code>,{" "}
+            <code className="font-mono">note</code>. Nạp lại cùng file không tạo trùng doanh nghiệp.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -337,7 +356,8 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault()
-            if (file) mutation.mutate({ data: { file, enqueue } })
+            if (file)
+              mutation.mutate({ data: { file, enqueue, ...(clientId !== NO_CLIENT ? { client_id: clientId } : {}) } })
           }}
         >
           <FilePicker
@@ -349,6 +369,30 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (op
             title="Chọn file companies.csv"
             hint="UTF-8, phân cách bằng dấu phẩy, chấm phẩy hoặc tab"
           />
+          {choices.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="import-client">Gắn mã cho hệ thống ngoài</Label>
+              <Select value={clientId} onValueChange={setClientId}>
+                <SelectTrigger id="import-client" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLIENT}>Không (nạp thường)</SelectItem>
+                  {choices.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {clientId !== NO_CLIENT && (
+                <p className="text-meta text-muted-foreground">
+                  Mỗi dòng cần cột <code className="font-mono">external_id</code> (mã doanh nghiệp bên hệ thống đó); cột{" "}
+                  <code className="font-mono">active</code> = 0 để ngừng theo dõi.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2.5">
             <Checkbox id="enqueue" checked={enqueue} onCheckedChange={(v) => setEnqueue(v === true)} />
             <Label htmlFor="enqueue" className="font-normal">

@@ -21,6 +21,8 @@ describe("nhãn", () => {
     expect(actionLabel("company.poll")).toBe("Poll ngay")
     expect(actionLabel("worker.drain")).toBe("Cho worker dừng nhận việc")
     expect(actionLabel("worker.joined")).toBe("Worker tham gia bằng khoá")
+    expect(actionLabel("api_key.create")).toBe("Tạo khoá API")
+    expect(actionLabel("integration.companies")).toBe("Hệ thống ngoài đẩy doanh nghiệp")
     expect(actionLabel("something.new")).toBe("something.new")
   })
 
@@ -31,6 +33,8 @@ describe("nhãn", () => {
     expect(actorLabel("system")).toBe("Hệ thống")
     expect(actorLabel("anonymous")).toBe("Không đăng nhập")
     expect(actorLabel("worker")).toBe("Worker")
+    expect(actorLabel("api:Backend đối tác")).toBe("Hệ thống ngoài Backend đối tác")
+    expect(resourceTypeLabel("api_client")).toBe("Hệ thống ngoài")
     expect(actorLabel("an")).toBe("an")
     expect(fieldLabel("already_queued")).toBe("Đã có trong hàng đợi")
     expect(fieldLabel("join_id")).toBe("Khoá tham gia")

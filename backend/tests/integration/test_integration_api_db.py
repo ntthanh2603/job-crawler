@@ -283,3 +283,30 @@ async def test_keys_scopes_and_revocation(web: Web) -> None:
     assert [c["id"] for c in listed["data"]] == [client_id]
     assert (await web.ui.delete(f"/api/api-clients/{client_id}")).status_code == 200
     assert (await web.ui.get(f"/api/api-clients/{client_id}")).status_code == 404
+
+
+async def test_ui_import_links_codes_to_a_client(web: Web) -> None:
+    client_id, _ = await web.new_client()
+    name = f"Nạp từ giao diện {web.tag}"
+    csv = f"external_id,name\nU-1,{name}\nU-2,{name}\n,thiếu mã\n"
+    r = await web.ui.post(
+        "/api/companies/import",
+        files={"file": ("ds.csv", csv.encode(), "text/csv")},
+        data={"client_id": client_id},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["rows"], body["created"], body["updated"]) == (2, 1, 1)
+    assert body["errors"] == ["dòng 4: thiếu external_id"]
+    missing = await web.ui.post(
+        "/api/companies/import",
+        files={"file": ("ds.csv", b"name\nABC\n", "text/csv")},
+        data={"client_id": client_id},
+    )
+    assert missing.status_code == 400
+    unknown = await web.ui.post(
+        "/api/companies/import",
+        files={"file": ("ds.csv", csv.encode(), "text/csv")},
+        data={"client_id": str(uuid4())},
+    )
+    assert unknown.status_code == 400

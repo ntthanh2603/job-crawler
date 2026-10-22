@@ -227,6 +227,8 @@ export type BodyPostEval = {
 };
 
 export type BodyPostImport = {
+  /** Nạp cho hệ thống ngoài này: cột `external_id` bắt buộc, gắn mã */
+  client_id?: string | null;
   enqueue?: boolean;
   /** companies.csv */
   file: Blob | File;
@@ -3851,6 +3853,9 @@ export const postImport = (
 ) => {
 
       const formData = new FormData();
+if(bodyPostImport.client_id !== undefined && bodyPostImport.client_id !== null) {
+ formData.append(`client_id`, bodyPostImport.client_id);
+ }
 if(bodyPostImport.enqueue !== undefined) {
  formData.append(`enqueue`, bodyPostImport.enqueue.toString())
  }

@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Respon
 
 from jobcrawler.common.api import MAX_HOURS, PageOut, actor_of, page_out, res_of
 from jobcrawler.common.schemas import CompanyEntity
+from jobcrawler.database.models import ApiClient
 from jobcrawler.modules.audit import audit_service
 from jobcrawler.modules.companies import batch_service, companies_service
 from jobcrawler.modules.companies.companies_schema import (
@@ -184,10 +185,20 @@ async def post_import(
     request: Request,
     file: Annotated[UploadFile, File(description="companies.csv")],
     enqueue: Annotated[bool, Form()] = False,
+    client_id: Annotated[
+        UUID | None,
+        Form(description="Nạp cho hệ thống ngoài này: cột `external_id` bắt buộc, gắn mã"),
+    ] = None,
 ) -> ImportOutcomeOut:
     res = res_of(request)
+    if client_id is not None:
+        async with res.sessionmaker() as session:
+            if await session.get(ApiClient, client_id) is None:
+                raise HTTPException(400, "Không có hệ thống ngoài này")
     try:
-        outcome = await companies_service.import_csv(res, await file.read(), enqueue=enqueue)
+        outcome = await companies_service.import_csv(
+            res, await file.read(), enqueue=enqueue, client_id=client_id
+        )
     except batch_service.CsvFormatError as exc:
         raise HTTPException(400, str(exc)) from None
     await audit_service.record_safely(
@@ -205,6 +216,7 @@ async def post_import(
             "enqueue": enqueue,
             "enqueued": outcome.enqueued,
             "already_queued": outcome.already_queued,
+            "client_id": str(client_id) if client_id else None,
         },
     )
     return ImportOutcomeOut.model_validate(dataclasses.asdict(outcome))
